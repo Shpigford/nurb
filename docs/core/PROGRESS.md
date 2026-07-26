@@ -1,9 +1,11 @@
 # nurb core progress
 
-## Status: Phase 1 complete. Phase 2 next.
+## Status: Phase 1 complete. Phase 2 nearly there.
 
 **The kernel question is answered: OCCT builds both parts and both match the Fusion
-originals dimension for dimension.** The architecture stands. Two assumptions carried
+originals dimension for dimension.** The architecture stands. `nurb check` now runs
+seven rules against them, clean, and has already caught one real defect in what
+Phase 1 shipped. Two assumptions carried
 in from research did not survive contact with a real part, and they change what Phase 2
 and Phase 4 should prioritize. See Findings below.
 
@@ -140,6 +142,7 @@ Printability rules on the in-memory B-rep, calibrated to zero false positives.
 - [x] `nurb check` CLI, with `--strict` for CI
 - [x] Rule `projection_ratio`
 - [x] Rules `concave_cosmetic` and `bed_bevel`
+- [x] Rule `min_wall`, by ray cast, with its limits documented rather than hidden
 - [x] Findings in the viewer: a panel plus a pin at each reported point
 - [x] **Zero false positives on all three parts**, which is the credibility bar
 
@@ -186,6 +189,18 @@ recorded. Checks run in 7ms on the hook and 277ms on the shelf.
   makes an unsupported ledge droop is how far it protrudes, not its area or its
   length, so a ledge under `overhang_reach` is silent. Same physics as the bridge
   limit, applied to the cantilever case.
+- **`min_wall` is the weakest rule here and the docstring says so.** A ray cast is
+  exact on flat parallel walls and wrong in two directions everywhere else, and both
+  showed up on the first run: it read the shelf's knife-edge mouth rim as a 0.76mm
+  wall, and the coupon's 0.5mm raised label as a 0.5mm wall. Neither is a defect and
+  all three parts print. It also misses what an inscribed sphere would catch, a thin
+  spot in an inside corner. So a clean result means "no thin walls found", not "no
+  thin walls", and the parts declare their own floor next to the reason on the card.
+
+  The one real filter it needed: only count a surface the ray leaves *through*, whose
+  outward normal points along the ray. A hit facing back means the ray had already
+  left the material, which is how a chamfer two corners away read as a 0.89mm wall on
+  a 6mm slab.
 - **The rules found a real defect in Phase 1's output.** `concave_cosmetic` flagged
   four 1mm chamfers at the shelf's gusset roots, which are inside corners, and both
   the convexity test and independent ring sampling confirm it. Phase 1 had reasoned

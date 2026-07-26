@@ -51,8 +51,9 @@ def test_sloped_underside_flags_only_past_the_limit(angle, flagged):
 def test_overhang_is_measured_from_the_build_direction_not_model_z():
     """The same solid, printed on a different face, has a different answer.
 
-    This is the trap the Notch parts sit in: they are modelled hanging and printed on
-    their backs.
+    Notch happens to print exactly as modelled, so its build direction is +z. Nothing
+    guarantees that in general, and a rule that assumes it does not error when it is
+    wrong, it just reports confident nonsense.
     """
     shape = Box(6, 6, 20) + Pos(0, 0, 12) * Box(30, 30, 4)
     assert only(shape, "overhang") != [], "cap underside hangs over nothing"
@@ -183,3 +184,40 @@ def test_concave_cosmetic_ignores_polish_on_an_outside_corner():
 def test_concave_cosmetic_does_not_mistake_a_pocket_for_a_chamfer():
     """A narrow pocket floor is bounded by concave edges too, and is square to them."""
     assert only(Box(20, 20, 20) - Pos(0, 0, 8) * Box(6, 6, 6), "concave_cosmetic") == []
+
+
+# --- wall thickness ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("thickness,flagged", [(2.0, False), (1.5, False), (0.8, True), (0.4, True)])
+def test_min_wall_measures_a_plain_plate(thickness, flagged):
+    found = only(Box(30, 30, thickness), "min_wall")
+    assert bool(found) is flagged
+    if flagged:
+        assert found[0].value == pytest.approx(thickness, abs=0.01)
+
+
+def test_min_wall_measures_a_tube_wall():
+    from build123d import Cylinder
+
+    tube = Cylinder(10, 20) - Cylinder(9, 30)  # 1mm wall
+    found = only(tube, "min_wall", Context(min_wall=1.5))
+    assert found and found[0].value == pytest.approx(1.0, abs=0.05)
+
+
+def test_min_wall_floor_is_per_part():
+    plate = Box(30, 30, 1.0)
+    assert only(plate, "min_wall", Context(min_wall=1.2)) != []
+    assert only(plate, "min_wall", Context(min_wall=0.8)) == []
+
+
+def test_min_wall_does_not_measure_across_a_chamfer_corner():
+    """A ray that has already left the material must not count what it hits next.
+
+    Without that filter a 1mm chamfer two corners away reads as a sub-millimetre wall
+    on a part that is 20mm thick.
+    """
+    from build123d import Axis, chamfer
+
+    shape = chamfer(Box(20, 20, 20).edges().filter_by(Axis.Z), 1)
+    assert only(shape, "min_wall", Context(min_wall=2.0)) == []

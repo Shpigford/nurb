@@ -11,7 +11,7 @@ import pathlib
 from dataclasses import dataclass, field
 from math import asin, degrees
 
-from build123d import CenterOf, GeomType, Vector
+from build123d import Axis, CenterOf, GeomType, Vector
 
 FAIL = "fail"  # this will not print, or will not work
 WARN = "warn"  # this needs attention, most often support
@@ -48,6 +48,7 @@ class Context:
     forward: tuple | None = None  # which way a wall-mounted part cantilevers, if it does
     projection_limit: float = 2.5  # reach over height, past which height is the fix
     cosmetic_chamfer: float = 1.0  # the size the polish pass uses
+    min_wall: float = 1.0  # what this printer lays down reliably; per part, per card
     sliver_area: float = 1.0
     accepted: dict = field(default_factory=dict)  # rule -> how many are already known
 
@@ -511,3 +512,86 @@ def concave_cosmetic(shape, ctx):
                 )
             )
     return found
+
+
+def _probes(face, grid=2):
+    """Points across a face with the outward normal at each."""
+    spots = [face.center()]
+    if face.geom_type != GeomType.PLANE or face.area > 25:
+        # Inset from the boundary on purpose. A probe sitting on a face's own edge
+        # measures the distance to whatever is around the corner, which is not a wall.
+        for i in range(grid):
+            for j in range(grid):
+                try:
+                    spots.append(
+                        face.position_at((i + 1) / (grid + 1), (j + 1) / (grid + 1))
+                    )
+                except Exception:
+                    continue
+    out = []
+    for spot in spots:
+        try:
+            out.append((spot, face.normal_at(spot)))
+        except Exception:
+            continue
+    return out
+
+
+@rule("min_wall")
+def min_wall(shape, ctx):
+    """The thinnest section in the solid, by shooting inward and seeing what it hits.
+
+    This is a ray cast, not an inscribed sphere, and it is the weakest rule here. It is
+    exact on the flat parallel walls that make up most of a printed part. It is wrong in
+    two directions everywhere else, and both showed up on the first run against this
+    library:
+
+    - It reads a taper as a wall. The shelf's mouth rims are knife edges by design, and
+      near the tip of a wedge any straight line across it is short. 0.76mm there is a
+      true measurement of something that is not a wall.
+    - It reads a relief as a wall. The calibration coupon's raised label is 0.5mm proud,
+      and that is what the ray finds.
+
+    Neither is a defect and all three parts print. So the number a part is allowed lives
+    on its card next to the reason, and the default is what the printer manages rather
+    than what a textbook says. It also misses the case an inscribed sphere would catch,
+    a thin spot in an inside corner, where the smallest sphere that fits is smaller than
+    any straight line across. Treat a clean result as "no thin walls found", not as
+    "no thin walls".
+    """
+    thinnest, spot = None, None
+    for face in shape.faces():
+        if face.area < ctx.sliver_area:
+            continue  # a face this small has no wall to speak of
+        for point, normal in _probes(face):
+            inward = -normal
+            hits = shape.find_intersection_points(Axis(point + inward * PROBE, inward))
+            # Only count a surface the ray leaves through: its outward normal points
+            # along the way the ray is going. A hit facing back at the ray means the
+            # ray had already left the material and struck something across a gap,
+            # which is how a chamfer two corners away reads as a thin wall.
+            reach = [
+                (hit - point).length
+                for hit, hit_normal in hits
+                if (hit - point).dot(inward) > ctx.min_wall * 0.01
+                and hit_normal.dot(inward) > 0.3
+            ]
+            if not reach:
+                continue
+            near = min(reach)
+            if thinnest is None or near < thinnest:
+                thinnest, spot = near, point
+    # Slack, because a card declaring the value it measured should not then fail on
+    # the last bit of a float.
+    if thinnest is None or thinnest >= ctx.min_wall - 1e-3:
+        return []
+    return [
+        Finding(
+            "min_wall",
+            WARN,
+            f"{thinnest:.2f}mm section, under the {ctx.min_wall:.2f}mm this printer "
+            f"lays down reliably (ray cast, so corners may be thinner still)",
+            value=round(thinnest, 3),
+            where=tuple(round(v, 2) for v in spot),
+        )
+    ]

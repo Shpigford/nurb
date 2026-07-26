@@ -33,7 +33,14 @@ tracks whatever the label says, so a coupon built at a different clearance or br
 count will not match it. That is tolerable here in a way it would not be on a real
 part: this is a gauge, and the only surface that has to come out right is the channel.
 
+The thinnest section is 0.5mm, which is the raised label standing off the front
+face. A ray cast cannot tell a relief from a wall. The channel web, which is the
+part that matters, is 1.8mm.
+
 ```toml
+[part]
+min_wall = 0.5
+
 [accepted]
 sliver = 65
 ```

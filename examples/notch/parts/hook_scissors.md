@@ -38,12 +38,17 @@ Six faces under 1mm2, and all six are the corner triangles where three 1mm chamf
 meet at a convex corner. That is the only tiny face the doctrine allows. A seventh
 means the polish pass has started cutting something it should not.
 
+The thinnest section is 1.0mm, behind the detent dimple: 6mm slab less the 4.2mm
+channel less the 0.8mm dimple. It is a consequence of the fit geometry rather than
+a choice, and it prints.
+
 ```toml
+[part]
+min_wall = 1.0
+forward = [-1, 0, 0]
+
 [accepted]
 sliver = 6
-
-[part]
-forward = [-1, 0, 0]
 ```
 
 ## Don't

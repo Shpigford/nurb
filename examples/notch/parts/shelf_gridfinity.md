@@ -46,12 +46,18 @@ which are gridfinity spec geometry and come four to a cell, plus two three-chamf
 corner triangles at 0.866mm2. It generalizes as `4 * grid_x * grid_y + 2`, so a
 different grid wants a different number here. A nineteenth at 2x2 is a regression.
 
+The thinnest section the ray cast finds is 0.76mm, at the front mouth rim. That
+is a knife edge flush with the platform edge, which is gridfinity spec and
+deliberate, and any straight line across the tip of a wedge is short. The real
+wall behind the detent is 1.0mm.
+
 ```toml
+[part]
+min_wall = 0.7
+forward = [-1, 0, 0]
+
 [accepted]
 sliver = 18
-
-[part]
-forward = [-1, 0, 0]
 ```
 
 ## Don't
