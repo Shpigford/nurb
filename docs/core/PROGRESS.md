@@ -138,11 +138,13 @@ Printability rules on the in-memory B-rep, calibrated to zero false positives.
 - [x] Rule `stability`
 - [x] Accepted baselines, declared in each part's card
 - [x] `nurb check` CLI, with `--strict` for CI
+- [x] Rule `projection_ratio`
 - [x] Findings in the viewer: a panel plus a pin at each reported point
 - [x] **Zero false positives on all three parts**, which is the credibility bar
 
-27 tests, every rule with both cases against shapes whose answers were worked out by
-hand. Checks run in 7ms on the hook and 277ms on the shelf.
+42 tests. Every rule has both cases against shapes whose answers were worked out by
+hand, and the example parts are asserted against the numbers their Fusion cards
+recorded. Checks run in 7ms on the hook and 277ms on the shelf.
 
 #### Decisions made
 
@@ -183,6 +185,14 @@ hand. Checks run in 7ms on the hook and 277ms on the shelf.
   makes an unsupported ledge droop is how far it protrudes, not its area or its
   length, so a ledge under `overhang_reach` is silent. Same physics as the bridge
   limit, applied to the cantilever case.
+- **`projection_ratio` reproduces the card's own number.** grid_y 3 gives 3.24 against
+  a card that says "a ratio of 3.2 at item_height 42", and 55mm clears it exactly as
+  the card claims. That is the third rule to land on a figure recorded by hand in
+  another kernel, after the two sliver baselines, and it is the strongest evidence
+  available that these rules measure what they claim to.
+- **A part opts in to `projection_ratio` by naming which way it reaches.** The rule is
+  meaningless for anything not cantilevered off a wall, and a default guess would
+  either fire on everything or nothing. Cards carry it as `[part] forward`.
 - **Checks are broadcast after the geometry, not with it.** Checking the shelf costs
   about as much again as building it, so running them inline would push the live loop
   past 1.5s. The model swaps at the speed it always did and the panel fills in a beat

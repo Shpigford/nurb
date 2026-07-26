@@ -49,6 +49,9 @@ different grid wants a different number here. A nineteenth at 2x2 is a regressio
 ```toml
 [accepted]
 sliver = 18
+
+[part]
+forward = [-1, 0, 0]
 ```
 
 ## Don't

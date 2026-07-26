@@ -41,6 +41,9 @@ means the polish pass has started cutting something it should not.
 ```toml
 [accepted]
 sliver = 6
+
+[part]
+forward = [-1, 0, 0]
 ```
 
 ## Don't

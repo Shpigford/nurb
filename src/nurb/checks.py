@@ -45,6 +45,8 @@ class Context:
     overhang_limit: float = 45.0  # degrees away from the build direction
     bridge_limit: float = 30.0  # how far this printer will span unsupported
     overhang_reach: float = 1.0  # a ledge shorter than this cannot droop enough to matter
+    forward: tuple | None = None  # which way a wall-mounted part cantilevers, if it does
+    projection_limit: float = 2.5  # reach over height, past which height is the fix
     sliver_area: float = 1.0
     accepted: dict = field(default_factory=dict)  # rule -> how many are already known
 
@@ -376,7 +378,8 @@ def from_card(part_path, base=None):
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"{card.name}: settings block is not valid TOML ({exc})") from exc
     ctx.accepted = {**ctx.accepted, **settings.get("accepted", {})}
-    for field_name, value in settings.get("printer", {}).items():
+    tunables = {**settings.get("printer", {}), **settings.get("part", {})}
+    for field_name, value in tunables.items():
         if not hasattr(ctx, field_name):
             raise ValueError(
                 f"{card.name}: no printer setting called {field_name!r}. "
@@ -384,3 +387,36 @@ def from_card(part_path, base=None):
             )
         setattr(ctx, field_name, tuple(value) if isinstance(value, list) else value)
     return ctx
+
+
+@rule("projection_ratio")
+def projection_ratio(shape, ctx):
+    """How far a wall-mounted part reaches out against how much wall it hangs on.
+
+    Past a point the fix is a taller back, not a bigger gusset: the load is levering
+    against the mount and no amount of bracing under the shelf changes that. Only
+    meaningful for something cantilevered off a wall, so a part opts in by saying
+    which way it reaches.
+    """
+    if ctx.forward is None:
+        return []
+    out = Vector(*ctx.forward).normalized()
+    up = Vector(*ctx.up).normalized()
+    low, high = _span(shape, out)
+    reach = high - low
+    floor, ceiling = _span(shape, up)
+    height = ceiling - floor
+    if height <= 0:
+        return []
+    ratio = reach / height
+    if ratio <= ctx.projection_limit:
+        return []
+    return [
+        Finding(
+            "projection_ratio",
+            WARN,
+            f"reaches {reach:.0f}mm on a {height:.0f}mm back, ratio {ratio:.2f}. "
+            f"past {ctx.projection_limit:.1f} the fix is a taller back, not more gusset",
+            value=round(ratio, 2),
+        )
+    ]
