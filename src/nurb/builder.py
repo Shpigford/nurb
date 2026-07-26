@@ -13,6 +13,20 @@ class BuildError(Exception):
     pass
 
 
+class UnknownParams(BuildError):
+    """An override named a parameter the part does not declare.
+
+    Its own type because the viewer has to tell this apart from a real build failure:
+    a slider left on a parameter that a later edit renamed is the file moving on, not
+    the part breaking, and reporting it as a broken part names a parameter the user
+    never typed.
+    """
+
+    def __init__(self, names):
+        self.names = sorted(names)
+        super().__init__(f"unknown parameter(s): {', '.join(self.names)}")
+
+
 def _in_project(module, root):
     """A module the project owns, as opposed to one installed into its venv.
 
@@ -58,15 +72,49 @@ def load(path):
     raise BuildError(f"no @part function in {path.name}")
 
 
+def _kind(value):
+    """What control this parameter can carry.
+
+    Read off the declared default, never off the current value: a float parameter whose
+    slider happens to be sitting on 2 would otherwise report `int` and come back after a
+    reload with an integer slider, which is the distinction this exists to preserve.
+
+    bool before int, because bool is an int subclass and a checkbox is not a slider.
+    """
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    return "other"
+
+
+def _safe(value):
+    """A parameter value the payload can carry.
+
+    A default can be any Python object, and one that json cannot encode would take the
+    whole websocket message down with it rather than just its own row.
+    """
+    if isinstance(value, (bool, int, float, str)) or value is None:
+        return value
+    return repr(value)
+
+
 def build(path, overrides=None, draft=False):
-    """Build a part. Returns (shape, params, milliseconds)."""
+    """Build a part. Returns (shape, params, milliseconds).
+
+    `params` is one row per parameter: what the file declares, what this build used,
+    and what kind of control it can carry. The keyword defaults are the parameters, so
+    this list is derived, never declared.
+    """
     fn = load(path)
     defn = fn._nurb
     kwargs = dict(defn.params)
     if overrides:
         unknown = set(overrides) - set(kwargs)
         if unknown:
-            raise BuildError(f"unknown parameter(s): {', '.join(sorted(unknown))}")
+            raise UnknownParams(unknown)
         kwargs.update(overrides)
     call = dict(kwargs)
     if defn.accepts_draft:
@@ -77,7 +125,57 @@ def build(path, overrides=None, draft=False):
     elapsed = (time.perf_counter() - started) * 1000
     if shape is None:
         raise BuildError(f"{defn.name}() returned None")
-    return shape, kwargs, elapsed
+
+    params = [
+        {
+            "name": name,
+            "default": _safe(default),
+            "value": _safe(kwargs[name]),
+            "kind": _kind(default),
+        }
+        for name, default in defn.params.items()
+    ]
+    return shape, params, elapsed
+
+
+def _triangulate(shape, tolerance):
+    """Vertices and triangles, read straight out of OCCT.
+
+    This is what `Shape.tessellate` does, and it exists because of one line in it.
+    build123d reads the triangles with `for t in poly.Triangles()`, and OCP's iterator
+    over that array is pathological: measured on the gridfinity shelf, the same 7790
+    triangles cost 536ms to iterate and 6.8ms to read by index. Meshing itself is 10ms.
+    So the loop's dominant cost was never geometry, it was an iterator, and Phase 1's
+    "tessellation is the loop" conclusion was measuring this.
+
+    Everything else here matches `tessellate` deliberately, including the winding flip
+    on a reversed face and the per-face vertex offset.
+    """
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.TopLoc import TopLoc_Location
+
+    shape.mesh(tolerance)
+    points, faces, offset = [], [], 0
+    for face in shape.faces():
+        loc = TopLoc_Location()
+        poly = BRep_Tool.Triangulation_s(face.wrapped, loc)
+        if poly is None:  # a face OCCT declined to triangulate takes no vertices with it
+            continue
+        trsf = loc.Transformation()
+        reverse = face.wrapped.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
+        for i in range(1, poly.NbNodes() + 1):
+            node = poly.Node(i).Transformed(trsf)
+            points.append((node.X(), node.Y(), node.Z()))
+        triangles = poly.Triangles()
+        for i in range(1, poly.NbTriangles() + 1):
+            tri = triangles.Value(i)
+            a, b, c = tri.Value(1), tri.Value(2), tri.Value(3)
+            if reverse:
+                b, c = c, b
+            faces.append((a + offset - 1, b + offset - 1, c + offset - 1))
+        offset += poly.NbNodes()
+    return points, faces
 
 
 def to_mesh(shape, tolerance=0.1):
@@ -88,10 +186,10 @@ def to_mesh(shape, tolerance=0.1):
     weld them merges the box corners and smears the normals across perpendicular
     faces, which renders as a shadeless blob.
     """
-    verts, tris = shape.tessellate(tolerance)
+    points, faces = _triangulate(shape, tolerance)
     mesh = trimesh.Trimesh(
-        vertices=np.array([(v.X, v.Y, v.Z) for v in verts], dtype=np.float64),
-        faces=np.array(tris, dtype=np.int64),
+        vertices=np.array(points, dtype=np.float64),
+        faces=np.array(faces, dtype=np.int64),
         process=False,
     )
     mesh.vertex_normals  # populate before export, or the GLB ships without normals

@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import errno
 import pathlib
 import sys
 
@@ -69,7 +70,7 @@ def cmd_build(args):
     root = project_root()
     for path in _resolve(root, args.part):
         try:
-            shape, params, ms = builder.build(path, draft=args.draft)
+            shape, _, ms = builder.build(path, draft=args.draft)
             info = builder.stats(shape)
             bbox = " x ".join(str(v) for v in info["bbox"])
             print(f"  {path.stem}: {bbox} mm  {ms:.0f}ms")
@@ -179,6 +180,15 @@ def cmd_dev(args):
         asyncio.run(server.run())
     except KeyboardInterrupt:
         print("\n  stopped")
+    except OSError as exc:
+        # Almost always a second `nurb dev`, and the raw errno traceback buries both
+        # what happened and the one-word fix.
+        if exc.errno != errno.EADDRINUSE:
+            raise
+        sys.exit(
+            f"  port {args.port} is already in use, most likely by another nurb dev.\n"
+            f"  nurb dev --port {args.port + 1}"
+        )
 
 
 def main(argv=None):

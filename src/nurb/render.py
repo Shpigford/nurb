@@ -40,7 +40,13 @@ def _host(server):
     up, done = threading.Event(), threading.Event()
 
     async def main():
-        async with serve(server.ws, "127.0.0.1", server.port, process_request=server.http):
+        async with serve(
+            server.ws,
+            "127.0.0.1",
+            server.port,
+            process_request=server.http,
+            origins=server.origins,
+        ):
             up.set()
             await asyncio.to_thread(done.wait)
 

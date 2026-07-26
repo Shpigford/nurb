@@ -1,13 +1,19 @@
 # nurb core progress
 
-## Status: Phases 1, 2 and 3 complete. Phase 4 next.
+## Status: Phases 1 through 4 complete. Phase 5 next.
 
 **The kernel question is answered: OCCT builds both parts and both match the Fusion
 originals dimension for dimension.** The architecture stands. `nurb check` now runs
-seven rules against them, clean, and has already caught one real defect in what
-Phase 1 shipped. Two assumptions carried
-in from research did not survive contact with a real part, and they change what Phase 2
-and Phase 4 should prioritize. See Findings below.
+eight rules against them, clean, and has already caught one real defect in what
+Phase 1 shipped. The agent surface is in, and the viewer has sliders, a section view
+and no network dependency.
+
+**The loop is about 20x faster than Phase 1 recorded, and the reason invalidates that
+finding rather than improving on it.** What Phase 1 measured as tessellation was almost
+entirely one pathological iterator in build123d, not geometry. Several assumptions
+carried in from research did not survive contact with a real part or a real profiler.
+See Findings below, and prefer them to anything in RESEARCH.md that sounds like a
+measurement.
 
 ## Quick reference
 
@@ -472,15 +478,177 @@ one server serve the whole list. The OCCT import is most of the first number.
 ---
 
 ### Phase 4: Viewer and human UX
-**Status:** Not Started
+**Status:** Complete (2026-07-26)
 
-Parameter sliders, vendored three.js, section view.
+Drag a parameter and the part rebuilds. The loop it rebuilds in turned out to be the
+real story.
 
 #### Tasks completed
-- (none yet)
+- [x] Parameters over the API, derived from the existing signature introspection
+- [x] A slider and a number field per numeric parameter, with an inferred range
+- [x] Live rebuild on drag, coalesced, in draft mode
+- [x] "Write N defaults to <part>.py", which edits the file's keyword defaults
+- [x] three.js vendored, so the viewer and `nurb render` need no network
+- [x] All five overlays confirmed on screen: HUD, checks, error, reframe, empty
+- [x] Section view, with a stencil cap
+- [x] 24 new tests, 101 total
+
+#### Results against the success criteria
+
+| Criterion | Result |
+|---|---|
+| Dragging a parameter rebuilds live without touching the file | Yes. Dragged `grid_y` 2 to 3 with the mouse and watched the bbox go 94 to 136mm, the sixth socket appear, and `projection_ratio` fire at 3.24, the figure Phase 2 recorded. |
+| The viewer works with networking disabled | Yes. The network log shows every request going to the viewer's own server, three.js included. |
+| All four overlays confirmed on screen | Five, counting the checks panel. Each was made to happen rather than simulated: reframe by growing a part 6x in one save, the error overlay by a real chamfer failure, the empty state by an empty project. |
+
+The loop, measured on this machine, in milliseconds:
+
+```
+                     build    tessellate + GLB        loop      was
+hook, draft            29             1.3             ~30       ~92
+hook, polished         58             2.6             ~61      ~166
+shelf, draft          401            30.4            ~431      ~900
+shelf, polished       605            30.4            ~635     ~1090
+```
+
+`nurb render` for all three parts went from 13.4s to 6.2s, and the test suite from 58s
+to 20s, both without being touched.
 
 #### Decisions made
-- (none yet)
+
+- **Read the triangles by index instead of iterating them.** `builder._triangulate`
+  replaces `Shape.tessellate` for the same reason nurb does anything else itself: the
+  loop latency is the product. It reaches past build123d into OCP, which is a real cost
+  in coupling, and it buys 22x to 109x on every rebuild, export and render. The
+  vertices and faces are asserted bit-identical to what build123d returns, on all three
+  parts, so the risk is confined to build123d changing an internal that this now
+  duplicates. The right long-term fix is upstream, in a one-line change to build123d.
+- **A guessed range, half the default to double it.** No part annotates a range and
+  none should have to, so the viewer guesses. `0..2x` was the obvious alternative and is
+  wrong: it puts `item_depth=0` and `chamfer_size=0` one drag away, and both are errors
+  rather than designs. The guess is soft, and a number typed into the field widens it
+  rather than being clamped, because the range is a guess and the number someone typed
+  is not.
+- **The type of the default is the annotation, and it has to be carried explicitly.**
+  An `int` default is a count and steps by one; a `float` default is a continuous
+  millimetre. This is the only signal available that does not require a parallel
+  declaration, and it cost one character in two example files. It cannot be inferred in
+  the browser: JavaScript has a single number type, so Python's `1.0` arrives as `1` and
+  `Number.isInteger` says true. The first build of the panel had integer sliders on
+  every chamfer for exactly that reason. `kind` now travels in the payload.
+- **One rebuild in flight, carrying the newest values, instead of a fixed debounce.**
+  The round trip spans 30ms on the hook and 431ms on the shelf, and no constant is right
+  for both. The reply checks whether newer input arrived while it was away, so nothing
+  queues and nothing is lost, and it clocks itself off whatever part is being edited.
+- **Only the numbers go stale, never the mesh.** Fading the geometry already means "this
+  build failed", and overloading it would make errors invisible. The HUD and the checks
+  panel dim instead, after a 0.25s delay, so anything that lands inside one round trip
+  never shows a state change at all.
+- **A skipped write is reported, not refused.** `fit_coupon` defaults `side_clearance`
+  to `SIDE_CLEARANCE`, and writing `0.31` over that name would keep the number and throw
+  away the only record of where it came from. Refusing the whole write was the first
+  design and it is a dead end: one such parameter would block every other parameter
+  forever. It now writes what it can and says what it left alone and why.
+- **The viewer sends only what differs from the file.** So the server's override map is
+  exactly "what is not in the source", clearing it is an empty message, and a write that
+  lands makes the corresponding override disappear on its own.
+- **The section plane lives on the materials, never on the renderer.** A global plane is
+  merged into every material including ones that set none, which would clip away the
+  finding pins at the moment they matter and z-fight the cap against itself.
+- **The websocket takes an Origin check.** It now accepts commands that write to the
+  user's source, and any page in any tab can open a socket to localhost.
+- **A stale override on a renamed parameter is dropped, not reported.** `UnknownParams`
+  exists as its own exception so the server can tell this apart from a real build
+  failure. The file is the authority, and reporting it as a broken part would name a
+  parameter the user never typed.
+- **Vendored r169, the version already in use, rather than the current r185.**
+  Vendoring and upgrading are separate changes and only one of them belongs in this
+  diff. r185 was checked and works. The upgrade path is written down next to the files,
+  because the import graph has grown since r169 in two ways that both fail as a blank
+  canvas rather than an error: r171 split `three.core.js` out of `three.module.js`, and
+  later releases add `SkeletonUtils.js` to what `GLTFLoader` imports.
+
+#### Findings
+
+- **The parameter panel must not be rebuilt while a slider is being held.** The server
+  echoes values back on every rebuild, and applying them blindly yanks the control out
+  from under the finger mid-drag. Values from the server are applied to every control
+  except the focused one, which is also why a file save updates the sliders (focus is in
+  the editor) while a drag does not.
+- **A failed build reports no parameters, and clearing the panel on that is a trap.**
+  Set a slider to a value that breaks the build and the panel vanishes with it, leaving
+  no way to drag back. Found by giving a part a validation guard and pushing a slider
+  past it. The panel now survives an error unless it belongs to a different part.
+- **Reset was rebuilding the panel from the entry it was trying to discard**, so every
+  slider snapped straight back to the override. It goes through the same setters a drag
+  uses now. The bug was invisible in code review and obvious the moment it was clicked.
+- **The confirmation of a write was destroyed by the rebuild the write caused.** Writing
+  changes the defaults, which changes the panel's signature, which rebuilds it. It
+  mattered least for "wrote grid_y" and most for "left `side_clearance` alone, and here
+  is why", which is the case a user needs to read.
+- **`nurb new` into a running `nurb dev` filled the part list and left the canvas saying
+  "no parts yet".** The first part of an empty project arrives as a `rebuilt` message,
+  and nothing was selected, so nothing was ever painted. A pre-existing bug in the
+  first-run path, found only because the empty state finally got looked at on screen.
+- **`nurb dev` on a taken port dumped a raw `OSError` traceback**, which buries both
+  what happened and the one-word fix. Found by running a second one. It now names the
+  port and prints the flag.
+- **The checks panel printed `projection_ratio` on top of its own message.** The rule
+  column was 92px and the longest rule name does not fit. It had never been seen because
+  all three example parts report clean, and it took a slider that pushed one into a
+  warning to show it. Phase 3 found a defect in Phase 2's output the same way.
+- **In draft mode a chamfer that cannot be built never fails**, because the polish pass
+  is skipped entirely. `nurb dev` runs draft by default, so a part can look fine in the
+  viewer and fail in `nurb build`. Not a defect, but worth knowing before trusting the
+  live loop as proof that a part builds.
+
+#### Found in review, after the phase read as done
+
+Five defects survived building the feature and watching it work. Each was found by
+reading the diff adversarially and then reproducing it, not by reasoning about it, and
+each now has a test that fails when its fix is reverted.
+
+- **`nurb render` would write to a part file.** It stands up a `Server` with no watcher
+  and no queue, purely to serve one screenshot, and that server accepted the same
+  websocket commands the dev server does: `params` crashed on the absent queue, and
+  `apply` rewrote the user's source. A read-only server has to say so.
+- **A command's `name` could escape `parts/`.** `{"type": "apply", "name": "../victim"}`
+  resolved to a real file and rewrote it. The Origin check made this hard to reach and
+  did not make it safe. A command names a part, never a path.
+- **The kind of a parameter was read off its current value.** A float parameter whose
+  slider landed on a whole number reported `int`, because JSON carries 2.0 as 2, so
+  after a reload a chamfer came back with an integer slider. The whole point of the
+  `chamfer_size=1.0` convention, undone by reading the wrong field.
+- **Switching parts mid-rebuild killed every slider in the session.** The in-flight flag
+  was a boolean, so a rebuild the user had walked away from never released it and every
+  later drag was silently dropped. Both the in-flight and pending markers are part names
+  now, which also stopped values collected for one part being sent under another's name.
+- **The section cap was centred on the world origin.** A part's own origin is a modeling
+  datum: the shelf lives entirely at `x <= 0`, so the cap left the far 49mm of its cut
+  face bare and spent half its area on empty space. It is centred on the part's bounding
+  box now. This one had been looked at on screen and passed, because the uncapped end was
+  the far end.
+
+The pattern in four of the five: **the happy path was verified and the second path was
+not.** One part, one drag, one server, one origin. Every defect lived in the second of
+something.
+
+#### Deferred, deliberately
+
+- **No drag-to-scrub on the labels.** A third input mode next to a slider and a number
+  field, and `<input type=range>` already gives arrow keys, Home, End and PageUp/Down
+  for free.
+- **No parameter grouping.** Every tool that groups needs an authored declaration of the
+  groups, which is the parallel declaration the contract forbids. Signature order is
+  already authored order, and the examples use it: the mount interface first, geometry
+  next, chamfers last.
+- **No tolerance tiering during a drag.** Measured across tolerance 0.1 to 2.0: meshing
+  time is flat and only the triangle count moves. It was never the cost.
+- **No draft/polished switch on drag release.** Draft is worth about 20% of the build,
+  and after the tessellation fix the build is nearly all of the loop, so the switch
+  would buy ~100ms on the shelf at the cost of two states to reason about.
+- **No `?section=` URL parameter.** `nurb render` has no use for a cut it cannot aim,
+  and aiming it needs the bounding box the viewer already has.
 
 #### Blockers
 - (none)
@@ -592,6 +760,17 @@ The lever is tessellation tolerance, geometry caching, or pushing tessellation o
 rebuild path, none of which is draft mode. This should inform Phase 4 rather than
 being discovered there.
 
+> **Wrong, and Phase 4 measured why.** None of those three levers was the answer and
+> none was needed. Almost all of that "tessellation" time is a Python iterator, not
+> geometry: `Shape.tessellate` reads triangles with `for t in poly.Triangles()`, and
+> OCP's iterator over `Poly_Array1OfTriangle` costs 536ms for the shelf's 7790
+> triangles against 6.8ms to read the same array by index. OCCT's actual meshing is
+> 10ms. Reading by index gives bit-identical vertices and faces 22x to 109x faster, and
+> the shelf's loop went to ~430ms draft without touching tolerance, caching, or the
+> rebuild path. The lesson is narrower than the finding: **a number this far off the
+> work being done is a measurement of the wrapper, not the workload.** Profile inside
+> the thing you are about to design around.
+
 ### 4. `new_edges` is the algebra-mode `Select.LAST`
 
 `new_edges(before, combined=after)` returns exactly the edges an operation created.
@@ -603,6 +782,26 @@ and now has evidence.
 ---
 
 ## Session log
+
+### 2026-07-26 (later still): Phase 4
+
+The phase's biggest change was not on its task list. Researching how other tools debounce
+an expensive rebuild turned up the claim that build123d's tessellation is mostly a slow
+iterator, which contradicted a Phase 1 finding recorded as a measurement. Profiling it
+first, before designing anything around a ~1s loop, is what made the rest of the phase
+easy: the debounce question mostly dissolved once the shelf answered in 431ms instead of
+900ms. **The order that mattered was measuring the constraint before designing for it**,
+and the only reason the constraint got questioned is that a recorded number looked too
+large for the work it claimed to describe.
+
+Everything in the panel was verified by clicking it, and that is where the bugs were.
+Reset, the write confirmation, the panel disappearing on a failed build, the first-run
+empty project and the overflowing rule column were all invisible in code and immediate
+on screen. The section view went the other way: it looked broken in a screenshot for
+several minutes and was correct all along, because a Notch shelf's platform sits low and
+its back plate rises, so a mid-height cut leaves the sockets standing. Hiding the cap and
+the stencil writers and looking at the clipped mesh alone is what settled it. **A
+screenshot is evidence of what is on screen, not of what it means.**
 
 ### 2026-07-26 (later): Phase 3
 
@@ -711,6 +910,29 @@ tests/test_measurements.py        new  every way a measurement can refuse
 tests/test_render.py              new  two views of a part are two different pictures
 ```
 
+Phase 4:
+
+```
+src/nurb/edit.py                  new  writes values back into a part's keyword defaults
+src/nurb/vendor/three/            new  r169: build, three addons, LICENSE, a README
+src/nurb/builder.py               _triangulate reads triangles by index, 22x to 109x;
+                                  params rows carry default, value and kind;
+                                  UnknownParams so a stale slider is not a broken part
+src/nurb/server.py                per-part overrides, websocket commands, /vendor route,
+                                  Origin check on the socket
+src/nurb/viewer.html              parameter panel, one-in-flight rebuilds, section view
+                                  with a stencil cap, vendored importmap, five overlays
+                                  verified, first part in an empty project is selected
+src/nurb/render.py                the render server takes the same Origin check
+src/nurb/cli.py                   a busy port says so instead of raising OSError
+src/nurb/doctrine.md              a continuous dimension is written as a float
+pyproject.toml                    vendor/ in the sdist
+examples/notch/parts/*.py         chamfer sizes are floats, so their sliders are
+tests/test_edit.py                new  what it writes, and what it refuses to touch
+tests/test_params.py              new  signature to payload to override and back
+README.md, CLAUDE.md              three.js redistribution, layout, current state
+```
+
 ---
 
 ## Architectural decisions
@@ -813,3 +1035,32 @@ Carried from research and the questions answered during planning.
 - **Non-ASCII in generated output is a portability bug, not a typography choice.** It only
   shows up on a machine with a different locale, which is to say on somebody else's, which
   for source-available code is most of them.
+
+**From Phase 4:**
+
+- **Profile the constraint before designing around it.** The whole phase was planned
+  against a ~1s rebuild that Phase 1 had measured and written down. Almost all of it was
+  a Python iterator inside a library call. A recorded number is evidence about the code
+  that produced it, not about the work it names, and this one was 50x larger than the
+  geometry it claimed to describe. The tell was available in Phase 1: 620ms to walk 7790
+  triangles is not a plausible cost for walking 7790 of anything.
+- **The clean cases cannot verify the code that handles the dirty ones.** Phase 3 wrote
+  this down about findings pins and it repeated here almost exactly: the checks panel's
+  rule column had been too narrow since Phase 2, and could not be seen until a slider
+  pushed a part into a warning. The same phase found it twice for the same reason.
+- **Interactive state has to be clicked, not read.** Reset, the write confirmation, the
+  panel vanishing on a failed build and the blank canvas on a fresh project were four
+  bugs in code that reads correctly. Every one of them took a single click to find and
+  none of them would have been found by re-reading the file.
+- **A screenshot proves what is on screen, not what it means.** The section view looked
+  broken for several minutes because a mid-height cut through a Notch shelf leaves the
+  socket platform standing, which is correct and looks like nothing happened. Isolating
+  the mesh from the cap and the stencil writers answered in one step what squinting at
+  three screenshots did not.
+- **Guard the dead ends, not just the errors.** Two designs here were correct and still
+  wrong to ship: refusing an entire write because one parameter is a named constant, and
+  clearing the parameter panel when a build fails. Both leave a user in a state with no
+  way out except editing the file by hand, which is the thing the panel exists to avoid.
+- **A type distinction does not survive JSON.** Python's `1.0` is JavaScript's `1`, and
+  `Number.isInteger` agrees. Anything the browser needs to know about a Python type has
+  to be sent as data, not recovered from the value.

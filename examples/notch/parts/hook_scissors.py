@@ -24,8 +24,8 @@ def hook_scissors(
     arm_thickness=6,
     upstand_height=15,
     upstand_thickness=6,
-    chamfer_size=1,
-    structural_chamfer=3,
+    chamfer_size=1.0,
+    structural_chamfer=3.0,
     draft=False,
 ):
     if item_depth <= MIN_ITEM_DEPTH:

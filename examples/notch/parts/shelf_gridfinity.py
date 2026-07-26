@@ -57,8 +57,8 @@ def shelf_gridfinity(
     gusset_thickness=3,
     gusset_tip=6,
     gusset_drop=3,
-    chamfer_size=1,
-    structural_chamfer=3,
+    chamfer_size=1.0,
+    structural_chamfer=3.0,
     draft=False,
 ):
     if item_depth <= MIN_ITEM_DEPTH:

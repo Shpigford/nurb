@@ -6,5 +6,10 @@ dist/
 wheels/
 *.egg-info
 
+# three.js ships its own build/ directory and the pattern above swallows it. Without
+# this the viewer's importmap points at a file that is not in the repo, which fails as
+# a blank canvas rather than as an error.
+!src/nurb/vendor/**/build/
+
 # Virtual environments
 .venv

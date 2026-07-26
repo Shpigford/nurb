@@ -19,6 +19,7 @@ from websockets.datastructures import Headers
 from . import builder
 
 VIEWER = pathlib.Path(__file__).parent / "viewer.html"
+VENDOR = (pathlib.Path(__file__).parent / "vendor").resolve()
 
 
 def _user_traceback(exc, path):
@@ -41,19 +42,44 @@ class Server:
         self.tolerance = tolerance
         self.draft = draft
         self.state = {}
+        # What the sliders are holding, per part, and only where it differs from the
+        # file. Empty means the part is exactly what its source says.
+        self.overrides = {}
         self.clients = set()
         self.loop = None
         self.queue = None
         self.observer = None
         self.drain_task = None
 
+    @property
+    def origins(self):
+        """The socket takes commands that write to the user's source, and any page in
+        any tab can open a socket to localhost. Only the viewer this server serves gets
+        to drive it."""
+        return [f"http://127.0.0.1:{self.port}", f"http://localhost:{self.port}"]
+
     # ---------- building ----------
+
+    def _build(self, path, name):
+        """Build with whatever the sliders are holding for this part."""
+        try:
+            return builder.build(path, overrides=self.overrides.get(name), draft=self.draft)
+        except builder.UnknownParams as exc:
+            # An edit renamed or removed a parameter a slider was still holding. The
+            # file is the authority, so those get dropped and the build goes ahead: a
+            # stale slider is not a broken part, and reporting it as one would name a
+            # parameter the user never typed.
+            for gone in exc.names:
+                self.overrides.get(name, {}).pop(gone, None)
+            if not self.overrides.get(name):
+                self.overrides.pop(name, None)
+            return builder.build(path, overrides=self.overrides.get(name), draft=self.draft)
 
     def rebuild(self, path):
         name = pathlib.Path(path).stem
         entry = {"name": name, "token": secrets.token_hex(4), "findings": None}
         try:
-            shape, params, ms = builder.build(path, draft=self.draft)
+            shape, params, ms = self._build(path, name)
             entry["glb"] = builder.to_glb(shape, self.tolerance)
             entry.update(builder.stats(shape))
             entry["params"] = params
@@ -122,6 +148,13 @@ class Server:
         if path == "/api/parts":
             body = json.dumps([self._meta(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
+        if path.startswith("/vendor/"):
+            # three.js, shipped in the package. A CAD tool that needs a CDN is broken
+            # on a plane, and `nurb render` drives this same page.
+            target = (VENDOR / path[len("/vendor/") :]).resolve()
+            if target.suffix == ".js" and target.is_relative_to(VENDOR) and target.is_file():
+                return self._resp(200, target.read_bytes(), "text/javascript; charset=utf-8")
+            return self._resp(404, b"not found", "text/plain")
         if path.startswith("/glb/"):
             entry = self.state.get(path[5:].removesuffix(".glb"))
             if entry and entry["glb"]:
@@ -155,20 +188,84 @@ class Server:
                 {"type": "sync", "parts": [self._meta(e) for e in self.state.values()]}
             )
             await connection.send(payload)
-            async for _ in connection:
-                pass
+            async for raw in connection:
+                await self.command(raw)
         finally:
             self.clients.discard(connection)
 
-    async def broadcast(self, entry, kind="rebuilt"):
+    async def command(self, raw):
+        """A message from the viewer: move the sliders, or write them to the file."""
+        # No queue means no watcher and no rebuild loop, which is the server `nurb
+        # render` stands up around a screenshot. It has no business writing to a part
+        # file, and nothing would rebuild if it moved a slider.
+        if self.queue is None:
+            return
+        try:
+            msg = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return
+        name = msg.get("name")
+        if not isinstance(name, str):
+            return
+        # A command names a part, never a path. Without the parent check, `../victim`
+        # reaches a file outside parts/ and `apply` rewrites it.
+        parts_dir = (self.root / "parts").resolve()
+        path = (parts_dir / f"{name}.py").resolve()
+        if path.parent != parts_dir or not path.is_file():
+            return
+
+        if msg.get("type") == "params":
+            values = {
+                k: v
+                for k, v in (msg.get("values") or {}).items()
+                if type(v) in (int, float)
+            }
+            # The viewer sends only what differs from the file, so this is the whole
+            # override set for the part and replacing it is what keeps the two honest.
+            self.overrides[name] = values
+            if not values:
+                self.overrides.pop(name)
+            self.queue.put_nowait(str(path))
+
+        elif msg.get("type") == "apply":
+            from . import edit
+
+            try:
+                written, skipped = edit.apply(path, self.overrides.get(name) or {})
+            except Exception as exc:
+                await self.send({"type": "applied", "name": name, "error": str(exc)})
+                return
+            # The written values are the file's now, so they are not overrides any more.
+            # Anything skipped still is, or the slider would jump back with no reason
+            # given. The watcher sees the write and rebuilds; nothing is queued here.
+            keep = {n: v for n, v in (self.overrides.get(name) or {}).items() if n not in written}
+            self.overrides[name] = keep
+            if not keep:
+                self.overrides.pop(name)
+            print(f"  {name}: wrote {', '.join(written) or 'nothing'}", flush=True)
+            for gone, why in skipped:
+                print(f"      left {gone} alone: {why}", flush=True)
+            await self.send(
+                {
+                    "type": "applied",
+                    "name": name,
+                    "written": written,
+                    "skipped": [{"name": n, "why": w} for n, w in skipped],
+                }
+            )
+
+    async def send(self, payload):
         if not self.clients:
             return
-        payload = json.dumps({"type": kind, **self._meta(entry)})
+        text = json.dumps(payload)
         for client in list(self.clients):
             try:
-                await client.send(payload)
+                await client.send(text)
             except Exception:
                 self.clients.discard(client)
+
+    async def broadcast(self, entry, kind="rebuilt"):
+        await self.send({"type": kind, **self._meta(entry)})
 
     # ---------- watching ----------
 
@@ -237,6 +334,8 @@ class Server:
         self.watch()
         # Held too: asyncio only keeps weak references to tasks.
         self.drain_task = asyncio.create_task(self.drain())
-        async with serve(self.ws, "127.0.0.1", self.port, process_request=self.http):
+        async with serve(
+            self.ws, "127.0.0.1", self.port, process_request=self.http, origins=self.origins
+        ):
             print(f"\n  nurb  http://127.0.0.1:{self.port}\n", flush=True)
             await asyncio.Future()

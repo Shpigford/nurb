@@ -30,8 +30,14 @@ parallel `PARAMS` dict; the two would drift.
 
 `draft` is optional and injected by the runtime, never passed by callers. When true,
 skip the polish pass. Worth 20% on a real part, not the 18x a cube suggested: chamfers
-are 23% of the gridfinity shelf's build. Tessellation, at 620ms against a 470ms build,
-is where the loop latency actually lives.
+are 23% of the gridfinity shelf's build.
+
+The build is now nearly all of the loop. Tessellation used to look like the larger half
+at 620ms, and Phase 4 found that almost all of it was one iterator in build123d rather
+than any geometry; `builder._triangulate` reads the same triangles by index in 30ms.
+Write a continuous dimension as a float (`chamfer_size=1.0`) and a count as an int
+(`bracket_count=4`): the viewer reads the type of the default to decide whether that
+parameter's slider steps by one.
 
 ## Commands
 
@@ -59,10 +65,12 @@ src/nurb/builder.py       load, build, tessellate, GLB
 src/nurb/checks.py        printability rules, convexity, Finding/Context
 src/nurb/card.py          the card's AUTO block
 src/nurb/measurements.py  measured(), and the refusal to guess
+src/nurb/edit.py          writes slider values back into a part's keyword defaults
 src/nurb/render.py        headless PNG, the only module that wants a browser
 src/nurb/doctrine.md      the doctrine itself, shipped in the package
 src/nurb/server.py        watcher, rebuild, HTTP + websocket on one port
-src/nurb/viewer.html      three.js viewer, Z-up, camera persistence
+src/nurb/viewer.html      three.js viewer, Z-up, camera persistence, sliders, section
+src/nurb/vendor/three/    three.js r169, so the viewer needs no network
 src/nurb/cli.py           command surface
 examples/notch/           the real parts, which are also the calibration set
 tests/                    rules and examples, both cases per rule
@@ -154,8 +162,10 @@ as though every file will be read by a stranger.
   what to do, never just "invalid input".
 - **The doctrine ships in the package**, exposed via `nurb rules`. One source of
   truth. `SKILL.md` and `AGENTS.md` are thin shims that point at it, never copies.
-- **The viewer must work offline** once three.js is vendored. A CAD tool that needs
-  a CDN is broken on a plane.
+- **The viewer works offline** and has to stay that way. three.js is vendored in
+  `src/nurb/vendor/three`, because a CAD tool that needs a CDN is broken on a plane and
+  `nurb render` drives the same page. Anything new the viewer imports gets vendored
+  too, and `pyproject.toml`'s `source-include` has to carry it.
 - **Examples are tests.** `examples/` holds real parts that the suite builds, so a
   broken example is a red build rather than a stale README.
 
@@ -168,7 +178,7 @@ as though every file will be read by a stranger.
 
 ## Current state
 
-Phases 1, 2 and 3 are done. Two real Notch parts and a calibration coupon live in
+Phases 1 through 4 are done. Two real Notch parts and a calibration coupon live in
 `examples/notch/`; they build to one solid each, match their Fusion originals dimension
 for dimension, and reproduce the sliver baselines their catalog cards recorded. The
 kernel question is settled and the timing numbers come from real geometry.
@@ -181,12 +191,21 @@ chamfers laid into concave junctions.
 The agent surface is in: `nurb rules` prints the doctrine from `src/nurb/doctrine.md`,
 `nurb card` regenerates each card's AUTO block from a build, `nurb render` screenshots the
 viewer headlessly, and `measurements.toml` carries dimensions with their provenance.
-77 tests.
 
-Phase 4 (viewer and human UX: parameter sliders, vendored three.js, section view) is
-next. Vendoring three.js also removes `nurb render`'s network dependency, which is worth
-knowing before planning around it.
+The viewer has a slider per numeric parameter, inferred from the signature and nothing
+else, a section view that caps its cut so a solid still reads as solid, and a button
+that writes an exploration back into the file's defaults. three.js is vendored, so the
+viewer and `nurb render` both work with no network. 105 tests.
 
-`docs/core/PROGRESS.md` has the findings, including three claims from RESEARCH.md and
-one from Phase 1 that a real part or a real print disproved. Read them before trusting
-anything in this file that sounds like a measurement.
+**The live loop got about 20x faster in Phase 4, and not for a reason anyone would
+guess.** `Shape.tessellate` reads its triangles with `for t in poly.Triangles()`, and
+OCP's iterator over that array is pathological: 7790 triangles cost 536ms to iterate
+and 6.8ms to read by index, against 10ms for the meshing itself. `builder._triangulate`
+reads them by index and returns bit-identical geometry. Phase 1's recorded conclusion
+that "tessellation is the loop" was measuring that iterator.
+
+Phase 5 (the remaining 14 Notch parts, `nurb extract`, fit assertions, CI) is next.
+
+`docs/core/PROGRESS.md` has the findings, including several claims from RESEARCH.md and
+earlier phases that a real part, a real print, or a real measurement disproved. Read
+them before trusting anything in this file that sounds like a measurement.

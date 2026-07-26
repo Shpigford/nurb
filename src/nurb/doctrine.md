@@ -24,6 +24,13 @@ Keyword defaults are the parameters. That one declaration feeds the agent, the C
 viewer, the tests, and any future configurator. Never add a parallel `PARAMS` dict; the
 two would drift.
 
+**Write a continuous dimension as a float.** The type of a default is the only thing
+that says whether a value is a count or a measurement, and the viewer reads it: an `int`
+default gets a slider that steps by one, a `float` default one that moves continuously.
+`bracket_count=4` is a count and `chamfer_size=1.0` is a millimetre, so the trailing
+`.0` is doing work. Nothing else has to be declared, and there is no annotation to keep
+in sync, because the type is already there in the signature.
+
 `draft` is optional and injected by the runtime, never passed by a caller. When it is
 true, skip the polish pass. It is worth about 20% on a real part, not the 18x a cube
 suggests.

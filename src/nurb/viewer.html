@@ -17,7 +17,9 @@
   aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
   aside h1 { font-size: 13px; font-weight: 600; padding: 14px 16px; border-bottom: 1px solid var(--line); letter-spacing: .08em; }
   aside h1 span { color: var(--dim); font-weight: 400; margin-left: 6px; letter-spacing: 0; }
-  #list { flex: 1; overflow-y: auto; padding: 6px; }
+  /* The list gives way to the parameters: three parts and fifteen sliders is the
+     common case, not the other way round. */
+  #list { flex: 0 1 auto; max-height: 38%; overflow-y: auto; padding: 6px; }
   .item { padding: 8px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
   .item:hover { background: #23272f; }
   .item.active { background: #2c313b; }
@@ -33,7 +35,7 @@
      ResizeObserver, which calls setSize() again -- a resize loop that flickers. */
   canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
   /* The canvas is appended last, so overlays need to be lifted above it. */
-  #hud, #err, #reframe, #empty, #checks { z-index: 1; }
+  #hud, #err, #tools, #empty, #checks { z-index: 1; }
   #hud {
     position: absolute; left: 16px; bottom: 14px; color: var(--dim);
     font-size: 11px; pointer-events: none; line-height: 1.7;
@@ -45,12 +47,25 @@
     padding: 12px 14px; border-radius: 8px; white-space: pre-wrap;
     font-size: 11px; display: none;
   }
-  #reframe {
-    position: absolute; top: 14px; right: 14px; display: none;
+  #tools {
+    position: absolute; top: 14px; right: 14px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  }
+  button {
     background: var(--panel); color: var(--text); border: 1px solid var(--line);
     padding: 7px 12px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 11px;
   }
-  #reframe:hover { border-color: var(--dim); }
+  button:hover { border-color: var(--dim); }
+  button:focus-visible { outline: none; border-color: var(--accent); }
+  #reframe { display: none; }
+  #section { display: flex; align-items: center; gap: 6px; }
+  #section .on { border-color: var(--accent); color: var(--accent); }
+  #cut { display: none; align-items: center; gap: 4px;
+         background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
+  #cut.open { display: flex; }
+  #cut button { padding: 3px 7px; border: 1px solid transparent; background: none; color: var(--dim); }
+  #cut button.on { color: var(--accent); }
+  #cut input { width: 90px; }
   #empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); }
   #checks {
     position: absolute; top: 14px; left: 16px; max-width: 46%; max-height: 60%;
@@ -64,22 +79,91 @@
   #checks .tag { flex: none; width: 30px; font-weight: 600; }
   #checks .fail .tag { color: var(--bad); }
   #checks .warn .tag { color: #f0c274; }
-  #checks .rule { flex: none; color: var(--dim); width: 92px; }
+  /* Wide enough for the longest rule name. At 92px `projection_ratio` overflowed its
+     column and printed on top of its own message. */
+  #checks .rule { flex: none; color: var(--dim); width: 118px; }
   #checks .ok { color: var(--accent); }
+  /* What a slider makes stale is the numbers, not the shape: the bbox, the build time
+     and the findings all describe the solid that is being replaced. The mesh is left
+     alone because fading it already means "this build failed". The .25s delay is the
+     point: anything that lands inside one round trip never dims at all, so the hook
+     shows no state change and the shelf does. */
+  #hud, #checks { transition: opacity .12s .25s; }
+  body.stale #hud, body.stale #checks { opacity: .32; }
+
+  /* ---- parameters ---- */
+  #params { flex: 1 1 auto; overflow-y: auto; border-top: 1px solid var(--line); padding: 0 12px 12px; }
+  #params.empty { display: none; }
+  #params h2 {
+    position: sticky; top: 0; background: var(--panel); z-index: 1;
+    display: flex; align-items: center; padding: 10px 0 6px;
+    font-size: 11px; font-weight: 600; color: var(--dim); letter-spacing: .04em;
+  }
+  #params h2 a { margin-left: auto; color: var(--dim); cursor: pointer; text-decoration: none; display: none; }
+  #params h2 a:hover { color: var(--text); }
+  body.dirty #params h2 a { display: block; }
+  .p { padding: 5px 0 7px 7px; border-left: 2px solid transparent; }
+  .p.dirty { border-left-color: var(--accent); }
+  .p .top { display: flex; align-items: center; }
+  .p .k { color: var(--dim); font-size: 11px; cursor: default;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .p.dirty .k { color: var(--text); }
+  .p .v {
+    width: 58px; margin-left: auto; text-align: right; background: none; border: none;
+    color: var(--text); font: inherit; font-size: 11px; border-radius: 3px; padding: 1px 3px;
+  }
+  .p .v::-webkit-outer-spin-button, .p .v::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .p .v { -moz-appearance: textfield; }
+  .p .v:hover { background: #23272f; }
+  .p .v:focus { outline: none; background: #23272f; box-shadow: 0 0 0 1px var(--accent); }
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 10px; background: none; }
+  .p input[type=range] { margin-top: 4px; }
+  input[type=range]::-webkit-slider-runnable-track { height: 2px; background: var(--line); border-radius: 1px; }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 9px; height: 9px; margin-top: -3.5px;
+    border-radius: 50%; background: var(--dim); transition: background .1s;
+  }
+  input[type=range]::-moz-range-track { height: 2px; background: var(--line); border-radius: 1px; }
+  input[type=range]::-moz-range-thumb { width: 9px; height: 9px; border: none; border-radius: 50%; background: var(--dim); }
+  .p:hover input[type=range]::-webkit-slider-thumb,
+  .p.dirty input[type=range]::-webkit-slider-thumb { background: var(--accent); }
+  .p:hover input[type=range]::-moz-range-thumb,
+  .p.dirty input[type=range]::-moz-range-thumb { background: var(--accent); }
+  input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(110,231,168,.25); }
+  input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px rgba(110,231,168,.25); }
+  #write { display: none; width: 100%; margin-top: 10px; text-align: left; line-height: 1.4; }
+  body.dirty #write { display: block; }
+  #note { font-size: 11px; color: var(--dim); margin-top: 8px; white-space: pre-wrap; }
+  #note.bad { color: var(--bad); }
   /* ?bare hides the chrome so a render is geometry on the plate and nothing else.
      Findings and sizes are text, and the CLI already prints them better than a PNG. */
   body.bare { grid-template-columns: 1fr; }
-  body.bare aside, body.bare #hud, body.bare #checks, body.bare #reframe { display: none; }
+  body.bare aside, body.bare #hud, body.bare #checks, body.bare #tools { display: none; }
+  /* Nothing to reframe or cut through yet, and this is the first screen a new project
+     shows. */
+  body.noparts #tools { display: none; }
 </style>
 </head>
 <body>
 <aside>
   <h1>nurb<span id="conn">connecting</span></h1>
   <div id="list"></div>
+  <div id="params" class="empty"></div>
 </aside>
 <main>
-  <div id="empty">no parts yet &mdash; nurb new &lt;name&gt;</div>
-  <button id="reframe">reframe</button>
+  <div id="empty">no parts yet. nurb new &lt;name&gt;</div>
+  <div id="tools">
+    <button id="reframe">reframe</button>
+    <div id="section">
+      <div id="cut">
+        <button data-axis="x">x</button>
+        <button data-axis="y">y</button>
+        <button data-axis="z">z</button>
+        <input id="cutpos" type="range" min="0" max="1" step="0.002" value="0.5">
+      </div>
+      <button id="sectionbtn">section</button>
+    </div>
+  </div>
   <div id="hud"></div>
   <div id="checks"></div>
   <div id="err"></div>
@@ -87,8 +171,8 @@
 
 <script type="importmap">
 { "imports": {
-  "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
-  "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+  "three": "/vendor/three/build/three.module.min.js",
+  "three/addons/": "/vendor/three/addons/"
 }}
 </script>
 <script type="module">
@@ -117,8 +201,11 @@ scene.background = new THREE.Color(0x16181d);
 const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
 camera.up.set(0, 0, 1);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// stencil: the section view caps its cut with a stencil pass, and the buffer is off
+// by default. Without it the cap silently never draws.
+const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.localClippingEnabled = true;
 main.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -175,6 +262,106 @@ resize();
   controls.update();
   renderer.render(scene, camera);
 })();
+
+// ---- section ----
+// A plain clip renders a solid as a shell: the near wall is cut away and the far wall is
+// backface-culled, so a box comes out as two floating panels. DoubleSide fixes the hole
+// but makes a solid look exactly like a hollow one, which is the single thing a
+// printability viewer must not do. So: a stencil pass marks where the plane passes
+// through material, and a cap is painted only there.
+//
+// The plane lives on the materials that should be cut, never on renderer.clippingPlanes.
+// A global plane is merged into every material including ones that set none, which would
+// clip the finding pins away at exactly the moment they matter, and would z-fight the cap
+// against itself.
+const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
+const PARKED = 1e6;   // "off", without changing the array length and recompiling shaders
+const plane = new THREE.Plane(new THREE.Vector3(0, 0, -1), PARKED);
+let cutAxis = 'z', cutAt = 0.5, cutting = false, writers = [];
+
+const stencilBase = {
+  depthWrite: false, depthTest: false, colorWrite: false,
+  stencilWrite: true, stencilFunc: THREE.AlwaysStencilFunc, clippingPlanes: [plane],
+};
+const stencilBack = new THREE.MeshBasicMaterial({
+  ...stencilBase, side: THREE.BackSide,
+  stencilFail: THREE.IncrementWrapStencilOp,
+  stencilZFail: THREE.IncrementWrapStencilOp,
+  stencilZPass: THREE.IncrementWrapStencilOp,
+});
+const stencilFront = new THREE.MeshBasicMaterial({
+  ...stencilBase, side: THREE.FrontSide,
+  stencilFail: THREE.DecrementWrapStencilOp,
+  stencilZFail: THREE.DecrementWrapStencilOp,
+  stencilZPass: THREE.DecrementWrapStencilOp,
+});
+const cap = new THREE.Mesh(
+  new THREE.PlaneGeometry(1, 1),
+  new THREE.MeshStandardMaterial({
+    color: 0xc9a227, metalness: 0.0, roughness: 0.85, side: THREE.DoubleSide,
+    stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc,
+    stencilFail: THREE.ReplaceStencilOp,
+    stencilZFail: THREE.ReplaceStencilOp,
+    stencilZPass: THREE.ReplaceStencilOp,
+  })
+);
+cap.renderOrder = 1.1;
+cap.visible = false;
+cap.onAfterRender = r => r.clearStencil();
+scene.add(cap);
+
+function sectionAttach() {
+  for (const w of writers) scene.remove(w);
+  writers = [];
+  if (!mesh) return;
+  for (const mat of [stencilBack, stencilFront]) {
+    const w = new THREE.Mesh(mesh.geometry, mat);
+    w.position.copy(mesh.position);
+    w.renderOrder = 1;
+    scene.add(w);
+    writers.push(w);
+  }
+  sectionUpdate();
+}
+
+function sectionUpdate() {
+  const on = cutting && !!mesh;
+  cap.visible = on;
+  for (const w of writers) w.visible = on;
+  if (!on) { plane.constant = PARKED; return; }
+  const box = mesh.geometry.boundingBox.clone().translate(mesh.position);
+  const lo = box.min[cutAxis], hi = box.max[cutAxis];
+  // A hair inside the bounds at each end, so neither extreme is a cut through nothing.
+  const at = lo + (hi - lo) * (0.02 + 0.96 * cutAt);
+  const dir = AXES[cutAxis];
+  plane.normal.set(-dir[0], -dir[1], -dir[2]);   // keeps the side the normal points at
+  plane.constant = at;
+  const span = box.getSize(new THREE.Vector3()).length();
+  cap.scale.set(span, span, 1);
+  // Centred on the part, not on coplanarPoint, which is where the plane passes the
+  // world origin. A part's own origin is a modeling datum: the shelf lives entirely at
+  // x <= 0, so an origin-centred cap left the far 49mm of its cut face bare and spent
+  // half its area on empty space.
+  plane.projectPoint(box.getCenter(new THREE.Vector3()), cap.position);
+  cap.lookAt(cap.position.x - plane.normal.x, cap.position.y - plane.normal.y,
+             cap.position.z - plane.normal.z);
+}
+
+document.getElementById('sectionbtn').onclick = ev => {
+  cutting = !cutting;
+  ev.currentTarget.classList.toggle('on', cutting);
+  document.getElementById('cut').classList.toggle('open', cutting);
+  sectionUpdate();
+};
+document.getElementById('cutpos').oninput = ev => { cutAt = +ev.target.value; sectionUpdate(); };
+for (const b of document.querySelectorAll('#cut button')) {
+  b.classList.toggle('on', b.dataset.axis === cutAxis);
+  b.onclick = () => {
+    cutAxis = b.dataset.axis;
+    for (const o of document.querySelectorAll('#cut button')) o.classList.toggle('on', o === b);
+    sectionUpdate();
+  };
+}
 
 // ---- camera persistence ----
 // A rebuild is a geometry swap, never a camera reset. Reloads restore per part.
@@ -251,6 +438,7 @@ async function paint(name, { keepCamera }) {
     }
     hud(entry);
     checks(name);
+    params(entry);
     return;
   }
   err.style.display = 'none';
@@ -263,6 +451,7 @@ async function paint(name, { keepCamera }) {
   if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
   if (!geo[0].attributes.normal) geo[0].computeVertexNormals();  // never render unlit
   mesh = new THREE.Mesh(geo[0], material.clone());
+  mesh.material.clippingPlanes = [plane];   // parked unless the section view is on
   scene.add(mesh);
 
   mesh.geometry.computeBoundingBox();
@@ -272,6 +461,7 @@ async function paint(name, { keepCamera }) {
   mesh.position.z = -mesh.geometry.boundingBox.min.z;
   const box = mesh.geometry.boundingBox.clone().translate(mesh.position);
   const size = box.getSize(new THREE.Vector3()).length();
+  sectionAttach();
 
   // Only reframe when the part changed scale enough that the camera is lost.
   const jumped = lastSize && (size / lastSize > 3 || lastSize / size > 3);
@@ -289,6 +479,7 @@ async function paint(name, { keepCamera }) {
   lastSize = size;
   hud(parts.get(name) || entry);
   checks(name);
+  params(parts.get(name) || entry);
 }
 
 // Takes a name, not an entry. `show` awaits the GLB fetch, so an entry captured
@@ -308,7 +499,7 @@ function checks(name) {
   const rows = found.map(f =>
     `<div class="f ${f.severity}"><span class="tag">${f.severity}</span>`
     + `<span class="rule">${f.rule}</span><span>${f.message}</span></div>`).join('');
-  box.innerHTML = `<h2>checks &mdash; ${found.length}</h2>${rows}`;
+  box.innerHTML = `<h2>checks (${found.length})</h2>${rows}`;
   const lift = mesh ? mesh.position.z : 0;
   for (const f of found) {
     if (!f.where) continue;
@@ -323,14 +514,213 @@ function checks(name) {
 
 function hud(e) {
   document.getElementById('hud').innerHTML = e.error
-    ? `<b>${e.name}</b> &mdash; build failed`
+    ? `<b>${e.name}</b><br>build failed`
     : `<b>${e.name}</b><br>${e.bbox.join(' &times; ')} mm<br>${e.ms} ms`;
+}
+
+// ---- parameters ----
+// The keyword defaults are the parameters, so the panel is derived from the same
+// signature the agent and the CLI read. Nothing here is declared anywhere.
+
+// No part annotates a range, so one has to be guessed, and the guess that survives
+// contact with real parts is half the default to double it. A 0-based range puts
+// item_depth=0 and chamfer_size=0 one drag away, and both of those are errors rather
+// than designs. The range is soft: typing a number outside it widens it.
+//
+// The type of the default is the annotation. An int default is a count and steps by
+// one; a float default is a continuous millimetre. That is why the examples write
+// chamfer_size=1.0 and bracket_count=4.
+//
+// `int` has to be told, never inferred: JavaScript has one number type, so Python's
+// 1.0 arrives as 1 and Number.isInteger says true. Only the build knows which it was,
+// which is what `kind` in the payload is for.
+function infer(d, int) {
+  let lo, hi;
+  if (d === 0) { lo = 0; hi = int ? 8 : 1; }
+  else if (d < 0) { lo = d * 2; hi = d / 2; }
+  else { lo = d / 2; hi = d * 2; }
+  if (int) {
+    lo = Math.floor(lo); hi = Math.ceil(hi);
+    if (d >= 1) lo = Math.max(1, lo);
+    if (hi - lo < 4) hi = lo + 4;            // never a slider with two stops on it
+    return { lo, hi, step: 1, int: true };
+  }
+  const step = 10 ** (Math.floor(Math.log10(hi - lo)) - 1);
+  return { lo: Math.floor(lo / step) * step, hi: Math.ceil(hi / step) * step, step, int: false };
+}
+
+const tidy = (v, step) => {
+  const places = Math.max(0, -Math.floor(Math.log10(step)));
+  return +v.toFixed(places);
+};
+
+const values = new Map();     // name -> what the sliders say, for the current part
+const defaults = new Map();
+const setters = new Map();    // name -> the one function that moves a row's controls
+let panelSig = null;
+// Writing to the file changes the defaults, which rebuilds this panel, which would
+// throw away the note saying what was written. Held here so it survives that, which
+// matters most when the answer was "left side_clearance alone, and here is why".
+let lastNote = null;
+
+function adjustable(p) { return p.kind === 'int' || p.kind === 'float'; }
+
+function dirty() {
+  const out = {};
+  for (const [k, v] of values) if (v !== defaults.get(k)) out[k] = v;
+  return out;
+}
+
+function markDirty() {
+  const changed = Object.keys(dirty());
+  document.body.classList.toggle('dirty', changed.length > 0);
+  for (const row of document.querySelectorAll('.p')) {
+    row.classList.toggle('dirty', changed.includes(row.dataset.name));
+  }
+  const write = document.getElementById('write');
+  if (write && current) {
+    write.textContent = `write ${changed.length} default${changed.length === 1 ? '' : 's'} `
+      + `to ${current}.py`;
+  }
+}
+
+function params(e) {
+  const box = document.getElementById('params');
+  // A failed build reports no parameters, and clearing the panel here would take the
+  // sliders away at the one moment they are needed: a value that breaks the build has
+  // to be draggable back. The panel is only cleared if it belongs to another part.
+  if (e.error && panelSig && panelSig.startsWith(e.name + '|')) return;
+  const rows = (e.params || []).filter(adjustable);
+  const sig = e.name + '|' + rows.map(p => `${p.name}:${p.default}`).join(',');
+  if (sig === panelSig) { sync(rows); return; }
+  panelSig = sig;
+
+  values.clear(); defaults.clear(); setters.clear();
+  box.classList.toggle('empty', !rows.length);
+  if (!rows.length) { box.innerHTML = ''; document.body.classList.remove('dirty'); return; }
+
+  box.innerHTML = '<h2>parameters<a id="resetall" title="reset every parameter">reset</a></h2>';
+  for (const p of rows) {
+    const r = infer(p.default, p.kind === 'int');
+    values.set(p.name, p.value); defaults.set(p.name, p.default);
+    const row = document.createElement('div');
+    row.className = 'p';
+    row.dataset.name = p.name;
+    row.innerHTML =
+      `<div class="top"><span class="k" title="double-click to reset to ${p.default}">${p.name}</span>`
+      + `<input class="v" type="number"${r.int ? ' step="1"' : ''}></div>`
+      + `<input type="range">`;
+    const num = row.querySelector('.v'), slide = row.querySelector('[type=range]');
+    slide.min = Math.min(r.lo, p.value); slide.max = Math.max(r.hi, p.value);
+    slide.step = r.step; slide.value = p.value;
+    slide.title = p.name;
+    num.value = p.value;
+
+    const set = (v, commit) => {
+      if (!Number.isFinite(v)) return;
+      values.set(p.name, r.int ? Math.round(v) : tidy(v, r.step));
+      const now = values.get(p.name);
+      num.value = now;
+      // A typed value outside the guessed range widens it rather than clamping. The
+      // range is a guess; the number someone typed is not.
+      if (now < +slide.min) slide.min = now;
+      if (now > +slide.max) slide.max = now;
+      slide.value = now;
+      markDirty();
+      push(commit);
+    };
+    setters.set(p.name, set);
+    slide.oninput = () => set(+slide.value, false);
+    slide.onchange = () => set(+slide.value, true);
+    num.onchange = () => set(+num.value, true);
+    row.querySelector('.k').ondblclick = () => set(p.default, true);
+    box.appendChild(row);
+  }
+  const write = document.createElement('button');
+  write.id = 'write';
+  write.title = 'replaces the keyword defaults in the part file';
+  write.onclick = () => sock && sock.send(JSON.stringify({ type: 'apply', name: current }));
+  box.appendChild(write);
+  const note = document.createElement('div');
+  note.id = 'note';
+  if (lastNote && lastNote.name === e.name) {
+    note.textContent = lastNote.text;
+    note.classList.toggle('bad', lastNote.bad);
+  }
+  box.appendChild(note);
+  // Through the same setters a drag uses. Rebuilding the panel here instead would read
+  // the values back off the entry, which still holds the overrides being discarded, and
+  // put every slider straight back where it was.
+  document.getElementById('resetall').onclick = () => {
+    for (const [name, set] of setters) set(defaults.get(name), false);
+    push(true);
+  };
+  markDirty();
+}
+
+// The server's values win, except on a control someone is holding: a rebuild lands
+// mid-drag and would otherwise yank the slider out from under the finger.
+function sync(rows) {
+  for (const p of rows) {
+    defaults.set(p.name, p.default);
+    const row = document.querySelector(`.p[data-name="${p.name}"]`);
+    if (!row) continue;
+    const num = row.querySelector('.v'), slide = row.querySelector('[type=range]');
+    if (document.activeElement === num || document.activeElement === slide) continue;
+    values.set(p.name, p.value);
+    num.value = p.value; slide.value = p.value;
+  }
+  markDirty();
+}
+
+// One rebuild in flight, always carrying the newest values. Nothing can queue up,
+// because there is only ever one request out, and nothing is lost, because the reply
+// checks for input that arrived while it was away. A fixed debounce cannot work here:
+// the round trip is 60ms on the hook and 430ms on the shelf, and no constant is right
+// for both. This clocks itself off the part being edited.
+// Both of these hold a part name rather than a flag. A rebuild can land while the user
+// is already looking at something else, and a boolean cannot tell "mine came back" from
+// "someone else's did": clicking another part mid-rebuild used to leave the flag stuck
+// on forever, which killed every slider in the session.
+let pending = null, pendingFor = null, inflight = null, timer = null, sock = null;
+
+function push(commit) {
+  lastNote = null;                      // moving a slider answers the last write
+  const note = document.getElementById('note');
+  if (note) note.textContent = '';
+  pending = dirty();
+  pendingFor = current;
+  clearTimeout(timer);
+  if (commit) flush();                  // released the slider, or typed a number
+  else timer = setTimeout(flush, 90);   // skip the values a drag passed straight over
+}
+
+function flush() {
+  if (pending === null || inflight || !sock || sock.readyState !== WebSocket.OPEN) return;
+  // Values collected for a part the user has since left. The server still holds that
+  // part's overrides, so dropping this loses nothing.
+  if (pendingFor !== current) { pending = null; return; }
+  const payload = pending;
+  pending = null;
+  inflight = current;
+  document.body.classList.add('stale');
+  sock.send(JSON.stringify({ type: 'params', name: current, values: payload }));
+}
+
+function settled(name) {
+  if (inflight !== name) return;
+  inflight = null;
+  if (pending !== null) flush();
+  else document.body.classList.remove('stale');
 }
 
 // ---- part list ----
 function render() {
   const list = document.getElementById('list');
   list.innerHTML = '';
+  // Here rather than on the sync message, so the first part written into an empty
+  // project brings the tools back without a reload.
+  document.body.classList.toggle('noparts', parts.size === 0);
   for (const e of parts.values()) {
     const row = document.createElement('div');
     row.className = 'item' + (e.name === current ? ' active' : '');
@@ -354,9 +744,17 @@ function flash(name) {
 // ---- socket ----
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
+  sock = ws;
   const conn = document.getElementById('conn');
   ws.onopen = () => conn.textContent = '';
-  ws.onclose = () => { conn.textContent = 'reconnecting'; setTimeout(connect, 1000); };
+  ws.onclose = () => {
+    conn.textContent = 'reconnecting';
+    // Nothing is coming back, so the in-flight rebuild has to be forgotten or the
+    // sliders go dead for good.
+    inflight = null;
+    document.body.classList.remove('stale');
+    setTimeout(connect, 1000);
+  };
   ws.onmessage = ev => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'sync') {
@@ -369,14 +767,33 @@ function connect() {
     }
     if (msg.type === 'rebuilt') {
       parts.set(msg.name, msg);
+      // The first part in an empty project arrives here, not in a sync, so without
+      // this `nurb new` in a running `nurb dev` fills the list and leaves the canvas
+      // showing "no parts yet".
+      if (!current) current = msg.name;
       render();
       flash(msg.name);
+      // Unconditionally, and by name: a rebuild the user walked away from still has to
+      // release the slot it was holding.
+      settled(msg.name);
       if (msg.name === current) show(msg.name, { keepCamera: true });
     }
     // Checks arrive after the geometry, so this only repaints the panel.
     if (msg.type === 'checked') {
       parts.set(msg.name, msg);
       if (msg.name === current) checks(msg.name);
+    }
+    if (msg.type === 'applied' && msg.name === current) {
+      lastNote = {
+        name: msg.name,
+        bad: !!msg.error,
+        text: msg.error
+          ? msg.error
+          : [`wrote ${msg.written.join(', ') || 'nothing'}`,
+             ...(msg.skipped || []).map(s => `left ${s.name} alone: ${s.why}`)].join('\n'),
+      };
+      const note = document.getElementById('note');
+      if (note) { note.classList.toggle('bad', lastNote.bad); note.textContent = lastNote.text; }
     }
   };
 }

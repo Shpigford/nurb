@@ -60,10 +60,15 @@ themed alias.
 Importing build123d costs 45s cold and 2.3s warm, and that is the whole argument: the
 dev server pays it once instead of on every save.
 
-What a rebuild costs after that depends on the part. A simple one is 46ms to build and
-120ms to tessellate. The heaviest part in `examples/` is 470ms and 620ms. Tessellation
-being the larger half is worth knowing before optimising the wrong thing, and draft
-mode is not the lever it looks like: chamfers are 23% of that build, not most of it.
+What a rebuild costs after that depends on the part. A simple one is 29ms to build and
+1ms to tessellate. The heaviest part in `examples/` is 401ms and 30ms. Draft mode is
+not the lever it looks like: chamfers are 23% of that build, not most of it.
+
+Tessellation used to be the larger half, at 620ms on that part, and almost none of it
+was geometry. `Shape.tessellate` reads its triangles with `for t in poly.Triangles()`,
+and OCP's iterator over that array costs 536ms where reading the same 7790 triangles by
+index costs 6.8ms. `builder._triangulate` does the latter and returns bit-identical
+vertices and faces. It is worth knowing before optimising the wrong thing.
 
 ## Layout
 
@@ -167,8 +172,8 @@ baselines their catalog cards recorded in Fusion.
 
 - `nurb extract`, pull shared geometry out of sibling parts into `system.py`
   once duplication actually shows up, rather than scaffolding it up front
-- Parameter sliders in the viewer, driven by the same keyword defaults
-- Vendored three.js so the viewer works offline, which `nurb render` also needs
+- The remaining Notch parts, and fit assertions over the whole library
+- `min_wall`, the one printability rule that is neither exact nor cheap
 
 ## Debugging the viewer
 
@@ -177,6 +182,10 @@ baselines their catalog cards recorded in Fusion.
 The URL takes `?part=<name>` to open a part, `?view=iso|front|back|left|right|top` to
 frame it deterministically, and `?bare` to hide the chrome. `nurb render` drives exactly
 that, and waits on `ready`.
+
+three.js is vendored in `src/nurb/vendor/three`, so the viewer needs no network. See the
+README beside it before changing versions: the import graph has grown since r169 and the
+files it added fail as a blank canvas rather than as an error.
 
 ## License
 
@@ -196,6 +205,10 @@ nurb does not redistribute OCCT. It is installed separately as a dependency, and
 dynamically linked at runtime. If you ever bundle nurb into a single-file
 distribution that embeds the OCCT binaries, ship a copy of the OCCT license with it
 and keep the library replaceable, per LGPL.
+
+nurb **does** redistribute [three.js](https://threejs.org) r169 (MIT), vendored in
+`src/nurb/vendor/three` so the viewer works without a network. Its `LICENSE` ships
+beside it and the `@license` header stays on the build file, which is what MIT asks for.
 
 Other dependencies: trimesh (MIT), watchdog (Apache-2.0), websockets (BSD-3-Clause),
 numpy (BSD-3-Clause). Optional, for `nurb render` only: playwright (Apache-2.0), which

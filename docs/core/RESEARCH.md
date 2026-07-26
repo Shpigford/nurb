@@ -127,6 +127,12 @@ shelf, polished      470ms          620ms       ~1090ms
 shelf, draft         380ms          520ms        ~900ms
 ```
 
+**The tessellate column was corrected again in Phase 4, and it was not geometry.**
+Almost all of it is OCP's iterator over `Poly_Array1OfTriangle`, which `Shape.tessellate`
+uses: 536ms to walk the shelf's 7790 triangles against 6.8ms to read them by index, and
+10ms for the meshing itself. Reading by index gives bit-identical output, so the column
+is now 1.3ms on the hook and 30ms on the shelf, and the loop is the build.
+
 Shelf build, by stage: socket lofts 156ms (34%), socket cut 68ms, cosmetic chamfer
 66ms, structural chamfer 43ms, gussets 42ms, fuse 39ms, edge selection 26ms, channels
 and detent 21ms.
@@ -442,21 +448,23 @@ Fit assertions for the test suite: channel floors at `x=-4.2`, y-centers exactly
 
 ### Not built
 
-- Parameter sliders driven by the same keyword defaults. Nearly free given the
-  contract, and it is the feature that makes the tool feel consumer-grade: drag
-  `item_height`, watch it rebuild. Effectively a local version of MakerWorld's
-  customizer, available during design rather than after publishing.
+- ~~Parameter sliders driven by the same keyword defaults.~~ **Built in Phase 4**, and
+  the contract did carry them: the panel is derived from the signature and declares
+  nothing. What the prediction missed is that a range still has to be guessed, and that
+  the guess needs to know whether a default is a count or a measurement. The type of the
+  default answers it, which is why the doctrine now asks for `chamfer_size=1.0`.
 - ~~Headless PNG render so an agent can see its own work.~~ **Built in Phase 3**, the way
   this predicted: Playwright against the existing viewer at `?part=x&view=iso`, on a
   server the render starts itself. Playwright is an optional extra rather than a
   dependency. The headless shell renders WebGL 2.0 through SwiftShader, so no offscreen
   GL stack and no browser channel pin were needed.
-- Section view, measurement tools.
-- Vendored three.js. Currently loaded from unpkg via importmap, so the viewer needs
-  network. A CAD tool should work offline. **Phase 3 raised the stakes on this:**
-  `nurb render` drives the same page, so it fails closed without network. Measured with
-  unpkg blocked: the page loads, the canvas exists, three.js never arrives, nothing is
-  ever drawn.
+- ~~Section view~~ **built in Phase 4**, with a stencil cap: a plain clip renders a
+  solid as two floating panels, and `DoubleSide` makes a solid indistinguishable from a
+  hollow one, which is the one thing a printability viewer must not do. Measurement
+  tools are still not built.
+- ~~Vendored three.js.~~ **Built in Phase 4.** `nurb render` no longer depends on the
+  network, which is what Phase 3 flagged when it measured the failure: with unpkg
+  blocked the page loaded, the canvas existed, and nothing was ever drawn.
 
 ## Risks
 
@@ -473,10 +481,11 @@ Phase 1 and are kept here with their outcomes, since the outcomes are the useful
 
    The trap: **every edge chamfers fine individually; only the batch fails.** Checking
    edges one at a time reports that nothing is wrong. Bisect the set pairwise.
-2. ~~**Rebuild latency on real parts.**~~ **Resolved, and the answer is not the one
-   assumed.** Build is 470ms on the shelf, but tessellation is another 620ms, so the
-   loop is ~1.1s. Tessellation is the critical path and draft mode does not address
-   it. See the measured facts above.
+2. ~~**Rebuild latency on real parts.**~~ **Resolved twice.** Phase 1 measured a ~1.1s
+   loop on the shelf and concluded tessellation was the critical path. Phase 4 profiled
+   inside that number and found it was an iterator in build123d rather than geometry;
+   reading the triangles by index leaves the loop at ~431ms draft, nearly all of it the
+   build. See the measured facts above.
 3. **False positives in the rules.** Kills adoption faster than missing checks. Two
    calibration parts now exist with exact baselines.
 4. **Concave edge detection.** Required by the polish rules, known to have a subtle
@@ -487,7 +496,11 @@ Phase 1 and are kept here with their outcomes, since the outcomes are the useful
    returns exactly what an operation created, and is the algebra-mode `Select.LAST`.
    Both parts flex `bracket_count` in both directions with baselines unchanged. This
    is genuinely better than Fusion's strict-ordering rule, not just parity.
-6. **three.js CDN dependency.** Offline breaks the viewer.
+6. ~~**three.js CDN dependency.** Offline breaks the viewer.~~ **Resolved in Phase 4.**
+   three.js r169 is vendored into `src/nurb/vendor/three` and the importmap points at
+   it. Verified by reading the network log: every request the viewer makes is to its own
+   server. `GLTFLoader` pulls in `BufferGeometryUtils`, which is easy to miss and fails
+   as a blank canvas rather than an error.
 
 ## Open questions
 
