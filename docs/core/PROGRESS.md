@@ -1,6 +1,6 @@
 # nurb core progress
 
-## Status: Phases 1 and 2 complete. Phase 3 next.
+## Status: Phases 1, 2 and 3 complete. Phase 4 next.
 
 **The kernel question is answered: OCCT builds both parts and both match the Fusion
 originals dimension for dimension.** The architecture stands. `nurb check` now runs
@@ -288,15 +288,183 @@ roots, invisible in code and in every other measure.
 ---
 
 ### Phase 3: Agent interface
-**Status:** Not Started
+**Status:** Complete (2026-07-26)
 
-`nurb rules`, card generation, headless render, harness shims.
+The doctrine ships in the package, cards regenerate their own facts, and a part can be
+looked at without a human at the keyboard.
 
 #### Tasks completed
-- (none yet)
+- [x] `src/nurb/doctrine.md`, the single source, printed by `nurb rules`
+- [x] `SKILL.md` and `AGENTS.md`, ~20 lines each, pointing at `nurb rules`
+- [x] `nurb card`: the AUTO block from a build, grafted under the title
+- [x] Card template already carried the four sections; `nurb card` now reports an empty
+      one, `## Don't` included
+- [x] Accepted baselines are in the card already, from Phase 2, and the AUTO block prints
+      the measured sliver count next to the accepted one
+- [x] `measurements.toml` plus `measured()`, provenance required
+- [x] Headless PNG through Playwright against the running viewer
+- [x] `nurb render <part>` writing `build/<part>.png`
+- [x] 23 new tests, 77 total
+
+#### Results against the success criteria
+
+| Criterion | Result |
+|---|---|
+| `nurb rules` is complete enough that no doctrine lives in harness files | 236 lines covering the part contract, printability, load path, polish, kernel traps, cards, measurements, verification. `SKILL.md` and `AGENTS.md` carry no doctrine, only the command list. |
+| Editing a part updates its card without hand-editing the AUTO block | `nurb card`, idempotent, and a test asserts the three real cards are current |
+| An agent can call `nurb render` and read the resulting image | Yes, verified by looking at all three parts plus a top view and a `--chrome` view |
+| A fresh session, given only the repo, can build a part correctly without asking | **Not verified.** See below. |
+
+The last one is the phase's whole objective and it has not been tested the only way it
+can be, which is a cold session working a part. What exists is the material it would
+need. Treat it as unproven until someone runs it.
+
+The AUTO blocks reproduced, unprompted, the numbers the cards had recorded in prose:
+34 x 25.16 x 30 and 94 x 100.64 x 42 for the bounding boxes, 6 and 18 slivers with
+smallest faces at 0.866 and 0.632mm², and a 2.24 projection ratio against a card that
+predicted grid_y 3 would reach 3.2. That is the fourth time a Phase 2 or 3 measurement
+has landed on a figure recorded by hand in another kernel.
+
+`nurb render` costs ~9s for one part cold and 13.4s for all three, since one browser and
+one server serve the whole list. The OCCT import is most of the first number.
 
 #### Decisions made
-- (none yet)
+
+- **`measurements.toml`, not `measurements.yaml`.** The plan said YAML. There is no YAML
+  parser in the standard library, `tomllib` is, and cards already use a TOML fence for
+  their check settings. Adding PyYAML would be a fifth dependency to read one small file
+  in a second format. One format for both, no new dependency.
+- **The AUTO block carries no timestamp.** The Fusion cards had "synced 2026-07-22 from
+  Fusion v7", which churns on every regeneration and makes a diff meaningless. Without
+  one the block is a real cache: regenerating on unchanged geometry produces no diff, so
+  `git diff` is the staleness check, and a test can assert the committed cards match what
+  the parts build to today. That test earned itself immediately, as the regression check
+  on the `measured()` refactor below.
+- **The AUTO block does not repeat the parameters**, which the plan asked for. Keyword
+  defaults *are* the parameters and a part file is readable text, so copying them into the
+  card is the parallel `PARAMS` dict the contract forbids, one level removed. The Fusion
+  cards listed them because the geometry lived in a binary file nobody could read. The
+  block now holds only what a build can tell you and the reader cannot: bounding box,
+  volume, solid count, face count, sliver count against the accepted baseline, projection
+  ratio, check verdict.
+- **No fit checks in the AUTO block**, also asked for by the plan. "Channel floors at
+  x=-4.2" is Notch, and nothing in `src/nurb/` should know what a channel is. The generic
+  version already exists: a card names which way the part reaches and gets its projection
+  ratio. Notch's own fit assertions belong in the Phase 5 test suite, which is where the
+  plan already puts them.
+- **Playwright is an optional extra, not a dependency.** It is the fifth-dependency rule
+  applied: one command wants a browser, the download is larger than everything else in
+  the tree, and the answer is `[project.optional-dependencies] render`. Asking for
+  `nurb render` without it prints the two commands that fix it.
+- **The default headless shell renders WebGL, so no `channel="chromium"` pin.** Measured
+  both: each reports WebGL 2.0 through SwiftShader and each draws the scene. Pinning the
+  channel would only narrow which Playwright installs work, including
+  `playwright install --only-shell`.
+- **`nurb render` hosts its own server.** Requiring `nurb dev` to be running is a
+  precondition an agent has to discover, and the whole point is one command that works
+  cold. It starts the server on a free port, serves the viewer, screenshots, stops. The
+  file watcher is deliberately not started, since nothing changes during a render.
+- **The image is geometry only by default.** `--chrome` keeps the HUD and the findings
+  panel. The reason to keep that flag is not the panel, it is the 3D pins: "overhang at
+  (12, 3, -8)" is a coordinate, and a pin is a place. Everything else the panel says, the
+  CLI says better.
+- **`--width` is the width of the file.** Dropped `device_scale_factor=2`, which silently
+  doubled it, and in `--chrome` mode the screenshot is the page rather than the canvas,
+  because otherwise the sidebar quietly took 220px off what was asked for.
+- **`measured()` raises rather than defaulting, and provenance is required.** A value with
+  no `how` is a guess with a filename on it. The three refusals (no file, unknown name, no
+  provenance) all exist because the failure they prevent is invisible: an invented
+  dimension builds, checks clean, exports and prints.
+- **`MeasurementError`, not `KeyError`.** `KeyError` reprs its argument, so a message
+  containing a worked TOML example came out as one quoted string full of backslash-n with
+  the useful part unreadable. Found by looking at the output rather than at the code,
+  which is the only way that class of bug shows up.
+- **The example splits measured hardware from chosen fit.** Six constants moved out of
+  `examples/notch/system.py` into `measurements.toml`: the bracket pitch, height, pitch
+  slop, and the three pocket dimensions, all of them facts about a bracket that nothing
+  can derive. `CLEARANCE` and `SIDE_CLEARANCE` stayed, because they came out of printed
+  coupons rather than off a bracket: they are decisions informed by measurement, and their
+  reasoning is worth more than their number. That line is the one worth keeping, since it
+  is what stops the file becoming a bag of constants.
+- **An empty required section is reported, not enforced.** `nurb card` names any of the
+  four that is missing or blank. A part that will not build until its changelog is written
+  is a tool nobody keeps, but `## Don't` left empty is how the retired lead-in chamfer
+  comes back.
+- **CLAUDE.md keeps its kernel rules.** The doctrine is the authority for designing parts
+  and the harness shims are `SKILL.md` and `AGENTS.md`, as the plan says. CLAUDE.md is
+  instructions for developing nurb itself, a different audience, and the two chamfer traps
+  it names are worth having in automatically loaded context. `nurb rules` is the full
+  statement of both.
+
+#### Findings
+
+- **Generated text has to be ASCII, and it was not.** The first AUTO block said `mm³` and
+  `mm²`, copied from the hand-written prose a few lines below it. `checks.py` had already
+  settled this by writing `mm2` in all five of its messages, and the reason is not
+  cosmetic: measured, a block written on a cp1252 machine comes back as **invalid UTF-8**
+  elsewhere, so nothing can read that card at all. A card's prose can say `mm²` because a
+  human wrote it once; a generated line that has to be byte-identical on every platform
+  cannot. Fixed both ways, since the two are separate problems: generated lines are ASCII
+  now, and every read and write of a card or the doctrine passes `encoding="utf-8"` instead
+  of trusting the locale, including the pre-existing read in `from_card`. A test asserts
+  the blocks on disk are ASCII while allowing the prose around them not to be.
+- **Findings pins were invisible on the geometry they annotate.** Phase 2 shipped them with
+  the default `depthTest`, and a rule reports a point *on a face*, so the pin sits half
+  inside the material. Measured on a deliberately cantilevered test part: two findings, two
+  pins in the scene at the right coordinates and colours, and only one visible, because the
+  `fail` pin on the shelf underside is behind the shelf from every angle that shows the
+  shelf. A marker you cannot see is worse than no marker, because the panel still says it
+  is there. Pins now draw through the solid (`depthTest: false` plus a per-mesh
+  `renderOrder`, since a Group's `renderOrder` only reaches its children in some three.js
+  versions). This is Phase 3 finding a defect in Phase 2's output, the same way Phase 2
+  found one in Phase 1's, and it was only found because `--chrome` had no reason to exist
+  except those pins, so it had to be tested against a part that actually fires a rule. All
+  three example parts report clean, which is exactly why this went unnoticed.
+- **The measurement lookup walked out of the project.** `_find` climbed to the filesystem
+  root, so a part could silently answer with an unrelated `measurements.toml` from an
+  ancestor directory: a wrong dimension that builds, checks clean and prints, which is the
+  one failure this module exists to prevent. It now stops at the project root, meaning the
+  directory holding `parts/`.
+- **The AUTO block was found by its exact opening sentence.** Changing that wording once
+  would have left every card on disk holding an unrecognised block, and the next
+  `nurb card` would have added a second one underneath it. It now matches on `<!-- AUTO`,
+  so any block, whatever its opener, is replaced.
+- **The projection ratio was computed in two places.** `nurb check` judged one and the card
+  printed another, agreeing today by construction. Both now call `checks.projection`.
+  Re-verified against the figures the card records: `grid_y` 3 gives reach 136mm and ratio
+  3.24 and fires, and `item_height` 55 brings it to 2.47 and clears, which is what Phase 2
+  measured.
+- **`nurb render` inherits the viewer's CDN dependency, and it fails closed.** Measured
+  with unpkg blocked: the server serves, the page loads, the canvas exists, and three.js
+  never arrives, so nothing is ever drawn. That promotes Phase 4's "vendor three.js" from
+  polish to a prerequisite for rendering offline or in a sealed CI container. The render
+  now says so when it times out, because a bare Playwright timeout sends the reader to
+  look at their geometry instead of their network.
+- **A top view is degenerate in a Z-up scene.** `camera.up` parallel to the view
+  direction gives an undefined orientation rather than a wrong one, so `?view=top` needed
+  an explicit up flip. Worth knowing before Phase 4 adds a view widget.
+- **A still does not need orbit headroom.** The viewer frames a part at 2.1x its span,
+  which is right for orbiting and wastes most of a screenshot. A named view is only ever
+  asked for by a still, so it frames at 1.45x. The interactive default is untouched.
+- **`window.__nurb.ready` is false in a hidden tab, and that is correct rather than
+  broken.** It is set from a `requestAnimationFrame` pair, and rAF does not fire while
+  `document.visibilityState` is `hidden`. Found while verifying the live loop in a
+  backgrounded browser pane: the camera held its position exactly across a rebuild and
+  `ready` stayed false, which looked like a bug for a minute. It is not. `ready` means the
+  geometry has been painted, and a hidden tab never paints, so a screenshot taken then
+  would be stale whatever the flag said. The consequence for the code is one line of copy:
+  the render's timeout error named the network as *the* cause, and now names both, because
+  a confidently wrong error message sends the reader to inspect their geometry.
+
+#### Deferred, deliberately
+
+- **No `nurb card --check`.** The block is idempotent, so `git diff --exit-code` already
+  answers "is this card stale" in CI, and the test suite asserts it. A flag would be a
+  third way to ask the same question.
+- **No command to write a measurement.** An agent editing a TOML file needs no help. What
+  it needed was the refusal, and that is in `measured()`.
+- **No section filter on `nurb rules`.** 236 lines is cheaper for a model to read than a
+  topic name is to guess, and a filter would invite writing doctrine that nobody prints.
 
 #### Blockers
 - (none)
@@ -436,6 +604,26 @@ and now has evidence.
 
 ## Session log
 
+### 2026-07-26 (later): Phase 3
+
+Order of work: doctrine, then the pieces that reference it. Writing `doctrine.md` first
+was the right call for a reason that was not obvious going in: assembling the whole
+doctrine in one place is what surfaced that the plan's `measurements.yaml` needed a YAML
+parser nobody had, and that the AUTO block's parameter list contradicted the part contract
+three sections above it. Both would have been written before being noticed otherwise.
+
+The `measured()` refactor of `system.py` was done after `nurb card` existed rather than
+before, which turned it from a risky edit into a checked one: the cards record exact
+bounding box, volume, face count and sliver count, so moving six constants out to
+`measurements.toml` and getting byte-identical blocks back is a real regression test. It
+was written for documentation and paid off as verification within the hour.
+
+Verified by looking, not by reasoning: five renders read back as images (three parts, a
+top view, a `--chrome` view), the missing-measurement error read back from a real CLI run
+twice, and the stale-card test watched to fail on a perturbed digit before being trusted.
+The `KeyError` formatting bug and the wasted screenshot framing were both invisible in
+code and obvious on screen.
+
 ### 2026-07-25 (later): Phase 1
 
 Ported both parts. Read the exact channel cross-section off the live Fusion model
@@ -502,6 +690,27 @@ src/nurb/server.py        watch the project root too; a change outside parts/ is
 src/nurb/viewer.html      parts sit on the grid instead of hanging under it
 ```
 
+Phase 3:
+
+```
+src/nurb/doctrine.md              new  the single source, printed by nurb rules
+src/nurb/card.py                  new  the AUTO block: facts, graft, thin
+src/nurb/measurements.py          new  measured(), MeasurementError
+src/nurb/render.py                new  headless PNG, the only browser dependency
+SKILL.md, AGENTS.md               new  thin shims, no doctrine
+examples/notch/measurements.toml  new  six measured bracket dimensions with provenance
+examples/notch/system.py          six constants now come from measured()
+examples/notch/parts/*.md         AUTO block grafted under each title
+src/nurb/cli.py                   rules, card, render
+src/nurb/__init__.py              measured() joins the part vocabulary
+src/nurb/viewer.html              ?part= ?view= ?bare, window.__nurb.ready, tighter
+                                  framing for a still, Z-up top view fixed
+pyproject.toml                    render extra, doctrine.md in the sdist
+tests/test_card.py                AUTO block, plus "the real cards are current"
+tests/test_measurements.py        new  every way a measurement can refuse
+tests/test_render.py              new  two views of a part are two different pictures
+```
+
 ---
 
 ## Architectural decisions
@@ -523,6 +732,11 @@ Carried from research and the questions answered during planning.
 | A project's own modules are importable and reloadable | `system.py` is the whole point of a parts library. A part says `from system import ...`; the loader puts the root on `sys.path` and forgets project modules after each build so an edit lands on the next rebuild. |
 | The grid is the build plate | Where a part's origin falls is a modeling datum. Notch hangs everything below z=0, which put every part under the plate. The viewer drops the part onto z=0 instead. |
 | Chamfer selection uses `new_edges`, never frozen geometry | It is what survives a `bracket_count` flex, and it is the algebra-mode `Select.LAST` CLAUDE.md asks for. |
+| The doctrine is a file in the package | `nurb rules` prints it, harness files point at it. A copy in `SKILL.md` and another in `AGENTS.md` would drift within a phase, and the drifted copy is the one an agent reads. |
+| The AUTO block is idempotent and holds no timestamp | It makes the block a cache rather than a competing source of truth: no diff unless the geometry moved, so `git diff` is the staleness check and a test can assert cards are current. |
+| The card does not restate the parameters | The signature is the parameters. Restating them anywhere, including in generated text, is the `PARAMS` dict the contract forbids. |
+| A dimension that was measured lives in `measurements.toml`, and asking for a missing one raises | An invented dimension builds, checks clean, exports and prints. Nothing downstream can catch it, so the only place to catch it is at the moment of asking. |
+| Rendering reuses the viewer rather than an offscreen stack | The image is then what a human would see, and nothing new has to know how to light a scene. It costs an optional browser, which is why it is an extra. |
 
 ---
 
@@ -573,3 +787,29 @@ Carried from research and the questions answered during planning.
   but the underlying constraint (a chamfer needs room to land) is physics-adjacent
   and applies to OCCT too, at a different number. Deleting it would have been wrong;
   restating it as a rule was right.
+
+**From Phase 3:**
+
+- **Build the recorder before the refactor.** Moving six constants out of `system.py`
+  looked like an edit that needed careful review. Done after `nurb card` existed, it
+  needed none: the cards hold exact bounding box, volume, face count and sliver count, so
+  identical blocks afterwards is proof nothing moved. A document written to explain a part
+  turned into the regression test for changing it, in the same session.
+- **Assemble the whole doctrine in one file before writing the code that references it.**
+  Two of the plan's own instructions did not survive being written down next to each other:
+  `measurements.yaml` needed a parser nobody had, and listing parameters in the card
+  contradicted the part contract stated three sections above it. Both would have been built
+  before being noticed.
+- **A message inside a `KeyError` is not the message you wrote.** `KeyError` reprs its
+  argument, so a worked example with newlines in it prints as one quoted string full of
+  backslash-n. Any other exception class formats it properly. Invisible in code, obvious
+  the first time the command was run.
+- **A flag whose only justification is a feature nobody has exercised is untested by
+  construction.** `--chrome` exists to show findings in place, and all three example parts
+  report clean, so the pins it renders had never once been looked at. Building a throwaway
+  part that deliberately fails a rule took four lines and found that half the pins were
+  invisible. Where a codebase is clean by design, the clean cases cannot verify the code
+  that handles the dirty ones, and something has to be made dirty on purpose.
+- **Non-ASCII in generated output is a portability bug, not a typography choice.** It only
+  shows up on a machine with a different locale, which is to say on somebody else's, which
+  for source-available code is most of them.

@@ -40,6 +40,9 @@ nurb new <name>      create parts/<name>.py and its card
 nurb dev             watch, rebuild, serve the viewer on :7373
 nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
+nurb rules           print the design doctrine
+nurb card [part]     regenerate a card's AUTO block
+nurb render [part]   write build/<part>.png, needs the render extra
 nurb export [part]   write STL/STEP/GLB into build/
 ```
 
@@ -51,15 +54,19 @@ never should be.
 ## Layout
 
 ```
-src/nurb/registry.py   @part, signature introspection
-src/nurb/builder.py    load, build, tessellate, GLB
-src/nurb/checks.py     printability rules, convexity, Finding/Context
-src/nurb/server.py     watcher, rebuild, HTTP + websocket on one port
-src/nurb/viewer.html   three.js viewer, Z-up, camera persistence
-src/nurb/cli.py        command surface
-examples/notch/        the real parts, which are also the calibration set
-tests/                 rules and examples, both cases per rule
-docs/core/             research, plan, progress
+src/nurb/registry.py      @part, signature introspection
+src/nurb/builder.py       load, build, tessellate, GLB
+src/nurb/checks.py        printability rules, convexity, Finding/Context
+src/nurb/card.py          the card's AUTO block
+src/nurb/measurements.py  measured(), and the refusal to guess
+src/nurb/render.py        headless PNG, the only module that wants a browser
+src/nurb/doctrine.md      the doctrine itself, shipped in the package
+src/nurb/server.py        watcher, rebuild, HTTP + websocket on one port
+src/nurb/viewer.html      three.js viewer, Z-up, camera persistence
+src/nurb/cli.py           command surface
+examples/notch/           the real parts, which are also the calibration set
+tests/                    rules and examples, both cases per rule
+docs/core/                research, plan, progress
 ```
 
 ## Rules
@@ -161,7 +168,7 @@ as though every file will be read by a stranger.
 
 ## Current state
 
-Phases 1 and 2 are done. Two real Notch parts and a calibration coupon live in
+Phases 1, 2 and 3 are done. Two real Notch parts and a calibration coupon live in
 `examples/notch/`; they build to one solid each, match their Fusion originals dimension
 for dimension, and reproduce the sliver baselines their catalog cards recorded. The
 kernel question is settled and the timing numbers come from real geometry.
@@ -171,7 +178,14 @@ of the three, which is the bar: a warning fired at a part that prints fine is a 
 the rule. It has already caught one real defect in what Phase 1 shipped, four cosmetic
 chamfers laid into concave junctions.
 
-Phase 3 (agent interface: `nurb rules`, card generation, headless render) is next.
+The agent surface is in: `nurb rules` prints the doctrine from `src/nurb/doctrine.md`,
+`nurb card` regenerates each card's AUTO block from a build, `nurb render` screenshots the
+viewer headlessly, and `measurements.toml` carries dimensions with their provenance.
+77 tests.
+
+Phase 4 (viewer and human UX: parameter sliders, vendored three.js, section view) is
+next. Vendoring three.js also removes `nurb render`'s network dependency, which is worth
+knowing before planning around it.
 
 `docs/core/PROGRESS.md` has the findings, including three claims from RESEARCH.md and
 one from Phase 1 that a real part or a real print disproved. Read them before trusting

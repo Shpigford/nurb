@@ -23,6 +23,11 @@ dependencies = [
     "websockets>=16.1.1",
 ]
 
+[project.optional-dependencies]
+# `nurb render` screenshots the viewer, which means a browser. Optional because it is
+# the only command that needs one and the download is larger than everything else here.
+render = ["playwright>=1.49"]
+
 [dependency-groups]
 dev = ["pytest>=8.0"]
 
@@ -34,4 +39,4 @@ requires = ["uv_build>=0.11.26,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-source-include = ["src/nurb/viewer.html"]
+source-include = ["src/nurb/viewer.html", "src/nurb/doctrine.md"]

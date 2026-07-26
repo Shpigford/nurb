@@ -123,6 +123,51 @@ def cmd_export(args):
             print(f"  {target.relative_to(root)}")
 
 
+def cmd_rules(args):
+    # Explicit utf-8: the doctrine says mm², so the locale default breaks it on a machine
+    # that is not utf-8, and `nurb rules` is the first command an agent runs.
+    doctrine = pathlib.Path(__file__).parent / "doctrine.md"
+    print(doctrine.read_text(encoding="utf-8"))
+
+
+def cmd_card(args):
+    from . import builder, card, checks
+
+    root = project_root()
+    for path in _resolve(root, args.part):
+        try:
+            shape, _, _ = builder.build(path, draft=False)
+            ctx = checks.from_card(path)
+            found = checks.run(shape, ctx)
+        except Exception as exc:
+            print(f"  {path.stem}: {type(exc).__name__}: {exc}")
+            continue
+        target, changed, thin = card.write(path, shape, ctx, found)
+        state = "updated" if changed else "current"
+        print(f"  {target.relative_to(root)}: {state}")
+        for heading in thin:
+            print(f"      empty section: {heading}")
+
+
+def cmd_render(args):
+    from . import builder, render
+
+    root = project_root()
+    try:
+        written = render.render(
+            root,
+            _resolve(root, args.part),
+            root / "build",
+            view=args.view,
+            size=(args.width, args.height),
+            chrome=args.chrome,
+        )
+    except builder.BuildError as exc:
+        sys.exit(f"  {exc}")
+    for _, png in written:
+        print(f"  {png.relative_to(root)}")
+
+
 def cmd_dev(args):
     from .server import Server
 
@@ -158,6 +203,23 @@ def main(argv=None):
     s.add_argument("part", nargs="?")
     s.add_argument("--strict", action="store_true", help="exit non-zero on any finding")
     s.set_defaults(fn=cmd_check)
+
+    s = sub.add_parser("rules", help="print the design doctrine")
+    s.set_defaults(fn=cmd_rules)
+
+    s = sub.add_parser("card", help="regenerate a part card's AUTO block")
+    s.add_argument("part", nargs="?")
+    s.set_defaults(fn=cmd_card)
+
+    s = sub.add_parser("render", help="write a PNG of a part to build/")
+    s.add_argument("part", nargs="?")
+    # Not argparse `choices`: reading them would mean importing the render module, and
+    # every heavy import in this file is function-local so `nurb --help` stays instant.
+    s.add_argument("--view", default="iso", help="iso, front, back, left, right, top")
+    s.add_argument("--width", type=int, default=1200)
+    s.add_argument("--height", type=int, default=900)
+    s.add_argument("--chrome", action="store_true", help="keep the HUD and findings panel")
+    s.set_defaults(fn=cmd_render)
 
     s = sub.add_parser("export", help="write STL/STEP/GLB to build/")
     s.add_argument("part", nargs="?")

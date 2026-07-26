@@ -66,6 +66,10 @@
   #checks .warn .tag { color: #f0c274; }
   #checks .rule { flex: none; color: var(--dim); width: 92px; }
   #checks .ok { color: var(--accent); }
+  /* ?bare hides the chrome so a render is geometry on the plate and nothing else.
+     Findings and sizes are text, and the CLI already prints them better than a PNG. */
+  body.bare { grid-template-columns: 1fr; }
+  body.bare aside, body.bare #hud, body.bare #checks, body.bare #reframe { display: none; }
 </style>
 </head>
 <body>
@@ -95,6 +99,16 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 const parts = new Map();
 let current = null, mesh = null, lastSize = null;
 
+// A headless render drives this same page, so the scene an agent sees is the scene a
+// human sees. ?view= also means "frame it deterministically", ignoring the saved camera.
+const q = new URLSearchParams(location.search);
+const want = q.get('part'), view = q.get('view'), bare = q.has('bare');
+const VIEWS = {
+  iso: [0.7, -0.75, 0.6], front: [0, -1, 0], back: [0, 1, 0],
+  left: [-1, 0, 0], right: [1, 0, 0], top: [0, 0, 1],
+};
+if (bare) document.body.classList.add('bare');
+
 // ---- scene (Z-up, matching CAD) ----
 const main = document.querySelector('main');
 const scene = new THREE.Scene();
@@ -111,6 +125,11 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.12;
 
+// Declared up here rather than next to the code that uses it, because `show` writes
+// `ready` and a headless render polls it. Both happen after this module is evaluated, so
+// the old position worked, but only by luck of ordering.
+window.__nurb = { THREE, scene, camera, controls, ready: false, get mesh() { return mesh; } };
+
 scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.2));
 const key = new THREE.DirectionalLight(0xffffff, 1.8);
 key.position.set(1, -1.4, 2);
@@ -124,9 +143,15 @@ scene.add(grid);
 const pins = new THREE.Group();
 scene.add(pins);
 const pinGeom = new THREE.SphereGeometry(1, 12, 8);
+// Pins draw through the solid, on purpose. A rule reports a point on a face, so the pin
+// sits half inside the material and the part hides it from most angles: the `fail` pin on
+// a shelf underside is invisible from every view that shows the shelf. A marker you cannot
+// see is worse than none, because the panel still says it is there. renderOrder as well as
+// depthTest, since the mesh is added to the scene after this group and would otherwise
+// paint over it.
 const pinMat = {
-  fail: new THREE.MeshBasicMaterial({ color: 0xf87171 }),
-  warn: new THREE.MeshBasicMaterial({ color: 0xf0c274 }),
+  fail: new THREE.MeshBasicMaterial({ color: 0xf87171, depthTest: false, depthWrite: false }),
+  warn: new THREE.MeshBasicMaterial({ color: 0xf0c274, depthTest: false, depthWrite: false }),
 };
 
 const material = new THREE.MeshStandardMaterial({
@@ -176,12 +201,20 @@ function restoreCamera(name) {
   } catch { return false; }
 }
 
-function frame(box) {
+function frame(box, from) {
   const size = box.getSize(new THREE.Vector3());
   const mid = box.getCenter(new THREE.Vector3());
   const span = Math.max(size.x, size.y, size.z) || 10;
-  const dist = span / (2 * Math.tan((camera.fov * Math.PI / 180) / 2)) * 2.1;
-  camera.position.set(mid.x + dist * 0.7, mid.y - dist * 0.75, mid.z + dist * 0.6);
+  // A named view is only ever asked for by a still, and a still does not need the
+  // headroom that orbiting comfortably does, so it gets a tighter fit.
+  const pad = from ? 1.45 : 2.1;
+  const dist = span / (2 * Math.tan((camera.fov * Math.PI / 180) / 2)) * pad;
+  const dir = VIEWS[from] || VIEWS.iso;
+  // Straight down is degenerate in a Z-up scene: the view direction is parallel to the
+  // camera's up vector, and the orientation comes out undefined rather than wrong.
+  camera.up.set(0, 0, 1);
+  if (!dir[0] && !dir[1]) camera.up.set(0, 1, 0);
+  camera.position.set(mid.x + dist * dir[0], mid.y + dist * dir[1], mid.z + dist * dir[2]);
   controls.target.copy(mid);
   camera.near = span / 100; camera.far = span * 100;
   camera.updateProjectionMatrix();
@@ -191,7 +224,19 @@ function frame(box) {
 // ---- loading ----
 const loader = new GLTFLoader();
 
-async function show(name, { keepCamera }) {
+// `ready` is what a headless render waits on. Two frames after the geometry lands,
+// because one only guarantees the mesh is in the scene, not that it has been painted.
+// Set on every exit path including a failed build, or a render of a broken part hangs.
+async function show(name, opts) {
+  window.__nurb.ready = false;
+  try {
+    await paint(name, opts);
+  } finally {
+    requestAnimationFrame(() => requestAnimationFrame(() => { window.__nurb.ready = true; }));
+  }
+}
+
+async function paint(name, { keepCamera }) {
   const entry = parts.get(name);
   const err = document.getElementById('err');
   document.getElementById('empty').style.display = 'none';
@@ -231,7 +276,10 @@ async function show(name, { keepCamera }) {
   // Only reframe when the part changed scale enough that the camera is lost.
   const jumped = lastSize && (size / lastSize > 3 || lastSize / size > 3);
   const reframe = document.getElementById('reframe');
-  if (!keepCamera) {
+  if (view) {
+    frame(box, view);                       // asked for a named view: no saved camera
+    reframe.style.display = 'none';
+  } else if (!keepCamera) {
     if (!restoreCamera(name)) frame(box);
     reframe.style.display = 'none';
   } else {
@@ -242,8 +290,6 @@ async function show(name, { keepCamera }) {
   hud(parts.get(name) || entry);
   checks(name);
 }
-
-window.__nurb = { THREE, scene, camera, controls, get mesh() { return mesh; } };
 
 // Takes a name, not an entry. `show` awaits the GLB fetch, so an entry captured
 // before that await is stale by the time it resolves: the checks message has already
@@ -269,6 +315,8 @@ function checks(name) {
     const pin = new THREE.Mesh(pinGeom, pinMat[f.severity] || pinMat.warn);
     pin.position.set(f.where[0], f.where[1], f.where[2] + lift);
     pin.scale.setScalar(Math.max(0.6, lastSize ? lastSize / 90 : 1));
+    pin.renderOrder = 999;  // per mesh, not on the group: a Group's renderOrder only
+                            // reaches its children in some three.js versions
     pins.add(pin);
   }
 }
@@ -314,6 +362,7 @@ function connect() {
     if (msg.type === 'sync') {
       parts.clear();
       msg.parts.forEach(p => parts.set(p.name, p));
+      if (!current && parts.has(want)) current = want;
       if (!current && msg.parts.length) current = msg.parts[0].name;
       render();
       if (current) show(current, { keepCamera: false });

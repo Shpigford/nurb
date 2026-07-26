@@ -370,7 +370,7 @@ def from_card(part_path, base=None):
     card = pathlib.Path(part_path).with_suffix(".md")
     if not card.is_file():
         return ctx
-    text = card.read_text()
+    text = card.read_text(encoding="utf-8")  # cards say mm², so never the locale default
     opening = f"```{CARD_SETTINGS}"
     if opening not in text:
         return ctx
@@ -391,6 +391,23 @@ def from_card(part_path, base=None):
     return ctx
 
 
+def projection(shape, ctx):
+    """How far a part reaches out, how much back it hangs on, and the ratio. None if it
+    is not cantilevered off a wall, which a part declares by naming which way it reaches.
+
+    Public because the card prints this number and the rule judges it. Computing it twice
+    would leave a card and a check that agree today and drift later.
+    """
+    if ctx.forward is None:
+        return None
+    low, high = _span(shape, Vector(*ctx.forward).normalized())
+    floor, ceiling = _span(shape, Vector(*ctx.up).normalized())
+    reach, height = high - low, ceiling - floor
+    if height <= 0:
+        return None
+    return reach, height, reach / height
+
+
 @rule("projection_ratio")
 def projection_ratio(shape, ctx):
     """How far a wall-mounted part reaches out against how much wall it hangs on.
@@ -400,17 +417,10 @@ def projection_ratio(shape, ctx):
     meaningful for something cantilevered off a wall, so a part opts in by saying
     which way it reaches.
     """
-    if ctx.forward is None:
+    reaching = projection(shape, ctx)
+    if reaching is None:
         return []
-    out = Vector(*ctx.forward).normalized()
-    up = Vector(*ctx.up).normalized()
-    low, high = _span(shape, out)
-    reach = high - low
-    floor, ceiling = _span(shape, up)
-    height = ceiling - floor
-    if height <= 0:
-        return []
-    ratio = reach / height
+    reach, height, ratio = reaching
     if ratio <= ctx.projection_limit:
         return []
     return [

@@ -13,17 +13,22 @@ Datums. Land these three and the hanging interface is correct for free:
 
 from build123d import Box, Part, Polygon, Pos, extrude
 
-from nurb import concave_edges
+from nurb import concave_edges, measured
 
 # --- measured hardware -------------------------------------------------------
 
-BLOCK_WIDTH = 25.16    # bracket pitch on-center, measured off a real wall
-BRACKET_HEIGHT = 25.0  # physical bracket height, drives the minimum slab
-PITCH_SLOP = 0.12      # per-interval scatter allowance across a run of brackets
+# These come from measurements.toml, which carries how each one was obtained. They are
+# facts about a bracket rather than decisions this library made, and none of them can be
+# derived from anything else here. The fit decisions below are the opposite: they were
+# chosen, and their reasoning is next to them.
 
-POCKET_WIDTH = 20.56       # bracket plate width where it meets the part
-POCKET_NECK_WIDTH = 12.16  # dovetail opening at the back face
-POCKET_DEPTH = 4.0         # plate thickness
+BLOCK_WIDTH = measured("bracket_pitch")
+BRACKET_HEIGHT = measured("bracket_height")
+PITCH_SLOP = measured("bracket_pitch_slop")
+
+POCKET_WIDTH = measured("bracket_pocket_width")
+POCKET_NECK_WIDTH = measured("bracket_pocket_neck_width")
+POCKET_DEPTH = measured("bracket_pocket_depth")
 
 # --- fit ---------------------------------------------------------------------
 

@@ -2,11 +2,12 @@
 
 The central reference for nurb. Everything else pulls from here.
 
-Status as of 2026-07-25: Phase 1 complete. Two real Notch parts build, match their
-Fusion originals dimension for dimension, and run in the live loop. The kernel
-question is settled. See `PROGRESS.md` for the findings, two of which correct claims
-made in this document before any real part existed; those corrections are folded in
-below and marked.
+Status as of 2026-07-26: Phases 1, 2 and 3 complete. Two real Notch parts and a
+calibration coupon build, match their Fusion originals dimension for dimension, run in the
+live loop, and report clean against eight printability rules. The kernel question is
+settled and the agent surface is in. See `PROGRESS.md` for the findings, several of which
+correct claims made in this document before any real part existed; those corrections are
+folded in below and marked.
 
 ## Overview
 
@@ -308,6 +309,7 @@ nurb export [part]   STL / STEP / 3MF / GLB into build/
 nurb extract         pull duplication out of sibling parts into system.py
 nurb rules           print the doctrine
 nurb card [part]     regenerate the AUTO block
+nurb render [part]   PNG into build/, so an agent can look at what it made
 ```
 
 A project is any directory containing `parts/`. There is no init step.
@@ -321,12 +323,19 @@ An agent opening a part cold needs four things:
 3. **`## Don't`** (what was tried and rejected)
 4. **The accepted-warnings baseline** (which findings are known and fine)
 
-Plus `measurements.yaml` for the provenance of real-world numbers.
+Plus `measurements.toml` for the provenance of real-world numbers. **TOML, not YAML,
+decided in Phase 3:** `tomllib` is in the standard library and cards already use a TOML
+fence, so YAML would have meant a fifth dependency and a second format for one small file.
 
 Card structure, carried over from the working Notch pattern:
 
-- **AUTO block**, regenerated from the build: parameters, bbox, derived ratios, fit
-  checks, check results. Never hand-edited. A cache, not a source of truth.
+- **AUTO block**, regenerated from the build. Never hand-edited. A cache, not a source of
+  truth. **Phase 3 narrowed what goes in it:** bbox, volume, solid and face counts, sliver
+  count against the accepted baseline, projection ratio, check verdict. Not the
+  parameters, because the signature is the parameters and a generated restatement is the
+  `PARAMS` dict the contract forbids. Not fit checks, because "channel floors at x=-4.2"
+  is Notch and `src/nurb/` should not know what a channel is; those are Phase 5 tests.
+  No timestamp, so the block is idempotent.
 - **Narrative**: `## What it is`, `## Design notes`, `## Don't`, `## Changelog`.
 
 **`## Don't` is promoted to a required section.** It is the highest-value content in
@@ -346,8 +355,12 @@ measure, and a wrong number produces a perfect model of the wrong object.
 
 Notch paid this cost once (25.16mm bracket pitch, measured off a real wall) and has
 amortized it across 16 parts. One-offs pay it every time. So measurement capture
-should be a first-class step: `measurements.yaml` holding named values with
+should be a first-class step: `measurements.toml` holding named values with
 provenance, which the agent asks for before building rather than improvising.
+
+**Built in Phase 3.** `measured("name")` reads it, and the load-bearing part is what
+happens when the name is not there: it raises, naming what is on file. Provenance is
+required too, since a value with no `how` is a guess with a filename on it.
 
 ## Systems (layer 5)
 
@@ -433,12 +446,17 @@ Fit assertions for the test suite: channel floors at `x=-4.2`, y-centers exactly
   contract, and it is the feature that makes the tool feel consumer-grade: drag
   `item_height`, watch it rebuild. Effectively a local version of MakerWorld's
   customizer, available during design rather than after publishing.
-- Headless PNG render so an agent can see its own work. Playwright screenshotting
-  the existing viewer at `?part=x&view=iso` reuses the same scene and avoids
-  offscreen GL dependency problems.
+- ~~Headless PNG render so an agent can see its own work.~~ **Built in Phase 3**, the way
+  this predicted: Playwright against the existing viewer at `?part=x&view=iso`, on a
+  server the render starts itself. Playwright is an optional extra rather than a
+  dependency. The headless shell renders WebGL 2.0 through SwiftShader, so no offscreen
+  GL stack and no browser channel pin were needed.
 - Section view, measurement tools.
 - Vendored three.js. Currently loaded from unpkg via importmap, so the viewer needs
-  network. A CAD tool should work offline.
+  network. A CAD tool should work offline. **Phase 3 raised the stakes on this:**
+  `nurb render` drives the same page, so it fails closed without network. Measured with
+  unpkg blocked: the page loads, the canvas exists, three.js never arrives, nothing is
+  ever drawn.
 
 ## Risks
 
@@ -473,11 +491,14 @@ Phase 1 and are kept here with their outcomes, since the outcomes are the useful
 
 ## Open questions
 
-- Does `nurb check` gate `nurb export`, or only report? Leaning report-only with an
-  opt-in `--strict`, since a warning that blocks work gets disabled.
-- Do accepted-warnings baselines live in the card's AUTO block or a separate
-  `.check.yaml`? Card keeps context together; separate file keeps the AUTO block
-  from churning.
+- ~~Does `nurb check` gate `nurb export`, or only report?~~ **Answered in Phase 2:**
+  report only, with `--strict` for CI.
+- ~~Do accepted-warnings baselines live in the card's AUTO block or a separate
+  `.check.yaml`?~~ **Answered in Phase 2 and 3:** neither. They sit in a hand-authored
+  TOML fence in the card, next to the sentence that justifies them, and the AUTO block is
+  a separate generated region that prints the measured count beside the accepted one. The
+  churn worry was real and is solved by the block carrying no timestamp, so regenerating
+  it produces no diff unless the geometry moved.
 - Does the port target one part per file, or does a family (gridfinity 2x1, 2x2,
   3x2) become one file with different defaults? The three gridfinity shelves are the
   same part flexed, which argues for one parameterized file and separate export

@@ -43,10 +43,17 @@ nurb new <name>     create parts/<name>.py and its card
 nurb dev            watch, rebuild, serve the viewer
 nurb build [part]   build once and report size
 nurb check [part]   run the printability rules
+nurb rules          print the design doctrine
+nurb card [part]    regenerate a card's AUTO block
+nurb render [part]  write a PNG into build/
 nurb export [part]  write STL/STEP/GLB into build/
 ```
 
 A project is any directory with a `parts/` folder. There's no init step.
+
+Names are deliberately boring. The primary user is a language model, and a model that
+has never seen this tool can guess `build`, `check` and `export`. It cannot guess a
+themed alias.
 
 ## Why a long-lived process
 
@@ -64,6 +71,7 @@ mode is not the lever it looks like: chamfers are 23% of that build, not most of
 parts/<name>.py     the part
 parts/<name>.md     its card: what it is, why, what not to retry
 system.py           optional: shared constants and geometry, importable from a part
+measurements.toml   optional: real-world dimensions with how they were obtained
 build/              generated, gitignored
 ```
 
@@ -101,6 +109,51 @@ It reports by default and takes `--strict` for CI, on the grounds that a warning
 blocks work gets switched off. Findings also show up in `nurb dev`, with a pin on the
 geometry at each one.
 
+## For an agent
+
+The doctrine lives in the package and prints with `nurb rules`: printability, load paths,
+the polish pass, the kernel traps, and what to verify. `SKILL.md` and `AGENTS.md` are ten
+lines each pointing at it, so there is one copy and it cannot drift.
+
+A part explains itself in a card next to it, same basename. Most of it is written by
+hand, including a `## Don't` section that records what was tried and rejected, which is
+the only place that information exists. One fenced block is generated:
+
+```
+nurb card
+```
+
+That block holds what only a build can tell you: bounding box, volume, solid count,
+sliver count against the accepted baseline, projection ratio, check verdict. It carries
+no timestamp, so regenerating it on unchanged geometry produces no diff and a stale card
+shows up in `git diff`. It deliberately does not repeat the parameters, because the
+signature is the parameters and copying them would be the drift the contract forbids.
+
+Dimensions an agent cannot derive go in `measurements.toml` with how they were obtained:
+
+```toml
+[bracket_pitch]
+value = 25.16
+unit = "mm"
+how = "on-center spacing across a run of brackets, measured on the wall"
+```
+
+```python
+from nurb import measured
+pitch = measured("bracket_pitch")
+```
+
+Asking for something that isn't there raises and says so. That failure is the point: a
+guessed dimension produces a part that builds, checks clean, and prints.
+
+`nurb render <part>` writes `build/<part>.png` by screenshotting the viewer, so the image
+is what a human would see. It needs the optional extra, which is the only part of nurb
+that wants a browser:
+
+```
+uv sync --extra render && uv run playwright install chromium
+```
+
 ## Tests
 
 ```
@@ -114,13 +167,16 @@ baselines their catalog cards recorded in Fusion.
 
 - `nurb extract`, pull shared geometry out of sibling parts into `system.py`
   once duplication actually shows up, rather than scaffolding it up front
-- Headless PNG render so an agent can see its own work
 - Parameter sliders in the viewer, driven by the same keyword defaults
-- Vendored three.js so the viewer works offline
+- Vendored three.js so the viewer works offline, which `nurb render` also needs
 
 ## Debugging the viewer
 
-`window.__nurb` exposes `{ THREE, scene, camera, controls, mesh }`.
+`window.__nurb` exposes `{ THREE, scene, camera, controls, mesh, ready }`.
+
+The URL takes `?part=<name>` to open a part, `?view=iso|front|back|left|right|top` to
+frame it deterministically, and `?bare` to hide the chrome. `nurb render` drives exactly
+that, and waits on `ready`.
 
 ## License
 
@@ -142,4 +198,5 @@ distribution that embeds the OCCT binaries, ship a copy of the OCCT license with
 and keep the library replaceable, per LGPL.
 
 Other dependencies: trimesh (MIT), watchdog (Apache-2.0), websockets (BSD-3-Clause),
-numpy (BSD-3-Clause).
+numpy (BSD-3-Clause). Optional, for `nurb render` only: playwright (Apache-2.0), which
+downloads its own browser build.

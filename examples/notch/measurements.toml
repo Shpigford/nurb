@@ -1,0 +1,40 @@
+# What the hardware is, as opposed to what this library chose.
+#
+# Every value here was obtained by measuring something physical, and none of it can be
+# derived, looked up, or sensibly guessed. That is the test for belonging in this file.
+# Fit decisions live in system.py next to the reasoning that produced them: CLEARANCE and
+# SIDE_CLEARANCE came out of printed coupons rather than off a bracket, so they are
+# choices informed by measurement and not measurements.
+#
+# Notch paid for this file once and has amortized it across the whole library. A one-off
+# part pays it every time, which is why `measured()` raises instead of defaulting.
+
+[bracket_pitch]
+value = 25.16
+unit = "mm"
+how = "on-center spacing across a run of Wall Control brackets, measured on the wall"
+
+[bracket_height]
+value = 25.0
+unit = "mm"
+how = "bracket face height; it is what sets the 28mm minimum slab for full engagement"
+
+[bracket_pitch_slop]
+value = 0.12
+unit = "mm"
+how = "per-interval scatter across a run of brackets. Real, and nothing spends it: printed runs of 2, 4 and 6 all slid on at one clearance, so the wall needs no compensating for."
+
+[bracket_pocket_width]
+value = 20.56
+unit = "mm"
+how = "bracket plate width where it meets the part, read off the shipped Fusion ChannelTool; the trapezoid area cross-checked at 72.912mm2"
+
+[bracket_pocket_neck_width]
+value = 12.16
+unit = "mm"
+how = "dovetail opening at the back face, same source as bracket_pocket_width"
+
+[bracket_pocket_depth]
+value = 4.0
+unit = "mm"
+how = "plate thickness, same source as bracket_pocket_width"
