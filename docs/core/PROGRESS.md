@@ -134,6 +134,12 @@ Printability rules on the in-memory B-rep, calibrated to zero false positives.
 - [x] Convexity test, with both cases unit-tested
 - [x] Rule `sliver`, silent at a declared baseline
 - [x] Rule `build_volume`
+- [x] Rule `overhang`, with curved faces sampled and bridges told from cantilevers
+- [x] Rule `stability`
+- [x] **Zero false positives on both parts**, which is the credibility bar
+
+20 tests, every rule with both cases against shapes whose answers were worked out by
+hand. Checks run in 7ms on the hook and 277ms on the shelf.
 
 #### Decisions made
 
@@ -152,11 +158,18 @@ Printability rules on the in-memory B-rep, calibrated to zero false positives.
   inside). 115/115 on the hook and 369/512 on the shelf agree with zero
   disagreements; the other 143 are edges the sampling method cannot resolve at any
   radius, which is a limit of the cross-check and not a verdict on the classifier.
-- **The build direction is not the model's z**, so `Context.up` carries it. A part is
-  modelled on whatever datums make it readable and printed on whatever face keeps it
-  off supports, and for Notch those differ by 90 degrees: parts hang from a slab top
-  at z=0 and print on their backs. An overhang rule that assumes model z would report
-  confident nonsense about every part in this library.
+- **The build direction is a setting, not an assumption**, so `Context.up` carries it.
+  Notch parts print exactly as modelled, top up, so +z is right for them and the
+  default holds. That was worth asking rather than deriving: the same hook reports 3,
+  1 or 4 findings depending on which face goes down, and every one of those answers
+  looks equally confident. Nothing generalises the Notch case to other projects.
+- **A bridge is not an overhang.** Both are 90 degrees to the build direction and the
+  normal cannot tell them apart, which is why an angle-only rule reports a channel
+  roof and a cantilevered shelf as the same problem. What separates them is whether
+  material sits on both sides, so the rule probes just outside and just below the
+  face. Under `bridge_limit` a bridge is silent, over it a warning, and a cantilever
+  past 45 degrees is a failure. Without this both parts fire two findings per
+  channel, on geometry that has printed fine for months.
 - **The sliver baseline is a count, not a set of faces.** Which face is which shifts
   as soon as anything upstream of the polish pass moves; the count is the stable
   assertion. Hook 6, shelf 18, both silent when declared and both reported exactly

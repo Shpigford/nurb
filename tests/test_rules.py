@@ -111,3 +111,35 @@ def test_build_volume_uses_the_best_orientation():
     assert only(tall, "build_volume", Context(bed=(256, 256, 300))) == [], "stands up"
     assert only(tall, "build_volume", Context(bed=(256, 256, 256))) != [], "260 > 256"
     assert only(tall, "build_volume", Context(bed=(100, 100, 100)))[0].severity == FAIL
+
+
+# --- bridges vs cantilevers --------------------------------------------------
+
+
+def test_short_bridge_is_not_a_finding():
+    """A slot through a block: its roof is 90deg, and every printer spans 10mm."""
+    shape = Box(40, 40, 20) - Pos(0, 0, 6) * Box(10, 60, 6)
+    assert only(shape, "overhang") == []
+
+
+def test_long_bridge_warns_but_does_not_fail():
+    shape = Box(80, 40, 20) - Pos(0, 0, 6) * Box(50, 60, 6)
+    found = only(shape, "overhang")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+    assert found[0].value == pytest.approx(50, abs=0.1)
+
+
+def test_bridge_limit_is_per_printer():
+    shape = Box(40, 40, 20) - Pos(0, 0, 6) * Box(10, 60, 6)
+    assert only(shape, "overhang", Context(bridge_limit=5)) != []
+    assert only(shape, "overhang", Context(bridge_limit=30)) == []
+
+
+def test_cantilever_still_fails_even_though_it_is_also_90_degrees():
+    """The distinction the whole rule turns on: same angle, no support on one side."""
+    shape = Box(6, 6, 20) + Pos(0, 0, 12) * Box(30, 30, 4)
+    found = only(shape, "overhang")
+    assert len(found) == 1
+    assert found[0].severity == FAIL
+    assert "unsupported" in found[0].message

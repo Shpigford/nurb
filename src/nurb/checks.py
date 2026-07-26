@@ -33,16 +33,16 @@ class Finding:
 class Context:
     """What a rule needs to know beyond the geometry itself.
 
-    `up` is the build direction, and it is not the model's z. A part is modelled on
-    whatever datums make its function readable and printed on whatever face keeps it
-    off supports, and those are rarely the same. Notch parts hang from a slab top at
-    z=0 and print on their backs, so every overhang question about them is asked
-    about -x. Getting this wrong does not error, it just reports confident nonsense.
+    `up` is the build direction, which is the model's z only when a part is printed
+    the way it is modelled. Notch parts are, so +z is right for them. Nothing
+    guarantees that in general, and getting it wrong does not error: it reports
+    confident nonsense about every face in the part.
     """
 
     bed: tuple = (256.0, 256.0, 256.0)
     up: tuple = (0.0, 0.0, 1.0)
     overhang_limit: float = 45.0  # degrees away from the build direction
+    bridge_limit: float = 30.0  # how far this printer will span unsupported
     sliver_area: float = 1.0
     accepted: dict = field(default_factory=dict)  # rule -> how many are already known
 
@@ -223,16 +223,47 @@ def _span(shape, up):
     return min(reach), max(reach)
 
 
+def _bridged(solid, face, up, ctx):
+    """The shortest span this face is supported across, or None if it is cantilevered.
+
+    A downward face with material on both sides of it is a bridge, and a printer walks
+    across a short one without help. A face with material on one side only is a
+    cantilever and needs support. Both are 90 degrees to the build direction and
+    nothing about the normal tells them apart, which is why the overhang angle alone
+    reports a channel roof and a shelf underside as the same problem.
+
+    Both sides get probed just outside the face and just below it, which is the same
+    containment test the convexity work was checked against.
+    """
+    below = face.center() - up * PROBE
+    best = None
+    for axis in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1)):
+        if abs(axis.dot(up)) > 0.9:
+            continue
+        low, high = _span(face, axis)
+        here = below.dot(axis)
+        ends = [
+            below + axis * (low - here - PROBE),
+            below + axis * (high - here + PROBE),
+        ]
+        if all(solid.is_inside((p.X, p.Y, p.Z)) for p in ends):
+            reach = high - low
+            best = reach if best is None else min(best, reach)
+    return best
+
+
 @rule("overhang")
 def overhang(shape, ctx):
-    """Downward faces steeper than the printer will bridge.
+    """Downward faces the printer cannot lay down unaided.
 
     Angle is measured from the build direction, so a vertical wall is 0 and a flat
-    ceiling is 90. Faces sitting on the bed are skipped: they are the first layer,
-    not an overhang.
+    ceiling is 90. Two things are deliberately not findings: a face on the bed, which
+    is the first layer, and a short bridge, which a printer spans on its own. Warning
+    about either is how a checker gets switched off.
     """
     up = Vector(*ctx.up).normalized()
     bed, _ = _span(shape, up)
+    solid = shape.solids()[0] if shape.solids() else None
     found = []
     for face in shape.faces():
         if _span(face, up)[1] <= bed + 1e-4:
@@ -240,12 +271,28 @@ def overhang(shape, ctx):
         worst = max(
             degrees(asin(max(-1.0, min(1.0, -n.dot(up))))) for n in _sample_normals(face)
         )
-        if worst > ctx.overhang_limit + 1e-6:
+        if worst <= ctx.overhang_limit + 1e-6:
+            continue
+        crossing = _bridged(solid, face, up, ctx) if solid else None
+        if crossing is not None and crossing <= ctx.bridge_limit:
+            continue  # a bridge this printer walks across
+        if crossing is not None:
             found.append(
                 Finding(
                     "overhang",
-                    WARN if worst < 90 else FAIL,
-                    f"{worst:.0f}deg overhang over {face.area:.1f}mm2, "
+                    WARN,
+                    f"{crossing:.0f}mm bridge over {face.area:.1f}mm2, "
+                    f"past the {ctx.bridge_limit:.0f}mm this printer spans",
+                    value=round(crossing, 1),
+                    where=tuple(round(v, 2) for v in face.center()),
+                )
+            )
+        else:
+            found.append(
+                Finding(
+                    "overhang",
+                    FAIL,
+                    f"{worst:.0f}deg unsupported over {face.area:.1f}mm2, "
                     f"limit {ctx.overhang_limit:.0f}deg",
                     value=round(worst, 1),
                     where=tuple(round(v, 2) for v in face.center()),
