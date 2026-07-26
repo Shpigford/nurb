@@ -129,7 +129,7 @@ resize();
 
 // ---- camera persistence ----
 // A rebuild is a geometry swap, never a camera reset. Reloads restore per part.
-const camKey = n => `nurb.cam.${n}`;
+const camKey = n => `nurb.cam.v2.${n}`;  // v2: parts now sit on the plate, not under it
 let saveTimer = null;
 controls.addEventListener('change', () => {
   if (!current) return;
@@ -196,7 +196,11 @@ async function show(name, { keepCamera }) {
   scene.add(mesh);
 
   mesh.geometry.computeBoundingBox();
-  const box = mesh.geometry.boundingBox.clone();
+  // The grid is the build plate, so a part sits on it. Where a part's own origin
+  // falls is a modeling datum and nothing to do with printing: Notch hangs
+  // everything below z=0, which would put every part underneath the plate.
+  mesh.position.z = -mesh.geometry.boundingBox.min.z;
+  const box = mesh.geometry.boundingBox.clone().translate(mesh.position);
   const size = box.getSize(new THREE.Vector3()).length();
 
   // Only reframe when the part changed scale enough that the camera is lost.
