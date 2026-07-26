@@ -77,6 +77,31 @@ def cmd_build(args):
             print(f"  {path.stem}: {type(exc).__name__}: {exc}")
 
 
+def cmd_check(args):
+    from . import builder, checks
+
+    root = project_root()
+    worst = 0
+    for path in _resolve(root, args.part):
+        try:
+            shape, _, _ = builder.build(path, draft=False)
+            found = checks.run(shape, checks.from_card(path))
+        except Exception as exc:
+            print(f"  {path.stem}: {type(exc).__name__}: {exc}")
+            worst = 2
+            continue
+        if not found:
+            print(f"  {path.stem}: clean")
+            continue
+        fails = sum(1 for f in found if f.severity == checks.FAIL)
+        print(f"  {path.stem}: {len(found)} finding(s), {fails} to fix")
+        for finding in found:
+            print(f"      {finding}")
+        worst = max(worst, 2 if fails else 1)
+    if args.strict and worst:
+        sys.exit(1)
+
+
 def cmd_export(args):
     from build123d import export_step, export_stl
 
@@ -128,6 +153,11 @@ def main(argv=None):
     s.add_argument("part", nargs="?")
     s.add_argument("--draft", action="store_true")
     s.set_defaults(fn=cmd_build)
+
+    s = sub.add_parser("check", help="run the printability rules")
+    s.add_argument("part", nargs="?")
+    s.add_argument("--strict", action="store_true", help="exit non-zero on any finding")
+    s.set_defaults(fn=cmd_check)
 
     s = sub.add_parser("export", help="write STL/STEP/GLB to build/")
     s.add_argument("part", nargs="?")

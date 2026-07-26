@@ -136,9 +136,11 @@ Printability rules on the in-memory B-rep, calibrated to zero false positives.
 - [x] Rule `build_volume`
 - [x] Rule `overhang`, with curved faces sampled and bridges told from cantilevers
 - [x] Rule `stability`
-- [x] **Zero false positives on both parts**, which is the credibility bar
+- [x] Accepted baselines, declared in each part's card
+- [x] `nurb check` CLI, with `--strict` for CI
+- [x] **Zero false positives on all three parts**, which is the credibility bar
 
-20 tests, every rule with both cases against shapes whose answers were worked out by
+27 tests, every rule with both cases against shapes whose answers were worked out by
 hand. Checks run in 7ms on the hook and 277ms on the shelf.
 
 #### Decisions made
@@ -170,6 +172,16 @@ hand. Checks run in 7ms on the hook and 277ms on the shelf.
   face. Under `bridge_limit` a bridge is silent, over it a warning, and a cantilever
   past 45 degrees is a failure. Without this both parts fire two findings per
   channel, on geometry that has printed fine for months.
+- **The baseline lives in the card, next to the sentence that justifies it.** A count
+  on its own is a magic number; the reason it is allowed is the part that matters, and
+  a card is where a part already explains itself. It is a TOML fence, so `tomllib`
+  reads it and no dependency is added. A card can also carry printer settings, and a
+  typo in a setting name is an error rather than a silently ignored line.
+- **A shallow ledge is not an overhang.** The raised label on the calibration coupon
+  produced a hundred 90-degree findings at a third of a square millimetre each. What
+  makes an unsupported ledge droop is how far it protrudes, not its area or its
+  length, so a ledge under `overhang_reach` is silent. Same physics as the bridge
+  limit, applied to the cantilever case.
 - **The sliver baseline is a count, not a set of faces.** Which face is which shifts
   as soon as anything upstream of the polish pass moves; the count is the stable
   assertion. Hook 6, shelf 18, both silent when declared and both reported exactly

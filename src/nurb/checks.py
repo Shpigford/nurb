@@ -7,6 +7,7 @@ A rule takes the shape and a Context and yields Findings. Rules compose: they ne
 see each other, and `run` gathers them.
 """
 
+import pathlib
 from dataclasses import dataclass, field
 from math import asin, degrees
 
@@ -43,6 +44,7 @@ class Context:
     up: tuple = (0.0, 0.0, 1.0)
     overhang_limit: float = 45.0  # degrees away from the build direction
     bridge_limit: float = 30.0  # how far this printer will span unsupported
+    overhang_reach: float = 1.0  # a ledge shorter than this cannot droop enough to matter
     sliver_area: float = 1.0
     accepted: dict = field(default_factory=dict)  # rule -> how many are already known
 
@@ -223,6 +225,21 @@ def _span(shape, up):
     return min(reach), max(reach)
 
 
+def _reach(face, up):
+    """How far a face protrudes, which is the smallest of its horizontal extents.
+
+    What makes an unsupported ledge droop is how far out it goes, not how much of it
+    there is. A 0.5mm ledge prints cleanly at any length, which is why raised lettering
+    is not a hundred overhang failures.
+    """
+    across = [
+        _span(face, axis)[1] - _span(face, axis)[0]
+        for axis in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1))
+        if abs(axis.dot(up)) < 0.9
+    ]
+    return min(across) if across else 0.0
+
+
 def _bridged(solid, face, up, ctx):
     """The shortest span this face is supported across, or None if it is cantilevered.
 
@@ -276,6 +293,8 @@ def overhang(shape, ctx):
         crossing = _bridged(solid, face, up, ctx) if solid else None
         if crossing is not None and crossing <= ctx.bridge_limit:
             continue  # a bridge this printer walks across
+        if crossing is None and _reach(face, up) <= ctx.overhang_reach:
+            continue  # a ledge too shallow to droop, whatever its angle or length
         if crossing is not None:
             found.append(
                 Finding(
@@ -324,3 +343,44 @@ def stability(shape, ctx):
                 )
             ]
     return []
+
+
+# --- per part settings -------------------------------------------------------
+
+CARD_SETTINGS = "toml"  # the fence a card uses to carry them
+
+
+def from_card(part_path, base=None):
+    """Read a part's check settings out of its card.
+
+    The card is where a part records what it has already justified, so a known
+    finding stays silent and a new one is a regression. It lives with the design
+    notes rather than in a file of its own, because the number is only meaningful
+    next to the sentence explaining why it is allowed.
+
+    A card with no settings block is normal and means no findings are excused.
+    """
+    import tomllib
+
+    ctx = base or Context()
+    card = pathlib.Path(part_path).with_suffix(".md")
+    if not card.is_file():
+        return ctx
+    text = card.read_text()
+    opening = f"```{CARD_SETTINGS}"
+    if opening not in text:
+        return ctx
+    block = text.split(opening, 1)[1].split("```", 1)[0]
+    try:
+        settings = tomllib.loads(block)
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"{card.name}: settings block is not valid TOML ({exc})") from exc
+    ctx.accepted = {**ctx.accepted, **settings.get("accepted", {})}
+    for field_name, value in settings.get("printer", {}).items():
+        if not hasattr(ctx, field_name):
+            raise ValueError(
+                f"{card.name}: no printer setting called {field_name!r}. "
+                f"have: {', '.join(sorted(vars(Context())))}"
+            )
+        setattr(ctx, field_name, tuple(value) if isinstance(value, list) else value)
+    return ctx

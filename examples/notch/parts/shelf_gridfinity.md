@@ -39,6 +39,18 @@ sockets, a grid array, two gussets, two chamfer passes, and a known sliver basel
 - Verified: channel floors at x=-4.2 with y-centers exactly 0, 25.16, 50.32, 75.48,
   every floor the full 21.56mm span. Flexes 4 -> 6 -> 4 with the baseline unchanged.
 
+## Accepted
+
+Eighteen faces under 1mm2 at the default 2x2: sixteen recess corners at 0.632mm2,
+which are gridfinity spec geometry and come four to a cell, plus two three-chamfer
+corner triangles at 0.866mm2. It generalizes as `4 * grid_x * grid_y + 2`, so a
+different grid wants a different number here. A nineteenth at 2x2 is a regression.
+
+```toml
+[accepted]
+sliver = 18
+```
+
 ## Don't
 
 - **Don't set `gusset_drop` to 2mm.** Fusion needed exactly 2mm to keep the gusset peak

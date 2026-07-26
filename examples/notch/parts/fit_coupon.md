@@ -25,6 +25,19 @@ keep the one that feels right, then set the constant in `system.py`. Each is abo
 - 30mm slab matches the light-part default, so the coupon engages a bracket the same
   way a hook does.
 
+## Accepted
+
+The raised label is lettering, and lettering is made of small faces. All 65 are in
+the glyphs; the coupon itself has no chamfers and so no corner triangles. The number
+tracks whatever the label says, so a coupon built at a different clearance or bracket
+count will not match it. That is tolerable here in a way it would not be on a real
+part: this is a gauge, and the only surface that has to come out right is the channel.
+
+```toml
+[accepted]
+sliver = 65
+```
+
 ## Don't
 
 - **Don't orient these differently from the part you are comparing against.** Print

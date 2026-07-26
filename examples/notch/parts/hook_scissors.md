@@ -32,6 +32,17 @@ kernel problem and not unfamiliarity with the API.
   three 1mm chamfers meet. That is the same count the Fusion part carried, and it
   is what confirms the polish exclusions match.
 
+## Accepted
+
+Six faces under 1mm2, and all six are the corner triangles where three 1mm chamfers
+meet at a convex corner. That is the only tiny face the doctrine allows. A seventh
+means the polish pass has started cutting something it should not.
+
+```toml
+[accepted]
+sliver = 6
+```
+
 ## Don't
 
 - **Don't chamfer the channel mouths.** The 1.5mm lead-in was retired on 2026-07-22
