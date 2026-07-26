@@ -133,6 +133,7 @@ class Server:
 
     def watch(self):
         server = self
+        parts_dir = self.root / "parts"
 
         class Handler(FileSystemEventHandler):
             def on_any_event(self, event):
@@ -140,15 +141,19 @@ class Server:
                     return
                 path = pathlib.Path(getattr(event, "dest_path", "") or event.src_path)
                 # "." skips the atomic-save temp files editors and sed leave behind
-                if path.suffix == ".py" and not path.name.startswith((".", "_")):
-                    server.loop.call_soon_threadsafe(server.queue.put_nowait, str(path))
+                if path.suffix != ".py" or path.name.startswith((".", "_")):
+                    return
+                # A shared module (system.py) can feed every part, so rebuild all.
+                changed = [path] if path.parent == parts_dir else builder.find_parts(server.root)
+                for target in changed:
+                    server.loop.call_soon_threadsafe(server.queue.put_nowait, str(target))
 
-        parts_dir = self.root / "parts"
         parts_dir.mkdir(parents=True, exist_ok=True)
         # Held on self: a dropped Observer can be collected and take its
         # FSEvents stream with it, and the watcher silently stops firing.
         self.observer = Observer()
         self.observer.schedule(Handler(), str(parts_dir), recursive=False)
+        self.observer.schedule(Handler(), str(self.root), recursive=False)
         self.observer.daemon = True
         self.observer.start()
 

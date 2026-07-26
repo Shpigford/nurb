@@ -13,9 +13,23 @@ class BuildError(Exception):
     pass
 
 
+def _in_project(module, root):
+    """A module the project owns, as opposed to one installed into its venv.
+
+    The venv usually sits inside the project, so location alone would call every
+    installed package a project module and re-import it on every rebuild.
+    """
+    file = getattr(module, "__file__", None)
+    if not file:
+        return False
+    path = pathlib.Path(file)
+    return path.is_relative_to(root) and "site-packages" not in path.parts
+
+
 def load(path):
     """Import a part file fresh and return its @part function."""
-    path = pathlib.Path(path)
+    path = pathlib.Path(path).resolve()
+    root = path.parent.parent if path.parent.name == "parts" else path.parent
     modname = f"_nurb_part_{path.stem}_{time.time_ns()}"
     spec = importlib.util.spec_from_file_location(modname, path)
     if spec is None or spec.loader is None:
@@ -24,10 +38,18 @@ def load(path):
     sys.modules[modname] = mod
     written = sys.dont_write_bytecode
     sys.dont_write_bytecode = True  # keep __pycache__ out of the user's parts/
+    sys.path.insert(0, str(root))  # so a part can `from system import ...`
+    known = set(sys.modules)
     try:
         spec.loader.exec_module(mod)
     finally:
         sys.dont_write_bytecode = written
+        sys.path.remove(str(root))
+        # Forget the project's own modules, so editing a shared one lands on the
+        # next rebuild instead of the next restart.
+        for name in set(sys.modules) - known:
+            if _in_project(sys.modules[name], root):
+                del sys.modules[name]
         sys.modules.pop(modname, None)
 
     for value in vars(mod).values():
