@@ -33,7 +33,7 @@
      ResizeObserver, which calls setSize() again -- a resize loop that flickers. */
   canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
   /* The canvas is appended last, so overlays need to be lifted above it. */
-  #hud, #err, #reframe, #empty { z-index: 1; }
+  #hud, #err, #reframe, #empty, #checks { z-index: 1; }
   #hud {
     position: absolute; left: 16px; bottom: 14px; color: var(--dim);
     font-size: 11px; pointer-events: none; line-height: 1.7;
@@ -52,6 +52,20 @@
   }
   #reframe:hover { border-color: var(--dim); }
   #empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--dim); }
+  #checks {
+    position: absolute; top: 14px; left: 16px; max-width: 46%; max-height: 60%;
+    overflow: auto; display: none; font-size: 11px; line-height: 1.6;
+    background: rgba(29,32,39,.92); border: 1px solid var(--line);
+    border-radius: 8px; padding: 9px 11px;
+  }
+  #checks h2 { font-size: 11px; font-weight: 600; color: var(--dim); margin-bottom: 5px; letter-spacing: .04em; }
+  #checks .f { display: flex; gap: 7px; padding: 2px 0; cursor: default; }
+  #checks .f:hover { color: #fff; }
+  #checks .tag { flex: none; width: 30px; font-weight: 600; }
+  #checks .fail .tag { color: var(--bad); }
+  #checks .warn .tag { color: #f0c274; }
+  #checks .rule { flex: none; color: var(--dim); width: 92px; }
+  #checks .ok { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -63,6 +77,7 @@
   <div id="empty">no parts yet &mdash; nurb new &lt;name&gt;</div>
   <button id="reframe">reframe</button>
   <div id="hud"></div>
+  <div id="checks"></div>
   <div id="err"></div>
 </main>
 
@@ -104,6 +119,15 @@ scene.add(key);
 const grid = new THREE.GridHelper(400, 40, 0x3a3f4a, 0x24272e);
 grid.rotation.x = Math.PI / 2;   // GridHelper is XZ; we want XY
 scene.add(grid);
+
+// Findings get a pin at their reported point, in the same shifted space as the mesh.
+const pins = new THREE.Group();
+scene.add(pins);
+const pinGeom = new THREE.SphereGeometry(1, 12, 8);
+const pinMat = {
+  fail: new THREE.MeshBasicMaterial({ color: 0xf87171 }),
+  warn: new THREE.MeshBasicMaterial({ color: 0xf0c274 }),
+};
 
 const material = new THREE.MeshStandardMaterial({
   color: 0x9aa6b8, metalness: 0.05, roughness: 0.62, flatShading: false,
@@ -181,6 +205,7 @@ async function show(name, { keepCamera }) {
       mesh.material.needsUpdate = true;
     }
     hud(entry);
+    checks(name);
     return;
   }
   err.style.display = 'none';
@@ -214,10 +239,39 @@ async function show(name, { keepCamera }) {
   }
   reframe.onclick = () => { frame(box); reframe.style.display = 'none'; };
   lastSize = size;
-  hud(entry);
+  hud(parts.get(name) || entry);
+  checks(name);
 }
 
 window.__nurb = { THREE, scene, camera, controls, get mesh() { return mesh; } };
+
+// Takes a name, not an entry. `show` awaits the GLB fetch, so an entry captured
+// before that await is stale by the time it resolves: the checks message has already
+// landed and repainted, and the old entry then hides the panel it just filled in.
+function checks(name) {
+  const e = parts.get(name);
+  const box = document.getElementById('checks');
+  pins.clear();
+  const found = e && e.findings;
+  if (!e || e.error || found === null || found === undefined) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  if (!found.length) {
+    box.innerHTML = '<h2>checks</h2><div class="ok">clean</div>';
+    return;
+  }
+  const rows = found.map(f =>
+    `<div class="f ${f.severity}"><span class="tag">${f.severity}</span>`
+    + `<span class="rule">${f.rule}</span><span>${f.message}</span></div>`).join('');
+  box.innerHTML = `<h2>checks &mdash; ${found.length}</h2>${rows}`;
+  const lift = mesh ? mesh.position.z : 0;
+  for (const f of found) {
+    if (!f.where) continue;
+    const pin = new THREE.Mesh(pinGeom, pinMat[f.severity] || pinMat.warn);
+    pin.position.set(f.where[0], f.where[1], f.where[2] + lift);
+    pin.scale.setScalar(Math.max(0.6, lastSize ? lastSize / 90 : 1));
+    pins.add(pin);
+  }
+}
 
 function hud(e) {
   document.getElementById('hud').innerHTML = e.error
@@ -269,6 +323,11 @@ function connect() {
       render();
       flash(msg.name);
       if (msg.name === current) show(msg.name, { keepCamera: true });
+    }
+    // Checks arrive after the geometry, so this only repaints the panel.
+    if (msg.type === 'checked') {
+      parts.set(msg.name, msg);
+      if (msg.name === current) checks(msg.name);
     }
   };
 }

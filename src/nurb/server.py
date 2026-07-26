@@ -51,7 +51,7 @@ class Server:
 
     def rebuild(self, path):
         name = pathlib.Path(path).stem
-        entry = {"name": name, "token": secrets.token_hex(4)}
+        entry = {"name": name, "token": secrets.token_hex(4), "findings": None}
         try:
             shape, params, ms = builder.build(path, draft=self.draft)
             entry["glb"] = builder.to_glb(shape, self.tolerance)
@@ -59,18 +59,59 @@ class Server:
             entry["params"] = params
             entry["ms"] = round(ms, 1)
             entry["error"] = None
+            entry["shape"] = shape  # kept for the check pass, never serialized
         except Exception as exc:
             entry["glb"] = None
+            entry["shape"] = None
             entry["error"] = f"{type(exc).__name__}: {exc}"
             entry["traceback"] = _user_traceback(exc, path)
         self.state[name] = entry
         return entry
 
+    def check(self, path):
+        """Run the rules on the last good build.
+
+        Separate from `rebuild` and broadcast separately, because checking the shelf
+        costs about as much again as building it. Geometry should land at the speed it
+        always did and the findings can arrive a beat later.
+        """
+        from . import checks
+
+        entry = self.state.get(pathlib.Path(path).stem)
+        if not entry or entry.get("shape") is None:
+            return entry
+        try:
+            found = checks.run(entry["shape"], checks.from_card(path))
+            entry["findings"] = [
+                {
+                    "rule": f.rule,
+                    "severity": f.severity,
+                    "message": f.message,
+                    "where": list(f.where) if f.where else None,
+                }
+                for f in found
+            ]
+        except Exception as exc:
+            entry["findings"] = [
+                {
+                    "rule": "check",
+                    "severity": "fail",
+                    "message": f"{type(exc).__name__}: {exc}",
+                    "where": None,
+                }
+            ]
+        return entry
+
     def rebuild_all(self):
         for path in builder.find_parts(self.root):
             entry = self.rebuild(path)
+            self.check(path)
             status = entry["error"] or f"{entry['ms']}ms"
-            print(f"  {entry['name']}: {status}", flush=True)
+            note = ""
+            if entry.get("findings"):
+                bad = sum(1 for f in entry["findings"] if f["severity"] == "fail")
+                note = f"  {len(entry['findings'])} finding(s), {bad} to fix"
+            print(f"  {entry['name']}: {status}{note}", flush=True)
 
     # ---------- http ----------
 
@@ -103,7 +144,7 @@ class Server:
 
     @staticmethod
     def _meta(entry):
-        return {k: v for k, v in entry.items() if k != "glb"}
+        return {k: v for k, v in entry.items() if k not in ("glb", "shape")}
 
     # ---------- websocket ----------
 
@@ -119,10 +160,10 @@ class Server:
         finally:
             self.clients.discard(connection)
 
-    async def broadcast(self, entry):
+    async def broadcast(self, entry, kind="rebuilt"):
         if not self.clients:
             return
-        payload = json.dumps({"type": "rebuilt", **self._meta(entry)})
+        payload = json.dumps({"type": kind, **self._meta(entry)})
         for client in list(self.clients):
             try:
                 await client.send(payload)
@@ -141,8 +182,14 @@ class Server:
                     return
                 path = pathlib.Path(getattr(event, "dest_path", "") or event.src_path)
                 # "." skips the atomic-save temp files editors and sed leave behind
-                if path.suffix != ".py" or path.name.startswith((".", "_")):
+                if path.suffix not in (".py", ".md") or path.name.startswith((".", "_")):
                     return
+                # A card carries what the part has already justified, so editing one
+                # changes the answer even though the geometry is untouched.
+                if path.suffix == ".md":
+                    path = path.with_suffix(".py")
+                    if not path.is_file():
+                        return
                 # A shared module (system.py) can feed every part, so rebuild all.
                 changed = [path] if path.parent == parts_dir else builder.find_parts(server.root)
                 for target in changed:
@@ -171,6 +218,16 @@ class Server:
                 status = entry["error"] or f"{entry['ms']}ms"
                 print(f"  {entry['name']}: {status}", flush=True)
                 await self.broadcast(entry)
+                # Geometry has landed, so the rules can take their time.
+                entry = await asyncio.to_thread(self.check, path)
+                if entry and entry.get("findings") is not None:
+                    await self.broadcast(entry, kind="checked")
+                    bad = sum(1 for f in entry["findings"] if f["severity"] == "fail")
+                    if entry["findings"]:
+                        print(
+                            f"    {len(entry['findings'])} finding(s), {bad} to fix",
+                            flush=True,
+                        )
 
     # ---------- run ----------
 

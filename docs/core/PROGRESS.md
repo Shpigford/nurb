@@ -138,6 +138,7 @@ Printability rules on the in-memory B-rep, calibrated to zero false positives.
 - [x] Rule `stability`
 - [x] Accepted baselines, declared in each part's card
 - [x] `nurb check` CLI, with `--strict` for CI
+- [x] Findings in the viewer: a panel plus a pin at each reported point
 - [x] **Zero false positives on all three parts**, which is the credibility bar
 
 27 tests, every rule with both cases against shapes whose answers were worked out by
@@ -182,6 +183,13 @@ hand. Checks run in 7ms on the hook and 277ms on the shelf.
   makes an unsupported ledge droop is how far it protrudes, not its area or its
   length, so a ledge under `overhang_reach` is silent. Same physics as the bridge
   limit, applied to the cantilever case.
+- **Checks are broadcast after the geometry, not with it.** Checking the shelf costs
+  about as much again as building it, so running them inline would push the live loop
+  past 1.5s. The model swaps at the speed it always did and the panel fills in a beat
+  later.
+- **Cards are watched too.** A card carries what the part has justified, so editing
+  one changes the answer even though no geometry moved. Without this, editing a
+  baseline did nothing until the next code change.
 - **The sliver baseline is a count, not a set of faces.** Which face is which shifts
   as soon as anything upstream of the polish pass moves; the count is the stable
   assertion. Hook 6, shelf 18, both silent when declared and both reported exactly
