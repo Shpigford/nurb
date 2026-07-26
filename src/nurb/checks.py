@@ -8,6 +8,9 @@ see each other, and `run` gathers them.
 """
 
 from dataclasses import dataclass, field
+from math import asin, degrees
+
+from build123d import CenterOf, GeomType, Vector
 
 FAIL = "fail"  # this will not print, or will not work
 WARN = "warn"  # this needs attention, most often support
@@ -171,3 +174,106 @@ def build_volume(shape, ctx):
             value=round(max(got), 1),
         )
     ]
+
+
+def _sample_normals(face, grid=5):
+    """Outward normals across a face.
+
+    A planar face has one and it is exact. A curved face does not, and the sampling
+    has to reach the ends of its parameter range: sampling cell midpoints instead
+    walks a cylinder round at 45, 135, 225 and 315 degrees and never once looks
+    straight down, which is the only normal an overhang check cares about. Endpoints
+    included, the same grid hits 270 exactly.
+
+    Still an approximation on a curved face, bounded by the grid spacing. Planar
+    faces, which is nearly all of this library, are exact.
+    """
+    if face.geom_type == GeomType.PLANE:
+        return [face.normal_at(face.center())]
+    out = []
+    for i in range(grid):
+        for j in range(grid):
+            try:
+                spot = face.position_at(i / (grid - 1), j / (grid - 1))
+                out.append(face.normal_at(spot))
+            except Exception:
+                continue
+    return out or [face.normal_at(face.center())]
+
+
+def _span(shape, up):
+    """How far a shape reaches along the build direction, as (lowest, highest).
+
+    Off the bounding box, not off the vertices. A curved face has vertices only where
+    its seam is, so a cylinder's lowest vertex sits at its middle: measuring from
+    vertices put the bed 8mm above the actual bottom of a cylinder, marked every face
+    grounded, and turned the overhang rule off without any sign that it had happened.
+
+    Exact for an axis-aligned build direction, which is what a part placed on a bed
+    has. Conservative otherwise.
+    """
+    box = shape.bounding_box()
+    corners = [
+        Vector(x, y, z)
+        for x in (box.min.X, box.max.X)
+        for y in (box.min.Y, box.max.Y)
+        for z in (box.min.Z, box.max.Z)
+    ]
+    reach = [c.dot(up) for c in corners]
+    return min(reach), max(reach)
+
+
+@rule("overhang")
+def overhang(shape, ctx):
+    """Downward faces steeper than the printer will bridge.
+
+    Angle is measured from the build direction, so a vertical wall is 0 and a flat
+    ceiling is 90. Faces sitting on the bed are skipped: they are the first layer,
+    not an overhang.
+    """
+    up = Vector(*ctx.up).normalized()
+    bed, _ = _span(shape, up)
+    found = []
+    for face in shape.faces():
+        if _span(face, up)[1] <= bed + 1e-4:
+            continue  # grounded, so it is the first layer rather than an overhang
+        worst = max(
+            degrees(asin(max(-1.0, min(1.0, -n.dot(up))))) for n in _sample_normals(face)
+        )
+        if worst > ctx.overhang_limit + 1e-6:
+            found.append(
+                Finding(
+                    "overhang",
+                    WARN if worst < 90 else FAIL,
+                    f"{worst:.0f}deg overhang over {face.area:.1f}mm2, "
+                    f"limit {ctx.overhang_limit:.0f}deg",
+                    value=round(worst, 1),
+                    where=tuple(round(v, 2) for v in face.center()),
+                )
+            )
+    return found
+
+
+@rule("stability")
+def stability(shape, ctx):
+    """Will it stand on the bed, or tip while printing."""
+    up = Vector(*ctx.up).normalized()
+    bed, _ = _span(shape, up)
+    footing = [f for f in shape.faces() if _span(f, up)[1] <= bed + 1e-4]
+    if not footing:
+        return [Finding("stability", FAIL, "nothing flat to stand on")]
+    com = shape.center(CenterOf.MASS)
+    axes = [a for a in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1)) if abs(a.dot(up)) < 0.9]
+    for axis in axes:
+        reach = [end for f in footing for end in _span(f, axis)]
+        here = com.dot(axis)
+        if not min(reach) <= here <= max(reach):
+            return [
+                Finding(
+                    "stability",
+                    WARN,
+                    "center of mass falls outside the footprint, it will tip",
+                    where=tuple(round(v, 2) for v in com),
+                )
+            ]
+    return []
