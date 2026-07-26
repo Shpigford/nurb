@@ -125,15 +125,42 @@ generalizes to `4 * grid_x * grid_y + 2`, confirmed at four grid sizes.
 ---
 
 ### Phase 2: `nurb check`
-**Status:** Not Started
+**Status:** In progress
 
 Printability rules on the in-memory B-rep, calibrated to zero false positives.
 
 #### Tasks completed
-- (none yet)
+- [x] `checks.py`: `Finding`, `Context`, a rule registry, `run()`
+- [x] Convexity test, with both cases unit-tested
+- [x] Rule `sliver`, silent at a declared baseline
+- [x] Rule `build_volume`
 
 #### Decisions made
-- (none yet)
+
+- **Convexity is `n1 . u2`**: does the second face extend in the direction the first
+  face's outward normal points. If it does, the solid folds back on itself and the
+  edge is concave. No winding convention, no orientation assumption.
+- **Which way a face extends is settled by probing the face**, not by aiming at its
+  centroid. The centroid version passed a box and both unit tests and was still
+  wrong: a face with the rest of the part merged into it puts its centroid somewhere
+  unrelated to this edge, which showed up as convex slab edges reported concave. It
+  took an independent method to catch, which is the whole reason RESEARCH said to
+  verify this one empirically rather than reason about it.
+- **Verified two ways.** Four unit tests with hand-counted answers covering both
+  cases, plus every edge of both real parts cross-checked against a completely
+  separate method (sample a ring around the edge, ask the solid how much of it is
+  inside). 115/115 on the hook and 369/512 on the shelf agree with zero
+  disagreements; the other 143 are edges the sampling method cannot resolve at any
+  radius, which is a limit of the cross-check and not a verdict on the classifier.
+- **The build direction is not the model's z**, so `Context.up` carries it. A part is
+  modelled on whatever datums make it readable and printed on whatever face keeps it
+  off supports, and for Notch those differ by 90 degrees: parts hang from a slab top
+  at z=0 and print on their backs. An overhang rule that assumes model z would report
+  confident nonsense about every part in this library.
+- **The sliver baseline is a count, not a set of faces.** Which face is which shifts
+  as soon as anything upstream of the polish pass moves; the count is the stable
+  assertion. Hook 6, shelf 18, both silent when declared and both reported exactly
+  when not.
 
 #### Carried in from Phase 1
 - Two calibration parts exist with **known-exact** baselines: hook 6 slivers at
