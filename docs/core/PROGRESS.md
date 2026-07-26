@@ -1,6 +1,6 @@
 # nurb core progress
 
-## Status: Phase 1 complete. Phase 2 nearly there.
+## Status: Phases 1 and 2 complete. Phase 3 next.
 
 **The kernel question is answered: OCCT builds both parts and both match the Fusion
 originals dimension for dimension.** The architecture stands. `nurb check` now runs
@@ -127,7 +127,7 @@ generalizes to `4 * grid_x * grid_y + 2`, confirmed at four grid sizes.
 ---
 
 ### Phase 2: `nurb check`
-**Status:** In progress
+**Status:** Complete (2026-07-26)
 
 Printability rules on the in-memory B-rep, calibrated to zero false positives.
 
@@ -236,6 +236,35 @@ recorded. Checks run in 7ms on the hook and 277ms on the shelf.
   as soon as anything upstream of the polish pass moves; the count is the stable
   assertion. Hook 6, shelf 18, both silent when declared and both reported exactly
   when not.
+
+#### Results against the success criteria
+
+| Criterion | Result |
+|---|---|
+| Rules run on the in-memory B-rep | Yes, eight of them |
+| Zero false positives on the calibration set | Yes, all three parts report clean |
+| Convexity test verified empirically | Two independent methods, both cases, 484 real edges |
+| Baselines per part, so a new finding is a regression | On the card, next to the reason |
+| `nurb check` exists and is usable | Reports by default, `--strict` for CI |
+| Findings visible in the loop | Panel and 3D pins in the viewer |
+
+It also caught a real defect in Phase 1's output: four 1mm chamfers on concave gusset
+roots, invisible in code and in every other measure.
+
+#### Deferred, deliberately
+
+- **`chamfer_clearance` is not a `nurb check` rule.** Phase 1 earned the underlying
+  rule (two chamfered convex edges need more than `2 * chamfer_size` between them), but
+  it is a question about geometry that does not exist yet. By the time `nurb check`
+  runs, a violation has already failed the build with an OCCT error. It belongs at
+  build time, wrapping the chamfer call with a better message, which is a different
+  piece of work from a rule.
+- **`nurb check` does not gate `nurb export`.** The open question from RESEARCH,
+  answered the way it leaned: report only. A part with a justified warning still has to
+  be exportable, and a check that blocks work gets switched off. `--strict` is there
+  for CI, which is where blocking belongs.
+- **`min_wall` is approximate and says so.** The inscribed-sphere method is the real
+  answer if wall thickness ever matters more than it does now.
 
 #### Carried in from Phase 1
 - Two calibration parts exist with **known-exact** baselines: hook 6 slivers at

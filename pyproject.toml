@@ -23,6 +23,9 @@ dependencies = [
     "websockets>=16.1.1",
 ]
 
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 nurb = "nurb.cli:main"
 

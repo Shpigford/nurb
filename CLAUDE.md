@@ -39,8 +39,11 @@ is where the loop latency actually lives.
 nurb new <name>      create parts/<name>.py and its card
 nurb dev             watch, rebuild, serve the viewer on :7373
 nurb build [part]    build once, report size and timing
+nurb check [part]    run the printability rules, --strict for CI
 nurb export [part]   write STL/STEP/GLB into build/
 ```
+
+`uv run pytest` runs the suite, which includes the parts in `examples/`.
 
 A project is any directory containing `parts/`. There is no init step, and there
 never should be.
@@ -50,9 +53,12 @@ never should be.
 ```
 src/nurb/registry.py   @part, signature introspection
 src/nurb/builder.py    load, build, tessellate, GLB
+src/nurb/checks.py     printability rules, convexity, Finding/Context
 src/nurb/server.py     watcher, rebuild, HTTP + websocket on one port
 src/nurb/viewer.html   three.js viewer, Z-up, camera persistence
 src/nurb/cli.py        command surface
+examples/notch/        the real parts, which are also the calibration set
+tests/                 rules and examples, both cases per rule
 docs/core/             research, plan, progress
 ```
 
@@ -155,10 +161,18 @@ as though every file will be read by a stranger.
 
 ## Current state
 
-Phase 1 is done. Two real Notch parts live in `examples/notch/`, build to one solid
-each, match their Fusion originals dimension for dimension, and reproduce their sliver
-baselines exactly. The kernel question is settled and the timing numbers now come from
-real geometry rather than a cube. Phase 2 (`nurb check`) is next.
+Phases 1 and 2 are done. Two real Notch parts and a calibration coupon live in
+`examples/notch/`; they build to one solid each, match their Fusion originals dimension
+for dimension, and reproduce the sliver baselines their catalog cards recorded. The
+kernel question is settled and the timing numbers come from real geometry.
 
-`docs/core/PROGRESS.md` has the findings, including two claims from RESEARCH.md that a
-real part disproved.
+`nurb check` runs eight printability rules against the solid and reports nothing on any
+of the three, which is the bar: a warning fired at a part that prints fine is a bug in
+the rule. It has already caught one real defect in what Phase 1 shipped, four cosmetic
+chamfers laid into concave junctions.
+
+Phase 3 (agent interface: `nurb rules`, card generation, headless render) is next.
+
+`docs/core/PROGRESS.md` has the findings, including three claims from RESEARCH.md and
+one from Phase 1 that a real part or a real print disproved. Read them before trusting
+anything in this file that sounds like a measurement.

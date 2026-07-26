@@ -42,6 +42,7 @@ nearer 20%.
 nurb new <name>     create parts/<name>.py and its card
 nurb dev            watch, rebuild, serve the viewer
 nurb build [part]   build once and report size
+nurb check [part]   run the printability rules
 nurb export [part]  write STL/STEP/GLB into build/
 ```
 
@@ -49,9 +50,13 @@ A project is any directory with a `parts/` folder. There's no init step.
 
 ## Why a long-lived process
 
-Importing build123d costs 45s cold and 2.3s warm. Everything after that is fast:
-build, boolean, chamfer, tessellate, and export together run in about 80ms. So the
-dev server pays the import once and every rebuild afterwards feels instant.
+Importing build123d costs 45s cold and 2.3s warm, and that is the whole argument: the
+dev server pays it once instead of on every save.
+
+What a rebuild costs after that depends on the part. A simple one is 46ms to build and
+120ms to tessellate. The heaviest part in `examples/` is 470ms and 620ms. Tessellation
+being the larger half is worth knowing before optimising the wrong thing, and draft
+mode is not the lever it looks like: chamfers are 23% of that build, not most of it.
 
 ## Layout
 
@@ -65,11 +70,49 @@ build/              generated, gitignored
 Cards are colocated with parts and share a basename. That's the whole link; a
 rename is `git mv` on two files.
 
+## Checks
+
+`nurb check` runs the printability rules against the solid rather than an exported
+mesh, so it sees real faces with exact areas and normals instead of triangles.
+
+```
+overhang          downward faces past 45 degrees, bridges told from cantilevers
+min_wall          thinnest section, by ray cast
+sliver            faces too small to print as anything but a smear
+concave_cosmetic  polish laid into an inside corner
+bed_bevel         polish laid on the edges that meet the build plate
+stability         center of mass outside the footprint
+projection_ratio  reach over height, for a part cantilevered off a wall
+build_volume      does it fit the printer at all
+```
+
+Every part carries what it has already justified on its card, so a known finding is
+silent and a new one is a regression:
+
+```toml
+[part]
+min_wall = 1.0
+
+[accepted]
+sliver = 6
+```
+
+It reports by default and takes `--strict` for CI, on the grounds that a warning which
+blocks work gets switched off. Findings also show up in `nurb dev`, with a pin on the
+geometry at each one.
+
+## Tests
+
+```
+uv run pytest
+```
+
+The parts in `examples/` are part of the suite, asserted against the dimensions and
+baselines their catalog cards recorded in Fusion.
+
 ## Not built yet
 
-- `nurb check` — printability rules as assertions (overhangs, wall thickness,
-  slivers, stability, build volume), with an accepted-warnings baseline per part
-- `nurb extract` — pull shared geometry out of sibling parts into `system.py`
+- `nurb extract`, pull shared geometry out of sibling parts into `system.py`
   once duplication actually shows up, rather than scaffolding it up front
 - Headless PNG render so an agent can see its own work
 - Parameter sliders in the viewer, driven by the same keyword defaults
