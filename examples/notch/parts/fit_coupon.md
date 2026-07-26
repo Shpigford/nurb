@@ -1,0 +1,58 @@
+# fit_coupon
+
+## What it is
+
+The hanging interface with nothing attached to it: one channel, one detent dimple, a
+30mm slab. A tool for dialing `SIDE_CLEARANCE` against a real bracket, not a part
+anyone hangs anything on.
+
+Print a ladder of them at different clearances, slide them all onto the same bracket,
+keep the one that feels right, then set the constant in `system.py`. Each is about
+2.6cm³, so a four-rung ladder is one short print rather than four hooks.
+
+## Design notes
+
+- `side_clearance` is a real parameter here rather than the system constant, which is
+  the whole point. `channels()` takes it so the coupon can build a fit the library
+  does not ship.
+- Widening it moves both dovetail walls by the same amount, so they stay at exactly 45
+  degrees whatever you pass. The depth clearance is not like this: `CHANNEL_WIDTH -
+  CHANNEL_NECK == 2 * CHANNEL_DEPTH` only holds at `CLEARANCE` 0.2, and the 45 degrees
+  is what lets the dovetail print without support. Side clearance is the free knob.
+- The value is raised on the front face, not cut into it. The web in front of the
+  channel is only 1.8mm and debossing would take a third of it. It is also the reason
+  the coupons are worth labelling at all: four of these come off the plate identical.
+- 30mm slab matches the light-part default, so the coupon engages a bracket the same
+  way a hook does.
+
+## Don't
+
+- **Don't orient these differently from the part you are comparing against.** Print
+  orientation changes the effective size of the slot, so a coupon laid down one way
+  and a hook laid another are not measuring the same thing. Slice them the way you
+  sliced the hook.
+- **Don't use this to dial multi-bracket parts.** One channel constrains yaw over its
+  own 21.56mm; four constrain it over 75mm. The same clearance that wobbles on a 1x
+  hook is fine on a 4x shelf, which is the whole reason this got noticed on the hook
+  first.
+- **Don't tighten `CLEARANCE` (depth) to fix a loose fit.** It breaks the 45 degree
+  walls. See Design notes.
+
+## Changelog
+
+- 2026-07-26: **0.25 settled.** 0.20 printed too tight to seat, 0.30 slid on loosely,
+  so the usable window is about 0.1mm wide and 0.25 is the middle of it. That width is
+  the same order as FDM extrusion variation, which is the real reason to stop here:
+  the printer moves further between prints than a finer increment would.
+- 2026-07-26: 2x, 4x and 6x all printed at 0.30 and all slid on, the 6x easily. Run
+  length needs no allowance at all, so the scaling is gone and every channel on every
+  part is one number. Three versions of that scaling were built and all three were
+  compensating for scatter the wall does not have. Base clearance now going below 0.30
+  since even a 6x feels a touch easy.
+- 2026-07-26: ladder printed. **0.30 is the number**, and `SIDE_CLEARANCE` moved 0.5
+  -> 0.3. Clearance is now per-channel rather than per-system, so the coupon takes
+  `bracket_count`.
+- 2026-07-26: created, after a printed `hook_scissors` came out loose side to side.
+  The shipped `SIDE_CLEARANCE` was 0.5mm per side, which is generous for FDM and
+  disagrees with the Notch constants table's stated 0.2. Ladder exported at 0.20 /
+  0.30 / 0.40 / 0.50.
