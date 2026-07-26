@@ -139,6 +139,7 @@ Printability rules on the in-memory B-rep, calibrated to zero false positives.
 - [x] Accepted baselines, declared in each part's card
 - [x] `nurb check` CLI, with `--strict` for CI
 - [x] Rule `projection_ratio`
+- [x] Rules `concave_cosmetic` and `bed_bevel`
 - [x] Findings in the viewer: a panel plus a pin at each reported point
 - [x] **Zero false positives on all three parts**, which is the credibility bar
 
@@ -185,6 +186,22 @@ recorded. Checks run in 7ms on the hook and 277ms on the shelf.
   makes an unsupported ledge droop is how far it protrudes, not its area or its
   length, so a ledge under `overhang_reach` is silent. Same physics as the bridge
   limit, applied to the cantilever case.
+- **The rules found a real defect in Phase 1's output.** `concave_cosmetic` flagged
+  four 1mm chamfers at the shelf's gusset roots, which are inside corners, and both
+  the convexity test and independent ring sampling confirm it. Phase 1 had reasoned
+  that the only concave edges were the ones the structural pass made; that was
+  untrue, and nothing in the build, the export or the print said so. This is the
+  argument for the whole phase in one finding: it is invisible in code, the selector
+  reads as an ordinary exposed-edge query, and the part looked fine by every other
+  measure. Bounding box, solid count and the sliver baseline are unchanged by the fix.
+- **`is_convex` and `concave_edges` are public API now.** A polish pass cannot be
+  written correctly without them, which the above demonstrates, so they belong in the
+  vocabulary a part file gets rather than inside the checker.
+- **Neither chamfer rule identifies chamfers.** `bed_bevel` looks for a face touching
+  the plate that is neither flat on it nor square to it, which a bevel is and nothing
+  else is. `concave_cosmetic` looks for a strip about as wide as the polish pass
+  makes, whose long edges are concave and which leans against what it joins. Trying to
+  recognise a chamfer as such was the fragile version; describing the defect is not.
 - **`projection_ratio` reproduces the card's own number.** grid_y 3 gives 3.24 against
   a card that says "a ratio of 3.2 at item_height 42", and 55mm clears it exactly as
   the card claims. That is the third rule to land on a figure recorded by hand in
@@ -215,10 +232,11 @@ recorded. Checks run in 7ms on the hook and 277ms on the shelf.
 - `polish_edges()` in `examples/notch/system.py` is a first draft of the
   `back_bottom_chamfer` and `mating_chamfer` rules, written as a selector instead of
   a check. Phase 2 should be able to reuse the predicate.
-- The concave-edge exclusion is still done structurally (subtract `new_edges` from
-  the polish set) rather than by testing convexity. That works because the only
-  concave edges in these two parts are the ones the structural pass just made. It
-  will not generalize, so the convexity test is still owed.
+- ~~The concave-edge exclusion is done structurally rather than by testing convexity,
+  which works because the only concave edges in these parts are the ones the
+  structural pass just made.~~ **Wrong, and Phase 2 proved it.** The shelf's gusset
+  roots are concave too, and all four were carrying a 1mm cosmetic chamfer in the
+  shipped part. `polish_edges` now vetoes concave edges outright.
 
 #### Blockers
 - (none)

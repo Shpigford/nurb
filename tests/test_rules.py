@@ -143,3 +143,43 @@ def test_cantilever_still_fails_even_though_it_is_also_90_degrees():
     assert len(found) == 1
     assert found[0].severity == FAIL
     assert "unsupported" in found[0].message
+
+
+# --- polish in the wrong place -----------------------------------------------
+
+
+def test_bed_bevel_catches_a_chamfer_on_the_first_layer():
+    from build123d import Axis, chamfer
+
+    box = Box(20, 20, 20)
+    bottom = chamfer(box.edges().group_by(Axis.Z)[0], 2)
+    assert len(only(bottom, "bed_bevel")) == 4
+
+
+def test_bed_bevel_ignores_a_chamfer_anywhere_else():
+    from build123d import Axis, chamfer
+
+    box = Box(20, 20, 20)
+    assert only(chamfer(box.edges().group_by(Axis.Z)[-1], 2), "bed_bevel") == []
+
+
+def test_concave_cosmetic_catches_polish_in_an_inside_corner():
+    from build123d import chamfer
+
+    shape = Box(20, 20, 20) - Pos(6, 0, 6) * Box(10, 30, 10)
+    inner = [e for e in shape.edges()
+             if abs(e.center().X - 1) < 1e-6 and abs(e.center().Z - 1) < 1e-6]
+    assert len(inner) == 1
+    assert len(only(chamfer(inner, 1), "concave_cosmetic")) == 1
+
+
+def test_concave_cosmetic_ignores_polish_on_an_outside_corner():
+    from build123d import Axis, chamfer
+
+    shape = chamfer(Box(20, 20, 20).edges().filter_by(Axis.Z), 1)
+    assert only(shape, "concave_cosmetic") == []
+
+
+def test_concave_cosmetic_does_not_mistake_a_pocket_for_a_chamfer():
+    """A narrow pocket floor is bounded by concave edges too, and is square to them."""
+    assert only(Box(20, 20, 20) - Pos(0, 0, 8) * Box(6, 6, 6), "concave_cosmetic") == []

@@ -13,6 +13,8 @@ Datums. Land these three and the hanging interface is correct for free:
 
 from build123d import Box, Part, Polygon, Pos, extrude
 
+from nurb import concave_edges
+
 # --- measured hardware -------------------------------------------------------
 
 BLOCK_WIDTH = 25.16    # bracket pitch on-center, measured off a real wall
@@ -118,18 +120,27 @@ def channels(count, height, step=1, side_clearance=SIDE_CLEARANCE):
 def polish_edges(shape, height):
     """Every edge the cosmetic pass is allowed to touch.
 
-    Three standing vetoes, all of them Notch rather than taste: the back face sits
-    flat against the wall, the bottom face is the first layer, and the channels are
-    the fit. What is excluded is an edge *lying in* one of those, not one that
-    merely ends there, so the vertical corners still get polished. Parts subtract
-    their own exclusions (structural chamfers, sockets) from what comes back.
+    Four standing vetoes. Three are Notch rather than taste: the back face sits flat
+    against the wall, the bottom face is the first layer, and the channels are the fit.
+    What is excluded is an edge *lying in* one of those, not one that merely ends
+    there, so the vertical corners still get polished. Parts subtract their own
+    exclusions (structural chamfers, sockets) from what comes back.
+
+    The fourth is general, and it is the one that is invisible in code: a cosmetic
+    chamfer belongs on a convex edge. Run over a concave one it adds a feather wedge
+    into an inside corner rather than taking a sharp edge off. This veto was missing
+    until `nurb check` grew the rule and found four of them on the shelf, at the gusset
+    roots, in a part that had already shipped.
 
     The channel veto runs a detent deep, since the dimple is fit too. It is also
     where a 1mm chamfer fails outright: the dimple walls are 0.8mm.
     """
     interface = FLOOR_X - DETENT_DEPTH
+    inside = set(concave_edges(shape))
 
     def allowed(edge):
+        if edge in inside:  # concave, so polish would wedge into the corner
+            return False
         bb = edge.bounding_box()
         if bb.min.X > -EPS:  # in the back face
             return False

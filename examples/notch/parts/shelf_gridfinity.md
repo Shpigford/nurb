@@ -75,6 +75,12 @@ forward = [-1, 0, 0]
   return, but do the arithmetic before you move any of them.
 - **Don't chamfer anything in the socket band or along the gusset-platform junction.**
   The rims are meant to be sharp and the junctions are concave.
+- **Don't polish a concave edge anywhere.** The gusset roots, where each fin meets the
+  slab face, are inside corners, and the first version of this part put a 1mm chamfer
+  on all four. `polish_edges` vetoes concave edges now and `nurb check` has a rule for
+  it, but the reason it survived a review is worth knowing: it is invisible in code.
+  The selector read as an ordinary exposed-edge query and the part built, exported and
+  printed without complaint.
 - **Don't add a `gusset_count`.** The Fusion part carries one because the shelf family
   shares a template, but here the gussets are the side cheeks. A third one lands in
   the middle of a cell and blocks a bin.
@@ -86,6 +92,10 @@ forward = [-1, 0, 0]
 
 ## Changelog
 
+- 2026-07-26: four 1mm chamfers removed from the gusset roots. They were concave
+  junctions, which the doctrine forbids polishing, and `nurb check`'s new
+  `concave_cosmetic` rule found them in the shipped part. Bounding box, solid count
+  and the 18-face sliver baseline are all unchanged.
 - 2026-07-25: ported to nurb. Bounding box matches the Fusion v4 exactly
   (94 x 100.64 x 42mm) and the 18-face sliver baseline reproduces. `gusset_drop`
   raised 2 -> 3mm for OCCT; see Don't.

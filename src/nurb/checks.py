@@ -47,6 +47,7 @@ class Context:
     overhang_reach: float = 1.0  # a ledge shorter than this cannot droop enough to matter
     forward: tuple | None = None  # which way a wall-mounted part cantilevers, if it does
     projection_limit: float = 2.5  # reach over height, past which height is the fix
+    cosmetic_chamfer: float = 1.0  # the size the polish pass uses
     sliver_area: float = 1.0
     accepted: dict = field(default_factory=dict)  # rule -> how many are already known
 
@@ -420,3 +421,93 @@ def projection_ratio(shape, ctx):
             value=round(ratio, 2),
         )
     ]
+
+
+@rule("bed_bevel")
+def bed_bevel(shape, ctx):
+    """Polish laid on the edges that meet the build plate.
+
+    A chamfer down there buys nothing and costs a mess: it turns the first layer into
+    a knife edge that squashes, and on a mount-facing part it stops the thing sitting
+    flat. Nothing has to identify a chamfer to find one, because a face touching the
+    bed that is neither flat on it nor square to it can only be a bevel.
+    """
+    up = Vector(*ctx.up).normalized()
+    bed, _ = _span(shape, up)
+    found = []
+    for face in shape.faces():
+        if _span(face, up)[0] > bed + 1e-4:
+            continue  # does not reach the plate
+        for normal in _sample_normals(face):
+            tilt = abs(normal.dot(up))
+            if 0.03 < tilt < 0.97:  # neither lying on the plate nor standing on it
+                found.append(
+                    Finding(
+                        "bed_bevel",
+                        WARN,
+                        f"{degrees(asin(min(1.0, tilt))):.0f}deg face meets the build "
+                        f"plate over {face.area:.1f}mm2, which is polish on the first layer",
+                        value=round(face.area, 2),
+                        where=tuple(round(v, 2) for v in face.center()),
+                    )
+                )
+                break
+    return found
+
+
+@rule("concave_cosmetic")
+def concave_cosmetic(shape, ctx):
+    """Polish laid into an inside corner instead of across an outside one.
+
+    A cosmetic chamfer belongs on a convex edge, where it takes a sharp corner off. Run
+    over a concave one it does the opposite: it adds a thin wedge into the corner,
+    which prints as a feather edge and collects stress where the part is already
+    weakest. A concave junction that needs relieving wants a deliberate structural
+    chamfer sized for the load, not the polish pass.
+
+    Found by shape rather than by trying to identify chamfers: a strip about as wide as
+    the polish pass makes, whose long edges are all concave, is one. Width comes from
+    area over perimeter, which is the honest measure for a strip and does not care how
+    the strip is oriented.
+    """
+    neighbours = edge_faces(shape)
+    limit = 2 * ctx.cosmetic_chamfer * 1.42
+    found = []
+    for face in shape.faces():
+        if face.geom_type != GeomType.PLANE:
+            continue
+        perimeter = sum(e.length for e in face.edges())
+        if perimeter <= 0:
+            continue
+        width = 2 * face.area / perimeter
+        if width > limit:
+            continue
+        long_edges = [e for e in face.edges() if e.length > width * 1.5]
+        if len(long_edges) < 2:
+            continue
+        here = face.normal_at(face.center())
+        verdicts, oblique = [], []
+        for edge in long_edges:
+            pair = neighbours.get(edge, [])
+            if len(pair) != 2:
+                continue
+            verdicts.append(is_convex(edge, *pair))
+            # Compared by topology, not by `is`: shape.faces() hands back fresh
+            # objects each call, so identity would always pick this face itself and
+            # every junction would look oblique.
+            other = pair[1] if pair[0] == face else pair[0]
+            # A bevel leans against what it joins. A pocket floor is square to its
+            # walls, and a pocket is not polish however narrow it is.
+            oblique.append(abs(here.dot(other.normal_at(edge.center()))) > 0.3)
+        if verdicts and not any(verdicts) and oblique and all(oblique):
+            found.append(
+                Finding(
+                    "concave_cosmetic",
+                    WARN,
+                    f"{width:.1f}mm strip sitting in a concave junction over "
+                    f"{face.area:.1f}mm2, which is polish where a structural chamfer belongs",
+                    value=round(width, 2),
+                    where=tuple(round(v, 2) for v in face.center()),
+                )
+            )
+    return found
