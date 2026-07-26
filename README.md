@@ -32,8 +32,9 @@ def dispenser(width=40, depth=30, height=20, wall=2, draft=False):
 ```
 
 `draft` is optional and passed by the runtime, not the caller. When it's true the
-part should skip its polish pass. `nurb dev` builds in draft by default because
-chamfers dominate build time: on this trivial part it's 18ms polished vs 1ms draft.
+part should skip its polish pass. `nurb dev` builds in draft by default: on this
+trivial part it's 18ms polished vs 1ms draft, and on a real one the saving is
+nearer 20%.
 
 ## Commands
 
@@ -57,6 +58,7 @@ dev server pays the import once and every rebuild afterwards feels instant.
 ```
 parts/<name>.py     the part
 parts/<name>.md     its card: what it is, why, what not to retry
+system.py           optional: shared constants and geometry, importable from a part
 build/              generated, gitignored
 ```
 

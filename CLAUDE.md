@@ -29,8 +29,9 @@ CLI, the viewer's sliders, the tests, and any future configurator. Never add a
 parallel `PARAMS` dict; the two would drift.
 
 `draft` is optional and injected by the runtime, never passed by callers. When true,
-skip the polish pass. This matters more than it looks: chamfers are most of the build
-cost, so draft mode is the difference between a live loop and a batch job.
+skip the polish pass. Worth 20% on a real part, not the 18x a cube suggested: chamfers
+are 23% of the gridfinity shelf's build. Tessellation, at 620ms against a 470ms build,
+is where the loop latency actually lives.
 
 ## Commands
 
@@ -75,12 +76,21 @@ table in RESEARCH.md for the full list of what vanishes and what survives.
 What does survive is physics: the print doctrine, sliver thresholds, chamfer sizing
 limits, and chamfer ordering effects.
 
-### Prefer `Select.LAST` over geometric selectors for chamfers
+### Prefer `new_edges` over geometric selectors for chamfers
 
 Each chamfer changes topology, so selectors resolved against pristine geometry drift
-once an earlier chamfer runs. `part.edges() - last` targets exactly what an operation
-just created and sidesteps the problem. Reach for it before falling back on strict
-operation ordering.
+once an earlier chamfer runs. `new_edges(before, combined=after)` returns exactly the
+edges an operation created and sidesteps the problem. It is the algebra-mode
+equivalent of a builder's `Select.LAST`, and algebra mode is what a part file uses, so
+`part.edges() - last` is not available to you. Reach for it before falling back on
+strict operation ordering.
+
+### Two chamfered edges need room between them
+
+More than `2 * chamfer_size` of face, or OCCT fails with `BRep_API: command not done`.
+This is the analogue of Fusion's `ASM_BL_NO_MATE` and it is the single most common way
+a part stops building. The trap: every edge chamfers fine on its own and only the batch
+fails, so testing them one at a time reports that nothing is wrong. Bisect the set.
 
 ### Systems are extracted, never scaffolded
 
@@ -145,7 +155,10 @@ as though every file will be read by a stranger.
 
 ## Current state
 
-The runtime works but has only ever built `Box() - chamfer()`. Every timing number
-and every claim about OCCT robustness comes from that. Phase 1 in
-`docs/core/IMPLEMENTATION.md` exists to fix exactly this, by porting the hardest
-Notch part. **Do not build on top of unproven kernel assumptions.**
+Phase 1 is done. Two real Notch parts live in `examples/notch/`, build to one solid
+each, match their Fusion originals dimension for dimension, and reproduce their sliver
+baselines exactly. The kernel question is settled and the timing numbers now come from
+real geometry rather than a cube. Phase 2 (`nurb check`) is next.
+
+`docs/core/PROGRESS.md` has the findings, including two claims from RESEARCH.md that a
+real part disproved.

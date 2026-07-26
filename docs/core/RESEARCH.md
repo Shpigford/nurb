@@ -2,8 +2,11 @@
 
 The central reference for nurb. Everything else pulls from here.
 
-Status as of 2026-07-25: runtime skeleton built and verified on trivial geometry.
-744 lines across six files. Not committed. Never tested on a real part.
+Status as of 2026-07-25: Phase 1 complete. Two real Notch parts build, match their
+Fusion originals dimension for dimension, and run in the live loop. The kernel
+question is settled. See `PROGRESS.md` for the findings, two of which correct claims
+made in this document before any real part existed; those corrections are folded in
+below and marked.
 
 ## Overview
 
@@ -108,10 +111,29 @@ Two consequences, both load-bearing:
 
 1. **The persistent process is mandatory, not an optimization.** A 2.3s import per
    rebuild would make the loop unusable. `nurb dev` pays it once.
-2. **Draft mode is worth more than expected.** On a trivial part, 18ms polished vs
-   **1ms** draft. Chamfers are essentially the entire build cost. Skipping the polish
-   pass during iteration is the highest-leverage latency lever available, and it
-   scales: the more polished the part, the bigger the win.
+2. ~~**Draft mode is worth more than expected.** On a trivial part, 18ms polished vs
+   **1ms** draft. Chamfers are essentially the entire build cost.~~ **Wrong, corrected
+   by Phase 1.** That held only for `Box() - chamfer()`. On the gridfinity shelf,
+   chamfers are 23% of the build and draft mode saves 20%, not 18x.
+
+### Corrected by Phase 1, on real parts
+
+```
+                     build    tessellate + GLB    loop
+hook, polished        46ms          120ms        ~166ms
+hook, draft           26ms           66ms         ~92ms
+shelf, polished      470ms          620ms       ~1090ms
+shelf, draft         380ms          520ms        ~900ms
+```
+
+Shelf build, by stage: socket lofts 156ms (34%), socket cut 68ms, cosmetic chamfer
+66ms, structural chamfer 43ms, gussets 42ms, fuse 39ms, edge selection 26ms, channels
+and detent 21ms.
+
+**Tessellation costs more than the entire build, and draft mode barely touches it.**
+The latency lever is tessellation tolerance, caching, or moving tessellation off the
+rebuild path. It is not the polish pass. Anything that plans around draft mode as the
+primary lever is planning around a measurement taken on a cube.
 
 ## Architecture
 
@@ -353,6 +375,15 @@ pitch_slop          0.12 mm   per-interval scatter allowance
 bracket height     25 mm      physical, drives min item_height = 28
 ```
 
+**Those are the bracket pocket, not the channel.** Phase 1 read the shipped
+`ChannelTool` off the live Fusion model and the channel is the pocket plus clearance
+that differs by axis: **0.2mm in depth, 0.5mm per side in width.** Nothing in the
+notes said so, and deriving the channel from the table alone produces one a
+millimeter too tight. The channel that ships is a trapezoid, floor at `x=-4.2`
+spanning `y` +/-10.78, mouth at `x=0` spanning +/-6.58, ceiling at `z=-3`. Its walls
+are therefore at exactly 45 degrees, which is what lets the dovetail print without
+support. `examples/notch/system.py` holds it.
+
 Coordinate convention: slab top at `z=0` (part extends down), back face at `x=0`
 (part extends forward in `-x`), first channel centered at `y=0`, channels marching
 `+y` at `block_width` spacing. Landing those three datums makes the hanging
@@ -411,26 +442,33 @@ Fit assertions for the test suite: channel floors at `x=-4.2`, y-centers exactly
 
 ## Risks
 
-**Ranked by how much they threaten the thesis.**
+**Ranked by how much they threaten the thesis.** Ranks 1, 2 and 5 were resolved by
+Phase 1 and are kept here with their outcomes, since the outcomes are the useful part.
 
-1. **OCCT chamfer robustness on real geometry. Untested.** Every timing number and
-   every claim of viability comes from `Box() - chamfer()`. The gridfinity 2x2 shelf
-   is the proof case: four loft-cut socket features, a pattern, gussets, two chamfer
-   passes, and a known 18-face sliver baseline. It already fights Fusion's kernel
-   (the gusset peak lands exactly on the slab-top chamfer boundary and fails
-   `ASM_BL_NO_MATE` if positioned naively). If OCCT cannot chamfer it cleanly, the
-   architecture needs rethinking. **This should be resolved before building anything
-   on top.**
-2. **Rebuild latency on real parts.** 1ms on a cube says nothing. If a real part
-   takes multiple seconds, draft mode and caching stop being optimizations and
-   become the critical path.
-3. **False positives in the rules.** Kills adoption faster than missing checks.
+1. ~~**OCCT chamfer robustness on real geometry. Untested.**~~ **Resolved. OCCT
+   handles it.** Both parts build, the shelf reproduces its 18-face sliver baseline
+   exactly, and the geometry matches the Fusion originals dimension for dimension.
+   One rule accounts for every failure encountered: **two chamfered convex edges need
+   more than `2 * chamfer_size` of face between them**, or OCCT raises
+   `BRep_API: command not done`. That is the `ASM_BL_NO_MATE` analogue. Fusion's
+   gusset-peak workaround was the same constraint at a smaller threshold.
+
+   The trap: **every edge chamfers fine individually; only the batch fails.** Checking
+   edges one at a time reports that nothing is wrong. Bisect the set pairwise.
+2. ~~**Rebuild latency on real parts.**~~ **Resolved, and the answer is not the one
+   assumed.** Build is 470ms on the shelf, but tessellation is another 620ms, so the
+   loop is ~1.1s. Tessellation is the critical path and draft mode does not address
+   it. See the measured facts above.
+3. **False positives in the rules.** Kills adoption faster than missing checks. Two
+   calibration parts now exist with exact baselines.
 4. **Concave edge detection.** Required by the polish rules, known to have a subtle
-   failure mode, must be verified empirically rather than reasoned about.
-5. **Chamfer selector drift.** Each chamfer changes topology, so selectors resolved
-   before an earlier chamfer runs may not match after. Fusion's answer was strict
-   ordering (cosmetic on pristine geometry first, then structural). OCCT's behavior
-   is unknown and may differ.
+   failure mode, must be verified empirically rather than reasoned about. Phase 1
+   sidestepped it by subtracting `new_edges` from the polish set, which works only
+   because those parts' sole concave edges are the ones the structural pass made.
+5. ~~**Chamfer selector drift.**~~ **Resolved.** `new_edges(before, combined=after)`
+   returns exactly what an operation created, and is the algebra-mode `Select.LAST`.
+   Both parts flex `bracket_count` in both directions with baselines unchanged. This
+   is genuinely better than Fusion's strict-ordering rule, not just parity.
 6. **three.js CDN dependency.** Offline breaks the viewer.
 
 ## Open questions
