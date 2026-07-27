@@ -345,9 +345,15 @@ src/nurb/cli.py               extract
 
 ## Post-implementation
 
-- [ ] `min_wall` rule: ray casting on sampled faces first, stated as an
-      approximation. Inscribed sphere only if the approximation proves inadequate.
-- [ ] Printer profiles: shipped defaults vs user-authored
+All five phases are complete. What is left, in the order it looks worth doing:
+
+- [x] `min_wall` rule, shipped in Phase 2 as a ray cast and stated as an approximation
+- [ ] `min_wall` by inscribed sphere. The ray cast is exact on flat parallel walls and
+      wrong in both directions everywhere else, and thirteen parts have not yet produced
+      a case where that mattered. Revisit when one does, not before.
+- [ ] Printer profiles: shipped defaults vs user-authored. Every card currently carries
+      its own, which is right for a `min_wall` a part has justified and wrong for a bed
+      size that belongs to a machine.
 - [ ] Decide `nurb` vs `nurb-cad` for the PyPI package name
 - [ ] Claim PyPI `nurb`, npm `nurb`, nurb.dev
 - [ ] Publishing path: does a nurb part export to an OpenSCAD file for MakerWorld's
@@ -366,8 +372,13 @@ src/nurb/cli.py               extract
 
 **Open question deferred to Phase 2:** does `nurb check` gate `nurb export`, or only
 report? Leaning report-only with an opt-in `--strict`, on the grounds that a warning
-which blocks work gets disabled.
+which blocks work gets disabled. Settled that way, and CI is what spends the `--strict`.
 
 **Planning note:** Phase 1 is the only phase that can invalidate the others. If the
 gridfinity port fails in a way that cannot be worked around, stop and revisit the
-kernel choice before continuing.
+kernel choice before continuing. It did not, and nothing in the twelve parts that
+followed moved the kernel question either.
+
+**Answered in Phase 5:** the three gridfinity shelves do collapse into one file, and so
+do the two utility hooks, as variants on the card rather than as export configs in a
+separate place. See `docs/core/PROGRESS.md`.
