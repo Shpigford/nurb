@@ -97,7 +97,7 @@ def test_the_shim_it_writes_is_the_one_the_package_ships():
     shipped = (pathlib.Path(cli.__file__).parent / "agents.md").read_text(encoding="utf-8")
     repo = pathlib.Path(__file__).parents[1]
     assert (repo / "AGENTS.md").read_text(encoding="utf-8") == shipped
-    assert shipped in (repo / "SKILL.md").read_text(encoding="utf-8")
+    assert shipped in (repo / "skills" / "nurb" / "SKILL.md").read_text(encoding="utf-8")
 
 
 def test_a_second_part_does_not_mention_the_shim_again(tmp_path, capsys):
@@ -258,15 +258,17 @@ def test_skill_output_is_the_shipped_file(capsys):
 def test_the_skill_is_the_shim_with_a_trigger_on_top():
     """One body, enforced rather than hoped.
 
-    The packaged skill.md serves anyone who installed from PyPI, the repo root
-    SKILL.md serves agents working in a checkout, and both are the agents.md
-    shim under a frontmatter trigger. If any of the three drift apart, the rule
-    about one copy has quietly broken.
+    The packaged skill.md serves anyone who installed from PyPI, the repo copy in
+    skills/nurb/ serves `npx skills add`, and both are the agents.md shim under a
+    frontmatter trigger. If any of the three drift apart, the rule about one copy
+    has quietly broken. The repo copy lives in skills/nurb/ rather than the root
+    because skills.sh installs the whole directory containing SKILL.md: at the
+    root, `npx skills add` copied the entire repo.
     """
     pkg = pathlib.Path(cli.__file__).parent
     repo = pathlib.Path(__file__).parents[1]
     shipped = (pkg / "skill.md").read_text(encoding="utf-8")
-    assert shipped == (repo / "SKILL.md").read_text(encoding="utf-8")
+    assert shipped == (repo / "skills" / "nurb" / "SKILL.md").read_text(encoding="utf-8")
     assert shipped.endswith((pkg / "agents.md").read_text(encoding="utf-8"))
     assert shipped.startswith("---\n")  # the trigger a harness keys on
     # Strict YAML reads an unquoted ": " inside a value as a nested mapping, and
