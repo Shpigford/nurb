@@ -877,6 +877,35 @@ the usual moves report nothing: bisecting isolates a single edge that still fail
 passes, letting the first give those two faces a real edge to meet along, then reselect
 from the result.
 
+##### 7. A part with text on it is not the same part on another machine
+
+CI is the first time this library built anywhere but one Mac, and it failed three tests,
+all of them the calibration coupon. The coupon carries a raised label, because four of
+them come off one plate looking identical and a gauge you cannot identify is no use. A
+label is glyph outlines, glyph outlines come from a system font, and the font on the
+runner is not the font here. Same part, 2600.6mm3 with 88 faces and 65 slivers on one
+machine, 2601.0 with 83 and 60 on the other.
+
+Nothing about the fit moves, which is the only surface a gauge has to get right. What
+moves is everything the card records, and what `min_wall` finds: the ray cast reaches the
+label before it reaches anything structural, so it returns 0.500 on one machine and 0.480
+on the other, at different places in the same word.
+
+The first attempt at a fix was to widen the rule's slack, and it was the wrong shape:
+those two numbers are not one number with noise on it, they are measurements of different
+geometry. The card sets `min_wall = 0` now, which says the rule cannot measure this part,
+and states the walls that actually matter and are not in doubt. The AUTO-block test skips
+a part that renders text and says why.
+
+**The doctrine already said no text labels on parts, for looks.** It has a second reason
+now, and it is a stronger one: text makes a part unreproducible.
+
+Two things generalize past the coupon. A checker's thresholds are claims about a
+measurement, so the tight ones need to be stable across kernel builds, and `min_wall` now
+carries one percent of slack for that reason alone. And **a card is a record of what one
+machine built**, which is fine as long as nothing asserts it somewhere else, and CI is
+exactly somewhere else.
+
 ---
 
 ## Pre-phase work (already built)
