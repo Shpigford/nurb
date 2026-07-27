@@ -1,6 +1,6 @@
 # nurb
 
-Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real B-rep solids ([build123d](https://build123d.readthedocs.io)/OCCT), checks them against print physics, and shows you the result live. You judge, drag sliders, download the STL.
+Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real solids, checks them against print physics, and shows you the result live. You judge, drag sliders, download the STL.
 
 ## Install
 
@@ -10,7 +10,13 @@ uv tool install nurb       # or: pip install nurb
 
 ## Teach your agent
 
-`nurb skill` prints a short skill file, so your agent reaches for nurb on its own whenever you ask for a printable part. It is plain markdown with a trigger description up top; drop it wherever your harness reads instructions:
+Install the nurb skill once and your agent reaches for nurb on its own whenever you ask for a printable part. [skills.sh](https://www.skills.sh/) detects whatever harnesses you have and installs into each:
+
+```bash
+npx skills add shpigford/nurb
+```
+
+Or `nurb skill` prints the same skill file as plain markdown, for redirecting wherever your harness reads instructions:
 
 ```bash
 mkdir -p ~/.claude/skills/nurb && nurb skill > ~/.claude/skills/nurb/SKILL.md   # Claude Code
@@ -41,6 +47,8 @@ def phone_stand(width=84.0, lean=15.0, wall=3.0, draft=False):
 ```
 
 The keyword defaults are the parameters. That one declaration drives the CLI, the viewer's sliders, and the tests; there is no schema to keep in sync. A float is a dimension, an int is a count (its slider steps by one). `draft` is passed by the runtime, not callers: when true, skip the polish pass.
+
+The body of a part is [build123d](https://build123d.readthedocs.io) code on the OCCT kernel. That is why the solids are real B-reps with working chamfers, fillets, and STEP export rather than meshes, and why your model already knows the modelling API.
 
 ## Commands
 

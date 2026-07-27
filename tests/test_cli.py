@@ -269,3 +269,8 @@ def test_the_skill_is_the_shim_with_a_trigger_on_top():
     assert shipped == (repo / "SKILL.md").read_text(encoding="utf-8")
     assert shipped.endswith((pkg / "agents.md").read_text(encoding="utf-8"))
     assert shipped.startswith("---\n")  # the trigger a harness keys on
+    # Strict YAML reads an unquoted ": " inside a value as a nested mapping, and
+    # skills.sh parses strictly: a colon in the description made `npx skills add`
+    # skip the whole file with "Nested mappings are not allowed".
+    for line in shipped.split("---\n")[1].splitlines():
+        assert ": " not in line.split(": ", 1)[1], f"strict-YAML trap in: {line}"
