@@ -25,16 +25,11 @@ nurb skill >> AGENTS.md                                # or any harness that rea
 
 ## Make something
 
-```bash
-nurb new phone_stand
-nurb dev                   # http://127.0.0.1:7373
-```
+Open your agent in the directory where the project should live, and talk:
 
-Then tell your agent:
+> Make me a phone stand: 15 degree lean, a slot for the charging cable, fits a phone 78mm wide.
 
-> Run `nurb rules`, then make me a phone stand: 15 degree lean, a slot for the charging cable, fits a phone 78mm wide.
-
-`nurb rules` prints the design doctrine (printability, load paths, kernel traps), so the agent knows how to use the tool before it starts. From there it edits `parts/phone_stand.py`, the browser updates on every save without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `stl`, print. The `stl` and `step` buttons build at whatever the sliders hold, and a `write` button saves your slider values back into the file's defaults, where the agent will see them.
+The agent does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and starts `nurb dev` so you get a link to watch. Every save updates the browser without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `stl`, print. A `write` button saves your slider values back into the file's defaults, where the agent will see them.
 
 ## A part
 

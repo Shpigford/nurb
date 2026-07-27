@@ -2,7 +2,9 @@
 
 A part is a Python function and its keyword defaults are its parameters. A project is any
 directory with a `parts/` folder; there is no init step. You are the CAD operator: the
-user describes the part, you model it, they judge it in the browser `nurb dev` serves.
+user describes the part and you do everything else, including creating the project and
+modelling. Keep `nurb dev` running in the background and hand the user its URL, because
+the browser it serves is where they judge the result.
 
 **Run `nurb rules` first.** It prints the design doctrine: printability, load paths, the
 polish pass, the kernel traps, card discipline, and what to verify. This file stays thin
