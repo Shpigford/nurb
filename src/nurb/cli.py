@@ -12,9 +12,13 @@ PART_TEMPLATE = '''from nurb import *
 @part
 def {name}(width=40.0, depth=30.0, height=20.0, wall=2.0, draft=False):
     body = Box(width, depth, height)
-    if not draft:
-        body = chamfer(body.edges().filter_by(Axis.Z), length=1)
-    return body
+    if draft:
+        return body
+    # Name what must stay sharp, then let `polish` chamfer whatever the kernel takes.
+    # A bare `chamfer(...)` is all or nothing: one edge that cannot land loses the lot.
+    bed = body.bounding_box().min.Z
+    keep = body.edges().filter_by(lambda e: e.bounding_box().min.Z > bed)
+    return polish(body, keep, 1.0)
 '''
 
 CARD_TEMPLATE = """# {name}
@@ -161,6 +165,14 @@ def cmd_check(args):
             for finding in found:
                 print(f"      {finding}")
             worst = max(worst, 2 if fails else 1)
+    # Project-level, after the parts: a guessed dimension produces a part that builds,
+    # checks clean and prints, so the only place it can be caught is here.
+    from .measurements import provisional
+
+    for name, how in provisional(root):
+        print(f"  measurement {name} is provisional: {how or 'no note'}")
+        worst = max(worst, 1)
+
     if args.strict and worst:
         sys.exit(1)
 
@@ -209,6 +221,97 @@ def cmd_export(args):
             elif fmt == "glb":
                 target.write_bytes(builder.to_glb(shape, 0.02))
             print(f"  {target.relative_to(root)}")
+
+
+# What OCCT says when a chamfer will not land. A part refusing to grow in its own words
+# is a design decision; refusing in these is a missing guard.
+KERNEL = ("Failed creating a chamfer", "Failed creating a fillet", "BRep_API")
+
+
+def _flex(path, problems):
+    """Grow every count and see what breaks.
+
+    Upward only. Growth is what catches a selector frozen against pristine geometry;
+    shrinking alone passes a broken part, because a part with fewer features has fewer
+    places to be wrong. A part is allowed to refuse, since a pocket row or a grid has to
+    fit between the brackets, but it has to refuse in its own words.
+    """
+    from . import builder
+
+    declared = builder.load(path)._nurb.params
+    counts = [
+        name
+        for name, default in declared.items()
+        if isinstance(default, int) and not isinstance(default, bool)
+    ]
+    for name in counts:
+        for grown in (declared[name] + 1, declared[name] + 2):
+            try:
+                shape, _, _ = builder.build(path, overrides={name: grown}, draft=False)
+            except ValueError as exc:
+                if any(k in str(exc) for k in KERNEL):
+                    problems.append(f"{name}={grown} fails in the kernel: {exc}")
+                continue  # a guard in the part's own words is a decision, not a fault
+            except Exception as exc:
+                problems.append(f"{name}={grown}: {type(exc).__name__}: {exc}")
+                continue
+            if len(shape.solids()) != 1:
+                problems.append(f"{name}={grown} builds {len(shape.solids())} solids")
+    return len(counts) * 2
+
+
+def cmd_verify(args):
+    """The doctrine's Verification section, run.
+
+    Two of its six items are not here and cannot be. Checking fit-critical faces by
+    coordinate is per part, which is what a project's own tests are for, and looking at
+    a render is the one step a machine cannot do for you.
+    """
+    from . import builder, card, checks
+
+    root = project_root()
+    worst = 0
+    for path in _resolve(root, args.part):
+        problems, built = [], []
+        configs = _configs(path)
+        if not configs:
+            problems.append("the card's settings block will not parse")
+        for name, overrides, ctx in configs:
+            try:
+                shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+            except Exception as exc:
+                problems.append(f"{name}: {type(exc).__name__}: {exc}")
+                continue
+            if len(shape.solids()) != 1:
+                problems.append(f"{name} is {len(shape.solids())} solids, not one")
+            found = checks.run(shape, ctx)
+            for finding in found:
+                problems.append(f"{name}: {finding}")
+            built.append((name, shape, ctx, found))
+
+        flexed = _flex(path, problems)
+
+        text = ""
+        md = path.with_suffix(".md")
+        if md.is_file():
+            text = md.read_text(encoding="utf-8")
+        if built:
+            _, shape, ctx, found = built[0]
+            if card.render(card.facts(shape, ctx, found, variants=built[1:])) not in text:
+                problems.append("card does not match the geometry, run `nurb card`")
+        for heading in card.thin(text):
+            problems.append(f"card section is empty: {heading}")
+
+        if problems:
+            worst = 1
+            print(f"  {path.stem}: {len(problems)} problem(s)")
+            for line in problems:
+                print(f"      {line}")
+        else:
+            print(f"  {path.stem}: ok, {len(configs)} configuration(s), {flexed} flexes")
+    print("  Not covered: fit faces by coordinate, and looking at a render.")
+    if worst:
+        sys.exit(1)
 
 
 def cmd_extract(args):
@@ -375,6 +478,10 @@ def main(argv=None):
 
     s = sub.add_parser("rules", help="print the design doctrine")
     s.set_defaults(fn=cmd_rules)
+
+    s = sub.add_parser("verify", help="run the doctrine's verification list")
+    s.add_argument("part", nargs="?")
+    s.set_defaults(fn=cmd_verify)
 
     s = sub.add_parser("extract", help="find duplication across parts")
     s.set_defaults(fn=cmd_extract)

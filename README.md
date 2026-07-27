@@ -24,11 +24,13 @@ Edit `parts/dispenser.py` and watch it update.
 from nurb import *
 
 @part
-def dispenser(width=40, depth=30, height=20, wall=2, draft=False):
-    body = Box(width, depth, height)
-    if not draft:
-        body = chamfer(body.edges().filter_by(Axis.Z), length=1)
-    return body
+def dispenser(width=80.0, height=120.0, wall=2.0, draft=False):
+    body = Box(width, height, wall)
+    if draft:
+        return body
+    bed = body.bounding_box().min.Z
+    keep = body.edges().filter_by(lambda e: e.bounding_box().min.Z > bed)
+    return polish(body, keep, 1.0)
 ```
 
 `draft` is optional and passed by the runtime, not the caller. When it's true the
@@ -45,6 +47,7 @@ nurb build [part]   build once and report size
 nurb check [part]   run the printability rules
 nurb rules          print the design doctrine
 nurb card [part]    regenerate a card's AUTO block
+nurb verify [part]  run the doctrine's verification list
 nurb render [part]  write a PNG into build/
 nurb export [part]  write STL/STEP/GLB into build/
 nurb extract        find duplication across parts

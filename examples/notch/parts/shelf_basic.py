@@ -7,7 +7,6 @@ from system import (
     MERGE_X,
     MIN_ITEM_DEPTH,
     plate_width,
-    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -129,5 +128,5 @@ def shelf_basic(
             return False
         return abs(here.Z - here.X - slope) < EPS or abs(here.X - tip_x) < EPS
 
-    polish = polish_edges(body, item_height).filter_by(lambda e: not on_gusset(e))
-    return polish_pass(body, polish - new_edges(pristine, combined=body), chamfer_size)
+    wanted = polish_edges(body, item_height).filter_by(lambda e: not on_gusset(e))
+    return polish(body, wanted - new_edges(pristine, combined=body), chamfer_size)

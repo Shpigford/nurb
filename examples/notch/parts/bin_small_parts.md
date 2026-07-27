@@ -4,8 +4,8 @@
 Size: 65.00 x 75.48 x 60.00 mm, 51232.5 mm3, 1 solid, 52 faces
 Projection: 65.0mm over a 60.0mm back, ratio 1.08 against a 2.5 limit
 Checks: clean
-Variant bin_small_parts_2x: 65.00 x 50.32 x 60.00 mm, 0 under 1.0mm2, clean
-Variant bin_small_parts_4x: 65.00 x 100.64 x 60.00 mm, 0 under 1.0mm2, clean
+Variant bin_small_parts_2x: 65.00 x 50.32 x 60.00 mm, 39218.9 mm3, 1 solid, 43 faces, 0 under 1.0mm2, clean
+Variant bin_small_parts_4x: 65.00 x 100.64 x 60.00 mm, 63246.0 mm3, 1 solid, 61 faces, 0 under 1.0mm2, clean
 <!-- /AUTO -->
 
 Ported from Fusion `Bin - Small Parts - 3x` v27.

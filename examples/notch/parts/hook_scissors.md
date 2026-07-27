@@ -5,8 +5,8 @@ Size: 34.00 x 25.16 x 30.00 mm, 6484.3 mm3, 1 solid, 44 faces
 Slivers: 6 under 1.0mm2, smallest 0.866mm2, 6 accepted
 Projection: 34.0mm over a 30.0mm back, ratio 1.13 against a 2.5 limit
 Checks: clean
-Variant hook_utility: 31.00 x 25.16 x 30.00 mm, 6 under 1.0mm2, clean
-Variant hook_utility_long: 51.00 x 25.16 x 35.00 mm, 6 under 1.0mm2, clean
+Variant hook_utility: 31.00 x 25.16 x 30.00 mm, 7457.3 mm3, 1 solid, 44 faces, 6 under 1.0mm2, clean
+Variant hook_utility_long: 51.00 x 25.16 x 35.00 mm, 10823.0 mm3, 1 solid, 44 faces, 6 under 1.0mm2, clean
 <!-- /AUTO -->
 
 Ported from Fusion `Hook - Scissors - 1x` v4.

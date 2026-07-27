@@ -85,14 +85,38 @@ def _windows(path):
         # Imports are not a system. Two parts in a family import the same names by
         # definition, and reporting that as duplication buries the geometry underneath.
         body = [s for s in body if not isinstance(s, (ast.Import, ast.ImportFrom))]
-        shapes = [_shape(stmt, local, {}) for stmt in body]
         for start in range(len(body)):
-            for end in range(start + MIN_RUN, len(body) + 1):
-                text = "|".join(shapes[start:end])
+            # Alpha-equivalence is a consistent rename across the whole run. Resetting
+            # `seen` for every statement loses data flow: `combine(a, b)` and
+            # `combine(b, a)` both become `combine(L0, L1)`.
+            seen, shapes = {}, []
+            for end in range(start, len(body)):
+                shapes.append(_shape(body[end], local, seen))
+                statements = end - start + 1
+                if statements < MIN_RUN:
+                    continue
+                text = "|".join(shapes)
                 if len(text) < MIN_TEXT:
                     continue
-                found.setdefault(text, (body[start].lineno, body[end - 1].end_lineno, end - start))
+                found.setdefault(
+                    text,
+                    (body[start].lineno, body[end].end_lineno, statements),
+                )
     return found
+
+
+def _contained(run, parent):
+    """Whether every site in `run` is already inside a reported parent at that path."""
+    spans = {}
+    for path, start, end, _ in parent["sites"]:
+        spans.setdefault(path, []).append((start, end))
+    return all(
+        any(
+            parent_start <= start and end <= parent_end
+            for parent_start, parent_end in spans.get(path, [])
+        )
+        for path, start, end, _ in run["sites"]
+    )
 
 
 def duplication(paths):
@@ -114,13 +138,10 @@ def duplication(paths):
     ]
     shared.sort(key=lambda d: (-d["statements"], -len(d["sites"])))
 
-    out, covered = [], set()
+    out = []
     for run in shared:
-        span = {(path, line) for path, line, _, _ in run["sites"]}
-        if span & covered:
-            continue  # already inside a longer run reported for the same files
-        for path, start, end, _ in run["sites"]:
-            covered.update((path, line) for line in range(start, end + 1))
+        if any(_contained(run, parent) for parent in out):
+            continue
         out.append(run)
     return out
 

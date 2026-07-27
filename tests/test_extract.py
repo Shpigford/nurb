@@ -87,6 +87,57 @@ def test_a_run_inside_a_longer_run_is_not_reported_twice(tmp_path):
     assert len(starts) == len(set(starts))
 
 
+def test_alpha_equivalence_preserves_data_flow_across_statements(tmp_path):
+    """Swapping two established locals is behavior, not another spelling of the same code."""
+    one = (
+        "def one(seed):\n"
+        "    left = make(seed)\n"
+        "    right = transform(left)\n"
+        "    return combine(left, right)\n"
+    )
+    swapped = (
+        "def swapped(source):\n"
+        "    first = make(source)\n"
+        "    second = transform(first)\n"
+        "    return combine(second, first)\n"
+    )
+    found = extract.duplication(
+        [write(tmp_path, "one", one), write(tmp_path, "swapped", swapped)]
+    )
+    assert max(run["statements"] for run in found) == 2
+
+
+def test_overlap_in_another_file_is_still_reported(tmp_path):
+    """A long A/B match does not account for the overlapping suffix also present in C."""
+    one = (
+        "def one(seed):\n"
+        "    a = first(seed)\n"
+        "    b = second(a)\n"
+        "    c = third(b)\n"
+        "    return fourth(c)\n"
+    )
+    two = (
+        "def two(source):\n"
+        "    x = first(source)\n"
+        "    y = second(x)\n"
+        "    z = third(y)\n"
+        "    return fourth(z)\n"
+    )
+    three = "def three(seed):\n    result = third(seed)\n    return fourth(result)\n"
+    found = extract.duplication(
+        [
+            write(tmp_path, "one", one),
+            write(tmp_path, "two", two),
+            write(tmp_path, "three", three),
+        ]
+    )
+    assert any(
+        run["statements"] == 2
+        and {path.stem for path, *_ in run["sites"]} == {"one", "two", "three"}
+        for run in found
+    )
+
+
 def test_it_runs_over_the_real_library():
     """Whatever it reports, it must not fall over on real parts."""
     parts = pathlib.Path(__file__).parents[1] / "examples" / "notch" / "parts"

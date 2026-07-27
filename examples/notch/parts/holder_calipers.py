@@ -9,7 +9,6 @@ from system import (
     EPS,
     MERGE_X,
     MIN_ITEM_DEPTH,
-    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -169,5 +168,5 @@ def holder_calipers(
             for floor in (bed + saddle_height, bed + saddle_height - roller_relief)
         )
 
-    polish = (polish_edges(body, item_height) - made).filter_by(lambda e: not bearing(e))
-    return polish_pass(body, polish, chamfer_size)
+    wanted = (polish_edges(body, item_height) - made).filter_by(lambda e: not bearing(e))
+    return polish(body, wanted, chamfer_size)

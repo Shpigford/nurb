@@ -14,8 +14,12 @@ from build123d import *  # noqa: F401,F403  -- geometry vocabulary
 
 from .checks import concave_edges, is_convex  # noqa: E402
 from .measurements import measured  # noqa: E402
+from .polish import polish  # noqa: E402
 from .registry import part  # noqa: E402  -- must win over any build123d name
 
+# `polish` is here because the doctrine prescribes the algorithm and every project
+# would otherwise write it: chamfer is all or nothing, so one edge that cannot land
+# takes the pass down and the set gets narrowed by hand until it builds.
 # `from nurb import *` hands a part file the whole build123d vocabulary, @part, the
 # convexity test, and `measured`. The convexity test is here because a polish pass cannot
 # be written without it: chamfering an inside corner is the one polish mistake that looks
@@ -27,5 +31,6 @@ __all__ = [
     "is_convex",
     "concave_edges",
     "measured",
+    "polish",
 ]
 __version__ = "0.1.0"

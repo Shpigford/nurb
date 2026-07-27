@@ -13,11 +13,13 @@ ones that are specific to OCCT are marked as such and were measured, not reasone
 from nurb import *
 
 @part
-def dispenser(width=80, height=120, wall=2, draft=False):
+def dispenser(width=80.0, height=120.0, wall=2.0, draft=False):
     body = Box(width, height, wall)
-    if not draft:
-        body = chamfer(body.edges().filter_by(Axis.Z), length=1)
-    return body
+    if draft:
+        return body
+    bed = body.bounding_box().min.Z
+    keep = body.edges().filter_by(lambda e: e.bounding_box().min.Z > bed)
+    return polish(body, keep, 1.0)
 ```
 
 Keyword defaults are the parameters. That one declaration feeds the agent, the CLI, the
@@ -112,10 +114,17 @@ The polish pass runs last, after structure is finished.
 
 1. **Chamfers are the default on exposed edges**, 1mm, never below 0.8mm. A consistent
    faceted look that prints reliably beats a fillet default.
-2. **No chamfers on the back face or the bottom face, at all.** The back sits against
-   the wall and the bottom is the bed-contact face. Chamfering them buys nothing, and
-   where a bottom chamfer meets another one it makes sliver facets and notch points that
-   are very hard to print.
+2. **No chamfers lying in the back face or the bottom face.** The back sits against the
+   wall and the bottom is the bed-contact face. Chamfering an edge that lies in either
+   buys nothing, and where a bottom chamfer meets another one it makes sliver facets and
+   notch points that are very hard to print.
+   **An edge that merely ends there is fine**, and this is the distinction to get right,
+   because reading the rule as "nothing touching the bed" throws away the vertical corner
+   chamfers, which are the most-handled edges on the part. A vertical corner's chamfer
+   stands square to the plate and the first layer keeps its full width. A *sloped* edge
+   arriving at the plate is the case that is not fine: its chamfer lands tilted and lays
+   a knife edge into the first layer. That is exactly what `bed_bevel` measures, and it
+   tells a corbel from a chamfer by reach, since a chamfer's reach is its size.
 3. **Never touch fit-critical mating geometry**: channels, dovetails, sockets, anything
    that has to slide onto something else. Lead-in chamfers at a mating mouth sound
    helpful and are not. They make tiny compound facets that print badly on someone
@@ -272,12 +281,23 @@ depth = measured("shelf_depth")
 An unknown name raises, naming what is on file. That failure is the point: it is the
 moment to ask rather than to pick something plausible.
 
+**When there is nobody to ask**, write the guess down and mark it `provisional = true`.
+The danger was never the guess, it is that a guess and a measurement look identical six
+months later. `how` is still required, because "eyeballed against a broom" tells the
+next person how far to trust it, and `nurb check` lists every provisional value until
+somebody picks up a caliper.
+
 A measured value pays for itself across a family. Notch measured one bracket pitch and
 amortized it over sixteen parts.
 
 ## Verification
 
-"It built" is not verification. Before presenting a part:
+"It built" is not verification. `nurb verify` runs the machine-checkable part of
+this list: one solid per configuration, every count flexed upward, the rules clean,
+and the card agreeing with the geometry. The two it cannot do are the two that need
+you, and they are items 2 and 6.
+
+Before presenting a part:
 
 1. **Flex the driving parameters up as well as down**, for example 4 to 6 to 2 to 4.
    Growth is what catches a frozen selector; shrinking alone passes a broken part.

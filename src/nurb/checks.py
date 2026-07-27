@@ -488,22 +488,23 @@ def bed_bevel(shape, ctx):
     where it lands on the plate rather than dying into the body it is exactly such a
     face: structure, prescribed, and 46mm2 of it.
 
-    What separates them is how far the face reaches, and a chamfer's reach is its size
-    exactly. Measured: 1.00, 2.00 and 3.00mm for bottom chamfers of those sizes, against
-    4.29mm for the corbel. The limit is three times the polish size because the largest
-    chamfer this doctrine puts anywhere is the 3mm structural relief, and the smallest
-    corbel it describes starts with a 4 to 6mm vertical tip, so there is a whole
-    millimetre of daylight between the two. Width does not separate them: the same faces
-    measure 3.25 and 3.43mm.
+    What separates them is how far the face rises off the bed, and a bottom chamfer's
+    rise is its size exactly. Measured: 1.00, 2.00 and 3.00mm for chamfers of those
+    sizes, against 4.29mm for the corbel. Rise is independent of the edge's path: a 1mm
+    chamfer around a 20mm cylinder is still 1mm high even though its plan-view bounding
+    box is 20mm in both directions. The limit is three times the polish size because the
+    largest chamfer this doctrine puts anywhere is the 3mm structural relief, and the
+    smallest corbel starts with a 4 to 6mm vertical tip.
     """
     up = Vector(*ctx.up).normalized()
     bed, _ = _span(shape, up)
     found = []
     for face in shape.faces():
-        if _span(face, up)[0] > bed + 1e-4:
+        low, high = _span(face, up)
+        if low > bed + 1e-4:
             continue  # does not reach the plate
-        if _reach(face, up) > 3 * ctx.cosmetic_chamfer:
-            continue  # too far to be a chamfer band, so it is structure
+        if high - low > 3 * ctx.cosmetic_chamfer:
+            continue  # rises too far to be a chamfer band, so it is structure
         for normal in _sample_normals(face):
             tilt = abs(normal.dot(up))
             if 0.03 < tilt < 0.97:  # neither lying on the plate nor standing on it

@@ -157,6 +157,21 @@ def test_bed_bevel_catches_a_chamfer_on_the_first_layer():
     assert len(only(bottom, "bed_bevel")) == 4
 
 
+def test_bed_bevel_catches_a_circular_chamfer_on_the_first_layer():
+    """The band is 1mm deep even though its plan-view bounding box is 20mm wide."""
+    from build123d import chamfer
+
+    cylinder = Cylinder(10, 20)
+    bed = cylinder.bounding_box().min.Z
+    bottom = [
+        edge
+        for edge in cylinder.edges()
+        if abs(edge.bounding_box().min.Z - bed) < 1e-6
+        and abs(edge.bounding_box().max.Z - bed) < 1e-6
+    ]
+    assert len(only(chamfer(bottom, 1), "bed_bevel")) == 1
+
+
 def test_bed_bevel_ignores_a_chamfer_anywhere_else():
     from build123d import Axis, chamfer
 
@@ -167,15 +182,15 @@ def test_bed_bevel_ignores_a_chamfer_anywhere_else():
 def test_bed_bevel_leaves_a_corbel_landing_on_the_plate_alone():
     """The doctrine's own 45 degree underside is not polish, however tilted it is.
 
-    Reach is what separates them, and a chamfer's reach is its size exactly: 1, 2 and
-    3mm for bottom chamfers of those sizes, against 4.29mm for the corbel that made this
-    fire at `holder_calipers`. Width does not: 3.25mm against 3.43mm.
+    Rise is what separates them, and a bottom chamfer rises by its size exactly: 1, 2
+    and 3mm, against 10mm for this corbel. Unlike plan-view reach, rise also works for a
+    chamfer following a circular or diagonal edge.
     """
     body = Pos(0, 0, 10) * Box(20, 20, 20)  # standing on the plate at z=0
     wedge = Plane.XZ * Polygon((10, 0), (10, 10), (0, 0), align=None)
     post = body - extrude(wedge, 30, both=True)  # a 45 degree underside reaching 10mm
     assert only(post, "bed_bevel") == []
-    # The same face against a part whose polish is 4mm, where 10mm of reach is back
+    # The same face against a part whose polish is 4mm, where 10mm of rise is back
     # inside chamfer territory. The rule is about scale, so it has to move with it.
     assert len(only(post, "bed_bevel", Context(cosmetic_chamfer=4.0))) == 1
 

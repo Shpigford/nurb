@@ -11,7 +11,7 @@ Datums. Land these three and the hanging interface is correct for free:
     first channel centered on y = 0, the rest march +y on BLOCK_WIDTH pitch
 """
 
-from build123d import Box, Part, Polygon, Pos, chamfer, extrude
+from build123d import Box, Part, Polygon, Pos, extrude
 
 from nurb import concave_edges, measured
 
@@ -194,63 +194,6 @@ def polish_edges(shape, height):
         return True
 
     return shape.edges().filter_by(allowed)
-
-
-def polish(shape, edges, size):
-    """Chamfer as much of `edges` as the kernel will take, and stop there.
-
-    `chamfer` is all or nothing: one edge that cannot land takes the whole call down.
-    Every part in this library met that, and the answer each time was to shrink the set
-    by hand until it built, which is how a 92-edge part ended up with three chamfered
-    edges. Fusion never had the problem because a human adds chamfers one feature at a
-    time and works around each collision, so the same doctrine produced far more of
-    them. This closes that gap: try the set, and where it fails, bisect and keep the
-    halves that build.
-
-    **A batch is also refused if it makes a face smaller than a corner triangle.** Three
-    chamfers meeting at a convex corner leave about `0.866 * size ** 2` and the doctrine
-    allows exactly that; anything smaller is chamfers colliding, which is the thing
-    "keep chamfering until it stops working" would otherwise walk straight into. Counted
-    as a delta so that geometry which was already small before the pass, like the
-    gridfinity recess corners, does not veto every candidate.
-
-    Edges are taken longest first and ties broken on position, so the result does not
-    depend on the order `edges` arrived in.
-
-    Every attempt chamfers the original solid with the whole accepted set at once, never
-    the result of the last attempt. An edge belongs to the shape it was selected from,
-    and `chamfer` reads its target off that shape, so applying batches one after another
-    would quietly keep re-chamfering the first body and return it.
-    """
-    floor = 0.8 * size**2
-
-    def tiny(solid):
-        return len([f for f in solid.faces() if f.area < floor])
-
-    allowance = tiny(shape)
-    kept, best = [], shape
-
-    def lands(candidate):
-        try:
-            out = chamfer(candidate, size)
-        except Exception:
-            return None
-        return out if tiny(out) <= allowance else None
-
-    def take(batch):
-        nonlocal kept, best
-        out = lands(kept + batch)
-        if out is not None:
-            kept, best = kept + batch, out
-            return
-        if len(batch) == 1:
-            return  # this one cannot land beside what is already there
-        half = len(batch) // 2
-        take(batch[:half])
-        take(batch[half:])
-
-    take(sorted(edges, key=lambda e: (-e.length, e.center().X, e.center().Y, e.center().Z)))
-    return best
 
 
 def detent_dimples(count, step=1):

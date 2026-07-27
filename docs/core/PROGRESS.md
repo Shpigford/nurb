@@ -679,14 +679,14 @@ into an assertion that runs.
 - [x] Parametrized flex test, upward, over every part
 - [x] Check baselines asserted for every configuration
 - [x] CI workflow
-- [x] 171 tests, up from 105
+- [x] 178 tests, up from 105
 
 #### Results against the success criteria
 
 | Criterion | Result |
 |---|---|
 | All 16 parts build | 19 configurations out of 13 files, every one a single solid |
-| `pytest` green across the library | 171 passed |
+| `pytest` green across the library | 178 passed |
 | Fit assertions catch a deliberately introduced pitch error | Yes, and the test that proves it is in the suite: a 0.1mm per interval error is reported by name |
 | Exports match the Fusion STLs dimensionally | Every configuration matches its catalog card's bounding box to 0.05mm, which is the card's own rounding. The STLs live in the Fusion project and not in this repo, so the recorded box is the comparison. |
 
@@ -854,9 +854,10 @@ disproved that: the doctrine's own corbel is a 45 degree underside, and where it
 the plate rather than dying into the body it is exactly such a face. 46mm2 of prescribed
 structure, reported as polish.
 
-Reach separates them and width does not. A chamfer's reach *is* its size, measured at
-1.00, 2.00 and 3.00mm for bottom chamfers of those sizes, against 4.29mm for the corbel.
-The same faces measure 3.25mm and 3.43mm wide, which is a 0.18mm gap and not a rule.
+Rise separates them: a bottom chamfer rises by its size, measured at 1.00, 2.00 and
+3.00mm, against 4.29mm for the corbel. Rise is also independent of the edge's path,
+where plan-view reach is not: a 1mm chamfer around a 20mm cylinder has a 20mm bounding
+box in both horizontal directions and is still only 1mm high.
 
 The same part turned up a real defect on the way, which is the reason to keep the rule
 rather than weaken it: the 1mm polish on the corbel's own side edges ran down to the

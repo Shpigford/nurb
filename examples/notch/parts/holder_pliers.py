@@ -11,7 +11,6 @@ from system import (
     MIN_ITEM_DEPTH,
     OVERSHOOT,
     plate_width,
-    polish,
     polish_edges,
     slab,
     span,

@@ -13,7 +13,6 @@ from system import (
     channels,
     detent_dimples,
     plate_width,
-    polish,
     polish_edges,
     span,
 )

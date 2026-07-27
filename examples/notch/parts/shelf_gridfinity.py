@@ -9,7 +9,6 @@ from system import (
     EPS,
     MERGE_X,
     MIN_ITEM_DEPTH,
-    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -138,5 +137,5 @@ def shelf_gridfinity(
         bb = edge.bounding_box()
         return bb.max.Z < top + EPS and bb.min.Z > top - SOCKET_DEPTH - EPS
 
-    polish = polish_edges(body, item_height).filter_by(lambda e: not in_sockets(e))
-    return polish_pass(body, polish - new_edges(pristine, combined=body), chamfer_size)
+    wanted = polish_edges(body, item_height).filter_by(lambda e: not in_sockets(e))
+    return polish(body, wanted - new_edges(pristine, combined=body), chamfer_size)

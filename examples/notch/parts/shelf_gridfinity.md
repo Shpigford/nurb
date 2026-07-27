@@ -5,8 +5,8 @@ Size: 94.00 x 100.64 x 42.00 mm, 45145.9 mm3, 1 solid, 214 faces
 Slivers: 18 under 1.0mm2, smallest 0.632mm2, 18 accepted
 Projection: 94.0mm over a 42.0mm back, ratio 2.24 against a 2.5 limit
 Checks: clean
-Variant shelf_gridfinity_2x1: 52.00 x 100.64 x 35.00 mm, 10 under 1.0mm2, clean
-Variant shelf_gridfinity_3x2: 94.00 x 150.96 x 42.00 mm, 26 under 1.0mm2, clean
+Variant shelf_gridfinity_2x1: 52.00 x 100.64 x 35.00 mm, 28375.5 mm3, 1 solid, 145 faces, 10 under 1.0mm2, clean
+Variant shelf_gridfinity_3x2: 94.00 x 150.96 x 42.00 mm, 63554.4 mm3, 1 solid, 300 faces, 26 under 1.0mm2, clean
 <!-- /AUTO -->
 
 Ported from Fusion `Shelf - Gridfinity 2x2 - 4x` v4.

@@ -69,10 +69,13 @@ def facts(shape, ctx=None, findings=None, variants=None):
     # unrecorded. A variant that stops building shows up here as a diff.
     for name, built, its_ctx, its_findings in variants or []:
         box = built.bounding_box()
+        solids = len(built.solids())
         small = [f for f in built.faces() if f.area < its_ctx.sliver_area]
         lines.append(
             f"Variant {name}: {box.size.X:.2f} x {box.size.Y:.2f} x {box.size.Z:.2f} mm, "
-            f"{len(small)} under {its_ctx.sliver_area}mm2, {_verdict(its_findings)}"
+            f"{built.volume:.1f} mm3, {solids} solid{'s' if solids != 1 else ''}, "
+            f"{len(built.faces())} faces, {len(small)} under {its_ctx.sliver_area}mm2, "
+            f"{_verdict(its_findings)}"
         )
     return lines
 

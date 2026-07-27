@@ -113,3 +113,55 @@ def test_a_harness_file_of_the_user_s_own_is_never_touched(tmp_path, capsys):
     assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "# mine\n"
     assert not (tmp_path / "AGENTS.md").exists()
     assert "CLAUDE.md is yours" in capsys.readouterr().out
+
+
+# --- verify -------------------------------------------------------------------
+
+
+PLAIN = "from nurb import *\n\n\n@part\ndef thing(w=10.0, draft=False):\n    return Box(w, w, w)\n"
+
+
+def test_verify_fails_on_a_card_that_disagrees_with_its_part(tmp_path, monkeypatch, capsys):
+    """The command has to be able to fail, or it is decoration."""
+    import argparse
+
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    (parts / "thing.md").write_text("# thing\n\nno AUTO block here\n")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_verify(argparse.Namespace(part=None))
+    assert exc.value.code == 1
+    out = capsys.readouterr().out
+    assert "card does not match" in out
+    assert "## Don't" in out  # the empty card sections are reported too
+
+
+def test_verify_says_what_it_cannot_check(tmp_path, monkeypatch, capsys):
+    """Two of the doctrine's six items need a human, and hiding that is worse."""
+    import argparse
+
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit):
+        cli.cmd_verify(argparse.Namespace(part=None))
+    assert "fit faces by coordinate" in capsys.readouterr().out
+
+
+# --- provisional measurements -------------------------------------------------
+
+
+def test_a_guess_is_allowed_to_be_written_down_and_has_to_say_so(tmp_path):
+    from nurb.measurements import measured, provisional
+
+    (tmp_path / "parts").mkdir()
+    (tmp_path / "measurements.toml").write_text(
+        '[bore]\nvalue = 24.0\nunit = "mm"\nhow = "eyeballed"\nprovisional = true\n\n'
+        '[pitch]\nvalue = 25.16\nunit = "mm"\nhow = "calipers"\n',
+        encoding="utf-8",
+    )
+    assert measured("bore", start=tmp_path) == 24.0  # it still builds a real part
+    assert provisional(tmp_path) == [("bore", "eyeballed")]  # and it still says so

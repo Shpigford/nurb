@@ -11,7 +11,6 @@ from system import (
     channels,
     detent_dimples,
     pitch,
-    polish as polish_pass,
 )
 
 # The bin is hardware, the same as the bracket is, so its dimensions come out of
@@ -215,12 +214,12 @@ def mount_akrobin_rail(
     # Cosmetic, 1mm on four face pairs and nothing else. The structural chamfer has
     # already moved the topology, so the roles get read again against the new body; the
     # 45 degree face it left has no role, so its edges cannot land in this set.
-    polish = wanted(body, COSMETIC)
-    if not polish:
+    cosmetic = wanted(body, COSMETIC)
+    if not cosmetic:
         raise ValueError(
             "the polish pass matched no edges, so the face roles no longer describe "
             "this geometry. Check `role` against the current parameters."
         )
-    if not all(is_convex(edge, *faces) for edge, faces in polish):
+    if not all(is_convex(edge, *faces) for edge, faces in cosmetic):
         raise ValueError("the polish set contains a concave edge, which would wedge")
-    return polish_pass(body, [edge for edge, _ in polish], chamfer_size)
+    return polish(body, [edge for edge, _ in cosmetic], chamfer_size)

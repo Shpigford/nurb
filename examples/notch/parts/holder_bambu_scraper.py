@@ -11,7 +11,6 @@ from system import (
     POCKET_WIDTH,
     channels,
     detent_dimples,
-    polish,
     polish_edges,
     span,
 )

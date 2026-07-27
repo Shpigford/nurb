@@ -61,12 +61,37 @@ def load(start=None):
     return _read(path) if path else {}
 
 
+def provisional(start=None):
+    """Every value on file that admits it was not actually measured.
+
+    The doctrine says to ask rather than improvise, and sometimes there is nobody to
+    ask: the caliper is in a drawer, the object is at the office, the print has to go
+    on tonight. The failure mode is not putting a number in, it is that the number then
+    looks exactly like one somebody measured. Six months later nothing distinguishes
+    them and the part is wrong for a reason no one can find.
+
+    So a guess is allowed to be written down and required to say so, and `nurb check`
+    reports the ones that still are. `how` stays mandatory either way: a provisional
+    value still has to say where it came from, because "eyeballed against a broom"
+    tells the next person how much to trust it.
+    """
+    return sorted(
+        (name, entry.get("how", ""))
+        for name, entry in load(start).items()
+        if entry.get("provisional")
+    )
+
+
 def measured(name, start=None):
     """A measured value, in mm.
 
     Raises when it is not on file, when it has no provenance, or when it is recorded in
     units this does not work in. All three are cases where continuing would produce
     geometry that looks right and is wrong.
+
+    A value marked `provisional = true` is returned like any other. It is a real number
+    that builds a real part; what it is not is measured, and `nurb check` says so until
+    somebody picks up a caliper.
     """
     start = pathlib.Path(start).resolve() if start else _caller_dir(2)
     path = _find(start)
@@ -74,7 +99,9 @@ def measured(name, start=None):
         raise MeasurementError(
             f"no {FILENAME} above {start}, so there is nothing measured to ask for. "
             f"Measure {name!r}, then record it:\n\n"
-            f'  [{name}]\n  value = 0\n  unit = "mm"\n  how = "how you measured it"'
+            f'  [{name}]\n  value = 0\n  unit = "mm"\n  how = "how you measured it"\n\n'
+            f"If there is nobody to ask right now, add `provisional = true` and put "
+            f"your best guess in. `nurb check` will keep reminding you."
         )
     book = _read(path)
     if name not in book:

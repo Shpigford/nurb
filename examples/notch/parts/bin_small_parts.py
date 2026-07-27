@@ -9,7 +9,6 @@ from system import (
     MIN_ITEM_DEPTH,
     OVERSHOOT,
     plate_width,
-    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -178,8 +177,8 @@ def bin_small_parts(
     # pass takes the front rim's own bevel down past that point, which gives the two
     # faces a real edge between them, and then the wrap builds.
     wrap = between(body, is_ramp, is_front)
-    polish = polish_edges(body, item_height).filter_by(
+    wanted = polish_edges(body, item_height).filter_by(
         lambda e: skin.get(e, 0) == 2 and e not in junction and e not in wrap
     )
-    body = chamfer(polish, chamfer_size)
-    return polish_pass(body, list(between(body, is_ramp, is_front)), chamfer_size)
+    body = chamfer(wanted, chamfer_size)
+    return polish(body, list(between(body, is_ramp, is_front)), chamfer_size)

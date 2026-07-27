@@ -17,11 +17,13 @@ One convention carries the whole system:
 from nurb import *
 
 @part
-def dispenser(width=80, height=120, wall=2, draft=False):
+def dispenser(width=80.0, height=120.0, wall=2.0, draft=False):
     body = Box(width, height, wall)
-    if not draft:
-        body = chamfer(body.edges().filter_by(Axis.Z), length=1)
-    return body
+    if draft:
+        return body
+    bed = body.bounding_box().min.Z
+    keep = body.edges().filter_by(lambda e: e.bounding_box().min.Z > bed)
+    return polish(body, keep, 1.0)
 ```
 
 **Keyword defaults are the parameters.** That single declaration feeds the agent, the
@@ -48,6 +50,7 @@ nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
 nurb rules           print the design doctrine
 nurb card [part]     regenerate a card's AUTO block
+nurb verify [part]   the doctrine's verification list, --strict-ish exit code
 nurb render [part]   write build/<part>.png, needs the render extra
 nurb export [part]   write STL/STEP/GLB into build/
 nurb extract         find duplication across sibling parts

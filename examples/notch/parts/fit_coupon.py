@@ -15,9 +15,9 @@ from system import (
 def fit_coupon(
     side_clearance=SIDE_CLEARANCE,
     bracket_count=1,
-    item_height=30,
-    item_depth=6,
-    label_size=6,
+    item_height=30.0,
+    item_depth=6.0,
+    label_size=6.0,
     label_relief=0.5,
     draft=False,
 ):

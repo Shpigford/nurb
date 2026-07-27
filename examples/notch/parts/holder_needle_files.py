@@ -10,7 +10,6 @@ from system import (
     MIN_ITEM_DEPTH,
     OVERSHOOT,
     plate_width,
-    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -172,7 +171,7 @@ def holder_needle_files(
     # The slab-front verticals are left out rather than vetoed. OCCT blends them even
     # though Fusion could not, and the only cost is two corner-triangle slivers, but the
     # print Josh signed off was built without them.
-    polish = polish_edges(body, item_height).filter_by(
+    wanted = polish_edges(body, item_height).filter_by(
         lambda e: e.bounding_box().min.Z > -EPS
     )
-    return polish_pass(body, polish, chamfer_size)
+    return polish(body, wanted, chamfer_size)

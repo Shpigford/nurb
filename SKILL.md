@@ -17,6 +17,7 @@ nurb rules            the doctrine, read this first
 nurb build [part]     build once, report size and timing
 nurb check [part]     the printability rules, --strict for CI
 nurb card [part]      regenerate a card's AUTO block
+nurb verify [part]    the doctrine's verification list: solids, flex, checks, card
 nurb render [part]    PNG into build/, so you can look at what you made
 nurb export [part]    STL/STEP/GLB into build/
 nurb extract          find duplication across parts

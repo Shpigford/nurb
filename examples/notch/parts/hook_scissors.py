@@ -7,7 +7,6 @@ from system import (
     EPS,
     MERGE_X,
     MIN_ITEM_DEPTH,
-    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -90,5 +89,5 @@ def hook_scissors(
 
     # Cosmetic, 1mm: everything exposed except the structural chamfers we just made
     # and the faces they landed on, which are concave and would sliver.
-    polish = polish_edges(body, item_height) - new_edges(pristine, combined=body)
-    return polish_pass(body, polish, chamfer_size)
+    wanted = polish_edges(body, item_height) - new_edges(pristine, combined=body)
+    return polish(body, wanted, chamfer_size)

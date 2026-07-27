@@ -113,6 +113,18 @@ def test_the_block_records_every_shipped_configuration():
     assert [line for line in lines if line.startswith("Variant hook_utility_long:")]
 
 
+def test_a_variant_line_records_disconnected_solids():
+    """A variant must not say `clean` while hiding a broken one-solid contract."""
+    from build123d import Box, Pos
+
+    base = Box(10, 10, 10)
+    split = base + Pos(20, 0, 0) * Box(10, 10, 10)
+    ctx = Context()
+    line = card.facts(base, ctx, [], variants=[("split", split, ctx, [])])[-1]
+    assert "2 solids" in line
+    assert "2000.0 mm3" in line
+
+
 # --- the AUTO block ----------------------------------------------------------
 
 FACTS = ["Size: 1 x 2 x 3 mm", "Checks: clean"]

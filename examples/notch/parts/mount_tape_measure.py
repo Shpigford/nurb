@@ -10,7 +10,6 @@ from system import (
     OVERSHOOT,
     channels,
     detent_dimples,
-    polish as polish_pass,
     polish_edges,
     span,
 )
@@ -108,5 +107,5 @@ def mount_tape_measure(
             and bb.max.X < slot_back + EPS
         )
 
-    polish = polish_edges(body, item_height).filter_by(lambda e: not slot_rim(e))
-    return polish_pass(body, polish, chamfer_size)
+    wanted = polish_edges(body, item_height).filter_by(lambda e: not slot_rim(e))
+    return polish(body, wanted, chamfer_size)
