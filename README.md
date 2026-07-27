@@ -34,8 +34,6 @@ nurb new dispenser         # a working part and its card
 nurb dev                   # http://127.0.0.1:7373, or the next free port
 ```
 
-(Working from a checkout of this repo, prefix commands with `uv run`.)
-
 Then tell your agent what you want and let it run `nurb rules`. That prints the
 design doctrine: the printability rules, the load-path patterns, the kernel
 traps, and what to verify before claiming a part works. It ships inside the
