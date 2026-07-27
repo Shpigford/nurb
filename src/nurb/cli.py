@@ -469,7 +469,7 @@ def cmd_dev(args):
     # Before the build, not after. Discovering the port is taken used to cost a full
     # rebuild of every part in the project first.
     port = _pick_port(args.port)
-    server = Server(root, port=port, draft=not args.polish)
+    server = Server(root, port=port, draft=args.draft)
     print(f"  building {root.name}/parts")
     server.rebuild_all()
     try:
@@ -499,7 +499,7 @@ def main(argv=None):
 
     s = sub.add_parser("dev", help="watch parts and serve the viewer")
     s.add_argument("--port", type=int, help=f"default: the first free port from {DEFAULT_PORT}")
-    s.add_argument("--polish", action="store_true", help="build full quality (slower)")
+    s.add_argument("--draft", action="store_true", help="start with the polish pass off (faster)")
     s.set_defaults(fn=cmd_dev)
 
     s = sub.add_parser("build", help="build parts once")

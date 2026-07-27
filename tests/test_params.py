@@ -120,6 +120,18 @@ def test_sending_nothing_back_is_how_a_part_returns_to_its_file(project):
     assert server.overrides == {}
 
 
+def test_the_polish_toggle_flips_draft_and_rebuilds_the_project(project, part_file):
+    """The viewer shows the polished part by default; the toggle is the escape hatch,
+    and flipping it rebuilds everything so no part is left in the old mode."""
+    server = Server(project)
+    assert server.draft is False
+    queued = run(server, {"type": "draft", "on": True})
+    assert server.draft is True
+    assert queued == [str(part_file)]
+    run(server, {"type": "draft", "on": False})
+    assert server.draft is False
+
+
 def test_a_message_naming_no_part_is_ignored(project):
     server = Server(project)
     for bad in [{"type": "params", "name": "../secrets", "values": {"count": 1}},

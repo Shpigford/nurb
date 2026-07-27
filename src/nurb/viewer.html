@@ -78,7 +78,7 @@
   #download { display: flex; gap: 6px; }
   #download button:disabled { color: var(--dim); cursor: default; }
   #section { display: flex; align-items: center; gap: 6px; }
-  #section .on { border-color: var(--accent); color: var(--accent); }
+  #section .on, #polishbtn.on { border-color: var(--accent); color: var(--accent); }
   #cut { display: none; align-items: center; gap: 4px;
          background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; }
   #cut.open { display: flex; }
@@ -208,6 +208,7 @@
       <button data-fmt="step">step</button>
     </div>
     <button id="reframe">reframe</button>
+    <button id="polishbtn" title="chamfer the exposed edges; off is the faster draft build">polish</button>
     <div id="section">
       <div id="cut">
         <button data-axis="x">x</button>
@@ -428,6 +429,21 @@ for (const b of document.querySelectorAll('#download button')) {
     }
   };
 }
+
+// On by default, matching the server: draft is a preview economy, and what the user
+// judges on screen should be the part that exports. Every rebuild while it is off is
+// a draft, so flipping it rebuilds the project in the new mode.
+let polished = true;
+function polishBadge() {
+  document.getElementById('polishbtn').classList.toggle('on', polished);
+}
+polishBadge();
+document.getElementById('polishbtn').onclick = () => {
+  if (!sock || sock.readyState !== WebSocket.OPEN) return;
+  polished = !polished;
+  polishBadge();
+  sock.send(JSON.stringify({ type: 'draft', on: !polished }));
+};
 
 document.getElementById('sectionbtn').onclick = ev => {
   cutting = !cutting;
@@ -902,6 +918,8 @@ function connect() {
     if (msg.type === 'sync') {
       project = msg.project || '';
       document.getElementById('project').textContent = project;
+      polished = !msg.draft;   // `nurb dev --draft` starts with the toggle off
+      polishBadge();
       checkUpdate(msg.version);
       parts.clear();
       msg.parts.forEach(p => parts.set(p.name, p));

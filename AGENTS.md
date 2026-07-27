@@ -8,6 +8,8 @@ A part is a Python function and its keyword defaults are its parameters. A proje
 
 **Ask before you model.** Anything the part has to fit (an opening, a bracket, the object it holds) is a question for the user: ask for those measurements in one batch, up front, using your harness's question tool if it has one, and record the answers in `measurements.toml` the way the doctrine describes. Anything that is taste rather than fit becomes a parameter instead of a question, because the viewer's sliders are how the user answers those. A guessed proportion costs one slider drag; a guessed clearance prints the wrong part.
 
+**Finish with the polish pass.** Chamfered edges are what make a print feel designed rather than extruded, so the doctrine's last step (`polish`, 1mm on exposed edges) stays in the part through every edit; the template `nurb new` emits already ends with it. Say so when you hand the part over, because the user can only ask for sharp edges if they know the chamfers are there on purpose. The viewer builds polished by default, and its polish button flips to the faster draft build.
+
 ```
 nurb rules            the doctrine, read this before designing
 nurb new <name>       create parts/<name>.py and its card

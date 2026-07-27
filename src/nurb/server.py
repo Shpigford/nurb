@@ -83,7 +83,7 @@ def _user_traceback(exc, path):
 
 
 class Server:
-    def __init__(self, root, port=7373, tolerance=0.1, draft=True):
+    def __init__(self, root, port=7373, tolerance=0.1, draft=False):
         self.root = pathlib.Path(root).resolve()
         self.port = port
         self.tolerance = tolerance
@@ -315,6 +315,7 @@ class Server:
                     "type": "sync",
                     "project": self.root.name,
                     "version": __version__,
+                    "draft": self.draft,
                     "parts": [self._wire(e) for e in self.state.values()],
                 }
             )
@@ -325,7 +326,8 @@ class Server:
             self.clients.discard(connection)
 
     async def command(self, raw):
-        """A message from the viewer: move the sliders, or write them to the file."""
+        """A message from the viewer: move the sliders, write them to the file, or
+        flip draft mode."""
         # No queue means no watcher and no rebuild loop, which is the server `nurb
         # render` stands up around a screenshot. It has no business writing to a part
         # file, and nothing would rebuild if it moved a slider.
@@ -335,6 +337,16 @@ class Server:
             msg = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             return
+
+        if msg.get("type") == "draft":
+            # The viewer's polish toggle. Draft is a preview economy, so the viewer
+            # shows the polished part unless someone turns it off, and the whole
+            # project rebuilds on a flip: a mode is not per-part.
+            self.draft = bool(msg.get("on"))
+            for target in builder.find_parts(self.root):
+                self.queue.put_nowait(str(target))
+            return
+
         name = msg.get("name")
         if not isinstance(name, str):
             return
