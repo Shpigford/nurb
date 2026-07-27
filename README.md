@@ -16,18 +16,13 @@ Install the nurb skill once and your agent reaches for nurb on its own whenever 
 npx skills add shpigford/nurb
 ```
 
-Or `nurb skill` prints the same skill file as plain markdown, for redirecting wherever your harness reads instructions:
-
-```bash
-mkdir -p ~/.claude/skills/nurb && nurb skill > ~/.claude/skills/nurb/SKILL.md   # Claude Code
-nurb skill >> AGENTS.md                                # or any harness that reads AGENTS.md
-```
+Or `nurb skill` prints the same skill file out for you.
 
 ## Make something
 
 Open your agent in the directory where the project should live, and talk:
 
-> Make me a phone stand: 15 degree lean, a slot for the charging cable, fits a phone 78mm wide.
+> Make an iPhone 17 Pro stand with a slot for the charging cable that runs underneath the stand
 
 The agent does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and starts `nurb dev` so you get a link to watch. Every save updates the browser without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `stl`, print. A `write` button saves your slider values back into the file's defaults, where the agent will see them.
 
