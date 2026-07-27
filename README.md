@@ -8,6 +8,15 @@ Agentic CAD for 3D printing. The user is a language model: your agent writes par
 uv tool install nurb       # or: pip install nurb
 ```
 
+## Teach your agent
+
+`nurb skill` prints a short skill file, so your agent reaches for nurb on its own whenever you ask for a printable part. It is plain markdown with a trigger description up top; drop it wherever your harness reads instructions:
+
+```bash
+mkdir -p ~/.claude/skills/nurb && nurb skill > ~/.claude/skills/nurb/SKILL.md   # Claude Code
+nurb skill >> AGENTS.md                                # or any harness that reads AGENTS.md
+```
+
 ## Make something
 
 ```bash
@@ -41,6 +50,7 @@ nurb dev            watch, rebuild, serve the viewer
 nurb build [part]   build once and report size
 nurb check [part]   run the printability rules, --strict for CI
 nurb rules          print the design doctrine
+nurb skill          print an agent skill file for your AI harness
 nurb card [part]    regenerate a card's AUTO block
 nurb verify [part]  run the doctrine's verification list
 nurb render [part]  write a PNG into build/

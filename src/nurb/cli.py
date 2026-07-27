@@ -363,6 +363,19 @@ def cmd_rules(args):
     print(doctrine.read_text(encoding="utf-8"))
 
 
+def cmd_skill(args):
+    """Print the agent skill, for whatever harness the user's model lives in.
+
+    Printed rather than installed, because every harness keeps its instructions
+    somewhere else and those paths change faster than this tool should chase:
+    redirect it to ~/.claude/skills/nurb/SKILL.md, a Cursor rule, or the end of an
+    AGENTS.md. The file is a shim that points at `nurb rules`, so an installed copy
+    does not go stale when the doctrine moves.
+    """
+    skill = pathlib.Path(__file__).parent / "skill.md"
+    print(skill.read_text(encoding="utf-8"))
+
+
 def cmd_card(args):
     from . import builder, card, checks
 
@@ -504,6 +517,9 @@ def main(argv=None):
 
     s = sub.add_parser("rules", help="print the design doctrine")
     s.set_defaults(fn=cmd_rules)
+
+    s = sub.add_parser("skill", help="print an agent skill file for your AI harness")
+    s.set_defaults(fn=cmd_skill)
 
     s = sub.add_parser("verify", help="run the doctrine's verification list")
     s.add_argument("part", nargs="?")

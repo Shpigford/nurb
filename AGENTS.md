@@ -1,7 +1,8 @@
 # nurb
 
 A part is a Python function and its keyword defaults are its parameters. A project is any
-directory with a `parts/` folder.
+directory with a `parts/` folder; there is no init step. You are the CAD operator: the
+user describes the part, you model it, they judge it in the browser `nurb dev` serves.
 
 **Run `nurb rules` first.** It prints the design doctrine: printability, load paths, the
 polish pass, the kernel traps, card discipline, and what to verify. This file stays thin
@@ -9,6 +10,7 @@ on purpose so there is one copy of that, in the package, which cannot drift.
 
 ```
 nurb rules            the doctrine, read this first
+nurb new <name>       create parts/<name>.py and its card
 nurb build [part]     build once, report size and timing
 nurb check [part]     the printability rules, --strict for CI
 nurb card [part]      regenerate a card's AUTO block
@@ -21,3 +23,5 @@ nurb dev              watch, rebuild, serve the viewer on :7373 or the next free
 
 Read `parts/<name>.md` before editing `parts/<name>.py`. Its `## Don't` section is what
 was tried and rejected, and it is the only place that records it.
+
+If `nurb` is not on PATH: `uv tool install nurb` or `pip install nurb`.

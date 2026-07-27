@@ -49,6 +49,7 @@ nurb dev             watch, rebuild, serve the viewer on :7373 or the next free 
 nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
 nurb rules           print the design doctrine
+nurb skill           print an agent skill file for any AI harness
 nurb card [part]     regenerate a card's AUTO block
 nurb verify [part]   the doctrine's verification list, --strict-ish exit code
 nurb render [part]   write build/<part>.png, needs the render extra

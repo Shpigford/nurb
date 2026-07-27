@@ -1065,6 +1065,17 @@ remains of "publish a configurator" is hosting without a running kernel, which i
 different problem and stays on the list; MakerWorld's customizer runs OpenSCAD, which
 build123d does not transpile to, so that path is closed rather than pending.
 
+### 2026-07-27 (later): `nurb skill`
+
+The discovery chain used to start inside a project: `nurb new` seeds AGENTS.md, the
+agent finds `nurb rules`. Before a project exists, an agent has never heard of nurb, so
+`nurb skill` prints an installable skill for whatever harness the user's model lives in:
+frontmatter trigger on top ("the user wants a printable part"), the agents.md shim
+underneath. Printed rather than installed, because every harness keeps instructions
+somewhere different and those paths change faster than this tool should chase. One body
+serves all three copies (packaged skill.md, repo SKILL.md, agents.md), and a test
+asserts the containment instead of hoping for it.
+
 ### 2026-07-26 (last): Phase 5
 
 Fourteen parts is the first piece of work here big enough that how it was done matters as
