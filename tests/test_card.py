@@ -202,8 +202,14 @@ def test_the_verdict_reads_as_a_summary():
 def test_the_real_cards_are_current():
     """A stale AUTO block is a card disagreeing with its own part.
 
-    This is the test that makes `nurb card` worth running: it builds all three example
-    parts and asserts the blocks already on disk are what the geometry produces now.
+    This is the test that makes `nurb card` worth running: it builds every example part
+    and asserts the blocks already on disk are what the geometry produces now.
+
+    A part that renders text is skipped, because its glyph outlines come from a system
+    font and so its volume, face count and sliver count are that machine's rather than
+    the part's. The calibration coupon is the only one, and it measures 2600.6mm3 with
+    88 faces here against 2601.0 and 83 on CI. The doctrine's "no text labels on parts"
+    rule now has a second reason behind it: text is not reproducible.
     """
     import pathlib
 
@@ -211,6 +217,8 @@ def test_the_real_cards_are_current():
 
     parts = pathlib.Path(__file__).parents[1] / "examples" / "notch" / "parts"
     for part in sorted(parts.glob("*.py")):
+        if "Text(" in part.read_text(encoding="utf-8"):
+            continue
         built = []
         for name, overrides, ctx in checks.configurations(part):
             shape, _, _ = builder.build(part, overrides=overrides or None, draft=False)

@@ -130,7 +130,13 @@ The polish pass runs last, after structure is finished.
    complaint. It shipped in this library once.
 5. **Select chamfer edges by filtering, never blanket-chamfer.** Mating edges, back-face
    edges, bottom-face edges and concave edges all have to be excluded.
-6. **No text labels on parts.** File naming carries catalog identity.
+6. **No text labels on parts.** File naming carries catalog identity. There is a second
+   reason beyond taste: a glyph's outline comes from a system font, so a part with text
+   on it builds to different geometry on a different machine. The calibration coupon,
+   which needs a label because four of them come off one plate looking identical, comes
+   out at 2600.6mm3 with 88 faces on one machine and 2601.0 with 83 on another. Nothing
+   about its fit moves, but its card cannot be asserted anywhere but where it was
+   written.
 7. **Consistency is the polish.** One chamfer size across a family is what makes it read
    as a designed system rather than a pile of prints.
 

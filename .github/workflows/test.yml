@@ -17,6 +17,10 @@ jobs:
 
       - run: uv sync --locked --all-extras --dev
 
+      # `nurb render` is the one command that wants a browser, and the extra installs
+      # playwright without one. Without this the render tests do not skip, they fail.
+      - run: uv run playwright install --with-deps chromium
+
       - run: uv run pytest -q
 
       # The rules against the real library, on a machine that is not the one they were

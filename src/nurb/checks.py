@@ -662,9 +662,11 @@ def min_wall(shape, ctx):
             near = min(reach)
             if thinnest is None or near < thinnest:
                 thinnest, spot = near, point
-    # Slack, because a card declaring the value it measured should not then fail on
-    # the last bit of a float.
-    if thinnest is None or thinnest >= ctx.min_wall - 1e-3:
+    # Slack, because a card declaring the value it measured should not then fail on the
+    # last bit of a float. One percent rather than a micron: the same coupon measures
+    # 0.500 against one OCCT build and 0.498 against another, so a threshold tight enough
+    # to see that difference turns a card into a claim about which machine wrote it.
+    if thinnest is None or thinnest >= ctx.min_wall * 0.99 - 1e-3:
         return []
     return [
         Finding(
