@@ -130,6 +130,17 @@ The polish pass runs last, after structure is finished.
    complaint. It shipped in this library once.
 5. **Select chamfer edges by filtering, never blanket-chamfer.** Mating edges, back-face
    edges, bottom-face edges and concave edges all have to be excluded.
+   **Filter for what must not be touched, then let the kernel refuse the rest.** A
+   chamfer call is all or nothing, so one edge that cannot land takes the whole pass
+   down, and the tempting response is to keep narrowing the set by hand until it builds.
+   That is how a part ends up with three chamfered edges out of ninety. Narrow the set
+   for reasons you can name, then chamfer greedily: try the set, and where it fails,
+   bisect and keep the halves that build. Refuse any batch that makes a face smaller
+   than the corner triangle three chamfers leave, about `0.866 * size ** 2`, since
+   anything smaller is chamfers colliding. Chamfer the original solid with the whole
+   accepted set each time, never the result of the last attempt: an edge belongs to the
+   shape it was selected from, and applying batches in sequence quietly re-chamfers the
+   first body and returns it.
 6. **No text labels on parts.** File naming carries catalog identity. There is a second
    reason beyond taste: a glyph's outline comes from a system font, so a part with text
    on it builds to different geometry on a different machine. The calibration coupon,

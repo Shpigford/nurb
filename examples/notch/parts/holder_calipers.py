@@ -9,6 +9,7 @@ from system import (
     EPS,
     MERGE_X,
     MIN_ITEM_DEPTH,
+    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -155,5 +156,18 @@ def holder_calipers(
     # A sloped edge reaching the bed used to need excluding here too, and now it does
     # not: `polish_edges` vetoes it, which is where the rest of the bottom-face rule
     # already lived.
-    polish = (polish_edges(body, item_height) - made).filter_by(lambda e: not blends(e))
-    return chamfer(polish, chamfer_size)
+    #
+    # The saddle floors do, and they are the one exclusion on this part that is fit
+    # rather than kernel. A ~40mm housing lands about 2.5mm of edge on a 7.66mm post,
+    # so a millimetre off each side of that floor is a quarter of the bearing surface
+    # on a part that is already marginal there. Mating geometry, and the doctrine's
+    # veto covers it.
+    def bearing(edge):
+        bb = edge.bounding_box()
+        return any(
+            abs(bb.min.Z - floor) < EPS and abs(bb.max.Z - floor) < EPS
+            for floor in (bed + saddle_height, bed + saddle_height - roller_relief)
+        )
+
+    polish = (polish_edges(body, item_height) - made).filter_by(lambda e: not bearing(e))
+    return polish_pass(body, polish, chamfer_size)

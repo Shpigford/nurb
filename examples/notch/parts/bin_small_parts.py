@@ -9,6 +9,7 @@ from system import (
     MIN_ITEM_DEPTH,
     OVERSHOOT,
     plate_width,
+    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -181,4 +182,4 @@ def bin_small_parts(
         lambda e: skin.get(e, 0) == 2 and e not in junction and e not in wrap
     )
     body = chamfer(polish, chamfer_size)
-    return chamfer(list(between(body, is_ramp, is_front)), chamfer_size)
+    return polish_pass(body, list(between(body, is_ramp, is_front)), chamfer_size)

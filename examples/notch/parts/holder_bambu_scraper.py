@@ -11,6 +11,7 @@ from system import (
     POCKET_WIDTH,
     channels,
     detent_dimples,
+    polish,
     polish_edges,
     span,
 )
@@ -131,4 +132,4 @@ def holder_bambu_scraper(
     # Cosmetic only. Nothing here is a loaded junction: the load runs from the sill
     # straight down through a monolithic block, so there is no concave weld to relieve
     # and no structural pass to exclude from the polish set.
-    return chamfer(polish_edges(body, item_height), chamfer_size)
+    return polish(body, polish_edges(body, item_height), chamfer_size)

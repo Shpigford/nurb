@@ -10,6 +10,7 @@ from system import (
     MIN_ITEM_DEPTH,
     OVERSHOOT,
     plate_width,
+    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -174,4 +175,4 @@ def holder_needle_files(
     polish = polish_edges(body, item_height).filter_by(
         lambda e: e.bounding_box().min.Z > -EPS
     )
-    return chamfer(polish, chamfer_size)
+    return polish_pass(body, polish, chamfer_size)

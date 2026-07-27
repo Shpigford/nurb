@@ -11,6 +11,7 @@ from system import (
     channels,
     detent_dimples,
     pitch,
+    polish as polish_pass,
 )
 
 # The bin is hardware, the same as the bracket is, so its dimensions come out of
@@ -222,4 +223,4 @@ def mount_akrobin_rail(
         )
     if not all(is_convex(edge, *faces) for edge, faces in polish):
         raise ValueError("the polish set contains a concave edge, which would wedge")
-    return chamfer([edge for edge, _ in polish], chamfer_size)
+    return polish_pass(body, [edge for edge, _ in polish], chamfer_size)

@@ -11,6 +11,7 @@ from system import (
     MIN_ITEM_DEPTH,
     OVERSHOOT,
     plate_width,
+    polish,
     polish_edges,
     slab,
     span,
@@ -120,4 +121,4 @@ def holder_pliers(
     # relief vetoes its own boundary through `polish_edges`, and the pocket walls are
     # inside corners for the same reason. The pocket rims are convex and do get polished,
     # which is what makes the mouths read as finished rather than sawn.
-    return chamfer(polish_edges(body, item_height), chamfer_size)
+    return polish(body, polish_edges(body, item_height), chamfer_size)

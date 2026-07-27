@@ -7,6 +7,7 @@ from system import (
     CHANNEL_DEPTH,
     EPS,
     FLOOR_X,
+    polish as polish_pass,
     polish_edges,
     slab,
     span,
@@ -138,4 +139,4 @@ def holder_filament_spool(
         return bb.max.X - bb.min.X > EPS and bb.max.Z - bb.min.Z > EPS
 
     polish = polish_edges(body, item_height).filter_by(lambda e: not excluded(e))
-    return chamfer(polish - new_edges(pristine, combined=body), chamfer_size)
+    return polish_pass(body, polish - new_edges(pristine, combined=body), chamfer_size)

@@ -13,6 +13,7 @@ from system import (
     channels,
     detent_dimples,
     plate_width,
+    polish,
     polish_edges,
     span,
 )
@@ -112,4 +113,4 @@ def holder_tall_tools(
     # Cosmetic, 1mm, and the only pass this part gets. The standing vetoes cover it: the
     # seven root segments where the block top meets the slab are concave, and so is
     # everything inside a pocket.
-    return chamfer(polish_edges(body, item_height), chamfer_size)
+    return polish(body, polish_edges(body, item_height), chamfer_size)
