@@ -1,33 +1,68 @@
 name: publish
 
-# Publishes to PyPI when a GitHub release is published. Trusted publishing: the
-# job proves its identity to PyPI over OIDC, so there is no long-lived token to
-# store, leak, or rotate. `uv publish` detects the exchange on its own inside
-# GitHub Actions.
+# Releasing is one act: merge a version bump. On every push to main this reads
+# `version` from pyproject.toml and, if that version has no tag yet, publishes
+# to PyPI over trusted publishing and creates the GitHub release with generated
+# notes. One workflow does both on purpose: a release created by a workflow's
+# own token does not trigger other workflows, so a separate publish-on-release
+# job would silently never run.
+#
+# The release is also the license record: FSL-1.1-MIT converts each version to
+# MIT two years after its release date, and the release is that date, published.
+#
+# The PyPI existence check makes the job idempotent: a version already uploaded
+# (0.1.0 went up by hand) still gets its tag and release, without a doomed
+# re-upload failing the run.
 #
 # One-time setup on PyPI (Manage project -> Publishing -> add a publisher):
 #   owner Shpigford, repository nurb, workflow publish.yml, environment pypi.
-#
-# Releasing is: bump `version` in pyproject.toml, merge, publish a GitHub
-# release whose tag matches (v0.2.0). PyPI refuses re-uploads of a version that
-# already exists, which is the guard against releasing without the bump.
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
 
 jobs:
   publish:
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
-      id-token: write # the OIDC exchange; this is the whole credential
-      contents: read
+      id-token: write # trusted publishing: the OIDC exchange is the credential
+      contents: write # the tag and the release
     steps:
       - uses: actions/checkout@v4
 
       - uses: astral-sh/setup-uv@v5
 
-      - run: uv build
+      - name: Read the version
+        id: version
+        run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
 
-      - run: uv publish
+      - name: Skip everything if this version is already tagged
+        id: tagged
+        run: |
+          if git ls-remote --exit-code --tags origin "v${{ steps.version.outputs.version }}" >/dev/null; then
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish to PyPI, unless this version is already there
+        if: steps.tagged.outputs.done != 'true'
+        run: |
+          if curl -sf "https://pypi.org/pypi/nurb/${{ steps.version.outputs.version }}/json" >/dev/null; then
+            echo "already on PyPI, tagging only"
+          else
+            uv build
+            uv publish
+          fi
+
+      - name: Create the release
+        if: steps.tagged.outputs.done != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.version.outputs.version }}" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --generate-notes
