@@ -1,0 +1,33 @@
+name: publish
+
+# Publishes to PyPI when a GitHub release is published. Trusted publishing: the
+# job proves its identity to PyPI over OIDC, so there is no long-lived token to
+# store, leak, or rotate. `uv publish` detects the exchange on its own inside
+# GitHub Actions.
+#
+# One-time setup on PyPI (Manage project -> Publishing -> add a publisher):
+#   owner Shpigford, repository nurb, workflow publish.yml, environment pypi.
+#
+# Releasing is: bump `version` in pyproject.toml, merge, publish a GitHub
+# release whose tag matches (v0.2.0). PyPI refuses re-uploads of a version that
+# already exists, which is the guard against releasing without the bump.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # the OIDC exchange; this is the whole credential
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - run: uv build
+
+      - run: uv publish

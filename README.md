@@ -9,14 +9,28 @@ without moving your camera.
 Built on [build123d](https://build123d.readthedocs.io) (OCCT), so parts are real
 B-rep solids with working chamfers, fillets, and STEP export.
 
+## Install
+
+nurb is on [PyPI](https://pypi.org/project/nurb/):
+
+```bash
+uv tool install nurb       # or: pip install nurb
+uvx nurb rules             # or run it without installing anything
+```
+
+There is nothing to install from npm. The registry blocks the unscoped name for
+everyone, and [`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb)
+exists only so `npx` users get pointed here instead of a 404.
+
 ## Try it
 
 ```bash
-uv run nurb new dispenser
-uv run nurb dev            # http://127.0.0.1:7373, or the next free port
+nurb new dispenser
+nurb dev                   # http://127.0.0.1:7373, or the next free port
 ```
 
-Edit `parts/dispenser.py` and watch it update.
+Edit `parts/dispenser.py` and watch it update. (Working from a checkout of this
+repo, prefix with `uv run`.)
 
 ## A part
 
