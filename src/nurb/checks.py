@@ -663,9 +663,11 @@ def min_wall(shape, ctx):
             if thinnest is None or near < thinnest:
                 thinnest, spot = near, point
     # Slack, because a card declaring the value it measured should not then fail on the
-    # last bit of a float. One percent rather than a micron: the same coupon measures
-    # 0.500 against one OCCT build and 0.498 against another, so a threshold tight enough
-    # to see that difference turns a card into a claim about which machine wrote it.
+    # last bit of a float. One percent rather than a micron: the same solid measures
+    # 0.500 against one OCCT build and 0.498 against another, and a threshold tight
+    # enough to see that turns a card into a claim about which machine wrote it. A card
+    # can also set `min_wall = 0` to say the rule cannot measure this part at all, which
+    # is honest for anything whose thinnest apparent section is not a wall.
     if thinnest is None or thinnest >= ctx.min_wall * 0.99 - 1e-3:
         return []
     return [

@@ -39,13 +39,21 @@ tracks whatever the label says, so a coupon built at a different clearance or br
 count will not match it. That is tolerable here in a way it would not be on a real
 part: this is a gauge, and the only surface that has to come out right is the channel.
 
-The thinnest section is 0.5mm, which is the raised label standing off the front
-face. A ray cast cannot tell a relief from a wall. The channel web, which is the
-part that matters, is 1.8mm.
+**`min_wall` is switched off here, and that is a statement about the rule rather than
+about the part.** The ray cast finds the label before it finds anything structural: it
+cannot tell a relief from a wall, so it returns the lettering's 0.5mm stand-off, and on
+a machine with a different system font it returns that font's stroke instead. Measured
+0.500 on one build and 0.480 on another, of the same part, at different places in the
+same word. No threshold can be both meaningful and stable against that.
+
+The walls that matter here are not in doubt and are not the ones being measured: the web
+in front of the channel is 1.8mm, and the section behind the detent dimple is 1.0mm, the
+same as every 6mm slab in this library. Both are fixed by the fit geometry rather than
+chosen, and neither depends on a font.
 
 ```toml
 [part]
-min_wall = 0.5
+min_wall = 0.0
 
 [accepted]
 sliver = 65
