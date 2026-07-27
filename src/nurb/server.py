@@ -9,6 +9,7 @@ import collections
 import json
 import pathlib
 import secrets
+import threading
 import traceback
 
 from watchdog.events import FileSystemEventHandler
@@ -17,10 +18,55 @@ from websockets.asyncio.server import serve
 from websockets.http11 import Response
 from websockets.datastructures import Headers
 
-from . import builder
+from . import __version__, builder
 
 VIEWER = pathlib.Path(__file__).parent / "viewer.html"
 VENDOR = (pathlib.Path(__file__).parent / "vendor").resolve()
+
+
+def _newer(current, latest):
+    """Is `latest` a later X.Y.Z than `current`? Anything unparseable is not newer."""
+    try:
+        return tuple(map(int, latest.split("."))) > tuple(map(int, current.split(".")))
+    except ValueError:
+        return False
+
+
+def _latest_on_pypi():
+    """The newest nurb on PyPI, asked at most once a day, or None.
+
+    Offline, slow, or an odd response all mean None: the check is a nudge, never a
+    requirement.
+    """
+    import time
+    import urllib.request
+
+    cache = pathlib.Path.home() / ".cache" / "nurb" / "latest"
+    try:
+        stamp, cached = cache.read_text().split()
+        if time.time() - float(stamp) < 86400:
+            return cached
+    except (OSError, ValueError):
+        pass
+    try:
+        with urllib.request.urlopen("https://pypi.org/pypi/nurb/json", timeout=3) as resp:
+            latest = json.load(resp)["info"]["version"]
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(f"{time.time()} {latest}")
+        return latest
+    except Exception:
+        return None
+
+
+def _update_nudge():
+    """One line on `nurb dev` stdout when PyPI has a newer release.
+
+    A thread because the primary user is an agent reading stdout, and startup must
+    never wait on the network to say so.
+    """
+    latest = _latest_on_pypi()
+    if latest and _newer(__version__, latest):
+        print(f"  nurb {__version__} ({latest} available: uv tool upgrade nurb)", flush=True)
 
 
 def _user_traceback(exc, path):
@@ -268,6 +314,7 @@ class Server:
                 {
                     "type": "sync",
                     "project": self.root.name,
+                    "version": __version__,
                     "parts": [self._wire(e) for e in self.state.values()],
                 }
             )
@@ -445,4 +492,5 @@ class Server:
             self.ws, "127.0.0.1", self.port, process_request=self.http, origins=self.origins
         ):
             print(f"\n  nurb  http://127.0.0.1:{self.port}\n", flush=True)
+            threading.Thread(target=_update_nudge, daemon=True).start()
             await asyncio.Future()

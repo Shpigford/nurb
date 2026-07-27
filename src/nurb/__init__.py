@@ -9,6 +9,8 @@ A part file needs one import:
         return Box(width, height, wall)
 """
 
+import importlib.metadata as _metadata
+
 import build123d as _b3d
 from build123d import *  # noqa: F401,F403  -- geometry vocabulary
 
@@ -33,4 +35,8 @@ __all__ = [
     "measured",
     "polish",
 ]
-__version__ = "0.1.0"
+# The version lives in pyproject.toml and nowhere else; a second copy here would drift.
+try:
+    __version__ = _metadata.version("nurb")
+except _metadata.PackageNotFoundError:  # a source tree on PYTHONPATH, never installed
+    __version__ = "0.0.0"

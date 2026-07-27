@@ -177,10 +177,7 @@ as though every file will be read by a stranger.
   what to do, never just "invalid input".
 - **The doctrine ships in the package**, exposed via `nurb rules`. One source of
   truth. `SKILL.md` and `AGENTS.md` are thin shims that point at it, never copies.
-- **The viewer works offline** and has to stay that way. three.js is vendored in
-  `src/nurb/vendor/three`, because a CAD tool that needs a CDN is broken on a plane and
-  `nurb render` drives the same page. Anything new the viewer imports gets vendored
-  too, and `pyproject.toml`'s `source-include` has to carry it.
+- **The viewer works offline.** Everything it *needs* is local: three.js is vendored in `src/nurb/vendor/three`, because a CAD tool that needs a CDN is broken on a plane, and `nurb render` drives the same page. Anything new the viewer imports gets vendored too, and `pyproject.toml`'s `source-include` has to carry it. Network is allowed for nudges that degrade silently, like the daily PyPI update check, which also stays out of headless renders.
 - **Examples are tests.** `examples/` holds real parts that the suite builds, so a
   broken example is a red build rather than a stale README.
 

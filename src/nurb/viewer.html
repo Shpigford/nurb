@@ -110,6 +110,15 @@
   #hud, #checks { transition: opacity .12s .25s; }
   body.stale #hud, body.stale #checks { opacity: .32; }
 
+  #foot { margin-top: auto; padding: 9px 12px; border-top: 1px solid var(--line);
+          display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+          color: var(--dim); font-size: 10px; }
+  #version { white-space: nowrap; }
+  #version.update { color: var(--accent); }
+  #links { margin-left: auto; display: flex; gap: 10px; }
+  #foot a { color: var(--dim); text-decoration: none; }
+  #foot a:hover { color: var(--text); }
+
   /* ---- parameters ---- */
   #params { flex: 1 1 auto; min-height: 0; overflow-y: auto; border-top: 1px solid var(--line); padding: 0 12px 12px; }
   #params.empty { display: none; }
@@ -183,6 +192,13 @@
   <h1><b>nurb</b><span id="project"></span><span id="conn">connecting</span></h1>
   <div id="list"></div>
   <div id="params" class="empty"></div>
+  <div id="foot">
+    <span id="version"></span>
+    <span id="links">
+      <a href="https://github.com/Shpigford/nurb" target="_blank" rel="noreferrer">github</a>
+      <a href="https://github.com/Shpigford/nurb/issues/new" target="_blank" rel="noreferrer">send feedback</a>
+    </span>
+  </div>
 </aside>
 <main>
   <div id="empty">no parts yet. nurb new &lt;name&gt;</div>
@@ -829,6 +845,44 @@ function flash(name) {
   setTimeout(() => dot.classList.remove('busy'), 400);
 }
 
+// ---- update check ----
+// The server says what is installed; PyPI says what is newest, asked at most once a
+// day (localStorage remembers) and never in a headless render. Offline, the fetch
+// fails silently and the badge is just the installed version.
+function versionBadge(installed, latest) {
+  const el = document.getElementById('version');
+  if (!installed) return;
+  if (latest && newerVersion(installed, latest)) {
+    el.textContent = `v${installed} → ${latest}`;
+    el.title = `${latest} is out: uv tool upgrade nurb`;
+    el.classList.add('update');
+  } else {
+    el.textContent = `v${installed}`;
+  }
+}
+
+function newerVersion(a, b) {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pb[i] || 0) - (pa[i] || 0);
+    if (d) return d > 0;
+  }
+  return false;
+}
+
+async function checkUpdate(installed) {
+  versionBadge(installed, null);
+  if (bare) return;
+  const cached = JSON.parse(localStorage.getItem('nurb-latest') || 'null');
+  if (cached && Date.now() - cached.at < 86400e3) return versionBadge(installed, cached.version);
+  try {
+    const resp = await fetch('https://pypi.org/pypi/nurb/json');
+    const latest = (await resp.json()).info.version;
+    localStorage.setItem('nurb-latest', JSON.stringify({ at: Date.now(), version: latest }));
+    versionBadge(installed, latest);
+  } catch { /* offline; the badge already shows the installed version */ }
+}
+
 // ---- socket ----
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -848,6 +902,7 @@ function connect() {
     if (msg.type === 'sync') {
       project = msg.project || '';
       document.getElementById('project').textContent = project;
+      checkUpdate(msg.version);
       parts.clear();
       msg.parts.forEach(p => parts.set(p.name, p));
       if (!current && parts.has(want)) current = want;

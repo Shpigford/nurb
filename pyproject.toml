@@ -23,6 +23,10 @@ dependencies = [
     "websockets>=16.1.1",
 ]
 
+[project.urls]
+Repository = "https://github.com/Shpigford/nurb"
+Issues = "https://github.com/Shpigford/nurb/issues"
+
 [project.optional-dependencies]
 # `nurb render` screenshots the viewer, which means a browser. Optional because it is
 # the only command that needs one and the download is larger than everything else here.

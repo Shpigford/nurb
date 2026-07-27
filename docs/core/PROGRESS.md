@@ -1021,7 +1021,9 @@ and now has evidence.
 
 ## Session log
 
-### 2026-07-27: The README's "not built yet" list
+### 2026-07-27: The viewer says what version it is, and whether PyPI has a newer one
+
+`__version__` now comes from `importlib.metadata`, so `pyproject.toml` is the only place the number lives; the old second copy in `__init__.py` was already one release away from drifting. The dev server sends the installed version in the sync message and the viewer shows it in a sidebar footer next to github and send-feedback links. Once a day (localStorage remembers) the viewer asks `pypi.org/pypi/nurb/json`, which sends `Access-Control-Allow-Origin: *`, and a newer release turns the badge into `v0.1.0 → 0.2.0` in the accent color with the upgrade command in the tooltip. The server does the same check on `nurb dev` startup, in a daemon thread with a one-day disk cache under `~/.cache/nurb/`, and prints one stdout line, because the primary user is an agent that reads stdout and never opens the page. Every failure path is silence: offline, slow, or odd response, the badge is just the version. `?bare=1` renders never fetch, so `nurb render` in CI stays off the network, and the check lives in `Server.run()`, which `nurb render`'s `_host` does not call. The "viewer works offline" rule in CLAUDE.md was reworded from a ban on network to what it always meant: everything the viewer *needs* is vendored, and a nudge that degrades silently is allowed.
 
 Three items, and the middle one produced this session's finding.
 
