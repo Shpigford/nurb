@@ -164,6 +164,22 @@ def test_bed_bevel_ignores_a_chamfer_anywhere_else():
     assert only(chamfer(box.edges().group_by(Axis.Z)[-1], 2), "bed_bevel") == []
 
 
+def test_bed_bevel_leaves_a_corbel_landing_on_the_plate_alone():
+    """The doctrine's own 45 degree underside is not polish, however tilted it is.
+
+    Reach is what separates them, and a chamfer's reach is its size exactly: 1, 2 and
+    3mm for bottom chamfers of those sizes, against 4.29mm for the corbel that made this
+    fire at `holder_calipers`. Width does not: 3.25mm against 3.43mm.
+    """
+    body = Pos(0, 0, 10) * Box(20, 20, 20)  # standing on the plate at z=0
+    wedge = Plane.XZ * Polygon((10, 0), (10, 10), (0, 0), align=None)
+    post = body - extrude(wedge, 30, both=True)  # a 45 degree underside reaching 10mm
+    assert only(post, "bed_bevel") == []
+    # The same face against a part whose polish is 4mm, where 10mm of reach is back
+    # inside chamfer territory. The rule is about scale, so it has to move with it.
+    assert len(only(post, "bed_bevel", Context(cosmetic_chamfer=4.0))) == 1
+
+
 def test_concave_cosmetic_catches_polish_in_an_inside_corner():
     from build123d import chamfer
 
@@ -172,6 +188,22 @@ def test_concave_cosmetic_catches_polish_in_an_inside_corner():
              if abs(e.center().X - 1) < 1e-6 and abs(e.center().Z - 1) < 1e-6]
     assert len(inner) == 1
     assert len(only(chamfer(inner, 1), "concave_cosmetic")) == 1
+
+
+def test_concave_cosmetic_leaves_a_deliberate_structural_chamfer_alone():
+    """The 2mm relief the doctrine prescribes for thin material is not polish.
+
+    Same corner, same rule, twice the chamfer. This fired six times at
+    `mount_tape_measure` and again at `mount_akrobin_rail`, at the exact geometry the
+    rule's own message tells you to use, because the limit was twice the strip a polish
+    chamfer leaves rather than about equal to it. Both parts print.
+    """
+    from build123d import chamfer
+
+    shape = Box(20, 20, 20) - Pos(6, 0, 6) * Box(10, 30, 10)
+    inner = [e for e in shape.edges()
+             if abs(e.center().X - 1) < 1e-6 and abs(e.center().Z - 1) < 1e-6]
+    assert only(chamfer(inner, 2), "concave_cosmetic") == []
 
 
 def test_concave_cosmetic_ignores_polish_on_an_outside_corner():

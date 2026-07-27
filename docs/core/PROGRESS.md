@@ -1,12 +1,22 @@
 # nurb core progress
 
-## Status: Phases 1 through 4 complete. Phase 5 next.
+## Status: Phases 1 through 5 complete.
 
-**The kernel question is answered: OCCT builds both parts and both match the Fusion
-originals dimension for dimension.** The architecture stands. `nurb check` now runs
-eight rules against them, clean, and has already caught one real defect in what
-Phase 1 shipped. The agent surface is in, and the viewer has sliders, a section view
-and no network dependency.
+**The whole Notch catalog is in nurb.** Sixteen catalog entries out of thirteen part
+files and nineteen shipped configurations, every one a single solid matching its Fusion
+bounding box, every one clean under `nurb check --strict`, every export watertight. The
+fit line each catalog card recorded by hand is an assertion that runs, and it is able to
+fail: a deliberate 0.1mm per interval pitch error is in the suite and gets caught.
+
+**The kernel question was answered in Phase 1 and thirteen parts have not moved it.**
+The architecture stands. What thirteen parts did move is the rules: two of the eight
+fired at geometry the doctrine prescribes, and the shared polish selector had a gap in
+one of its three vetoes. All three were found by a part rather than by review, which is
+the argument for a port being a calibration set and not just a corpus. See Findings
+under Phase 5.
+
+The agent surface is in, and the viewer has sliders, a section view and no network
+dependency.
 
 **The loop is about 20x faster than Phase 1 recorded, and the reason invalidates that
 finding rather than improving on it.** What Phase 1 measured as tessellation was almost
@@ -656,18 +666,216 @@ something.
 ---
 
 ### Phase 5: Full port, extract, tests
-**Status:** Not Started
+**Status:** Complete (2026-07-26)
 
-Remaining 14 Notch parts, `nurb extract`, pytest suite, CI.
+The whole Notch catalog in nurb, with the fit line every card recorded by hand turned
+into an assertion that runs.
 
 #### Tasks completed
-- (none yet)
+- [x] Ported the remaining 14 catalog parts
+- [x] Collapsed the four catalog clones into variants
+- [x] `nurb extract`, and then the extraction it found
+- [x] pytest over every part: pitch, span, floor count, one solid, baselines
+- [x] Parametrized flex test, upward, over every part
+- [x] Check baselines asserted for every configuration
+- [x] CI workflow
+- [x] 171 tests, up from 105
+
+#### Results against the success criteria
+
+| Criterion | Result |
+|---|---|
+| All 16 parts build | 19 configurations out of 13 files, every one a single solid |
+| `pytest` green across the library | 171 passed |
+| Fit assertions catch a deliberately introduced pitch error | Yes, and the test that proves it is in the suite: a 0.1mm per interval error is reported by name |
+| Exports match the Fusion STLs dimensionally | Every configuration matches its catalog card's bounding box to 0.05mm, which is the card's own rounding. The STLs live in the Fusion project and not in this repo, so the recorded box is the comparison. |
+
+Every one of the 19 exports is watertight and a single body, with a genus that matches
+the design rather than a constant: 5 for the pliers holder's five through-pockets, 1 for
+the tape mount's slot, 0 for everything else. Phase 1's "euler 2" check was right for
+three parts that happen to have no holes and wrong as a general test.
+
+Two volumes could be checked against Fusion directly and both reconcile. The pliers
+holder is 39.98cm3 against a recorded 40. The AkroBin rail is 60.29 against 60.1, and
+the difference is entirely the channel side clearance, which was 0.5mm/side when Fusion
+measured and is 0.25 now; the same arithmetic recovers the card's 1798mm2 of pad area to
+the decimal.
+
+**Three sliver baselines came out above what the Fusion cards recorded, and in each case
+the port is right and the original was under-polished.** `shelf_basic` earns 6 rather
+than 2 because Fusion's `Chamfer_Edges` was a hand-picked list that missed the lip's two
+top ends; nurb selects by filter and finishes them. `holder_pliers` earns 4 rather than 2
+because Fusion excluded the slab-front verticals to work around a selector limitation
+OCCT does not have. Both were confirmed by reproducing the Fusion number on demand: put
+the missed edges back out of the polish set and the count drops to exactly what the card
+says. That is the difference between a port that disagrees and a port that knows why.
 
 #### Decisions made
-- (none yet)
 
-#### Blockers
-- Depends on Phase 1 establishing the part patterns
+- **Four of the sixteen catalog entries are variants, not files.** `Hook - Utility - 1x`
+  and `Hook - Utility Long - 1x` are the scissors hook at a wider cradle and a longer
+  reach; `Shelf - Gridfinity 2x1` and `3x2` are the archetype at another grid, and the
+  existing part already built both. A catalog entry is a name, some overrides and its
+  own baselines, so that is what a variant is: a `[variants.<name>]` block in the card,
+  which `build`, `check`, `card` and `export` all walk exactly as they walk the part's
+  own defaults. The alternative was four near-copies of two functions, free to drift.
+  Sixteen catalog entries now come out of twelve part files.
+
+  The accepted baselines had to be per variant rather than per part, which is the
+  detail that makes the shape right: the gridfinity sliver count is
+  `4 * grid_x * grid_y + 2`, so 18, 10 and 26 across the family. A single number on the
+  part would have been wrong for two thirds of it.
+
+- **`nurb extract` reports and does not rewrite.** Lifting a run of statements into a
+  shared function means choosing which of its free names become parameters and what the
+  function is called, and both are judgements about what the thing *is*. The expensive
+  part is noticing, and noticing is mechanical: it matches statement runs across part
+  files up to alpha-equivalence, canonicalizing the names a part binds while leaving
+  imported names alone, so two parts that wrote the same construction with different
+  local names match and `Box(a, b, c)` and `Pos(a, b, c)` do not.
+
+  Run over the finished port it found one thing worth having, and found it in six
+  files at once: the plate, its channels and its dimples, written out character for
+  character. That is `system.slab()` now, with `plate_width()` beside it. Three parts
+  do not use it, and they are the test of whether the extraction was real rather than
+  convenient: the scraper holder decouples its width from the bracket run, the AkroBin
+  rail carries a rib above z=0 and steps its channels, and the calibration coupon
+  sweeps the clearance. A helper with a flag for each of those would have been the
+  wrong abstraction wearing the right name.
+
+  **The extraction is provably geometry-neutral.** Every configuration was fingerprinted
+  by bounding box, volume, face count, solid count and sliver count before and after,
+  and the two are identical. That is what makes a refactor of thirteen part files
+  something other than an act of faith.
+
+  What it reports now is 2-statement runs, all of them idiom rather than geometry: `if
+  draft: return body`, a `mid = span(...)` followed by a list comprehension. Those are
+  the shape of the part contract, not duplication, and lifting them would make every
+  part harder to read to save nothing.
+
+- **Notch's bins are hardware, so they went in `measurements.toml`.** The AkroBin rail's
+  8.75mm standoff is the leg thickness plus the slot depth, both off Josh's bins with
+  calipers, and neither can be derived. The file was for the bracket; it is for anything
+  the library has to mate with.
+
+#### Findings
+
+##### 1. A structural chamfer goes across a weld, not around it
+
+The two utility hooks want a 20mm cradle on a single 25.16mm bracket, which leaves
+2.58mm of slab standing either side of the arm. Phase 1's hook chamfered the whole
+arm-to-slab junction, all three edges of it, and that set cannot build at any cradle
+wider than 17mm: the 3mm band has to land on that strip, and then the slab's own front
+corner needs another 1mm of it for the polish pass.
+
+Measured, at `chamfer_size` 1.0: builds with 1.08mm of strip left, fails with 1.00mm.
+Flush, with no strip at all, builds again. So the rule is `margin > chamfer_size` or
+`margin == 0`, and the part raises rather than letting OCCT say it.
+
+The fix is not a smaller chamfer. Relieving only the full-width edge where the arm's
+top meets the slab keeps the family's 3mm at every cradle width, holds the sliver
+baseline at 6, and leaves the slab's exposed corners polished. The two vertical legs
+carry almost none of the moment; they were in the set because in Fusion selecting "the
+junction" picks up the whole chain.
+
+Two wrong answers came first, and both build:
+
+1. `structural_chamfer` 1.5 on the wide variants. It builds and `nurb check` fires
+   `concave_cosmetic` at it, because a 1.5mm facet in an inside corner is close enough
+   to polish that the rule cannot tell, which is the rule correctly noticing that a
+   1.5mm relief is barely a relief.
+2. Leaving the slab's front verticals out of the polish pass instead. Also builds, and
+   trades a chamfer on the most-handled exposed edge on the part for one on an inside
+   corner nobody sees. The doctrine ranks those the other way round.
+
+##### 2. `concave_cosmetic` was firing at the geometry its own message prescribes
+
+The rule looks for a strip about as wide as the polish pass makes whose long edges are
+all concave. Its limit was **twice** that width, and twice is what a 2mm structural
+chamfer measures: 2.6mm for the chamfer face itself, 1.9mm for the wall left standing
+between two of them. So it fired six times at `mount_tape_measure` and again at
+`mount_akrobin_rail`, both of which use a 2mm relief for the reason the doctrine gives,
+because the material is 2mm thick. Two shipped, printed parts, told they had polish in
+an inside corner at exactly the spot where they had put a deliberate relief.
+
+Phase 2's own bar catches this: a rule that fires at a part which prints fine is a bug
+in the rule. The fix is that a relief is *bigger* than polish, and being bigger is the
+only thing that distinguishes the two, so the window is now the strip a polish chamfer
+leaves plus 15% rather than twice it.
+
+It cost a true positive: a 1mm chamfer in a concave junction shallower than about 105
+degrees now leaves a strip wide enough to read as deliberate. That is the right way
+round to be wrong. `polish_edges` vetoes concave edges outright, so this rule is the
+backstop for a part that rolls its own selector, and a backstop that cries wolf at
+correct geometry gets switched off.
+
+Found twice independently, once here and once by the agent porting the tape mount,
+which is the useful part: the port is a second opinion on Phase 2's calibration, and it
+had only three parts to calibrate against.
+
+##### 3. The one-edge form of the clearance rule, which the doctrine was missing
+
+The kernel rule everyone knows on this project is that two chamfered convex edges need
+more than `2 * chamfer_size` of face between them. Three parts hit the other half of it
+independently and measured the same threshold: **one chamfered edge needs more than
+`chamfer_size`**, and it bites wherever a polished edge sits beside something that is
+never polished. A concave junction. A structural chamfer's toe. A pocket wall.
+
+- the hook's slab strip beside the arm: builds at 1.08mm, fails at 1.00mm
+- the pliers holder's pocket back wall against the 3mm relief: `structural_chamfer`
+  builds at 0.99 and fails at 1.00 with 1.0mm of face
+- the tall-tools slab reveal above the block: builds at 2mm, fails at 1mm
+
+It looks like plenty of room, which is why all three found it the hard way. It is in
+the doctrine now.
+
+##### 4. A part can be wrong in a way every number agrees with
+
+Porting the needle-file holder, an agent drew the keyhole throat profile clockwise.
+`Polygon` takes its face normal from the winding and `extrude` follows it, so the cut
+went downward, landed a millimetre under the part and removed nothing. What came out was
+four plain round holes with no throats and no flared mouths: a snap-fit clip with
+nothing to snap.
+
+Bounding box, solid count, sliver count, channel fit and `nurb check` were all exactly
+what a correct part reports. What caught it was measuring one seat: the cylindrical face
+came back 65.97mm2, a full 360 degrees, and a seat with a throat cut into it can only be
+248.
+
+The doctrine already says "it built" is not verification, and this is the sharpest case
+of it in the project so far. Every check that exists passed. The thing that failed was
+the one feature the part is for.
+
+##### 5. `bed_bevel` could not tell a corbel from a chamfer
+
+The rule looks for a face touching the build plate that is neither flat on it nor square
+to it, on the reasoning that such a face can only be a bevel. The calipers holder
+disproved that: the doctrine's own corbel is a 45 degree underside, and where it lands on
+the plate rather than dying into the body it is exactly such a face. 46mm2 of prescribed
+structure, reported as polish.
+
+Reach separates them and width does not. A chamfer's reach *is* its size, measured at
+1.00, 2.00 and 3.00mm for bottom chamfers of those sizes, against 4.29mm for the corbel.
+The same faces measure 3.25mm and 3.43mm wide, which is a 0.18mm gap and not a rule.
+
+The same part turned up a real defect on the way, which is the reason to keep the rule
+rather than weaken it: the 1mm polish on the corbel's own side edges ran down to the
+plate and laid two 9.3mm2 tilted facets into the first layer. `polish_edges` vetoed an
+edge lying in the bottom face and allowed a vertical corner that merely ends there, which
+is right, and let the case in between through. It vetoes that now.
+
+##### 6. The second way a chamfer batch dies, where bisecting does not help
+
+Every chamfer failure this project had seen was a clearance problem, and the standing
+advice is to bisect the set. The parts bin found one that is not: an edge whose end lands
+on a vertex with four faces around it but only three edges between them. Two of those
+faces touch at a point without sharing an edge, and OCCT has no cap for that corner.
+
+It fails alone, on a clean body, at every length from 2.4mm down to 0.05mm. So both of
+the usual moves report nothing: bisecting isolates a single edge that still fails, and
+"try a smaller length" never reaches a length that works. The fix is to chamfer in two
+passes, letting the first give those two faces a real edge to meet along, then reselect
+from the result.
 
 ---
 
@@ -782,6 +990,37 @@ and now has evidence.
 ---
 
 ## Session log
+
+### 2026-07-26 (last): Phase 5
+
+Fourteen parts is the first piece of work here big enough that how it was done matters as
+much as what came out. It was done as ten parallel ports, one agent per part, each given
+the Fusion card, the datums, the verified build123d facts, and a verification list it had
+to answer in full: bbox against the card, one solid, floors on pitch, flex upward,
+predict the sliver count *before* measuring it, run the checks, render it and look.
+
+Two things about that are worth keeping.
+
+**Predicting the baseline first is what turned the port into a test.** Six of the ten
+predictions were exactly right, and the interesting ones are the four that were not.
+`shelf_basic` predicted 6 against a card that said 2, went and reproduced the 2 by
+putting the missed edges back, and so could say which was wrong rather than guessing.
+`bin_small_parts` predicted 2 and measured 0, and the reconciliation is a fact about
+chamfer ordering nobody would have gone looking for. A number written down after the
+fact would have taught none of that.
+
+**Every rule bug in this phase was found by a part, not by review.** `concave_cosmetic`
+firing at a prescribed 2mm relief, `bed_bevel` firing at a prescribed corbel, the
+bottom-face veto's gap, two new kernel rules. Phase 2 calibrated those rules against
+three parts and they were clean; thirteen parts is a different instrument. The general
+version: a checker's false-positive rate is a function of how much geometry it has seen,
+and the only way to find out is more geometry.
+
+The thing that nearly went wrong is worth recording too. Everything the runtime measures
+about the needle-file holder was correct while the part had no working clip in it, because
+a profile drawn clockwise extruded the wrong way and cut air. Bounding box, solid count,
+sliver count, channel fit, all eight rules: green. What caught it was measuring a single
+face and finding 360 degrees where 248 belonged.
 
 ### 2026-07-26 (later still): Phase 4
 
@@ -931,6 +1170,32 @@ examples/notch/parts/*.py         chamfer sizes are floats, so their sliders are
 tests/test_edit.py                new  what it writes, and what it refuses to touch
 tests/test_params.py              new  signature to payload to override and back
 README.md, CLAUDE.md              three.js redistribution, layout, current state
+```
+
+Phase 5:
+
+```
+examples/notch/parts/            10 new parts and their cards: shelf_basic,
+                                 holder_pliers, holder_tall_tools, holder_calipers,
+                                 holder_bambu_scraper, holder_needle_files,
+                                 holder_filament_spool, mount_tape_measure,
+                                 mount_akrobin_rail, bin_small_parts
+examples/notch/system.py         slab() and plate_width(), extracted from six parts;
+                                 polish_edges also vetoes a sloped edge reaching the bed
+examples/notch/measurements.toml the AkroBin's three measured dimensions
+src/nurb/extract.py              new  duplication across parts, up to alpha-equivalence
+src/nurb/checks.py               configurations() reads a card's variants; a relief is
+                                 not polish (concave_cosmetic); a corbel is not a
+                                 chamfer (bed_bevel)
+src/nurb/card.py                 the AUTO block carries a line per variant
+src/nurb/cli.py                  build/check/card/export walk variants; extract
+src/nurb/doctrine.md             variants; the one-edge clearance rule; the four-faces
+                                 three-edges chamfer failure
+tests/test_notch_fit.py          new  the hanging interface, and a pitch error it catches
+tests/test_extract.py            new  alpha-equivalence, and what must not match
+.github/workflows/test.yml       new  pytest, then nurb check --strict
+hook_scissors, shelf_gridfinity  the structural chamfer goes across the weld; the other
+                                 four catalog entries arrive as their variants
 ```
 
 ---

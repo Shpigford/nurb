@@ -64,18 +64,36 @@ def _resolve(root, name):
     return match
 
 
+def _configs(path):
+    """A part's configurations: itself, then whatever variants its card declares.
+
+    Every command that walks parts walks these instead, so a variant is checked,
+    exported and reported exactly like a part. A card that will not parse comes back
+    as an empty list with the reason printed, which is how the per-part commands
+    already report a part that will not build.
+    """
+    from . import checks
+
+    try:
+        return checks.configurations(path)
+    except Exception as exc:
+        print(f"  {path.stem}: {type(exc).__name__}: {exc}")
+        return []
+
+
 def cmd_build(args):
     from . import builder
 
     root = project_root()
     for path in _resolve(root, args.part):
-        try:
-            shape, _, ms = builder.build(path, draft=args.draft)
-            info = builder.stats(shape)
-            bbox = " x ".join(str(v) for v in info["bbox"])
-            print(f"  {path.stem}: {bbox} mm  {ms:.0f}ms")
-        except Exception as exc:
-            print(f"  {path.stem}: {type(exc).__name__}: {exc}")
+        for name, overrides, _ in _configs(path):
+            try:
+                shape, _, ms = builder.build(path, overrides=overrides or None, draft=args.draft)
+                info = builder.stats(shape)
+                bbox = " x ".join(str(v) for v in info["bbox"])
+                print(f"  {name}: {bbox} mm  {ms:.0f}ms")
+            except Exception as exc:
+                print(f"  {name}: {type(exc).__name__}: {exc}")
 
 
 def cmd_check(args):
@@ -84,21 +102,25 @@ def cmd_check(args):
     root = project_root()
     worst = 0
     for path in _resolve(root, args.part):
-        try:
-            shape, _, _ = builder.build(path, draft=False)
-            found = checks.run(shape, checks.from_card(path))
-        except Exception as exc:
-            print(f"  {path.stem}: {type(exc).__name__}: {exc}")
+        configs = _configs(path)
+        if not configs:
             worst = 2
-            continue
-        if not found:
-            print(f"  {path.stem}: clean")
-            continue
-        fails = sum(1 for f in found if f.severity == checks.FAIL)
-        print(f"  {path.stem}: {len(found)} finding(s), {fails} to fix")
-        for finding in found:
-            print(f"      {finding}")
-        worst = max(worst, 2 if fails else 1)
+        for name, overrides, ctx in configs:
+            try:
+                shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+                found = checks.run(shape, ctx)
+            except Exception as exc:
+                print(f"  {name}: {type(exc).__name__}: {exc}")
+                worst = 2
+                continue
+            if not found:
+                print(f"  {name}: clean")
+                continue
+            fails = sum(1 for f in found if f.severity == checks.FAIL)
+            print(f"  {name}: {len(found)} finding(s), {fails} to fix")
+            for finding in found:
+                print(f"      {finding}")
+            worst = max(worst, 2 if fails else 1)
     if args.strict and worst:
         sys.exit(1)
 
@@ -112,16 +134,40 @@ def cmd_export(args):
     out = root / "build"
     out.mkdir(exist_ok=True)
     for path in _resolve(root, args.part):
-        shape, _, _ = builder.build(path, draft=False)
-        for fmt in args.formats:
-            target = out / f"{path.stem}.{fmt}"
-            if fmt == "stl":
-                export_stl(shape, str(target))
-            elif fmt == "step":
-                export_step(shape, str(target))
-            elif fmt == "glb":
-                target.write_bytes(builder.to_glb(shape, 0.02))
-            print(f"  {target.relative_to(root)}")
+        for name, overrides, _ in _configs(path):
+            shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+            for fmt in args.formats:
+                target = out / f"{name}.{fmt}"
+                if fmt == "stl":
+                    export_stl(shape, str(target))
+                elif fmt == "step":
+                    export_step(shape, str(target))
+                elif fmt == "glb":
+                    target.write_bytes(builder.to_glb(shape, 0.02))
+                print(f"  {target.relative_to(root)}")
+
+
+def cmd_extract(args):
+    from . import builder, extract
+
+    root = project_root()
+    paths = builder.find_parts(root)
+    if len(paths) < 2:
+        sys.exit("  extract compares parts against each other, and this project has one")
+    found = extract.duplication(paths)
+    if not found:
+        print(f"  nothing said twice across {len(paths)} parts")
+        return
+    for run in found:
+        where = ", ".join(f"{p.stem}:{line}" for p, line, _, _ in run["sites"])
+        print(f"  {run['statements']} statements, {len(run['sites'])} parts: {where}")
+        path, start, end, _ = run["sites"][0]
+        for line in extract.source(path, start, end).splitlines():
+            print(f"      {line}")
+        print()
+    print(f"  {len(found)} candidate(s), longest first.")
+    print("  Lift what is genuinely shared into system.py. Two parts saying the same")
+    print("  thing is not yet a system; two parts that would both have to change is.")
 
 
 def cmd_rules(args):
@@ -136,14 +182,19 @@ def cmd_card(args):
 
     root = project_root()
     for path in _resolve(root, args.part):
+        configs = _configs(path)
+        if not configs:
+            continue
         try:
-            shape, _, _ = builder.build(path, draft=False)
-            ctx = checks.from_card(path)
-            found = checks.run(shape, ctx)
+            built = []
+            for name, overrides, ctx in configs:
+                shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+                built.append((name, shape, ctx, checks.run(shape, ctx)))
         except Exception as exc:
             print(f"  {path.stem}: {type(exc).__name__}: {exc}")
             continue
-        target, changed, thin = card.write(path, shape, ctx, found)
+        _, shape, ctx, found = built[0]
+        target, changed, thin = card.write(path, shape, ctx, found, variants=built[1:])
         state = "updated" if changed else "current"
         print(f"  {target.relative_to(root)}: {state}")
         for heading in thin:
@@ -216,6 +267,9 @@ def main(argv=None):
 
     s = sub.add_parser("rules", help="print the design doctrine")
     s.set_defaults(fn=cmd_rules)
+
+    s = sub.add_parser("extract", help="find duplication across parts")
+    s.set_defaults(fn=cmd_extract)
 
     s = sub.add_parser("card", help="regenerate a part card's AUTO block")
     s.add_argument("part", nargs="?")

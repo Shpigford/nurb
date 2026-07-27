@@ -28,7 +28,7 @@ CLOSE = "<!-- /AUTO -->"
 REQUIRED = ("## What it is", "## Design notes", "## Don't", "## Changelog")
 
 
-def facts(shape, ctx=None, findings=None):
+def facts(shape, ctx=None, findings=None, variants=None):
     """The lines of an AUTO block, in reading order.
 
     Every line stays ASCII, which is what `checks.py` already does in its own messages.
@@ -63,6 +63,17 @@ def facts(shape, ctx=None, findings=None):
         )
 
     lines.append(f"Checks: {_verdict(findings)}")
+
+    # One line per variant, because a variant is a shipped configuration and a card that
+    # only described the defaults would leave the other three quarters of a family
+    # unrecorded. A variant that stops building shows up here as a diff.
+    for name, built, its_ctx, its_findings in variants or []:
+        box = built.bounding_box()
+        small = [f for f in built.faces() if f.area < its_ctx.sliver_area]
+        lines.append(
+            f"Variant {name}: {box.size.X:.2f} x {box.size.Y:.2f} x {box.size.Z:.2f} mm, "
+            f"{len(small)} under {its_ctx.sliver_area}mm2, {_verdict(its_findings)}"
+        )
     return lines
 
 
@@ -122,13 +133,13 @@ def thin(text):
     return out
 
 
-def write(part_path, shape, ctx=None, findings=None):
+def write(part_path, shape, ctx=None, findings=None, variants=None):
     """Regenerate a part's AUTO block. Returns (card_path, changed, thin_sections)."""
     card = pathlib.Path(part_path).with_suffix(".md")
     # Explicit utf-8 both ways. A card's prose says mm², so the locale default would read
     # it wrong on a machine that is not utf-8 and write back something nothing can read.
     was = card.read_text(encoding="utf-8") if card.is_file() else f"# {card.stem}\n"
-    now = graft(was, facts(shape, ctx, findings))
+    now = graft(was, facts(shape, ctx, findings, variants))
     if now != was:
         card.write_text(now, encoding="utf-8")
     return card, now != was, thin(now)

@@ -150,9 +150,23 @@ Specific to OCCT, and measured on real parts rather than reasoned about.
   with 1.66mm between the edges and builds with 2.16mm; at 0.5mm it builds with 1.16mm.
   The threshold tracks the chamfer exactly. This is the single most common way a part
   stops building.
+- **One chamfered edge needs more than `chamfer_size` of face**, which is the same rule
+  with one chamfer instead of two and is easy to miss because it looks like plenty of
+  room. It bites wherever a polished edge sits beside something that is never polished:
+  a concave junction, a structural chamfer's toe, a pocket wall. Measured on three
+  different parts, all at the same threshold: 1.08mm builds and 1.00mm fails at a 1mm
+  chamfer.
 - **A batch chamfer failure is not a bad edge.** Every edge in a failing set chamfers
   fine on its own, so testing them one at a time reports that nothing is wrong. Bisect
   the set pairwise instead. "Try a smaller length" would never have found the rule above.
+- **The second way a chamfer dies, where bisecting does not help**, is an edge whose end
+  lands on a vertex with four faces around it and only three edges between them. Two of
+  those faces touch at a point without sharing an edge, and OCCT has no cap for that
+  corner. The edge fails on its own, on a clean body, at every length down to 0.05mm, so
+  nothing about the failure looks like a clearance problem. The fix is to chamfer in two
+  passes so that the first one gives those two faces a real edge to meet along, then
+  reselect from the result. Found on the parts bin, where the front drop and the side
+  taper land at the same height by design.
 - **Prefer `new_edges` over geometric selectors.** Each chamfer changes topology, so a
   selector resolved against pristine geometry drifts once an earlier chamfer runs.
   `new_edges(before, combined=after)` returns exactly the edges an operation created. It
@@ -195,6 +209,25 @@ forward = [-1, 0, 0]
 [accepted]
 sliver = 6
 ```
+
+### Variants
+
+A catalog entry that is the same function at different numbers is a variant, not a new
+file. It goes in the same fence, and `build`, `check`, `card` and `export` all walk it
+exactly as they walk the part's own defaults, so it gets its own STL, its own baselines
+and its own line in the AUTO block.
+
+```toml
+[variants.shelf_gridfinity_3x2.params]
+grid_x = 3
+bracket_count = 6
+
+[variants.shelf_gridfinity_3x2.accepted]
+sliver = 26
+```
+
+The test is whether it is the same geometry. A wider cradle on the same J is a variant.
+A different mechanism is a part, however similar the slab looks.
 
 ## Measurements
 

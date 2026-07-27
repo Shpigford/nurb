@@ -47,6 +47,7 @@ nurb rules          print the design doctrine
 nurb card [part]    regenerate a card's AUTO block
 nurb render [part]  write a PNG into build/
 nurb export [part]  write STL/STEP/GLB into build/
+nurb extract        find duplication across parts
 ```
 
 A project is any directory with a `parts/` folder. There's no init step.
@@ -114,6 +115,25 @@ It reports by default and takes `--strict` for CI, on the grounds that a warning
 blocks work gets switched off. Findings also show up in `nurb dev`, with a pin on the
 geometry at each one.
 
+## Variants
+
+Some parts in a catalog are the same function flexed rather than new geometry. Those
+ship as variants on the card, not as copies of the file:
+
+```toml
+[variants.shelf_gridfinity_3x2.params]
+grid_x = 3
+bracket_count = 6
+
+[variants.shelf_gridfinity_3x2.accepted]
+sliver = 26
+```
+
+`build`, `check`, `card` and `export` all walk a part's variants the same way they walk
+its default, so a variant gets its own STL, its own baselines and its own line in the
+card's generated block. Four of the sixteen parts in `examples/notch` are variants; the
+alternative was four near-copies of two files, free to drift.
+
 ## For an agent
 
 The doctrine lives in the package and prints with `nurb rules`: printability, load paths,
@@ -166,14 +186,19 @@ uv run pytest
 ```
 
 The parts in `examples/` are part of the suite, asserted against the dimensions and
-baselines their catalog cards recorded in Fusion.
+baselines their catalog cards recorded in Fusion. `tests/test_notch_fit.py` is the
+hanging interface: every channel floor on exact pitch, at full span, one per bracket and
+no more, for every shipped configuration. Its numbers are literals rather than imports
+from the part's own constants, because a fit test that reads the same constant the part
+built from agrees with the part however wrong the constant is.
 
 ## Not built yet
 
-- `nurb extract`, pull shared geometry out of sibling parts into `system.py`
-  once duplication actually shows up, rather than scaffolding it up front
-- The remaining Notch parts, and fit assertions over the whole library
-- `min_wall`, the one printability rule that is neither exact nor cheap
+- `min_wall` is a ray cast, so it is exact on flat parallel walls and approximate
+  everywhere else. An inscribed sphere is the correct answer and an expensive one.
+- Printer profiles, shipped rather than written per card
+- A configurator: a part's parameters are already introspectable, so the missing piece
+  is publishing, not modelling
 
 ## Debugging the viewer
 

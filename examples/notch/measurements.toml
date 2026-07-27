@@ -38,3 +38,21 @@ how = "dovetail opening at the back face, same source as bracket_pocket_width"
 value = 4.0
 unit = "mm"
 how = "plate thickness, same source as bracket_pocket_width"
+
+# The AkroBin rail hangs bins by their own moulded lip, so the bin is hardware too. Its
+# standoff is the sum of the two below and not a choice this library made.
+
+[akrobin_leg_thickness]
+value = 2.75
+unit = "mm"
+how = "calipers on the moulded rear hanger leg of Josh's Akro-Mils AkroBins, 2026-07-24"
+
+[akrobin_leg_length]
+value = 10.75
+unit = "mm"
+how = "calipers, how far the hanger leg reaches down inside the bin's own slot, 2026-07-24"
+
+[akrobin_slot_depth]
+value = 6.0
+unit = "mm"
+how = "calipers, back wall to leg across the bin's hanger slot, 2026-07-24. The rail's item_depth is this plus the leg thickness, so 8.75 is the bin's number and not a preference"

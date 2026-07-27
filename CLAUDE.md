@@ -50,6 +50,7 @@ nurb rules           print the design doctrine
 nurb card [part]     regenerate a card's AUTO block
 nurb render [part]   write build/<part>.png, needs the render extra
 nurb export [part]   write STL/STEP/GLB into build/
+nurb extract         find duplication across sibling parts
 ```
 
 `uv run pytest` runs the suite, which includes the parts in `examples/`.
@@ -62,8 +63,9 @@ never should be.
 ```
 src/nurb/registry.py      @part, signature introspection
 src/nurb/builder.py       load, build, tessellate, GLB
-src/nurb/checks.py        printability rules, convexity, Finding/Context
+src/nurb/checks.py        printability rules, convexity, Finding/Context, variants
 src/nurb/card.py          the card's AUTO block
+src/nurb/extract.py       duplication across sibling parts, up to alpha-equivalence
 src/nurb/measurements.py  measured(), and the refusal to guess
 src/nurb/edit.py          writes slider values back into a part's keyword defaults
 src/nurb/render.py        headless PNG, the only module that wants a browser
@@ -73,6 +75,7 @@ src/nurb/viewer.html      three.js viewer, Z-up, camera persistence, sliders, se
 src/nurb/vendor/three/    three.js r169, so the viewer needs no network
 src/nurb/cli.py           command surface
 examples/notch/           the real parts, which are also the calibration set
+tests/test_notch_fit.py   the hanging interface, asserted for every configuration
 tests/                    rules and examples, both cases per rule
 docs/core/                research, plan, progress
 ```
@@ -118,6 +121,13 @@ fails, so testing them one at a time reports that nothing is wrong. Bisect the s
 Notch did not begin as a system; `block_width = 25.16` exists because a real wall got
 measured after parts existed. Guessing what is shared before you know propagates the
 wrong abstraction. The command is `nurb extract`, not `nurb new system`.
+
+It reports and does not rewrite, because choosing which free names become parameters and
+what the function is called are judgements about what the thing *is*, and noticing is
+the only mechanical part. Run over the finished port it found `system.slab()` in six
+files at once. **The test of a real extraction is what does not use it**: three parts
+still build their own plate, because they genuinely differ, and a helper with a flag for
+each of them would have been the wrong abstraction wearing the right name.
 
 ### Generated files stay nearly empty
 
@@ -178,24 +188,39 @@ as though every file will be read by a stranger.
 
 ## Current state
 
-Phases 1 through 4 are done. Two real Notch parts and a calibration coupon live in
-`examples/notch/`; they build to one solid each, match their Fusion originals dimension
-for dimension, and reproduce the sliver baselines their catalog cards recorded. The
-kernel question is settled and the timing numbers come from real geometry.
+Phases 1 through 5 are done. The whole Notch catalog lives in `examples/notch/`:
+sixteen catalog entries out of thirteen part files and nineteen shipped configurations,
+every one a single solid matching its Fusion bounding box, clean under
+`nurb check --strict`, and watertight when exported.
 
-`nurb check` runs eight printability rules against the solid and reports nothing on any
-of the three, which is the bar: a warning fired at a part that prints fine is a bug in
-the rule. It has already caught one real defect in what Phase 1 shipped, four cosmetic
-chamfers laid into concave junctions.
+`tests/test_notch_fit.py` is the hanging interface, asserted rather than read: every
+channel floor on exact pitch, at full span, one per bracket and no more, for every
+configuration. Its numbers are literals rather than imports from `system.py`, because a
+fit test that reads the same constant the part built from agrees with the part however
+wrong the constant is. A deliberate 0.1mm per interval pitch error is in the suite so
+the assertion is known to be able to fail. 171 tests.
+
+**Thirteen parts found rule bugs that three parts could not.** `concave_cosmetic` was
+firing at the 2mm structural relief the doctrine prescribes for thin material, and
+`bed_bevel` at the 45 degree corbel it prescribes for a raised feature. Both were
+recalibrated against measurements, not opinions: a relief is wider than polish, and a
+chamfer's reach is exactly its size where a corbel's is its rise. `polish_edges` also
+had a gap, allowing a sloped edge that reaches the bed. Every one was found by a part
+rather than by review, which is the argument for `examples/` being the calibration set.
 
 The agent surface is in: `nurb rules` prints the doctrine from `src/nurb/doctrine.md`,
 `nurb card` regenerates each card's AUTO block from a build, `nurb render` screenshots the
 viewer headlessly, and `measurements.toml` carries dimensions with their provenance.
 
+`nurb extract` finds duplication across sibling parts up to alpha-equivalence and
+reports it; it does not rewrite, because naming the thing is the judgement and noticing
+is the mechanical part. Run over the finished port it found `system.slab()` in six files
+at once.
+
 The viewer has a slider per numeric parameter, inferred from the signature and nothing
 else, a section view that caps its cut so a solid still reads as solid, and a button
 that writes an exploration back into the file's defaults. three.js is vendored, so the
-viewer and `nurb render` both work with no network. 105 tests.
+viewer and `nurb render` both work with no network.
 
 **The live loop got about 20x faster in Phase 4, and not for a reason anyone would
 guess.** `Shape.tessellate` reads its triangles with `for t in poly.Triangles()`, and
@@ -203,8 +228,6 @@ OCP's iterator over that array is pathological: 7790 triangles cost 536ms to ite
 and 6.8ms to read by index, against 10ms for the meshing itself. `builder._triangulate`
 reads them by index and returns bit-identical geometry. Phase 1's recorded conclusion
 that "tessellation is the loop" was measuring that iterator.
-
-Phase 5 (the remaining 14 Notch parts, `nurb extract`, fit assertions, CI) is next.
 
 `docs/core/PROGRESS.md` has the findings, including several claims from RESEARCH.md and
 earlier phases that a real part, a real print, or a real measurement disproved. Read

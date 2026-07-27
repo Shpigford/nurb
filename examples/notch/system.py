@@ -60,8 +60,8 @@ SIDE_CLEARANCE = 0.25  # slide fit, width
 # CHANNEL_NECK == CHANNEL_WIDTH - 2 * CHANNEL_DEPTH. Side clearance drops out of that
 # identity, so widening it keeps the 45; depth clearance does not, so 0.2 is pinned.
 CHANNEL_DEPTH = POCKET_DEPTH + CLEARANCE               # 4.2, the floor plane
-CHANNEL_WIDTH = POCKET_WIDTH + 2 * SIDE_CLEARANCE      # 21.16 at channel 0's floor
-CHANNEL_NECK = POCKET_NECK_WIDTH + 2 * SIDE_CLEARANCE  # 12.76 at channel 0's mouth
+CHANNEL_WIDTH = POCKET_WIDTH + 2 * SIDE_CLEARANCE      # 21.06 at the floor
+CHANNEL_NECK = POCKET_NECK_WIDTH + 2 * SIDE_CLEARANCE  # 12.66 at the mouth
 
 FLOOR_X = -CHANNEL_DEPTH  # -4.2, the coordinate every fit check is written against
 
@@ -94,8 +94,39 @@ def pitch(count, step=1):
 
 
 def span(count, step=1):
-    """Y midpoint of the bracket run. Loads hang balanced when they center here."""
+    """Y midpoint of the bracket run. Loads hang balanced when they center here.
+
+    Also the midpoint of the plate, since the plate stands half a pitch outside the
+    first and last channel at both ends. Anything spanning the full width centers here.
+    """
     return (count - 1) * step * BLOCK_WIDTH / 2
+
+
+def plate_width(count, step=1):
+    """How wide a part standing on `count` brackets comes out.
+
+    Half a pitch of material stands outside the first and last channel, so a plate tiles
+    with itself. `step` for the same reason `pitch` and `span` take one: a run that skips
+    brackets is `(count - 1) * step + 1` pitches wide, and only the unstepped case is
+    `count * BLOCK_WIDTH`.
+    """
+    return ((count - 1) * step + 1) * BLOCK_WIDTH
+
+
+def slab(count, height, depth):
+    """The back of a part: the plate that hangs on the wall, channels and dimples cut.
+
+    Extracted rather than scaffolded, and `nurb extract` is what found it: six parts had
+    written these three statements character for character before this existed. The
+    three that do not use it are the three that genuinely differ, which is the test of
+    whether an extraction was real. The scraper holder decouples its width from the
+    bracket run, the AkroBin rail carries a rib above z=0 and runs its channels on a
+    multiple of the pitch, and the calibration coupon sweeps the clearance.
+    """
+    plate = Pos(-depth / 2, span(count), -height / 2) * Box(
+        depth, plate_width(count), height
+    )
+    return plate - channels(count, height) - detent_dimples(count)
 
 
 def channels(count, height, step=1, side_clearance=SIDE_CLEARANCE):
@@ -150,6 +181,13 @@ def polish_edges(shape, height):
         if bb.min.X > -EPS:  # in the back face
             return False
         if bb.max.Z < -height + EPS:  # in the bottom face
+            return False
+        # And an edge that only reaches the bed, if it arrives at an angle. A vertical
+        # corner ending there is fine, because its chamfer stands square to the plate and
+        # the first layer keeps its full width. A sloped one lays a tilted facet into the
+        # first layer, which is the thing the bottom-face veto exists to stop; the
+        # calipers holder's corbel flanks are where the gap showed up.
+        if bb.min.Z < -height + EPS and abs(edge.tangent_at(0.5).Z) < 1 - EPS:
             return False
         if bb.min.X > interface - EPS and bb.max.Z < -TOP_MARGIN + EPS:  # in a channel
             return False

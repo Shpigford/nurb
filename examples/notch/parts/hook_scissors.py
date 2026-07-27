@@ -7,9 +7,8 @@ from system import (
     EPS,
     MERGE_X,
     MIN_ITEM_DEPTH,
-    channels,
-    detent_dimples,
     polish_edges,
+    slab,
     span,
 )
 
@@ -17,13 +16,13 @@ from system import (
 @part
 def hook_scissors(
     bracket_count=1,
-    item_height=30,
-    item_depth=6,
-    hook_projection=28,
-    hook_width=15,
-    arm_thickness=6,
-    upstand_height=15,
-    upstand_thickness=6,
+    item_height=30.0,
+    item_depth=6.0,
+    hook_projection=28.0,
+    hook_width=15.0,
+    arm_thickness=6.0,
+    upstand_height=15.0,
+    upstand_thickness=6.0,
     chamfer_size=1.0,
     structural_chamfer=3.0,
     draft=False,
@@ -34,11 +33,19 @@ def hook_scissors(
             f"arm would not reach the slab. Raise it above {MIN_ITEM_DEPTH}."
         )
 
-    y0, y1 = -BLOCK_WIDTH / 2, (bracket_count - 0.5) * BLOCK_WIDTH
-    slab = Pos(-item_depth / 2, (y0 + y1) / 2, -item_height / 2) * Box(
-        item_depth, y1 - y0, item_height
-    )
-    back = slab - channels(bracket_count, item_height) - detent_dimples(bracket_count)
+    # The strip of slab left standing beside the arm carries the polish on the slab's own
+    # front corner, so it has to be wider than that chamfer. Measured here: builds at
+    # 1.08mm and fails at 1.00mm, and flush (no strip at all) is fine again.
+    margin = (bracket_count * BLOCK_WIDTH - hook_width) / 2
+    if 0 < margin <= chamfer_size:
+        raise ValueError(
+            f"a {hook_width}mm cradle leaves a {margin:.2f}mm strip of slab either side, too "
+            f"narrow to carry the {chamfer_size}mm polish on its own corner. Narrow the cradle "
+            f"below {bracket_count * BLOCK_WIDTH - 2 * chamfer_size:.2f}, run it flush at "
+            f"{bracket_count * BLOCK_WIDTH:.2f}, or add a bracket."
+        )
+
+    back = slab(bracket_count, item_height, item_depth)
 
     # The J, drawn once in section and swept across. Bottom-weighted: the arm and
     # its upstand sit on the floor of the slab, so the load hangs under the stop.
@@ -64,11 +71,19 @@ def hook_scissors(
     # Structural, 3mm: the two concave junctions the load runs through. `new_edges`
     # gives the arm-to-slab weld exactly, which no geometric selector does once a
     # chamfer has already moved the topology around.
-    junction = [e for e in new_edges(back, arm, combined=body) if e.center().Z > floor + EPS]
+    #
+    # Across the weld, not around it. The two vertical legs where the arm's sides meet
+    # the slab carry almost none of the moment, and relieving them eats the strip of
+    # slab beside the arm: at a 20mm cradle that strip is 2.58mm and a 3mm band cannot
+    # land on it at all. Chamfering the weld alone is what lets the wide-cradle utility
+    # hooks exist on one bracket.
+    weld = new_edges(back, arm, combined=body).filter_by(Axis.Y).filter_by(
+        lambda e: e.center().Z > floor + EPS
+    )
     corner = body.edges().filter_by(Axis.Y).filter_by(
         lambda e: abs(e.center().X - inner) < EPS and abs(e.center().Z - arm_top) < EPS
     )
-    body = chamfer(junction + list(corner), structural_chamfer)
+    body = chamfer(list(weld) + list(corner), structural_chamfer)
     if draft:
         return body
 

@@ -5,6 +5,8 @@ Size: 94.00 x 100.64 x 42.00 mm, 45145.9 mm3, 1 solid, 214 faces
 Slivers: 18 under 1.0mm2, smallest 0.632mm2, 18 accepted
 Projection: 94.0mm over a 42.0mm back, ratio 2.24 against a 2.5 limit
 Checks: clean
+Variant shelf_gridfinity_2x1: 52.00 x 100.64 x 35.00 mm, 10 under 1.0mm2, clean
+Variant shelf_gridfinity_3x2: 94.00 x 150.96 x 42.00 mm, 26 under 1.0mm2, clean
 <!-- /AUTO -->
 
 Ported from Fusion `Shelf - Gridfinity 2x2 - 4x` v4.
@@ -18,6 +20,12 @@ a bin is pulled straight up.
 
 This is the hardest part in the library and the reason Phase 1 exists: four lofted
 sockets, a grid array, two gussets, two chamfer passes, and a known sliver baseline.
+
+It carries the whole gridfinity family. `Shelf - Gridfinity 2x1 - 4x` and
+`Shelf - Gridfinity 3x2 - 6x` were Save-As copies in Fusion, where a copy is the only
+way to ship two sizes; here they are the same function at another grid, so they ship as
+variants. Each declares its own sliver baseline, because the count is `4 * grid_x *
+grid_y + 2` and a family-wide number would be wrong for two thirds of the family.
 
 ## Design notes
 
@@ -65,6 +73,20 @@ forward = [-1, 0, 0]
 
 [accepted]
 sliver = 18
+
+[variants.shelf_gridfinity_2x1.params]
+grid_y = 1
+item_height = 35.0
+
+[variants.shelf_gridfinity_2x1.accepted]
+sliver = 10
+
+[variants.shelf_gridfinity_3x2.params]
+grid_x = 3
+bracket_count = 6
+
+[variants.shelf_gridfinity_3x2.accepted]
+sliver = 26
 ```
 
 ## Don't
@@ -105,6 +127,10 @@ sliver = 18
 
 ## Changelog
 
+- 2026-07-26: the 2x1 and 3x2 shelves arrive as variants rather than as two more
+  copies of this file. Both reproduce their Fusion bounding boxes and their recorded
+  sliver baselines, 10 and 26, on the first build. Geometry is untouched; continuous
+  dimensions became floats so the viewer's sliders move continuously.
 - 2026-07-26: four 1mm chamfers removed from the gusset roots. They were concave
   junctions, which the doctrine forbids polishing, and `nurb check`'s new
   `concave_cosmetic` rule found them in the shipped part. Bounding box, solid count

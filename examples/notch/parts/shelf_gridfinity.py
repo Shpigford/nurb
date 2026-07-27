@@ -9,9 +9,8 @@ from system import (
     EPS,
     MERGE_X,
     MIN_ITEM_DEPTH,
-    channels,
-    detent_dimples,
     polish_edges,
+    slab,
     span,
 )
 
@@ -47,16 +46,16 @@ def socket(cell):
 @part
 def shelf_gridfinity(
     bracket_count=4,
-    item_height=42,
-    item_depth=6,
+    item_height=42.0,
+    item_depth=6.0,
     grid_x=2,
     grid_y=2,
-    cell=42,
-    shelf_thickness=7,
-    back_gap=4,
-    gusset_thickness=3,
-    gusset_tip=6,
-    gusset_drop=3,
+    cell=42.0,
+    shelf_thickness=7.0,
+    back_gap=4.0,
+    gusset_thickness=3.0,
+    gusset_tip=6.0,
+    gusset_drop=3.0,
     chamfer_size=1.0,
     structural_chamfer=3.0,
     draft=False,
@@ -82,11 +81,7 @@ def shelf_gridfinity(
             f"not {bracket_count}. Raise bracket_count to {need}, or drop grid_x."
         )
 
-    y0, y1 = -BLOCK_WIDTH / 2, (bracket_count - 0.5) * BLOCK_WIDTH
-    slab = Pos(-item_depth / 2, (y0 + y1) / 2, -item_height / 2) * Box(
-        item_depth, y1 - y0, item_height
-    )
-    back = slab - channels(bracket_count, item_height) - detent_dimples(bracket_count)
+    back = slab(bracket_count, item_height, item_depth)
 
     # Everything forward hangs off the bracket run's midpoint, not off y=0, so the
     # load stays balanced between the brackets.

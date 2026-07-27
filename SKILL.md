@@ -18,6 +18,7 @@ nurb check [part]     the printability rules, --strict for CI
 nurb card [part]      regenerate a card's AUTO block
 nurb render [part]    PNG into build/, so you can look at what you made
 nurb export [part]    STL/STEP/GLB into build/
+nurb extract          find duplication across parts
 nurb dev              watch, rebuild, serve the viewer on :7373
 ```
 
