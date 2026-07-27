@@ -220,6 +220,10 @@ def cmd_export(args):
                 export_step(shape, str(target))
             elif fmt == "glb":
                 target.write_bytes(builder.to_glb(shape, 0.02))
+            else:
+                # The print used to sit outside this chain, so a typo in `--formats`
+                # reported a filename that was never written and exited 0.
+                sys.exit(f"  no exporter for {fmt!r}. have: {', '.join(FORMATS)}")
             print(f"  {target.relative_to(root)}")
 
 
@@ -257,7 +261,7 @@ def _flex(path, problems):
                 continue
             if len(shape.solids()) != 1:
                 problems.append(f"{name}={grown} builds {len(shape.solids())} solids")
-    return len(counts) * 2
+    return counts
 
 
 def cmd_verify(args):
@@ -289,7 +293,7 @@ def cmd_verify(args):
                 problems.append(f"{name}: {finding}")
             built.append((name, shape, ctx, found))
 
-        flexed = _flex(path, problems)
+        counts = _flex(path, problems)
 
         text = ""
         md = path.with_suffix(".md")
@@ -297,8 +301,10 @@ def cmd_verify(args):
             text = md.read_text(encoding="utf-8")
         if built:
             _, shape, ctx, found = built[0]
-            if card.render(card.facts(shape, ctx, found, variants=built[1:])) not in text:
-                problems.append("card does not match the geometry, run `nurb card`")
+            if card.MARK not in text:
+                problems.append("card has no generated block yet, run `nurb card`")
+            elif card.render(card.facts(shape, ctx, found, variants=built[1:])) not in text:
+                problems.append("card disagrees with the geometry, run `nurb card`")
         for heading in card.thin(text):
             problems.append(f"card section is empty: {heading}")
 
@@ -308,7 +314,11 @@ def cmd_verify(args):
             for line in problems:
                 print(f"      {line}")
         else:
-            print(f"  {path.stem}: ok, {len(configs)} configuration(s), {flexed} flexes")
+            # Naming them, because "0 flexes" reads like a pass and means the sweep
+            # never ran. A part with no counts has nothing to grow, which is worth
+            # seeing rather than skimming past.
+            grew = f"flexed {', '.join(counts)}" if counts else "no counts to flex"
+            print(f"  {path.stem}: ok, {len(configs)} configuration(s), {grew}")
     print("  Not covered: fit faces by coordinate, and looking at a render.")
     if worst:
         sys.exit(1)
@@ -388,6 +398,10 @@ def cmd_render(args):
 
 
 DEFAULT_PORT = 7373
+
+# GLB is the viewer's format, so it is on request rather than written every time.
+FORMATS = ("stl", "step", "glb")
+DEFAULT_FORMATS = ("stl", "step")
 
 
 def _is_free(port):
@@ -502,7 +516,10 @@ def main(argv=None):
 
     s = sub.add_parser("export", help="write STL/STEP/GLB to build/")
     s.add_argument("part", nargs="?")
-    s.add_argument("--formats", nargs="+", default=["stl", "step"])
+    s.add_argument(
+        "--formats", nargs="+", default=list(DEFAULT_FORMATS),
+        help=f"default: {' '.join(DEFAULT_FORMATS)}. also: glb",
+    )
     s.set_defaults(fn=cmd_export)
 
     args = p.parse_args(argv)

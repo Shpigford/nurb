@@ -52,7 +52,7 @@ nurb rules           print the design doctrine
 nurb card [part]     regenerate a card's AUTO block
 nurb verify [part]   the doctrine's verification list, --strict-ish exit code
 nurb render [part]   write build/<part>.png, needs the render extra
-nurb export [part]   write STL/STEP/GLB into build/
+nurb export [part]   write STL and STEP into build/, --formats for GLB
 nurb extract         find duplication across sibling parts
 ```
 

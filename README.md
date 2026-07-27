@@ -49,7 +49,7 @@ nurb rules          print the design doctrine
 nurb card [part]    regenerate a card's AUTO block
 nurb verify [part]  run the doctrine's verification list
 nurb render [part]  write a PNG into build/
-nurb export [part]  write STL/STEP/GLB into build/
+nurb export [part]  write STL and STEP into build/, --formats for GLB
 nurb extract        find duplication across parts
 ```
 

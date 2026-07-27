@@ -14,7 +14,7 @@ nurb check [part]     the printability rules, --strict for CI
 nurb card [part]      regenerate a card's AUTO block
 nurb verify [part]    the doctrine's verification list: solids, flex, checks, card
 nurb render [part]    PNG into build/, so you can look at what you made
-nurb export [part]    STL/STEP/GLB into build/
+nurb export [part]    STL and STEP into build/, --formats for GLB
 nurb extract          find duplication across parts
 nurb dev              watch, rebuild, serve the viewer on :7373 or the next free port
 ```
