@@ -1,10 +1,6 @@
 # nurb
 
-Agentic CAD for 3D printing. The user is a language model: your agent writes
-parts as Python functions, nurb builds them into real B-rep solids
-([build123d](https://build123d.readthedocs.io)/OCCT), checks them against print
-physics, and shows you the result live. You judge, drag sliders, download the
-STL.
+Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real B-rep solids ([build123d](https://build123d.readthedocs.io)/OCCT), checks them against print physics, and shows you the result live. You judge, drag sliders, download the STL.
 
 ## Install
 
@@ -21,16 +17,9 @@ nurb dev                   # http://127.0.0.1:7373
 
 Then tell your agent:
 
-> Run `nurb rules`, then make me a phone stand: 15 degree lean, a slot for the
-> charging cable, fits a phone 78mm wide.
+> Run `nurb rules`, then make me a phone stand: 15 degree lean, a slot for the charging cable, fits a phone 78mm wide.
 
-`nurb rules` prints the design doctrine (printability, load paths, kernel
-traps), so the agent knows how to use the tool before it starts. From there it
-edits `parts/phone_stand.py`, the browser updates on every save without moving
-your camera, and check findings pin themselves to the geometry. When it looks
-right: drag the sliders if you want, click `stl`, print. The `stl` and `step`
-buttons build at whatever the sliders hold, and a `write` button saves your
-slider values back into the file's defaults, where the agent will see them.
+`nurb rules` prints the design doctrine (printability, load paths, kernel traps), so the agent knows how to use the tool before it starts. From there it edits `parts/phone_stand.py`, the browser updates on every save without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `stl`, print. The `stl` and `step` buttons build at whatever the sliders hold, and a `write` button saves your slider values back into the file's defaults, where the agent will see them.
 
 ## A part
 
@@ -42,10 +31,7 @@ def phone_stand(width=84.0, lean=15.0, wall=3.0, draft=False):
     ...
 ```
 
-The keyword defaults are the parameters. That one declaration drives the CLI,
-the viewer's sliders, and the tests; there is no schema to keep in sync. A
-float is a dimension, an int is a count (its slider steps by one). `draft` is
-passed by the runtime, not callers: when true, skip the polish pass.
+The keyword defaults are the parameters. That one declaration drives the CLI, the viewer's sliders, and the tests; there is no schema to keep in sync. A float is a dimension, an int is a count (its slider steps by one). `draft` is passed by the runtime, not callers: when true, skip the polish pass.
 
 ## Commands
 
@@ -66,8 +52,7 @@ A project is any directory with a `parts/` folder. No init step.
 
 ## Checks
 
-The agent cannot see, so `nurb check` is its eyes. Rules run against the exact
-solid, not a mesh, and findings come back as text with coordinates:
+The agent cannot see, so `nurb check` is its eyes. Rules run against the exact solid, not a mesh, and findings come back as text with coordinates:
 
 ```
 overhang          downward faces past 45 degrees, bridges told from cantilevers
@@ -80,10 +65,7 @@ projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try
-another with `nurb check --printer prusa_mk4s`. A part records what it has
-already justified on its card, so known findings stay silent and new ones are
-regressions:
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
 
 ```toml
 [part]
@@ -93,21 +75,13 @@ min_wall = 1.0
 sliver = 6
 ```
 
-When text is not enough, `nurb render <part>` screenshots the viewer so the
-agent can look at its own work (`uv sync --extra render && uv run playwright
-install chromium`, the only part of nurb that wants a browser).
+When text is not enough, `nurb render <part>` screenshots the viewer so the agent can look at its own work (`uv sync --extra render && uv run playwright install chromium`, the only part of nurb that wants a browser).
 
 ## Cards and measurements
 
-Agents forget everything between sessions, so each part gets a card
-(`parts/<name>.md`): what it is, why, and a `## Don't` section for what was
-tried and rejected. `nurb card` regenerates its one machine-written block with
-what only a build can tell you.
+Agents forget everything between sessions, so each part gets a card (`parts/<name>.md`): what it is, why, and a `## Don't` section for what was tried and rejected. `nurb card` regenerates its one machine-written block with what only a build can tell you.
 
-Dimensions an agent cannot derive go in `measurements.toml` with how they were
-obtained; `measured("bracket_pitch")` returns them, and asking for one that is
-not there raises instead of letting the model guess. A guessed dimension builds,
-checks clean, prints, and does not fit.
+Dimensions an agent cannot derive go in `measurements.toml` with how they were obtained; `measured("bracket_pitch")` returns them, and asking for one that is not there raises instead of letting the model guess. A guessed dimension builds, checks clean, prints, and does not fit.
 
 ## Variants
 
@@ -118,8 +92,7 @@ The same function flexed is a variant on the card, not a copy of the file:
 grid_x = 3
 ```
 
-`build`, `check`, `card` and `export` walk variants like parts, so each gets its
-own STL and baselines.
+`build`, `check`, `card` and `export` walk variants like parts, so each gets its own STL and baselines.
 
 ## Layout
 
@@ -134,55 +107,34 @@ build/              generated, gitignored
 
 ## Speed
 
-`nurb dev` is a long-lived process because importing the kernel costs 45s cold.
-After that, rebuilds run 30 to 400ms depending on the part, which matters
-because an agent iterates in save-check cycles, dozens per part.
+`nurb dev` is a long-lived process because importing the kernel costs 45s cold. After that, rebuilds run 30 to 400ms depending on the part, which matters because an agent iterates in save-check cycles, dozens per part.
 
 ## Tests
 
-`uv run pytest`. The parts in `examples/` are the calibration set, asserted
-against dimensions from really-printed parts. Fit tests use literal numbers,
-never the part's own constants: a model's tests love to agree with its code.
+`uv run pytest`. The parts in `examples/` are the calibration set, asserted against dimensions from really-printed parts. Fit tests use literal numbers, never the part's own constants: a model's tests love to agree with its code.
 
 ## Not built yet
 
-- A hosted configurator. `nurb dev` already is one for anybody who can reach it,
-  but publishing without a running kernel is a different problem.
+- A hosted configurator. `nurb dev` already is one for anybody who can reach it, but publishing without a running kernel is a different problem.
 - Measurement tools in the viewer.
-- `min_wall` probes sample faces, so a pinch nothing lands near is still missed.
-  A clean result means "no thin walls found", not "no thin walls".
+- `min_wall` probes sample faces, so a pinch nothing lands near is still missed. A clean result means "no thin walls found", not "no thin walls".
 
 ## Debugging the viewer
 
-`window.__nurb` exposes `{ THREE, scene, camera, controls, mesh, ready }`. The
-URL takes `?part=<name>`, `?view=iso|front|back|left|right|top`, and `?bare`.
-three.js is vendored in `src/nurb/vendor/three`, so the viewer needs no network;
-see the README beside it before changing versions.
+`window.__nurb` exposes `{ THREE, scene, camera, controls, mesh, ready }`. The URL takes `?part=<name>`, `?view=iso|front|back|left|right|top`, and `?bare`. three.js is vendored in `src/nurb/vendor/three`, so the viewer needs no network; see the README beside it before changing versions.
 
 ## License
 
-[FSL-1.1-MIT](LICENSE). Source-available for any purpose except building a
-competing product, and converts to plain MIT two years after each release.
+[FSL-1.1-MIT](LICENSE). Source-available for any purpose except building a competing product, and converts to plain MIT two years after each release.
 
 Copyright 2026 Ordinary Systems LLC.
 
 ### Third-party notices
 
-nurb uses **Open CASCADE Technology** (OCCT) for all B-rep geometry, reached
-through [build123d](https://github.com/gumyr/build123d) (Apache-2.0) and the
-`OCP` bindings (Apache-2.0). OCCT is licensed under
-[LGPL-2.1 with an additional exception](https://dev.opencascade.org/resources/licensing).
-nurb does not redistribute OCCT; it is installed as a dependency and dynamically
-linked. Bundling nurb into a single-file distribution that embeds OCCT would
-require shipping the OCCT license and keeping the library replaceable, per LGPL.
+nurb uses **Open CASCADE Technology** (OCCT) for all B-rep geometry, reached through [build123d](https://github.com/gumyr/build123d) (Apache-2.0) and the `OCP` bindings (Apache-2.0). OCCT is licensed under [LGPL-2.1 with an additional exception](https://dev.opencascade.org/resources/licensing). nurb does not redistribute OCCT; it is installed as a dependency and dynamically linked. Bundling nurb into a single-file distribution that embeds OCCT would require shipping the OCCT license and keeping the library replaceable, per LGPL.
 
-nurb **does** redistribute [three.js](https://threejs.org) r169 (MIT), vendored
-so the viewer works offline, with its `LICENSE` beside it.
+nurb **does** redistribute [three.js](https://threejs.org) r169 (MIT), vendored so the viewer works offline, with its `LICENSE` beside it.
 
-Other dependencies: trimesh (MIT), watchdog (Apache-2.0), websockets
-(BSD-3-Clause), numpy (BSD-3-Clause). Optional, for `nurb render` only:
-playwright (Apache-2.0).
+Other dependencies: trimesh (MIT), watchdog (Apache-2.0), websockets (BSD-3-Clause), numpy (BSD-3-Clause). Optional, for `nurb render` only: playwright (Apache-2.0).
 
-npm note: nurb has no JavaScript to ship, so PyPI is the only install channel.
-[`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb) just points
-`npx` users here.
+npm note: nurb has no JavaScript to ship, so PyPI is the only install channel. [`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb) just points `npx` users here.
