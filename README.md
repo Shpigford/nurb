@@ -18,9 +18,12 @@ uv tool install nurb       # or: pip install nurb
 uvx nurb rules             # or run it without installing anything
 ```
 
-There is nothing to install from npm. The registry blocks the unscoped name for
-everyone, and [`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb)
-exists only so `npx` users get pointed here instead of a 404.
+PyPI is the only install channel, because nurb is Python driving a C++ kernel
+and there is no JavaScript to ship.
+[`@shpigford/nurb`](https://www.npmjs.com/package/@shpigford/nurb) exists as a
+signpost: `npx @shpigford/nurb` tells you the two commands above instead of
+leaving `npx` users at a 404. (npm blocks the unscoped name for everyone as too
+similar to existing packages.)
 
 ## Try it
 
