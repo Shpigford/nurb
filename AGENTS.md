@@ -15,7 +15,7 @@ nurb card [part]      regenerate a card's AUTO block
 nurb render [part]    PNG into build/, so you can look at what you made
 nurb export [part]    STL/STEP/GLB into build/
 nurb extract          find duplication across parts
-nurb dev              watch, rebuild, serve the viewer on :7373
+nurb dev              watch, rebuild, serve the viewer on :7373 or the next free port
 ```
 
 Read `parts/<name>.md` before editing `parts/<name>.py`. Its `## Don't` section is what

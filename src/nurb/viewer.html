@@ -20,8 +20,15 @@
     grid-template-rows: minmax(0, 1fr);
   }
   aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
-  aside h1 { font-size: 13px; font-weight: 600; padding: 14px 16px; border-bottom: 1px solid var(--line); letter-spacing: .08em; }
-  aside h1 span { color: var(--dim); font-weight: 400; margin-left: 6px; letter-spacing: 0; }
+  aside h1 { font-size: 13px; font-weight: 600; padding: 14px 16px;
+             border-bottom: 1px solid var(--line); letter-spacing: .08em;
+             display: flex; align-items: baseline; gap: 7px; }
+  aside h1 span { color: var(--dim); font-weight: 400; letter-spacing: 0; }
+  /* The project is the thing you are working in, so it reads as text rather than as
+     chrome. Two `nurb dev` on two directories look identical without it. */
+  aside h1 #project { color: var(--text); overflow: hidden; text-overflow: ellipsis;
+                      white-space: nowrap; }
+  aside h1 #conn { margin-left: auto; flex: none; font-size: 11px; }
   /* The list gives way to the parameters: three parts and fifteen sliders is the
      common case, not the other way round.
 
@@ -171,7 +178,7 @@
 </head>
 <body>
 <aside>
-  <h1>nurb<span id="conn">connecting</span></h1>
+  <h1><b>nurb</b><span id="project"></span><span id="conn">connecting</span></h1>
   <div id="list"></div>
   <div id="params" class="empty"></div>
 </aside>
@@ -753,6 +760,14 @@ function settled(name) {
 }
 
 // ---- part list ----
+let project = '';
+
+// The tab is the only part of this visible when the window is behind another one, and
+// with a server per project there can be several. Part first: that is what changes.
+function title() {
+  document.title = [current, project].filter(Boolean).join(' \u00b7 ') || 'nurb';
+}
+
 function render() {
   const list = document.getElementById('list');
   list.innerHTML = '';
@@ -768,6 +783,7 @@ function render() {
     row.onclick = () => { current = e.name; render(); show(e.name, { keepCamera: false }); };
     list.appendChild(row);
   }
+  title();
 }
 
 function flash(name) {
@@ -796,6 +812,8 @@ function connect() {
   ws.onmessage = ev => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'sync') {
+      project = msg.project || '';
+      document.getElementById('project').textContent = project;
       parts.clear();
       msg.parts.forEach(p => parts.set(p.name, p));
       if (!current && parts.has(want)) current = want;
@@ -817,6 +835,17 @@ function connect() {
       if (msg.name === current) show(msg.name, { keepCamera: true });
     }
     // Checks arrive after the geometry, so this only repaints the panel.
+    // Deleted or renamed away. Without this it stays in the list, selectable, with
+    // sliders that rebuild a file that is not there.
+    if (msg.type === 'gone') {
+      parts.delete(msg.name);
+      if (current === msg.name) {
+        current = parts.size ? parts.keys().next().value : null;
+        if (current) show(current, { keepCamera: false });
+        else { document.getElementById('empty').style.display = 'grid'; }
+      }
+      render();
+    }
     if (msg.type === 'checked') {
       parts.set(msg.name, msg);
       if (msg.name === current) checks(msg.name);

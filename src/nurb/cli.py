@@ -10,7 +10,7 @@ PART_TEMPLATE = '''from nurb import *
 
 
 @part
-def {name}(width=40, depth=30, height=20, wall=2, draft=False):
+def {name}(width=40.0, depth=30.0, height=20.0, wall=2.0, draft=False):
     body = Box(width, depth, height)
     if not draft:
         body = chamfer(body.edges().filter_by(Axis.Z), length=1)
@@ -125,26 +125,50 @@ def cmd_check(args):
         sys.exit(1)
 
 
+def _collect_exports(paths):
+    """Resolve every artifact name before writing any of them."""
+    found, owners = [], {}
+    failed = False
+    for path in paths:
+        configs = _configs(path)
+        if not configs:
+            failed = True
+            continue
+        for name, overrides, ctx in configs:
+            if name in owners:
+                print(
+                    f"  duplicate export name {name!r}: "
+                    f"{owners[name].name} and {path.name}"
+                )
+                failed = True
+                continue
+            owners[name] = path
+            found.append((path, name, overrides, ctx))
+    if failed:
+        sys.exit(1)
+    return found
+
+
 def cmd_export(args):
     from build123d import export_step, export_stl
 
     from . import builder
 
     root = project_root()
+    configs = _collect_exports(_resolve(root, args.part))
     out = root / "build"
     out.mkdir(exist_ok=True)
-    for path in _resolve(root, args.part):
-        for name, overrides, _ in _configs(path):
-            shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
-            for fmt in args.formats:
-                target = out / f"{name}.{fmt}"
-                if fmt == "stl":
-                    export_stl(shape, str(target))
-                elif fmt == "step":
-                    export_step(shape, str(target))
-                elif fmt == "glb":
-                    target.write_bytes(builder.to_glb(shape, 0.02))
-                print(f"  {target.relative_to(root)}")
+    for path, name, overrides, _ in configs:
+        shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+        for fmt in args.formats:
+            target = out / f"{name}.{fmt}"
+            if fmt == "stl":
+                export_stl(shape, str(target))
+            elif fmt == "step":
+                export_step(shape, str(target))
+            elif fmt == "glb":
+                target.write_bytes(builder.to_glb(shape, 0.02))
+            print(f"  {target.relative_to(root)}")
 
 
 def cmd_extract(args):
@@ -220,11 +244,53 @@ def cmd_render(args):
         print(f"  {png.relative_to(root)}")
 
 
+DEFAULT_PORT = 7373
+
+
+def _is_free(port):
+    import socket
+
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
+
+def _pick_port(asked):
+    """The port to serve on, checked before anything expensive happens.
+
+    A project is any directory with a `parts/` folder, so working on two at once is
+    the ordinary case rather than an advanced one, and it should not cost a flag. An
+    unasked-for port walks up from the default until one is free.
+
+    Asking explicitly means asking, so a port that is taken is an error rather than a
+    suggestion: `--port 7373` picking 7374 would send you to a tab showing somebody
+    else's parts.
+    """
+    if asked is not None:
+        if _is_free(asked):
+            return asked
+        sys.exit(
+            f"  port {asked} is already in use, most likely by another nurb dev.\n"
+            f"  leave --port off and one will be picked for you"
+        )
+    for port in range(DEFAULT_PORT, DEFAULT_PORT + 40):
+        if _is_free(port):
+            return port
+    sys.exit(f"  nothing free between {DEFAULT_PORT} and {DEFAULT_PORT + 40}")
+
+
 def cmd_dev(args):
     from .server import Server
 
     root = project_root()
-    server = Server(root, port=args.port, draft=not args.polish)
+    # Before the build, not after. Discovering the port is taken used to cost a full
+    # rebuild of every part in the project first.
+    port = _pick_port(args.port)
+    server = Server(root, port=port, draft=not args.polish)
     print(f"  building {root.name}/parts")
     server.rebuild_all()
     try:
@@ -232,14 +298,10 @@ def cmd_dev(args):
     except KeyboardInterrupt:
         print("\n  stopped")
     except OSError as exc:
-        # Almost always a second `nurb dev`, and the raw errno traceback buries both
-        # what happened and the one-word fix.
+        # A race: free when it was checked and taken by the time it was bound.
         if exc.errno != errno.EADDRINUSE:
             raise
-        sys.exit(
-            f"  port {args.port} is already in use, most likely by another nurb dev.\n"
-            f"  nurb dev --port {args.port + 1}"
-        )
+        sys.exit(f"  port {port} was taken between checking it and binding it. Try again.")
 
 
 def main(argv=None):
@@ -251,7 +313,7 @@ def main(argv=None):
     s.set_defaults(fn=cmd_new)
 
     s = sub.add_parser("dev", help="watch parts and serve the viewer")
-    s.add_argument("--port", type=int, default=7373)
+    s.add_argument("--port", type=int, help=f"default: the first free port from {DEFAULT_PORT}")
     s.add_argument("--polish", action="store_true", help="build full quality (slower)")
     s.set_defaults(fn=cmd_dev)
 

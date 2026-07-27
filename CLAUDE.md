@@ -43,7 +43,7 @@ parameter's slider steps by one.
 
 ```
 nurb new <name>      create parts/<name>.py and its card
-nurb dev             watch, rebuild, serve the viewer on :7373
+nurb dev             watch, rebuild, serve the viewer on :7373 or the next free port
 nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
 nurb rules           print the design doctrine
@@ -198,13 +198,13 @@ channel floor on exact pitch, at full span, one per bracket and no more, for eve
 configuration. Its numbers are literals rather than imports from `system.py`, because a
 fit test that reads the same constant the part built from agrees with the part however
 wrong the constant is. A deliberate 0.1mm per interval pitch error is in the suite so
-the assertion is known to be able to fail. 171 tests.
+the assertion is known to be able to fail. 178 tests.
 
 **Thirteen parts found rule bugs that three parts could not.** `concave_cosmetic` was
 firing at the 2mm structural relief the doctrine prescribes for thin material, and
 `bed_bevel` at the 45 degree corbel it prescribes for a raised feature. Both were
 recalibrated against measurements, not opinions: a relief is wider than polish, and a
-chamfer's reach is exactly its size where a corbel's is its rise. `polish_edges` also
+bottom chamfer rises by exactly its size where a corbel rises farther. `polish_edges` also
 had a gap, allowing a sloped edge that reaches the bed. Every one was found by a part
 rather than by review, which is the argument for `examples/` being the calibration set.
 

@@ -6,6 +6,7 @@ nothing in nurb does either.
 """
 
 import asyncio
+import contextlib
 import json
 import pathlib
 
@@ -208,3 +209,30 @@ def test_what_most_parts_declare_identically_is_a_family_constant(project, part_
     }
     assert "height" in family  # same default in all four
     assert "count" not in family  # 2 in one part and 9 in three
+
+
+def test_a_deleted_part_is_forgotten_rather_than_left_in_the_list(project, part_file):
+    """Through the drain, which is what the watcher actually calls.
+
+    A part that is gone from disk but still listed is one you can select, drag sliders
+    on and export, none of which exist. It used to sit there until the server restarted.
+    """
+    server = Server(project)
+    server.rebuild(part_file)
+    server.overrides["thing"] = {"count": 9}
+    assert "thing" in server.state
+
+    sent = []
+
+    async def go():
+        server.queue = asyncio.Queue()
+        server.send = lambda payload: sent.append(payload) or asyncio.sleep(0)
+        part_file.unlink()
+        server.queue.put_nowait(str(part_file))
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(server.drain(), timeout=1.0)
+
+    asyncio.run(go())
+    assert "thing" not in server.state
+    assert "thing" not in server.overrides  # the sliders go with it
+    assert {"type": "gone", "name": "thing"} in sent

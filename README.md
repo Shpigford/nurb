@@ -13,7 +13,7 @@ B-rep solids with working chamfers, fillets, and STEP export.
 
 ```bash
 uv run nurb new dispenser
-uv run nurb dev            # http://127.0.0.1:7373
+uv run nurb dev            # http://127.0.0.1:7373, or the next free port
 ```
 
 Edit `parts/dispenser.py` and watch it update.
@@ -50,7 +50,14 @@ nurb export [part]  write STL/STEP/GLB into build/
 nurb extract        find duplication across parts
 ```
 
-A project is any directory with a `parts/` folder. There's no init step.
+A project is any directory with a `parts/` folder. There's no init step, and there's
+no such thing as being outside a project: `mkdir -p thing/parts && cd thing && nurb new
+clip` is the whole setup for a one-off.
+
+`nurb dev` serves one project, so two projects means two of them. It takes 7373 if that
+is free and walks up if it is not, printing where it landed, and the sidebar and the
+browser tab both carry the project name so two of them are not mistakable for each
+other.
 
 Names are deliberately boring. The primary user is a language model, and a model that
 has never seen this tool can guess `build`, `check` and `export`. It cannot guess a

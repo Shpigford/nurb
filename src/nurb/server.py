@@ -218,7 +218,11 @@ class Server:
         self.clients.add(connection)
         try:
             payload = json.dumps(
-                {"type": "sync", "parts": [self._wire(e) for e in self.state.values()]}
+                {
+                    "type": "sync",
+                    "project": self.root.name,
+                    "parts": [self._wire(e) for e in self.state.values()],
+                }
             )
             await connection.send(payload)
             async for raw in connection:
@@ -343,6 +347,14 @@ class Server:
                 paths.add(self.queue.get_nowait())  # collect, don't discard:
             for path in sorted(paths):              # two parts can change at once
                 if not pathlib.Path(path).exists():
+                    # Deleted, or renamed away. Dropping it is the whole handling: a
+                    # part that is gone from disk but still in the list is one you can
+                    # select, drag sliders on, and export, none of which exist.
+                    name = pathlib.Path(path).stem
+                    if self.state.pop(name, None) is not None:
+                        self.overrides.pop(name, None)
+                        print(f"  {name}: gone", flush=True)
+                        await self.send({"type": "gone", "name": name})
                     continue
                 entry = await asyncio.to_thread(self.rebuild, path)
                 status = entry["error"] or f"{entry['ms']}ms"
