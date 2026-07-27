@@ -37,6 +37,39 @@ def project_root(start=None):
     return here
 
 
+# Harness files an agent reads without being told to. The first one that already
+# exists is left alone and gets a nudge instead, since it is the user's file.
+HARNESS = ("AGENTS.md", "CLAUDE.md")
+
+
+def _seed_agents(root):
+    """Put a pointer to `nurb rules` where an agent will find it on day one.
+
+    Everything an agent needs is already reachable: `nurb --help` lists the commands and
+    `nurb rules` prints the doctrine. What was missing is any reason to type `nurb` at
+    all. A fresh project is two files that look like an ordinary build123d script, so an
+    agent reads them as one, writes generic geometry, and never learns the tool exists.
+
+    This is not an init step. It is the command you were already running, it is skipped
+    when the project has a harness file of its own, and `nurb new` prints everything it
+    writes either way.
+    """
+    from . import __file__ as pkg
+
+    shim = (pathlib.Path(pkg).parent / "agents.md").read_text(encoding="utf-8")
+    for name in HARNESS:
+        here = root / name
+        if not here.is_file():
+            continue
+        # The one this command wrote on a previous run is not news.
+        if here.read_text(encoding="utf-8") == shim:
+            return None, None
+        return None, name
+    target = root / HARNESS[0]
+    target.write_text(shim, encoding="utf-8")
+    return target, None
+
+
 def cmd_new(args):
     root = project_root()
     parts = root / "parts"
@@ -47,7 +80,14 @@ def cmd_new(args):
         sys.exit(f"{py} already exists")
     py.write_text(PART_TEMPLATE.format(name=name))
     md.write_text(CARD_TEMPLATE.format(name=name))
-    print(f"  {py.relative_to(root)}\n  {md.relative_to(root)}")
+    written = [py, md]
+    seeded, already = _seed_agents(root)
+    if seeded:
+        written.append(seeded)
+    for path in written:
+        print(f"  {path.relative_to(root)}")
+    if already:
+        print(f"  {already} is yours, so it was left alone. Point it at `nurb rules`.")
 
 
 def _resolve(root, name):
@@ -305,7 +345,13 @@ def cmd_dev(args):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="nurb", description="agentic CAD for 3D printing")
+    p = argparse.ArgumentParser(
+        prog="nurb",
+        description="agentic CAD for 3D printing",
+        # The one line worth having here: an agent that meets this binary in a
+        # traceback should learn where the rest of it is.
+        epilog="start with `nurb rules`, which prints the design doctrine",
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("new", help="create a part")
