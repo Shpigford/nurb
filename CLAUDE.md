@@ -190,6 +190,7 @@ as though every file will be read by a stranger.
   not obvious from the code.
 - No em-dashes in user-facing copy, docs, or comments.
 - Commit messages describe what changed and why, in plain sentences.
+- **Never hard-wrap prose. Ever.** One paragraph is one line; editors soft-wrap. This applies to every markdown and text file, and it applies even when the surrounding file is already wrapped: fix the paragraph you touch instead of matching the wrapping. Code, tables, and fenced blocks keep their formatting.
 
 ## Current state
 

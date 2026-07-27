@@ -5,15 +5,9 @@ description: Design 3D-printable parts as Python functions with nurb. Use when t
 
 # nurb
 
-A part is a Python function and its keyword defaults are its parameters. A project is any
-directory with a `parts/` folder; there is no init step. You are the CAD operator: the
-user describes the part and you do everything else, including creating the project and
-modelling. Keep `nurb dev` running in the background and hand the user its URL, because
-the browser it serves is where they judge the result.
+A part is a Python function and its keyword defaults are its parameters. A project is any directory with a `parts/` folder; there is no init step. You are the CAD operator: the user describes the part and you do everything else, including creating the project and modelling. Keep `nurb dev` running in the background and hand the user its URL, because the browser it serves is where they judge the result.
 
-**Run `nurb rules` first.** It prints the design doctrine: printability, load paths, the
-polish pass, the kernel traps, card discipline, and what to verify. This file stays thin
-on purpose so there is one copy of that, in the package, which cannot drift.
+**Run `nurb rules` first.** It prints the design doctrine: printability, load paths, the polish pass, the kernel traps, card discipline, and what to verify. This file stays thin on purpose so there is one copy of that, in the package, which cannot drift.
 
 ```
 nurb rules            the doctrine, read this first
@@ -28,7 +22,6 @@ nurb extract          find duplication across parts
 nurb dev              watch, rebuild, serve the viewer on :7373 or the next free port
 ```
 
-Read `parts/<name>.md` before editing `parts/<name>.py`. Its `## Don't` section is what
-was tried and rejected, and it is the only place that records it.
+Read `parts/<name>.md` before editing `parts/<name>.py`. Its `## Don't` section is what was tried and rejected, and it is the only place that records it.
 
 If `nurb` is not on PATH: `uv tool install nurb` or `pip install nurb`.
