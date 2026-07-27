@@ -9,6 +9,8 @@ A part is a Python function and its keyword defaults are its parameters. A proje
 
 **Run `nurb rules` first.** It prints the design doctrine: printability, load paths, the polish pass, the kernel traps, card discipline, and what to verify. This file stays thin on purpose so there is one copy of that, in the package, which cannot drift.
 
+**Ask before you model.** Anything the part has to fit (an opening, a bracket, the object it holds) is a question for the user: ask for those measurements in one batch before the first build, using your harness's question tool if it has one, and record the answers in `measurements.toml` the way the doctrine describes. Anything that is taste rather than fit becomes a parameter instead of a question, because the viewer's sliders are how the user answers those. A guessed proportion costs one slider drag; a guessed clearance prints the wrong part.
+
 ```
 nurb rules            the doctrine, read this first
 nurb new <name>       create parts/<name>.py and its card
