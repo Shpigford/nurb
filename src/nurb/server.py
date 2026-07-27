@@ -51,6 +51,10 @@ class Server:
         self.queue = None
         self.observer = None
         self.drain_task = None
+        # One build at a time, shared by the rebuild loop and the export route. OCCT
+        # makes no thread-safety promises, and a download landing mid-rebuild is the
+        # ordinary way two builds would otherwise overlap.
+        self.building = asyncio.Lock()
 
     @property
     def origins(self):
@@ -142,10 +146,12 @@ class Server:
 
     # ---------- http ----------
 
-    def http(self, connection, request):
+    async def http(self, connection, request):
         path = request.path.split("?")[0]
         if path == "/":
             return self._resp(200, VIEWER.read_bytes(), "text/html; charset=utf-8")
+        if path.startswith("/export/"):
+            return await self.export(path[len("/export/") :])
         if path == "/api/parts":
             body = json.dumps([self._wire(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
@@ -166,7 +172,7 @@ class Server:
         return self._resp(404, b"not found", "text/plain")
 
     @staticmethod
-    def _resp(status, body, content_type):
+    def _resp(status, body, content_type, attach=None):
         headers = Headers(
             {
                 "Content-Type": content_type,
@@ -174,7 +180,48 @@ class Server:
                 "Cache-Control": "no-store",
             }
         )
+        if attach:
+            headers["Content-Disposition"] = f'attachment; filename="{attach}"'
         return Response(status, "OK" if status == 200 else "Error", headers, body)
+
+    # What the download button serves. This is the configurator: the parameters were
+    # always introspectable and the sliders already drive them, so publishing a part is
+    # `nurb dev` plus this route, not a second modelling stack.
+    EXPORTS = {"stl": "model/stl", "step": "application/step"}
+
+    async def export(self, filename):
+        name, _, fmt = filename.rpartition(".")
+        if fmt not in self.EXPORTS or name not in self.state:
+            return self._resp(404, b"not found", "text/plain")
+        try:
+            async with self.building:
+                body = await asyncio.to_thread(self._export, name, fmt)
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"
+            return self._resp(500, message.encode(), "text/plain")
+        return self._resp(200, body, self.EXPORTS[fmt], attach=f"{name}.{fmt}")
+
+    def _export(self, name, fmt):
+        """Build at the values the sliders hold and export that.
+
+        Always the polished build, whatever the viewer is showing: draft is a preview
+        economy, and a file somebody downloads is on its way to a slicer.
+        """
+        import tempfile
+
+        from build123d import export_step, export_stl
+
+        path = next((p for p in builder.find_parts(self.root) if p.stem == name), None)
+        if path is None:  # deleted between the click and the build
+            raise builder.BuildError(f"{name} is no longer on disk")
+        shape, _, _ = builder.build(path, overrides=self.overrides.get(name), draft=False)
+        with tempfile.TemporaryDirectory() as scratch:
+            target = pathlib.Path(scratch) / f"{name}.{fmt}"
+            if fmt == "stl":
+                export_stl(shape, str(target))
+            else:
+                export_step(shape, str(target))
+            return target.read_bytes()
 
     @staticmethod
     def _meta(entry):
@@ -316,7 +363,15 @@ class Server:
                     return
                 path = pathlib.Path(getattr(event, "dest_path", "") or event.src_path)
                 # "." skips the atomic-save temp files editors and sed leave behind
-                if path.suffix not in (".py", ".md") or path.name.startswith((".", "_")):
+                if path.name.startswith((".", "_")):
+                    return
+                # printer.toml changes every part's checks and measurements.toml can
+                # feed any part's geometry, so either rebuilds the project the way
+                # system.py does: they land in the else branch below.
+                if path.suffix not in (".py", ".md") and path.name not in (
+                    "printer.toml",
+                    "measurements.toml",
+                ):
                     return
                 # A card carries what the part has already justified, so editing one
                 # changes the answer even though the geometry is untouched.
@@ -325,7 +380,12 @@ class Server:
                     if not path.is_file():
                         return
                 # A shared module (system.py) can feed every part, so rebuild all.
-                changed = [path] if path.parent == parts_dir else builder.find_parts(server.root)
+                # The suffix guard keeps a stray toml saved into parts/ from queueing
+                # itself as a part.
+                if path.suffix == ".py" and path.parent == parts_dir:
+                    changed = [path]
+                else:
+                    changed = builder.find_parts(server.root)
                 for target in changed:
                     server.loop.call_soon_threadsafe(server.queue.put_nowait, str(target))
 
@@ -356,12 +416,14 @@ class Server:
                         print(f"  {name}: gone", flush=True)
                         await self.send({"type": "gone", "name": name})
                     continue
-                entry = await asyncio.to_thread(self.rebuild, path)
+                async with self.building:
+                    entry = await asyncio.to_thread(self.rebuild, path)
                 status = entry["error"] or f"{entry['ms']}ms"
                 print(f"  {entry['name']}: {status}", flush=True)
                 await self.broadcast(entry)
                 # Geometry has landed, so the rules can take their time.
-                entry = await asyncio.to_thread(self.check, path)
+                async with self.building:
+                    entry = await asyncio.to_thread(self.check, path)
                 if entry and entry.get("findings") is not None:
                     await self.broadcast(entry, kind="checked")
                     bad = sum(1 for f in entry["findings"] if f["severity"] == "fail")

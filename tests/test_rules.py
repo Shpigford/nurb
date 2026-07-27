@@ -258,6 +258,24 @@ def test_min_wall_floor_is_per_part():
     assert only(plate, "min_wall", Context(min_wall=0.8)) == []
 
 
+@pytest.mark.parametrize("allowed,flagged", [(9.5, True), (8.8, False)])
+def test_min_wall_measures_a_skewed_section_with_a_sphere(allowed, flagged):
+    """Through a skewed section the ray measures the slant, and the sphere corrects it.
+
+    A wedge whose hypotenuse leans over the back face. The highest probe on the back
+    sits 8mm from the hypotenuse plane, whose normal is 0.8 off the probe's axis, so
+    the shortest chord any probe accepts is 10.0mm while the largest tangent sphere is
+    2 * 8 / (1 + 0.8) = 8.89mm, both worked out by hand. A limit of 9.5 sits between
+    them, which is exactly the case a ray cast alone gets wrong.
+    """
+    section = Plane.XZ * Polygon((0, 0), (30, 0), (0, 40), align=None)
+    wedge = extrude(section, 10, both=True)
+    found = only(wedge, "min_wall", Context(min_wall=allowed))
+    assert bool(found) is flagged
+    if flagged:
+        assert found[0].value == pytest.approx(8.89, abs=0.05)
+
+
 def test_min_wall_does_not_measure_across_a_chamfer_corner():
     """A ray that has already left the material must not count what it hits next.
 

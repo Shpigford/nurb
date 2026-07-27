@@ -108,7 +108,7 @@ def _resolve(root, name):
     return match
 
 
-def _configs(path):
+def _configs(path, base=None):
     """A part's configurations: itself, then whatever variants its card declares.
 
     Every command that walks parts walks these instead, so a variant is checked,
@@ -119,7 +119,7 @@ def _configs(path):
     from . import checks
 
     try:
-        return checks.configurations(path)
+        return checks.configurations(path, base=base)
     except Exception as exc:
         print(f"  {path.stem}: {type(exc).__name__}: {exc}")
         return []
@@ -144,9 +144,18 @@ def cmd_check(args):
     from . import builder, checks
 
     root = project_root()
+    # Resolved once, and only when asked for: `--printer a1_mini` answers "does this
+    # fit that machine" without touching printer.toml. The file, when present, is
+    # already the default inside `checks.configurations`.
+    base = None
+    if args.printer:
+        try:
+            base = checks.printer(root, args.printer)
+        except ValueError as exc:
+            sys.exit(f"  {exc}")
     worst = 0
     for path in _resolve(root, args.part):
-        configs = _configs(path)
+        configs = _configs(path, base=base)
         if not configs:
             worst = 2
         for name, overrides, ctx in configs:
@@ -488,6 +497,9 @@ def main(argv=None):
     s = sub.add_parser("check", help="run the printability rules")
     s.add_argument("part", nargs="?")
     s.add_argument("--strict", action="store_true", help="exit non-zero on any finding")
+    # Not argparse `choices`: reading them would parse the shipped profiles on every
+    # `nurb --help`, and the error for an unknown name already lists what exists.
+    s.add_argument("--printer", help="check against a shipped profile instead of printer.toml")
     s.set_defaults(fn=cmd_check)
 
     s = sub.add_parser("rules", help="print the design doctrine")

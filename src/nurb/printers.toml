@@ -1,0 +1,35 @@
+# Shipped printer profiles: machine facts, not part judgements.
+#
+# A bed size belongs to the machine, so it lives here and is picked once per project
+# in printer.toml, never per card. What a part has justified (its min_wall, its
+# accepted slivers) stays on its card next to the sentence explaining why.
+#
+# Every key must be a field of checks.Context. Sizes are manufacturer-published
+# build volumes in mm, X x Y x Z.
+
+[bambu_x1c]
+bed = [256.0, 256.0, 256.0]
+
+[bambu_p1s]
+bed = [256.0, 256.0, 256.0]
+
+[bambu_p1p]
+bed = [256.0, 256.0, 256.0]
+
+[bambu_a1]
+bed = [256.0, 256.0, 256.0]
+
+[bambu_a1_mini]
+bed = [180.0, 180.0, 180.0]
+
+[prusa_mk4s]
+bed = [250.0, 210.0, 220.0]
+
+[prusa_mini]
+bed = [180.0, 180.0, 180.0]
+
+[prusa_xl]
+bed = [360.0, 360.0, 360.0]
+
+[ender_3_v3]
+bed = [220.0, 220.0, 250.0]

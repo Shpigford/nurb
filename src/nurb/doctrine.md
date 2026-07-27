@@ -225,7 +225,10 @@ Plus two machine-facing pieces:
   produces no diff.
 - The **accepted baselines**, a TOML fence carrying what this part has already justified:
   its sliver count, its real minimum wall, its printer settings. The number goes next to
-  the sentence that earns it, because a count on its own is a magic number.
+  the sentence that earns it, because a count on its own is a magic number. Machine facts
+  stay out of it: a bed size belongs to the machine, so it lives in `printer.toml` at the
+  project root, which names a shipped profile (`profile = "bambu_a1_mini"`) and can
+  override any check setting machine-wide.
 
 ```toml
 [part]

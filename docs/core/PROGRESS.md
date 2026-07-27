@@ -1,6 +1,6 @@
 # nurb core progress
 
-## Status: Phases 1 through 5 complete.
+## Status: Phases 1 through 5 complete, and the README's "not built yet" list built.
 
 **The whole Notch catalog is in nurb.** Sixteen catalog entries out of thirteen part
 files and nineteen shipped configurations, every one a single solid matching its Fusion
@@ -1020,6 +1020,50 @@ and now has evidence.
 ---
 
 ## Session log
+
+### 2026-07-27: The README's "not built yet" list
+
+Three items, and the middle one produced this session's finding.
+
+**Printer profiles ship in the package.** `src/nurb/printers.toml` holds machine facts,
+a project names one in `printer.toml` at the root, and `nurb check --printer x` tries
+another machine without touching the file. The split the docs kept circling is now
+enforced by layering: Context defaults, then the profile, then the file's own overrides,
+then the card, so a card keeps winning for exactly what its part has justified and
+nothing else. The watcher now rebuilds the project when `printer.toml` or
+`measurements.toml` changes; the second was an existing gap the first exposed, since
+editing a measurement always could change geometry and never triggered a rebuild.
+
+**`min_wall` grew its inscribed sphere, and the naive version was disproved before it
+shipped.** A tangent sphere at every probe, which is what the literature describes,
+reads curvature as thickness: every detent dimple in the library reported its bowl's
+0.8mm, and the shelf reported 0.033mm at a knife edge. Values like that do not measure
+walls and cannot be carded. What shipped instead is a correction of the ray: any chord
+thin enough that the true section could still be under `min_wall` gets the shrinking
+ball, on exact `distance_to_with_closest_points` queries so the check stays on the
+solid, and the gate follows from the ray's own exit filter (an accepted chord leaves
+within a 0.3 cosine, so a chord past `min_wall / 0.3` cannot be hiding a failure).
+
+The filter that matters was found by a part, again. The scraper measured 1.07mm sitting
+in a 2.3mm web: a sphere wedged between the channel floor and the detent dimple's bowl,
+two surfaces bounding the same air. The fix is the ray's own rule applied to the
+sphere's contact, whose normal comes free as `(q - c) / r`: the far surface has to face
+back at the measurement, same 0.3 floor. Algebraically that is `|w|^2 / 2r^2 - 1 > 0.3`,
+one comparison. With it, every library value lands exactly on its card or above:
+flat-parallel parts unchanged at 1.0, akrobin's 1.98 chord corrected to a true 1.64
+diagonal, the spool 1.42 to 1.18, the shelves 1.0 to 0.84 at the mouth chamfers against
+a 0.7 card. Nothing fires. The whole-library strict check went from ~9s to ~14s, which
+is what "correct and expensive" was supposed to cost. The skew case has a hand-derived
+test: a wedge where the shortest chord is 10.0mm and the tangent sphere is
+2 * 8 / 1.8 = 8.89mm, with the limit between them.
+
+**The viewer is the configurator.** `/export/<part>.stl|step` builds at whatever the
+sliders hold, polished regardless of the draft economy, behind the same lock as the
+rebuild loop so two OCCT builds cannot overlap. Verified in a real browser: slider from
+200 to 150, download, and the STL measures 150 x 200 x 10 and is watertight. What
+remains of "publish a configurator" is hosting without a running kernel, which is a
+different problem and stays on the list; MakerWorld's customizer runs OpenSCAD, which
+build123d does not transpile to, so that path is closed rather than pending.
 
 ### 2026-07-26 (last): Phase 5
 

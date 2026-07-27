@@ -349,6 +349,55 @@ def stability(shape, ctx):
     return []
 
 
+# --- printer profiles --------------------------------------------------------
+
+PRINTERS = pathlib.Path(__file__).parent / "printers.toml"
+PRINTER_FILE = "printer.toml"  # optional, at the project root, like measurements.toml
+
+
+def profiles():
+    """The shipped printer profiles: machine facts, keyed by name."""
+    import tomllib
+
+    return tomllib.loads(PRINTERS.read_text(encoding="utf-8"))
+
+
+def _project_root(part_path):
+    """The project a part belongs to, by the same rule the builder uses."""
+    path = pathlib.Path(part_path).resolve()
+    return path.parent.parent if path.parent.name == "parts" else path.parent
+
+
+def printer(root, name=None):
+    """The machine's Context: a shipped profile, then the project's printer.toml.
+
+    A bed size belongs to the machine, not to a part, so it is picked once here
+    rather than written onto every card. The file names a shipped profile and can
+    override any check setting machine-wide; a card still wins for what its part
+    has justified, because `_apply` runs the card on top of this.
+    """
+    import tomllib
+
+    ctx = Context()
+    block = {}
+    file = pathlib.Path(root) / PRINTER_FILE
+    if file.is_file():
+        try:
+            block = tomllib.loads(file.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            raise ValueError(f"{PRINTER_FILE}: not valid TOML ({exc})") from exc
+    name = name or block.pop("profile", None)
+    if name:
+        have = profiles()
+        if name not in have:
+            raise ValueError(
+                f"no printer profile called {name!r}. have: {', '.join(sorted(have))}"
+            )
+        _apply(ctx, {"printer": have[name]}, f"profile {name!r}")
+    block.pop("profile", None)  # named on the command line, so the file's loses
+    return _apply(ctx, {"printer": block}, PRINTER_FILE)
+
+
 # --- per part settings -------------------------------------------------------
 
 CARD_SETTINGS = "toml"  # the fence a card uses to carry them
@@ -396,7 +445,8 @@ def from_card(part_path, base=None):
     A card with no settings block is normal and means no findings are excused.
     """
     card = pathlib.Path(part_path).with_suffix(".md")
-    return _apply(base or Context(), settings(part_path), card.name)
+    base = base or printer(_project_root(part_path))
+    return _apply(base, settings(part_path), card.name)
 
 
 def configurations(part_path, base=None):
@@ -416,9 +466,10 @@ def configurations(part_path, base=None):
     stem = pathlib.Path(part_path).stem
     card = pathlib.Path(part_path).with_suffix(".md")
     block = settings(part_path)
+    base = base or printer(_project_root(part_path))
 
     def fresh():
-        return _apply(replace(base) if base else Context(), block, card.name)
+        return _apply(replace(base), block, card.name)
 
     out = [(stem, {}, fresh())]
     for name, variant in block.get("variants", {}).items():
@@ -619,29 +670,75 @@ def _probes(face, grid=2):
     return out
 
 
+def _sphere_at(shape, point, outward, chord):
+    """The largest sphere tangent to the solid at `point`, as a diameter, or None.
+
+    The shrinking ball: start at half the ray's chord, ask the kernel for the nearest
+    boundary point to the center, and where something is nearer than the radius, shrink
+    to the sphere through it. Distances are exact B-rep queries, so this stays a check
+    on the solid rather than on a mesh, and it converges in a handful of steps because
+    the tangency update jumps straight to the answer rather than bisecting toward it.
+
+    None means the far contact was a graze rather than a wall. The contact normal comes
+    free, as (q - c) / r, and it gets the same 0.3 floor the ray's exit filter uses,
+    with the same meaning: a measurement has to leave through a surface facing back at
+    it. Without this, a shallow depression reads as a thin section of whatever it is
+    pressed into: the scraper's detent dimple measured 1.07mm sitting in a 2.3mm web,
+    between two surfaces bounding the same air.
+    """
+    inward = -outward
+    r = chord / 2
+    w = None
+    for _ in range(12):
+        center = point + inward * r
+        d, q, _ = shape.distance_to_with_closest_points(center)
+        if d >= r - 1e-5:
+            break
+        w = point - q
+        if w.length < 1e-6:
+            return None  # pinned at the tangent point, which is curvature, not a wall
+        denom = 2 * w.dot(outward)
+        if denom <= 1e-9:
+            return None  # the contact is behind the tangent plane, nothing to measure
+        grown = w.dot(w) / denom
+        if grown >= r - 1e-6:
+            break
+        r = grown
+    if w is not None and w.dot(w) / (2 * r * r) - 1 <= 0.3:
+        return None
+    return 2 * r
+
+
 @rule("min_wall")
 def min_wall(shape, ctx):
-    """The thinnest section in the solid, by shooting inward and seeing what it hits.
+    """The thinnest section in the solid: a ray cast, corrected by an inscribed sphere
+    wherever the correction could change the verdict.
 
-    This is a ray cast, not an inscribed sphere, and it is the weakest rule here. It is
-    exact on the flat parallel walls that make up most of a printed part. It is wrong in
-    two directions everywhere else, and both showed up on the first run against this
-    library:
+    The ray is exact on the flat parallel walls that make up most of a printed part,
+    and an overestimate everywhere else: through a skewed wall it measures the slant,
+    up to 1/0.3 of the true section at its own exit filter's floor. So any chord thin
+    enough that the true section might still be under `min_wall` gets refined by
+    `_sphere_at`, which measures the way a wall is actually thin, perpendicular to
+    nothing in particular. The gate follows from the filter rather than being tuned: an
+    accepted chord leaves within the 0.3 cosine floor, so a chord past `min_wall / 0.3`
+    cannot be hiding a failing section, and the sphere is only paid for where it could
+    matter. That also prices `min_wall = 0`, the card's way of saying "this rule cannot
+    measure this part", at nothing.
 
-    - It reads a taper as a wall. The shelf's mouth rims are knife edges by design, and
-      near the tip of a wedge any straight line across it is short. 0.76mm there is a
-      true measurement of something that is not a wall.
-    - It reads a relief as a wall. The calibration coupon's raised label is 0.5mm proud,
-      and that is what the ray finds.
+    Two caveats survive the correction, and live on cards rather than in code:
 
-    Neither is a defect and all three parts print. So the number a part is allowed lives
-    on its card next to the reason, and the default is what the printer manages rather
-    than what a textbook says. It also misses the case an inscribed sphere would catch,
-    a thin spot in an inside corner, where the smallest sphere that fits is smaller than
-    any straight line across. Treat a clean result as "no thin walls found", not as
-    "no thin walls".
+    - A taper reads as a wall. Near the tip of a designed knife edge every section is
+      short, sphere and chord alike. The gridfinity shelves' sockets measure 0.84mm
+      where their 45 degree walls meet, and their cards allow 0.7 next to the sentence
+      saying why.
+    - A relief reads as a wall. The calibration coupon's raised label is 0.5mm proud,
+      and that is what gets measured, so its card sets `min_wall = 0`.
+
+    Probes sample faces, so a pinch nothing lands near is still missed. Treat a clean
+    result as "no thin walls found", not as "no thin walls".
     """
     thinnest, spot = None, None
+    floor = ctx.min_wall * 0.01
     for face in shape.faces():
         if face.area < ctx.sliver_area:
             continue  # a face this small has no wall to speak of
@@ -655,12 +752,22 @@ def min_wall(shape, ctx):
             reach = [
                 (hit - point).length
                 for hit, hit_normal in hits
-                if (hit - point).dot(inward) > ctx.min_wall * 0.01
+                if (hit - point).dot(inward) > floor
                 and hit_normal.dot(inward) > 0.3
             ]
             if not reach:
                 continue
             near = min(reach)
+            if near * 0.3 < ctx.min_wall:
+                # The sphere starts from the first boundary crossing rather than from
+                # the accepted chord, because half of that is guaranteed to sit inside
+                # the material, and the shrink only ever moves down from there.
+                first = min(
+                    (hit - point).length for hit, _ in hits if (hit - point).length > floor
+                )
+                section = _sphere_at(shape, point, normal, first)
+                if section is not None and floor < section < near:
+                    near = section
             if thinnest is None or near < thinnest:
                 thinnest, spot = near, point
     # Slack, because a card declaring the value it measured should not then fail on the
@@ -676,7 +783,7 @@ def min_wall(shape, ctx):
             "min_wall",
             WARN,
             f"{thinnest:.2f}mm section, under the {ctx.min_wall:.2f}mm this printer "
-            f"lays down reliably (ray cast, so corners may be thinner still)",
+            f"lays down reliably",
             value=round(thinnest, 3),
             where=tuple(round(v, 2) for v in spot),
         )

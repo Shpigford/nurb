@@ -67,6 +67,7 @@ never should be.
 src/nurb/registry.py      @part, signature introspection
 src/nurb/builder.py       load, build, tessellate, GLB
 src/nurb/checks.py        printability rules, convexity, Finding/Context, variants
+src/nurb/printers.toml    shipped printer profiles, named by a project's printer.toml
 src/nurb/card.py          the card's AUTO block
 src/nurb/extract.py       duplication across sibling parts, up to alpha-equivalence
 src/nurb/measurements.py  measured(), and the refusal to guess
@@ -231,6 +232,15 @@ OCP's iterator over that array is pathological: 7790 triangles cost 536ms to ite
 and 6.8ms to read by index, against 10ms for the meshing itself. `builder._triangulate`
 reads them by index and returns bit-identical geometry. Phase 1's recorded conclusion
 that "tessellation is the loop" was measuring that iterator.
+
+The README's original "not built yet" list is built. Printer profiles ship in
+`src/nurb/printers.toml`, named once per project by `printer.toml` (`nurb check
+--printer x` tries another machine). `min_wall` corrects its ray chords with an
+inscribed sphere on exact kernel distances, gated so the sphere is only paid for where
+it could change the verdict; the far contact gets the same 0.3 cosine floor as the
+ray's exit filter, or a dimple's bowl reads as a thin wall (it did: 1.07mm in a 2.3mm
+web on the scraper). And the viewer is the configurator: `stl`/`step` buttons build at
+the slider values, polished, and hand back the file.
 
 `docs/core/PROGRESS.md` has the findings, including several claims from RESEARCH.md and
 earlier phases that a real part, a real print, or a real measurement disproved. Read

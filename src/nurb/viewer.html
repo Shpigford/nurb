@@ -75,6 +75,8 @@
   button:hover { border-color: var(--dim); }
   button:focus-visible { outline: none; border-color: var(--accent); }
   #reframe { display: none; }
+  #download { display: flex; gap: 6px; }
+  #download button:disabled { color: var(--dim); cursor: default; }
   #section { display: flex; align-items: center; gap: 6px; }
   #section .on { border-color: var(--accent); color: var(--accent); }
   #cut { display: none; align-items: center; gap: 4px;
@@ -185,6 +187,10 @@
 <main>
   <div id="empty">no parts yet. nurb new &lt;name&gt;</div>
   <div id="tools">
+    <div id="download">
+      <button data-fmt="stl">stl</button>
+      <button data-fmt="step">step</button>
+    </div>
     <button id="reframe">reframe</button>
     <div id="section">
       <div id="cut">
@@ -377,6 +383,34 @@ function sectionUpdate() {
   plane.projectPoint(box.getCenter(new THREE.Vector3()), cap.position);
   cap.lookAt(cap.position.x - plane.normal.x, cap.position.y - plane.normal.y,
              cap.position.z - plane.normal.z);
+}
+
+// ---- download ----
+// This is the configurator. The sliders already hold an exploration, so the file
+// that comes back is the polished build of exactly what is on screen, whatever the
+// preview economy: draft is for the loop, a download is on its way to a slicer.
+// Fetched rather than navigated, so a failed build lands in the note instead of
+// replacing the viewer with a traceback.
+for (const b of document.querySelectorAll('#download button')) {
+  b.onclick = async () => {
+    if (!current) return;
+    const fmt = b.dataset.fmt, was = b.textContent;
+    b.disabled = true; b.textContent = 'building';
+    try {
+      const r = await fetch(`/export/${current}.${fmt}`);
+      if (!r.ok) throw new Error(await r.text());
+      const url = URL.createObjectURL(await r.blob());
+      const a = Object.assign(document.createElement('a'),
+                              { href: url, download: `${current}.${fmt}` });
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const note = document.getElementById('note');
+      if (note) { note.classList.add('bad'); note.textContent = `export failed: ${e.message}`; }
+    } finally {
+      b.disabled = false; b.textContent = was;
+    }
+  };
 }
 
 document.getElementById('sectionbtn').onclick = ev => {

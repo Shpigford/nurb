@@ -516,7 +516,10 @@ Phase 1 and are kept here with their outcomes, since the outcomes are the useful
   3x2) become one file with different defaults? The three gridfinity shelves are the
   same part flexed, which argues for one parameterized file and separate export
   configs.
-- Printer profiles: shipped defaults, or user-authored from the start?
+- ~~Printer profiles: shipped defaults, or user-authored from the start?~~ **Answered
+  post-Phase 5: shipped.** Machine facts live in `src/nurb/printers.toml`; a project
+  names one in `printer.toml` and can override any check setting machine-wide. Cards
+  keep only what a part has justified.
 - Is `nurb` also the name of the published PyPI package, given `nurb` is free there
   today, or does the package become `nurb-cad` with `nurb` as the console script?
 

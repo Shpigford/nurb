@@ -348,16 +348,21 @@ src/nurb/cli.py               extract
 All five phases are complete. What is left, in the order it looks worth doing:
 
 - [x] `min_wall` rule, shipped in Phase 2 as a ray cast and stated as an approximation
-- [ ] `min_wall` by inscribed sphere. The ray cast is exact on flat parallel walls and
-      wrong in both directions everywhere else, and thirteen parts have not yet produced
-      a case where that mattered. Revisit when one does, not before.
-- [ ] Printer profiles: shipped defaults vs user-authored. Every card currently carries
-      its own, which is right for a `min_wall` a part has justified and wrong for a bed
-      size that belongs to a machine.
+- [x] `min_wall` by inscribed sphere, as a correction of the ray rather than a
+      replacement. A full tangent-sphere pass proved wrong on this library before it
+      shipped: it reads curvature as thickness (0.033mm on the shelf, 0.8mm at every
+      detent dimple), so the sphere only refines chords thin enough to change the
+      verdict, and a contact that grazes rather than crosses is rejected by the same
+      0.3 cosine floor the ray's exit filter uses. See PROGRESS.md.
+- [x] Printer profiles: shipped. Machine facts live in `src/nurb/printers.toml`, a
+      project names one in `printer.toml`, and a card still wins for what its part
+      has justified. `nurb check --printer x` tries another machine.
 - [ ] Decide `nurb` vs `nurb-cad` for the PyPI package name
 - [ ] Claim PyPI `nurb`, npm `nurb`, nurb.dev
-- [ ] Publishing path: does a nurb part export to an OpenSCAD file for MakerWorld's
-      customizer, or does nurb host its own configurator?
+- [x] Publishing path, half-answered: nurb hosts its own. The dev server's viewer is
+      the configurator, with `stl`/`step` downloads built at the slider values. An
+      OpenSCAD export for MakerWorld's customizer is not a target, because build123d
+      does not transpile to OpenSCAD. Hosting without a running kernel stays open.
 
 ## Notes
 

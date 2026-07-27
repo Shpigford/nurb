@@ -43,5 +43,6 @@ source-include = [
     "src/nurb/viewer.html",
     "src/nurb/doctrine.md",
     "src/nurb/agents.md",
+    "src/nurb/printers.toml",
     "src/nurb/vendor/**/*",
 ]

@@ -88,6 +88,7 @@ parts/<name>.py     the part
 parts/<name>.md     its card: what it is, why, what not to retry
 system.py           optional: shared constants and geometry, importable from a part
 measurements.toml   optional: real-world dimensions with how they were obtained
+printer.toml        optional: which machine this project prints on
 build/              generated, gitignored
 ```
 
@@ -101,7 +102,7 @@ mesh, so it sees real faces with exact areas and normals instead of triangles.
 
 ```
 overhang          downward faces past 45 degrees, bridges told from cantilevers
-min_wall          thinnest section, by ray cast
+min_wall          thinnest section, ray cast corrected by an inscribed sphere
 sliver            faces too small to print as anything but a smear
 concave_cosmetic  polish laid into an inside corner
 bed_bevel         polish laid on the edges that meet the build plate
@@ -109,6 +110,25 @@ stability         center of mass outside the footprint
 projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
+
+`min_wall`'s ray is exact on flat parallel walls and measures the slant through a skewed
+one, so any chord thin enough to change the verdict is corrected by the largest sphere
+tangent at that point, computed against the solid with exact kernel distances. A sphere
+whose far contact is a graze rather than a wall is rejected by the same 0.3 cosine floor
+the ray's exit filter uses, which is what keeps a detent dimple's bowl from reading as a
+thin section of the web it is pressed into.
+
+The bed size belongs to the machine, not to a part, so it is not written on cards.
+A project picks a shipped profile once, in `printer.toml` at the root:
+
+```toml
+profile = "bambu_a1_mini"
+```
+
+Any check setting can be overridden in the same file, machine-wide. A card still wins
+for what its part has justified. `nurb check --printer prusa_mk4s` answers "does this
+fit that machine" without touching the file, and naming a profile that does not exist
+lists the ones that do.
 
 Every part carries what it has already justified on its card, so a known finding is
 silent and a new one is a regression:
@@ -202,13 +222,23 @@ no more, for every shipped configuration. Its numbers are literals rather than i
 from the part's own constants, because a fit test that reads the same constant the part
 built from agrees with the part however wrong the constant is.
 
+## The viewer is the configurator
+
+A part's parameters were always introspectable, so the sliders come from the signature
+and nothing else. The `stl` and `step` buttons build the part at whatever the sliders
+are holding, at full polish whatever the preview economy, and hand back the file: what
+is on screen is what lands in the slicer. Point somebody at your `nurb dev` and they
+can configure and download a part without touching Python.
+
 ## Not built yet
 
-- `min_wall` is a ray cast, so it is exact on flat parallel walls and approximate
-  everywhere else. An inscribed sphere is the correct answer and an expensive one.
-- Printer profiles, shipped rather than written per card
-- A configurator: a part's parameters are already introspectable, so the missing piece
-  is publishing, not modelling
+- A hosted configurator. `nurb dev` already is one for anybody who can reach it, but
+  publishing without a running kernel is a different problem: MakerWorld's customizer
+  runs OpenSCAD, which build123d does not transpile to.
+- Measurement tools in the viewer. The section view shows an interior; it does not
+  yet measure it.
+- `min_wall` probes sample faces, so a pinch nothing lands near is still missed. A
+  clean result means "no thin walls found", not "no thin walls".
 
 ## Debugging the viewer
 
