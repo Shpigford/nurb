@@ -84,7 +84,7 @@ def _update_nudge():
     """
     latest = _latest_on_pypi()
     if latest and _newer(__version__, latest):
-        print(f"  nurb {__version__} ({latest} available: uv tool upgrade nurb)", flush=True)
+        print(f"  nurb {__version__} ({latest} available: nurb update)", flush=True)
 
 
 def _user_traceback(exc, path):

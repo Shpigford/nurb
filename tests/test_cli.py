@@ -309,3 +309,37 @@ def test_the_skill_is_the_shim_with_a_trigger_on_top():
     # skip the whole file with "Nested mappings are not allowed".
     for line in shipped.split("---\n")[1].splitlines():
         assert ": " not in line.split(": ", 1)[1], f"strict-YAML trap in: {line}"
+
+
+def test_skill_sync_rewrites_a_stale_copy_and_writes_the_shared_one_once(tmp_path, monkeypatch, capsys):
+    """skills.sh symlinks every harness at one universal copy; sync must not report it twice."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    packaged = (pathlib.Path(cli.__file__).parent / "skill.md").read_text(encoding="utf-8")
+    universal = tmp_path / ".agents" / "skills" / "nurb"
+    universal.mkdir(parents=True)
+    (universal / "SKILL.md").write_text("stale", encoding="utf-8")
+    claude = tmp_path / ".claude" / "skills" / "nurb"
+    claude.mkdir(parents=True)
+    (claude / "SKILL.md").symlink_to(universal / "SKILL.md")
+    cli.main(["skill", "--sync"])
+    out = capsys.readouterr().out
+    assert (universal / "SKILL.md").read_text(encoding="utf-8") == packaged
+    assert (claude / "SKILL.md").is_symlink()
+    assert out.count("skills/nurb") == 1
+    assert "updated" in out
+
+
+def test_skill_sync_leaves_a_current_copy_alone(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    packaged = (pathlib.Path(cli.__file__).parent / "skill.md").read_text(encoding="utf-8")
+    claude = tmp_path / ".claude" / "skills" / "nurb"
+    claude.mkdir(parents=True)
+    (claude / "SKILL.md").write_text(packaged, encoding="utf-8")
+    cli.main(["skill", "--sync"])
+    assert "current" in capsys.readouterr().out
+
+
+def test_skill_sync_with_nothing_installed_points_at_the_installer(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cli.main(["skill", "--sync"])
+    assert "npx skills add shpigford/nurb" in capsys.readouterr().out

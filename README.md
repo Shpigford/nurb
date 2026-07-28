@@ -5,18 +5,20 @@ Agentic CAD for 3D printing. The user is a language model: your agent writes par
 ## Install
 
 ```bash
-uv tool install nurb       # or: pip install nurb
+curl -fsSL https://nurb.dev/install.sh | sh
 ```
+
+One line, installs everything below: uv if you don't have it, nurb, and the skill. Prefer your own package manager? `uv tool install nurb` (or `pip install nurb`) does the first half.
 
 ## Teach your agent
 
-Install the nurb skill once and your agent reaches for nurb on its own whenever you ask for a printable part. [skills.sh](https://www.skills.sh/) detects whatever harnesses you have and installs into each:
+Install the nurb skill once and your agent reaches for nurb on its own whenever you ask for a printable part. The installer above already did this; by hand, [skills.sh](https://www.skills.sh/) detects whatever harnesses you have and installs into each:
 
 ```bash
 npx skills add shpigford/nurb
 ```
 
-Or `nurb skill` prints the same skill file out for you.
+Or `nurb skill` prints the same skill file out for you. Later, `nurb update` upgrades nurb and rewrites the installed skill to match, so the two move together.
 
 ## Make something
 
@@ -50,7 +52,8 @@ nurb check [part]   run the printability rules, --strict for CI
 nurb inspect [part] faces, normals, concave edges, each finding on its face
 nurb rules          print the design doctrine
 nurb api            the vocabulary a part file gets, with signatures
-nurb skill          print an agent skill file for your AI harness
+nurb skill          print an agent skill file for your AI harness, --sync rewrites installed copies
+nurb update         upgrade nurb, then re-sync the installed skill to match
 nurb card [part]    regenerate a card's AUTO block
 nurb verify [part]  run the doctrine's verification list
 nurb render [part]  write a PNG into build/

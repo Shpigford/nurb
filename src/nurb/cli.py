@@ -426,9 +426,64 @@ def cmd_skill(args):
     redirect it to ~/.claude/skills/nurb/SKILL.md, a Cursor rule, or the end of an
     AGENTS.md. The file is a shim that points at `nurb rules`, so an installed copy
     does not go stale when the doctrine moves.
+
+    `--sync` is the one exception to "printed rather than installed": the two paths
+    nurb's own install flow creates (skills.sh's universal directory and the Claude
+    fallback) get rewritten from the copy shipped in this package, so an installed
+    skill matches the installed nurb rather than whatever version first wrote it.
     """
-    skill = pathlib.Path(__file__).parent / "skill.md"
-    print(skill.read_text(encoding="utf-8"))
+    skill = (pathlib.Path(__file__).parent / "skill.md").read_text(encoding="utf-8")
+    if not args.sync:
+        print(skill)
+        return
+    home = pathlib.Path.home()
+    targets = [
+        home / ".agents" / "skills" / "nurb" / "SKILL.md",
+        home / ".claude" / "skills" / "nurb" / "SKILL.md",
+    ]
+    seen = set()
+    found = False
+    for target in targets:
+        if not target.is_file():
+            continue
+        # skills.sh symlinks each harness at its universal copy; one write is enough.
+        real = target.resolve()
+        if real in seen:
+            continue
+        seen.add(real)
+        found = True
+        state = "current"
+        if real.read_text(encoding="utf-8") != skill:
+            real.write_text(skill, encoding="utf-8")
+            state = "updated"
+        print(f"  ~/{target.relative_to(home)}: {state}")
+    if not found:
+        print("  no installed skill found. install one: npx skills add shpigford/nurb")
+
+
+def cmd_update(args):
+    """Upgrade nurb, then re-sync the installed skill so the two move together.
+
+    The sync runs in a fresh process on purpose: the upgrade just replaced this
+    package on disk, and it is the new install's skill that should land, not the
+    one loaded into this interpreter.
+    """
+    import shutil
+    import subprocess
+
+    uv = shutil.which("uv")
+    if uv:
+        if subprocess.run([uv, "tool", "upgrade", "nurb"]).returncode != 0:
+            # flush=True because the sync subprocess below shares this stdout, and
+            # buffered parent lines would land after the child's.
+            print("  uv could not upgrade nurb; if you installed with pip: pip install -U nurb", flush=True)
+    else:
+        print("  uv not found. upgrade nurb however you installed it, e.g. pip install -U nurb", flush=True)
+    exe = shutil.which("nurb")
+    if exe:
+        subprocess.run([exe, "skill", "--sync"])
+    else:
+        cmd_skill(argparse.Namespace(sync=True))
 
 
 def cmd_card(args):
@@ -606,7 +661,11 @@ def main(argv=None):
     s.set_defaults(fn=cmd_inspect)
 
     s = sub.add_parser("skill", help="print an agent skill file for your AI harness")
+    s.add_argument("--sync", action="store_true", help="rewrite installed copies from this package instead of printing")
     s.set_defaults(fn=cmd_skill)
+
+    s = sub.add_parser("update", help="upgrade nurb and re-sync the installed skill")
+    s.set_defaults(fn=cmd_update)
 
     s = sub.add_parser("verify", help="run the doctrine's verification list")
     s.add_argument("part", nargs="?")

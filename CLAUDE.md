@@ -47,7 +47,8 @@ nurb check [part]    run the printability rules, --strict for CI
 nurb inspect [part]  faces, normals, concave edges, each finding on its face
 nurb rules           print the design doctrine
 nurb api             the vocabulary a part file gets, with signatures
-nurb skill           print an agent skill file for any AI harness
+nurb skill           print an agent skill file for any AI harness, --sync rewrites installed copies
+nurb update          upgrade nurb, then re-sync the installed skill to match
 nurb card [part]     regenerate a card's AUTO block
 nurb verify [part]   the doctrine's verification list, --strict-ish exit code
 nurb render [part]   write build/<part>.png, needs the render extra
