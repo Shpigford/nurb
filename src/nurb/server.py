@@ -147,12 +147,19 @@ class Server:
 
     def rebuild(self, path):
         name = pathlib.Path(path).stem
-        entry = {"name": name, "token": secrets.token_hex(4), "findings": None}
+        entry = {
+            "name": name,
+            "token": secrets.token_hex(4),
+            "findings": None,
+            "variants": self._variants(path),
+            "variant": None,
+        }
         try:
             shape, params, ms = self._build(path, name)
             entry["glb"] = builder.to_glb(shape, self.tolerance)
             entry.update(builder.stats(shape))
             entry["params"] = params
+            entry["variant"] = self._active_variant(params, entry["variants"])
             entry["ms"] = round(ms, 1)
             entry["error"] = None
             entry["shape"] = shape  # kept for the check pass, never serialized
@@ -163,6 +170,34 @@ class Server:
             entry["traceback"] = _user_traceback(exc, path)
         self.state[name] = entry
         return entry
+
+    @staticmethod
+    def _variants(path):
+        """The card's variants, as the viewer shows them: a name and its overrides.
+
+        A variant is one part flexed, which is exactly what the sliders do, so the
+        viewer treats picking one as loading its params. A card that will not parse
+        means no variants, not a broken part: the build itself never read the card.
+        """
+        from . import checks
+
+        try:
+            return [{"name": n, "params": p} for n, p, _ in checks.configurations(path)[1:]]
+        except Exception:
+            return []
+
+    @staticmethod
+    def _active_variant(params, variants):
+        """The card variant whose complete built values are on screen, if any."""
+        rows = {p["name"]: p for p in params or []}
+        for variant in variants:
+            overrides = variant["params"]
+            if set(overrides) <= set(rows) and all(
+                p["value"] == overrides.get(name, p["default"])
+                for name, p in rows.items()
+            ):
+                return variant["name"]
+        return None
 
     def check(self, path):
         """Run the rules on the last good build.
@@ -177,7 +212,17 @@ class Server:
         if not entry or entry.get("shape") is None:
             return entry
         try:
-            found = checks.run(entry["shape"], checks.from_card(path))
+            # Sliders sitting exactly on a card variant are that variant, so its own
+            # settings judge it: shelf_gridfinity_2x1 accepts 10 slivers, not the
+            # base part's 18. Matched on the built values, never on a mode flag, so
+            # one slider drag off the variant honestly puts the base rules back.
+            configs = checks.configurations(path)
+            ctx = configs[0][2]
+            for name, _, vctx in configs[1:]:
+                if name == entry["variant"]:
+                    ctx = vctx
+                    break
+            found = checks.run(entry["shape"], ctx)
             entry["findings"] = [
                 {
                     "rule": f.rule,
@@ -385,7 +430,7 @@ class Server:
             values = {
                 k: v
                 for k, v in (msg.get("values") or {}).items()
-                if type(v) in (int, float)
+                if type(v) in (bool, int, float, str) or v is None
             }
             # The viewer sends only what differs from the file, so this is the whole
             # override set for the part and replacing it is what keeps the two honest.

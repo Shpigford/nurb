@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import json
 
 import pytest
 import trimesh
@@ -23,6 +24,103 @@ def project(tmp_path):
     server = Server(tmp_path)
     server.rebuild(part)
     return server
+
+
+CARD = """# thing
+
+```toml
+[part]
+min_wall = 10.0
+
+[variants.slim.params]
+width = 15.0
+
+[variants.slim.part]
+min_wall = 1.0
+```
+"""
+
+SCALAR_PART = """from nurb import *
+
+@part
+def thing(width=10.0, tall=False):
+    return Box(width, 10.0, 20.0 if tall else 10.0)
+"""
+
+SCALAR_CARD = """# thing
+
+```toml
+[variants.tall.params]
+tall = true
+
+[variants.wide.params]
+width = 20.0
+```
+"""
+
+
+def test_rebuild_carries_the_cards_variants(tmp_path):
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    (tmp_path / "parts" / "thing.md").write_text(CARD)
+    entry = server.rebuild(part)
+    assert entry["variants"] == [{"name": "slim", "params": {"width": 15.0}}]
+    assert server._wire(entry)["variants"] == entry["variants"]
+
+
+def test_rebuild_names_a_non_numeric_variant_from_its_built_values(tmp_path):
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    part.write_text(SCALAR_PART)
+    (tmp_path / "parts" / "thing.md").write_text(SCALAR_CARD)
+    server.rebuild(part)
+
+    server.queue = asyncio.Queue()
+    asyncio.run(
+        server.command(
+            json.dumps({"type": "params", "name": "thing", "values": {"tall": True}})
+        )
+    )
+    entry = server.rebuild(part)
+
+    assert server.overrides["thing"] == {"tall": True}
+    assert entry["bbox"] == [10.0, 10.0, 20.0]
+    assert entry["variant"] == "tall"
+
+
+def test_failed_build_has_no_active_variant(tmp_path):
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    part.write_text(SCALAR_PART)
+    (tmp_path / "parts" / "thing.md").write_text(SCALAR_CARD)
+    server.overrides["thing"] = {"width": 0.0}
+
+    entry = server.rebuild(part)
+
+    assert entry["error"]
+    assert entry["variant"] is None
+
+
+def test_check_judges_a_matching_variant_by_its_own_settings(tmp_path):
+    """Sliders sitting exactly on a card variant get that variant's settings, and one
+    step off puts the base part's rules back."""
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    (tmp_path / "parts" / "thing.md").write_text(CARD)
+
+    server.rebuild(part)
+    rules = [f["rule"] for f in server.check(part)["findings"]]
+    assert "min_wall" in rules  # the base card demands 10mm of a 5mm plate
+
+    server.overrides["thing"] = {"width": 15.0}
+    server.rebuild(part)
+    rules = [f["rule"] for f in server.check(part)["findings"]]
+    assert "min_wall" not in rules  # the slim variant allows 1mm
+
+    server.overrides["thing"] = {"width": 14.0}
+    server.rebuild(part)
+    rules = [f["rule"] for f in server.check(part)["findings"]]
+    assert "min_wall" in rules
 
 
 def test_export_builds_at_the_slider_values(tmp_path):

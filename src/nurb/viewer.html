@@ -45,6 +45,11 @@
   .item.active { background: #2c313b; }
   .item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item .ms { color: var(--dim); font-size: 11px; }
+  /* A variant is its part flexed, so it nests under it: indented past the dot, dim
+     until it is the configuration on screen. */
+  .item.var { padding: 4px 10px 4px 24px; font-size: 12px; }
+  .item.var .name { color: var(--dim); }
+  .item.var.active .name { color: var(--text); }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
   .dot.bad { background: var(--bad); }
   .dot.busy { animation: pulse .6s ease-in-out infinite; }
@@ -326,6 +331,7 @@ let current = null, mesh = null, lastSize = null;
 // human sees. ?view= also means "frame it deterministically", ignoring the saved camera.
 const q = new URLSearchParams(location.search);
 const want = q.get('part'), view = q.get('view'), bare = q.has('bare');
+let wantVariant = q.get('variant');   // consumed by the first sync, then the URL just mirrors
 const VIEWS = {
   iso: [0.7, -0.75, 0.6], front: [0, -1, 0], back: [0, 1, 0],
   left: [-1, 0, 0], right: [1, 0, 0], top: [0, 0, 1],
@@ -502,8 +508,11 @@ for (const b of document.querySelectorAll('#download button')) {
       const r = await fetch(`/export/${current}.${fmt}`);
       if (!r.ok) throw new Error(await r.text());
       const url = URL.createObjectURL(await r.blob());
+      // A variant is a catalog entry, so its file carries the catalog name: sliders
+      // sitting on hook_utility download hook_utility.stl, not hook_scissors.stl.
+      const v = activeVariant(parts.get(current));
       const a = Object.assign(document.createElement('a'),
-                              { href: url, download: `${current}.${fmt}` });
+                              { href: url, download: `${v ? v.name : current}.${fmt}` });
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -922,6 +931,39 @@ function title() {
   document.title = [current, project].filter(Boolean).join(' \u00b7 ') || 'nurb';
 }
 
+// The server resolves this from the values it successfully built. Failed builds have
+// no active variant, and non-slider parameters such as booleans still count.
+function variantActive(e, v) {
+  return e && e.variant === v.name;
+}
+
+function activeVariant(e) {
+  return e && (e.variants || []).find(v => variantActive(e, v)) || null;
+}
+
+// Picking a variant is loading its overrides: the same pipeline a slider drag uses, so
+// checks, export and the write button all just see the part flexed. Sent raw rather
+// than through the sliders' setters, whose step rounding would corrupt a value like
+// 25.16; sync() moves the sliders when the rebuild lands.
+function applyVariant(name, v) {
+  if (!sock || sock.readyState !== WebSocket.OPEN) return;
+  pending = null; pendingFor = null;   // a drag in flight must not resurrect old values
+  inflight = name;
+  document.body.classList.add('stale');
+  sock.send(JSON.stringify({ type: 'params', name, values: { ...v.params } }));
+}
+
+// The address bar always holds the link to what is on screen, so any part or variant
+// can be handed to someone as a URL. Named views and bare renders own their URLs.
+function setURL(vname) {
+  if (bare || view) return;
+  const u = new URL(location);
+  if (current) u.searchParams.set('part', current); else u.searchParams.delete('part');
+  const v = vname || (current && activeVariant(parts.get(current))?.name);
+  if (v) u.searchParams.set('variant', v); else u.searchParams.delete('variant');
+  if (u.href !== location.href) history.replaceState(null, '', u);
+}
+
 function render() {
   const list = document.getElementById('list');
   list.innerHTML = '';
@@ -934,14 +976,27 @@ function render() {
     row.innerHTML = `<span class="dot ${e.error ? 'bad' : ''}"></span>`
       + `<span class="name">${e.name}</span>`
       + `<span class="ms">${e.error ? 'err' : e.ms + 'ms'}</span>`;
-    row.onclick = () => { current = e.name; render(); show(e.name, { keepCamera: false }); };
+    row.onclick = () => { current = e.name; render(); show(e.name, { keepCamera: false }); setURL(); };
     list.appendChild(row);
+    for (const v of e.variants || []) {
+      const vr = document.createElement('div');
+      vr.className = 'item var' + (e.name === current && variantActive(e, v) ? ' active' : '');
+      vr.innerHTML = `<span class="name">${v.name}</span>`;
+      vr.title = Object.entries(v.params).map(([k, val]) => `${k} = ${val}`).join('\n');
+      vr.onclick = () => {
+        if (current !== e.name) { current = e.name; show(e.name, { keepCamera: false }); }
+        applyVariant(e.name, v);
+        render();
+        setURL(v.name);
+      };
+      list.appendChild(vr);
+    }
   }
   title();
 }
 
 function flash(name) {
-  const rows = [...document.querySelectorAll('.item')];
+  const rows = [...document.querySelectorAll('.item:not(.var)')];
   const row = rows.find(r => r.querySelector('.name').textContent === name);
   if (!row) return;
   const dot = row.querySelector('.dot');
@@ -1050,8 +1105,17 @@ function connect() {
       msg.parts.forEach(p => parts.set(p.name, p));
       if (!current && parts.has(want)) current = want;
       if (!current && msg.parts.length) current = msg.parts[0].name;
+      // ?variant= is an ask, so it loads that variant's overrides once. Once, because
+      // a reconnect sync must not snap back what the user has since dragged away.
+      let linked = null;
+      if (wantVariant && current === want) {
+        linked = (parts.get(current).variants || []).find(v => v.name === wantVariant);
+        if (linked) applyVariant(current, linked);
+      }
+      wantVariant = null;
       render();
       if (current) show(current, { keepCamera: false });
+      setURL(linked && linked.name);
     }
     if (msg.type === 'rebuilt') {
       parts.set(msg.name, msg);
@@ -1064,7 +1128,7 @@ function connect() {
       // Unconditionally, and by name: a rebuild the user walked away from still has to
       // release the slot it was holding.
       settled(msg.name);
-      if (msg.name === current) show(msg.name, { keepCamera: true });
+      if (msg.name === current) { show(msg.name, { keepCamera: true }); setURL(); }
     }
     // Checks arrive after the geometry, so this only repaints the panel.
     // Deleted or renamed away. Without this it stays in the list, selectable, with
@@ -1077,6 +1141,7 @@ function connect() {
         else { document.getElementById('empty').style.display = 'grid'; }
       }
       render();
+      setURL();
     }
     if (msg.type === 'checked') {
       parts.set(msg.name, msg);
