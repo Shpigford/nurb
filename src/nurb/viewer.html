@@ -114,7 +114,24 @@
           display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
           color: var(--dim); font-size: 10px; }
   #version { white-space: nowrap; }
-  #version.update { color: var(--accent); }
+  /* The badge stays the size of the version number when an update exists: growing it
+     to "v0.2.0 -> 0.3.0" rewrapped the footer and shoved the links down a line. The
+     detail lives in the modal instead. */
+  #version.update { color: var(--accent); cursor: pointer; }
+  #version.update:hover { text-decoration: underline; }
+  #upgrade { position: fixed; inset: 0; z-index: 2; display: none;
+             place-items: center; background: rgba(0,0,0,.45); }
+  #upgrade.open { display: grid; }
+  #upgrade .card { background: var(--panel); border: 1px solid var(--line);
+                   border-radius: 8px; padding: 16px 18px; width: 320px;
+                   font-size: 12px; line-height: 1.7; }
+  #upgrade .card b { color: var(--accent); font-weight: 600; }
+  #upgrade code { display: block; background: var(--bg); border: 1px solid var(--line);
+                  border-radius: 6px; padding: 6px 10px; margin: 10px 0;
+                  user-select: all; -webkit-user-select: all; }
+  #upgrade button { width: 100%; }
+  #upgrade .note { color: var(--dim); margin-top: 8px; white-space: pre-wrap; }
+  #upgrade .note.bad { color: var(--bad); }
   #links { margin-left: auto; display: flex; gap: 10px; }
   #foot a { color: var(--dim); text-decoration: none; }
   #foot a:hover { color: var(--text); }
@@ -200,6 +217,14 @@
     </span>
   </div>
 </aside>
+<div id="upgrade">
+  <div class="card">
+    <p><b id="upnew"></b> is out. this is <span id="uphave"></span>.</p>
+    <code>uv tool upgrade nurb</code>
+    <button id="upgo">upgrade and restart</button>
+    <p class="note" id="upnote"></p>
+  </div>
+</div>
 <main>
   <div id="empty">no parts yet. nurb new &lt;name&gt;</div>
   <div id="tools">
@@ -865,17 +890,53 @@ function flash(name) {
 // The server says what is installed; PyPI says what is newest, asked at most once a
 // day (localStorage remembers) and never in a headless render. Offline, the fetch
 // fails silently and the badge is just the installed version.
+let installedVersion = null, latestVersion = null, upgradable = false;
+
 function versionBadge(installed, latest) {
   const el = document.getElementById('version');
   if (!installed) return;
+  installedVersion = installed;
   if (latest && newerVersion(installed, latest)) {
-    el.textContent = `v${installed} → ${latest}`;
-    el.title = `${latest} is out: uv tool upgrade nurb`;
+    latestVersion = latest;
+    el.textContent = `v${installed} ↑`;
+    el.title = `${latest} is out`;
     el.classList.add('update');
   } else {
+    latestVersion = null;
     el.textContent = `v${installed}`;
+    el.title = '';
+    el.classList.remove('update');
+    // A sync landing here with the modal open is the post-upgrade reconnect: the
+    // restarted server is the new version, so the modal's work is done.
+    upgradeModal(false);
   }
 }
+
+// ---- upgrade modal ----
+function upgradeModal(open) {
+  document.getElementById('upgrade').classList.toggle('open', open);
+  if (!open) return;
+  document.getElementById('upnew').textContent = `nurb ${latestVersion}`;
+  document.getElementById('uphave').textContent = `v${installedVersion}`;
+  const go = document.getElementById('upgo');
+  // The server only offers the button when it knows how it was installed (a uv tool
+  // venv); anyone else gets the command to run themselves.
+  go.style.display = upgradable ? '' : 'none';
+  go.disabled = false;
+  go.textContent = 'upgrade and restart';
+  const note = document.getElementById('upnote');
+  note.classList.remove('bad');
+  note.textContent = '';
+}
+document.getElementById('version').onclick = () => { if (latestVersion) upgradeModal(true); };
+document.getElementById('upgrade').onclick = ev => { if (ev.target.id === 'upgrade') upgradeModal(false); };
+addEventListener('keydown', ev => { if (ev.key === 'Escape') upgradeModal(false); });
+document.getElementById('upgo').onclick = ev => {
+  sock.send(JSON.stringify({ type: 'upgrade' }));
+  ev.target.disabled = true;
+  ev.target.textContent = 'upgrading…';
+  document.getElementById('upnote').textContent = 'the viewer reconnects when the new server is up';
+};
 
 function newerVersion(a, b) {
   const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
@@ -920,6 +981,7 @@ function connect() {
       document.getElementById('project').textContent = project;
       polished = !msg.draft;   // `nurb dev --draft` starts with the toggle off
       polishBadge();
+      upgradable = !!msg.upgradable;
       checkUpdate(msg.version);
       parts.clear();
       msg.parts.forEach(p => parts.set(p.name, p));
@@ -956,6 +1018,16 @@ function connect() {
     if (msg.type === 'checked') {
       parts.set(msg.name, msg);
       if (msg.name === current) checks(msg.name);
+    }
+    // Success never arrives as a message: the server execs itself and the socket
+    // drops, so only a failure has anything to say.
+    if (msg.type === 'upgraded' && msg.error) {
+      const go = document.getElementById('upgo');
+      go.disabled = false;
+      go.textContent = 'upgrade and restart';
+      const note = document.getElementById('upnote');
+      note.classList.add('bad');
+      note.textContent = msg.error;
     }
     if (msg.type === 'applied' && msg.name === current) {
       lastNote = {

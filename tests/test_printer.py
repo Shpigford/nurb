@@ -44,6 +44,12 @@ def test_an_unknown_profile_says_what_exists(tmp_path):
         printer(tmp_path)
 
 
+def test_the_export_table_is_not_a_printer_setting(tmp_path):
+    """`[export]` belongs to `nurb export`; a check must walk past it, not choke."""
+    project(tmp_path, 'profile = "bambu_a1_mini"\n\n[export]\nformats = ["stl"]\n')
+    assert printer(tmp_path).bed == (180.0, 180.0, 180.0)
+
+
 def test_a_direct_setting_overrides_the_profile(tmp_path):
     """The file can describe a machine no profile ships, or correct one that does."""
     project(tmp_path, 'profile = "bambu_a1_mini"\nbed = [300, 300, 300]\n')

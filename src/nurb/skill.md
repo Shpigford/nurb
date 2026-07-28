@@ -7,7 +7,7 @@ description: Design 3D-printable parts as Python functions with nurb. Use when t
 
 A part is a Python function and its keyword defaults are its parameters. A project is any directory with a `parts/` folder; there is no init step. You are the CAD operator: the user describes the part and you do everything else, including creating the project and modelling.
 
-**Start `nurb dev` in the background and hand the user its URL before anything else.** It prints one, and the viewer it serves is where the user watches the part take shape: every save rebuilds and repaints without moving their camera. So work in saves, not in silence. `nurb new` already emits a working part; put that blocky draft on screen in the first minute and refine it while they watch. Ten correct but invisible minutes of modelling read as a hang.
+**Start `nurb dev` in the background and hand the user its URL before anything else.** It prints one, and the viewer it serves is where the user watches the part take shape: every save rebuilds and repaints without moving their camera. When your shell runs on the user's own machine, `--open` puts the viewer on their screen without the URL hop. So work in saves, not in silence. `nurb new` already emits a working part; put that blocky draft on screen in the first minute and refine it while they watch. Ten correct but invisible minutes of modelling read as a hang.
 
 **Run `nurb rules` before you design.** It prints the doctrine: printability, load paths, the polish pass, the kernel traps, card discipline, and what to verify. This file stays thin on purpose so there is one copy of that, in the package, which cannot drift.
 
@@ -26,7 +26,10 @@ nurb render [part]    PNG into build/, so you can look at what you made
 nurb export [part]    STL and STEP into build/, --formats for GLB
 nurb extract          find duplication across parts
 nurb dev              watch, rebuild, serve the viewer on :7373 or the next free port
+nurb launcher         rewrite viewer.command, the double-clickable `nurb dev` a project is born with
 ```
+
+A standing preference is a file, not a flag you have to remember: a user who never wants STEP gets `formats = ["stl"]` under `[export]` in `printer.toml`, and every bare `nurb export` honors it.
 
 Read `parts/<name>.md` before editing `parts/<name>.py`. Its `## Don't` section is what was tried and rejected, and it is the only place that records it.
 

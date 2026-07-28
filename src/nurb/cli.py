@@ -77,6 +77,9 @@ def _seed_agents(root):
 def cmd_new(args):
     root = project_root()
     parts = root / "parts"
+    # The first part is the project's birth, the only moment the launcher appears
+    # on its own. Deleting it is a decision, so it is never written back over one.
+    born = not parts.is_dir()
     parts.mkdir(parents=True, exist_ok=True)
     name = args.name.replace("-", "_")
     py, md = parts / f"{name}.py", parts / f"{name}.md"
@@ -85,6 +88,8 @@ def cmd_new(args):
     py.write_text(PART_TEMPLATE.format(name=name))
     md.write_text(CARD_TEMPLATE.format(name=name))
     written = [py, md]
+    if born:
+        written.append(_write_launcher(root))
     seeded, already = _seed_agents(root)
     if seeded:
         written.append(seeded)
@@ -210,18 +215,39 @@ def _collect_exports(paths):
     return found
 
 
+def _project_formats(root):
+    """printer.toml's `[export] formats`, the project's standing preference.
+
+    A syntax error is left for checks.printer to report, which every export
+    reaches on its way to a Context and which names the file and the line.
+    """
+    import tomllib
+
+    from .checks import PRINTER_FILE
+
+    file = root / PRINTER_FILE
+    if not file.is_file():
+        return None
+    try:
+        block = tomllib.loads(file.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return None
+    return block.get("export", {}).get("formats")
+
+
 def cmd_export(args):
     from build123d import export_step, export_stl
 
     from . import builder
 
     root = project_root()
+    formats = args.formats or _project_formats(root) or list(DEFAULT_FORMATS)
     configs = _collect_exports(_resolve(root, args.part))
     out = root / "build"
     out.mkdir(exist_ok=True)
     for path, name, overrides, _ in configs:
         shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
-        for fmt in args.formats:
+        for fmt in formats:
             target = out / f"{name}.{fmt}"
             if fmt == "stl":
                 export_stl(shape, str(target))
@@ -469,7 +495,7 @@ def cmd_dev(args):
     # Before the build, not after. Discovering the port is taken used to cost a full
     # rebuild of every part in the project first.
     port = _pick_port(args.port)
-    server = Server(root, port=port, draft=args.draft)
+    server = Server(root, port=port, draft=args.draft, open_browser=args.open)
     print(f"  building {root.name}/parts")
     server.rebuild_all()
     try:
@@ -481,6 +507,27 @@ def cmd_dev(args):
         if exc.errno != errno.EADDRINUSE:
             raise
         sys.exit(f"  port {port} was taken between checking it and binding it. Try again.")
+
+
+LAUNCHER = "viewer.command"
+
+
+def _write_launcher(root):
+    file = root / LAUNCHER
+    # A login shell, because Finder's Terminal session does not carry the PATH a
+    # profile adds, and the double-click would die on `command not found: nurb`.
+    file.write_text(
+        "#!/bin/zsh -l\n"
+        'cd "$(dirname "$0")"\n'
+        "exec nurb dev --open\n"
+    )
+    file.chmod(0o755)
+    return file
+
+
+def cmd_launcher(args):
+    _write_launcher(project_root())
+    print(f"  {LAUNCHER}: double-click in Finder to serve this project")
 
 
 def main(argv=None):
@@ -500,7 +547,11 @@ def main(argv=None):
     s = sub.add_parser("dev", help="watch parts and serve the viewer")
     s.add_argument("--port", type=int, help=f"default: the first free port from {DEFAULT_PORT}")
     s.add_argument("--draft", action="store_true", help="start with the polish pass off (faster)")
+    s.add_argument("--open", action="store_true", help="open the viewer in a browser once serving")
     s.set_defaults(fn=cmd_dev)
+
+    s = sub.add_parser("launcher", help=f"write {LAUNCHER}, a double-clickable `nurb dev`")
+    s.set_defaults(fn=cmd_launcher)
 
     s = sub.add_parser("build", help="build parts once")
     s.add_argument("part", nargs="?")
@@ -545,8 +596,8 @@ def main(argv=None):
     s = sub.add_parser("export", help="write STL/STEP/GLB to build/")
     s.add_argument("part", nargs="?")
     s.add_argument(
-        "--formats", nargs="+", default=list(DEFAULT_FORMATS),
-        help=f"default: {' '.join(DEFAULT_FORMATS)}. also: glb",
+        "--formats", nargs="+", default=None,
+        help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: glb",
     )
     s.set_defaults(fn=cmd_export)
 

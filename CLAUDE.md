@@ -5,10 +5,6 @@ rebuilds it on save and pushes geometry to a browser without moving the camera.
 
 Built on build123d (OCCT), so parts are real B-rep solids.
 
-**Read `docs/core/RESEARCH.md` before making architectural decisions.** It is the
-central reference and explains why things are the way they are. `docs/core/PROGRESS.md`
-is the running log; update it as you work.
-
 ## The part contract
 
 One convention carries the whole system:
@@ -55,6 +51,7 @@ nurb verify [part]   the doctrine's verification list, --strict-ish exit code
 nurb render [part]   write build/<part>.png, needs the render extra
 nurb export [part]   write STL and STEP into build/, --formats for GLB
 nurb extract         find duplication across sibling parts
+nurb launcher        write viewer.command, a double-clickable `nurb dev`
 ```
 
 `uv run pytest` runs the suite, which includes the parts in `examples/`.
@@ -82,7 +79,6 @@ src/nurb/cli.py           command surface
 examples/notch/           the real parts, which are also the calibration set
 tests/test_notch_fit.py   the hanging interface, asserted for every configuration
 tests/                    rules and examples, both cases per rule
-docs/core/                research, plan, progress
 ```
 
 ## Rules
@@ -99,8 +95,7 @@ the interface cannot.
 Notch's Fusion timelines contain constructions that exist only to work around a
 stateful CAD kernel: `ChannelTool`, the 16-lobe comb, `CombWeb`, `JoinComb`, fixed
 over-counts, derive links. In code these are a `for` loop and an `import`. Porting
-them imports accidental complexity into a system that never had the problem. See the
-table in RESEARCH.md for the full list of what vanishes and what survives.
+them imports accidental complexity into a system that never had the problem.
 
 What does survive is physics: the print doctrine, sliver thresholds, chamfer sizing
 limits, and chamfer ordering effects.
@@ -240,7 +235,3 @@ it could change the verdict; the far contact gets the same 0.3 cosine floor as t
 ray's exit filter, or a dimple's bowl reads as a thin wall (it did: 1.07mm in a 2.3mm
 web on the scraper). And the viewer is the configurator: `stl`/`step` buttons build at
 the slider values, polished, and hand back the file.
-
-`docs/core/PROGRESS.md` has the findings, including several claims from RESEARCH.md and
-earlier phases that a real part, a real print, or a real measurement disproved. Read
-them before trusting anything in this file that sounds like a measurement.

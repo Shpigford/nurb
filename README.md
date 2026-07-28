@@ -54,9 +54,10 @@ nurb verify [part]  run the doctrine's verification list
 nurb render [part]  write a PNG into build/
 nurb export [part]  write STL and STEP into build/, --formats for GLB
 nurb extract        find duplication across parts
+nurb launcher       write viewer.command, a double-clickable `nurb dev`
 ```
 
-A project is any directory with a `parts/` folder. No init step.
+A project is any directory with a `parts/` folder. No init step. The first `nurb new` in a fresh directory also drops `viewer.command`, so a project can be opened from Finder by double-click from day one; delete it and it stays deleted, `nurb launcher` brings it back on purpose.
 
 ## Checks
 
@@ -73,7 +74,7 @@ projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The same file carries the project's export preference: an `[export]` table with `formats = ["stl"]` drops STEP from every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
 
 ```toml
 [part]

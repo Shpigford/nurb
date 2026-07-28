@@ -238,6 +238,47 @@ def test_export_refuses_a_format_it_cannot_write(tmp_path, monkeypatch, capsys):
     assert not (tmp_path / "build" / "thing.obj").exists()
 
 
+def test_the_first_part_brings_the_launcher(tmp_path, monkeypatch):
+    """Project birth is the only moment it appears on its own; deleting it sticks."""
+    monkeypatch.chdir(tmp_path)
+    cli.main(["new", "one"])
+    launcher = tmp_path / "viewer.command"
+    assert launcher.exists()
+    launcher.unlink()
+    cli.main(["new", "two"])
+    assert not launcher.exists()
+
+
+def test_launcher_is_an_executable_that_runs_dev(tmp_path, monkeypatch):
+    """Double-clickable from Finder: executable, login shell, lands on `nurb dev --open`."""
+    import os
+
+    (tmp_path / "parts").mkdir()
+    monkeypatch.chdir(tmp_path)
+    cli.main(["launcher"])
+    file = tmp_path / "viewer.command"
+    text = file.read_text()
+    assert text.startswith("#!/bin/zsh -l\n")
+    assert "nurb dev --open" in text
+    assert os.access(file, os.X_OK)
+
+
+def test_export_reads_the_projects_formats(tmp_path, monkeypatch):
+    """printer.toml's [export] table is the standing preference; the flag still wins."""
+    import argparse
+
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    (tmp_path / "printer.toml").write_text('[export]\nformats = ["stl"]\n')
+    monkeypatch.chdir(tmp_path)
+    cli.cmd_export(argparse.Namespace(part=None, formats=None))
+    assert (tmp_path / "build" / "thing.stl").exists()
+    assert not (tmp_path / "build" / "thing.step").exists()
+    cli.cmd_export(argparse.Namespace(part=None, formats=["step"]))
+    assert (tmp_path / "build" / "thing.step").exists()
+
+
 def test_the_shim_promises_what_export_actually_writes():
     shim = (pathlib.Path(cli.__file__).parent / "agents.md").read_text(encoding="utf-8")
     assert "STL and STEP" in shim

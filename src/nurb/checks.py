@@ -395,6 +395,7 @@ def printer(root, name=None):
             )
         _apply(ctx, {"printer": have[name]}, f"profile {name!r}")
     block.pop("profile", None)  # named on the command line, so the file's loses
+    block.pop("export", None)  # a workflow preference, not a machine fact; cmd_export reads it
     return _apply(ctx, {"printer": block}, PRINTER_FILE)
 
 

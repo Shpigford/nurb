@@ -11,6 +11,7 @@ import pathlib
 import secrets
 import threading
 import traceback
+import webbrowser
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -58,6 +59,23 @@ def _latest_on_pypi():
         return None
 
 
+def _upgrade_command():
+    """The argv that upgrades this install, or None when we cannot know it.
+
+    `uv tool install nurb` is the documented path and the only one recognized: its
+    venvs live under .../uv/tools/nurb, so running from one is the tell. Anything
+    else, pip, pipx, a dev checkout, gets the command shown and nothing run, because
+    guessing wrong on a dev checkout would replace it with PyPI.
+    """
+    import shutil
+    import sys
+
+    prefix = pathlib.Path(sys.prefix)
+    if prefix.name == "nurb" and prefix.parent.name == "tools" and shutil.which("uv"):
+        return ["uv", "tool", "upgrade", "nurb"]
+    return None
+
+
 def _update_nudge():
     """One line on `nurb dev` stdout when PyPI has a newer release.
 
@@ -83,11 +101,12 @@ def _user_traceback(exc, path):
 
 
 class Server:
-    def __init__(self, root, port=7373, tolerance=0.1, draft=False):
+    def __init__(self, root, port=7373, tolerance=0.1, draft=False, open_browser=False):
         self.root = pathlib.Path(root).resolve()
         self.port = port
         self.tolerance = tolerance
         self.draft = draft
+        self.open_browser = open_browser
         self.state = {}
         # What the sliders are holding, per part, and only where it differs from the
         # file. Empty means the part is exactly what its source says.
@@ -315,6 +334,7 @@ class Server:
                     "type": "sync",
                     "project": self.root.name,
                     "version": __version__,
+                    "upgradable": _upgrade_command() is not None,
                     "draft": self.draft,
                     "parts": [self._wire(e) for e in self.state.values()],
                 }
@@ -345,6 +365,10 @@ class Server:
             self.draft = bool(msg.get("on"))
             for target in builder.find_parts(self.root):
                 self.queue.put_nowait(str(target))
+            return
+
+        if msg.get("type") == "upgrade":
+            await self.upgrade()
             return
 
         name = msg.get("name")
@@ -396,6 +420,34 @@ class Server:
                     "skipped": [{"name": n, "why": w} for n, w in skipped],
                 }
             )
+
+    async def upgrade(self):
+        """Run the install's own upgrade, then exec ourselves so the new code serves.
+
+        The dropped socket is the restart signal: the viewer's reconnect loop lands on
+        the new process and the fresh sync carries the new version.
+        """
+        import os
+        import subprocess
+        import sys
+
+        cmd = _upgrade_command()
+        if cmd is None:
+            await self.send(
+                {"type": "upgraded", "error": "not a uv tool install; upgrade it the way it was installed"}
+            )
+            return
+        print(f"  upgrading: {' '.join(cmd)}", flush=True)
+        done = await asyncio.to_thread(
+            subprocess.run, cmd, capture_output=True, text=True, timeout=120
+        )
+        if done.returncode != 0:
+            reason = (done.stderr or done.stdout).strip() or f"exit {done.returncode}"
+            print(f"  upgrade failed: {reason}", flush=True)
+            await self.send({"type": "upgraded", "error": reason})
+            return
+        print("  upgraded, restarting", flush=True)
+        os.execv(sys.argv[0], sys.argv)
 
     async def send(self, payload):
         if not self.clients:
@@ -504,5 +556,8 @@ class Server:
             self.ws, "127.0.0.1", self.port, process_request=self.http, origins=self.origins
         ):
             print(f"\n  nurb  http://127.0.0.1:{self.port}\n", flush=True)
+            if self.open_browser:
+                # After the bind, or the browser lands on a connection refused.
+                webbrowser.open(f"http://127.0.0.1:{self.port}")
             threading.Thread(target=_update_nudge, daemon=True).start()
             await asyncio.Future()
