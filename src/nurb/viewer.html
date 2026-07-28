@@ -575,12 +575,33 @@ controls.addEventListener('change', () => {
   }, 250);
 });
 
-function restoreCamera(name) {
+// True when this viewpoint can plausibly see the part: camera outside the solid,
+// target near it, distance in a sane band. A saved camera can go stale when the
+// part changes shape under it, and restoring one that fails this paints a blank
+// canvas that looks exactly like a mesh failure (issue #21).
+function sane(p, t, box) {
+  const size = box.getSize(new THREE.Vector3());
+  const span = Math.max(size.x, size.y, size.z) || 10;
+  const dist = p.distanceTo(t);
+  return !box.containsPoint(p)
+    && box.clone().expandByScalar(span * 2).containsPoint(t)
+    && dist > span / 100 && dist < span * 50;
+}
+
+function restoreCamera(name, box) {
   try {
     const s = JSON.parse(localStorage.getItem(camKey(name)));
     if (!s) return false;
-    camera.position.fromArray(s.p);
-    controls.target.fromArray(s.t);
+    const p = new THREE.Vector3().fromArray(s.p);
+    const t = new THREE.Vector3().fromArray(s.t);
+    if (!sane(p, t, box)) return false;
+    camera.position.copy(p);
+    controls.target.copy(t);
+    // frame()'s clipping planes for this part, not whatever the last part left behind.
+    const size = box.getSize(new THREE.Vector3());
+    const span = Math.max(size.x, size.y, size.z) || 10;
+    camera.near = span / 100; camera.far = span * 100;
+    camera.updateProjectionMatrix();
     controls.update();
     return true;
   } catch { return false; }
@@ -668,10 +689,15 @@ async function paint(name, { keepCamera }) {
     frame(box, view);                       // asked for a named view: no saved camera
     reframe.style.display = 'none';
   } else if (!keepCamera) {
-    if (!restoreCamera(name)) frame(box);
-    reframe.style.display = 'none';
+    // A restored camera is a guess about stale state, so keep the escape hatch visible.
+    const restored = restoreCamera(name, box);
+    if (!restored) frame(box);
+    reframe.style.display = restored ? 'inline-flex' : 'none';
   } else {
-    reframe.style.display = jumped ? 'inline-flex' : 'none';
+    // A rebuild can move a feature out from under a close-in camera without changing
+    // the part's overall size, so the scale heuristic alone is not enough.
+    const lost = !sane(camera.position, controls.target, box);
+    reframe.style.display = (jumped || lost) ? 'inline-flex' : 'none';
   }
   reframe.onclick = () => { frame(box); reframe.style.display = 'none'; };
   lastSize = size;
