@@ -10,6 +10,8 @@ A part is a Python function and its keyword defaults are its parameters. A proje
 
 **Ask before you model.** Anything the part has to fit (an opening, a bracket, the object it holds) is a question for the user: ask for those measurements in one batch, up front, using your harness's question tool if it has one, and record the answers in `measurements.toml` the way the doctrine describes. Anything that is taste rather than fit becomes a parameter instead of a question, because the viewer's sliders are how the user answers those. A guessed proportion costs one slider drag; a guessed clearance prints the wrong part.
 
+**When parts have to work together, assemble them before printing either.** A part that mounts to another, or moves against one, gets an `@assembly`: a function in `parts/` that returns placed solids, with `use()` building the siblings, `hinge()` declaring how one moves, and `obstacle()` standing in for the machine or wall they mount into. `nurb check` then sweeps each joint through its declared range and reports the angle where it jams and where the contact is, which is the one failure no per-part check can see: a door that builds clean, checks clean, prints beautifully and will not open. The joint angle is a keyword default, so the viewer's slider swings the assembly live for the user. Model obstacles from the user's measurements, and say on the assembly's card how rough they are.
+
 **Finish with the polish pass.** Chamfered edges are what make a print feel designed rather than extruded, so the doctrine's last step (`polish`, 1mm on exposed edges) stays in the part through every edit; the template `nurb new` emits already ends with it. Say so when you hand the part over, because the user can only ask for sharp edges if they know the chamfers are there on purpose. The viewer builds polished by default, and its polish button flips to the faster draft build.
 
 **Write the card before you hand the part over, even for a single part.** A part gets printed, used, and then revisited weeks later to adjust something, and by then the session that built it is gone. `## Don't` is the only record of what was tried and rejected, so without it the next agent helpfully re-adds the lead-in chamfer that was retired on purpose. There is no one-off: there is the first session and the ones after it, and the card is what you are leaving for them.
@@ -19,7 +21,7 @@ nurb rules            the doctrine, read this before designing
 nurb api              the vocabulary a part file gets, with signatures
 nurb new <name>       create parts/<name>.py and its card
 nurb build [part]     build once, report size and timing
-nurb check [part]     the printability rules, --strict for CI
+nurb check [part]     the printability rules; on an assembly, the motion sweep. --strict for CI
 nurb inspect [part]   faces, normals, concave edges, each finding on its face
 nurb card [part]      regenerate a card's AUTO block
 nurb verify [part]    the doctrine's verification list: solids, flex, checks, card

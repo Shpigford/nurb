@@ -295,6 +295,64 @@ somebody picks up a caliper.
 A measured value pays for itself across a family. Notch measured one bracket pitch and
 amortized it over sixteen parts.
 
+## Assemblies
+
+Every rule above judges one solid being manufactured. An assembly judges solids being
+used together: a door on its mount, a lid over the machine it covers. The failure it
+exists for built clean, checked clean, exported watertight and printed beautifully,
+then jammed at 45 degrees of its swing, because the collision between two correct
+parts existed only in the physical world. No per-solid rule can have an opinion about
+motion.
+
+The contract mirrors a part's. An assembly is a function in `parts/` whose keyword
+defaults are its parameters; what it returns is placed solids rather than one solid.
+`use(name)` builds a sibling part where it was modelled, `hinge(solid, axis, through,
+at)` declares a revolute joint and poses it, and `obstacle(solid, name)` adds what the
+parts mount into: the machine, the wall, the shelf above. The joint angle is an
+ordinary keyword default, so the viewer's slider swings it live, and the slider ends
+exactly where the declared range does.
+
+**The declared range is a claim, and `nurb check` audits it** the way min_wall audits
+a wall: each hinge sweeps through it against everything else in the scene, and a
+finding is the angle where it jams plus the coordinates of the contact. Declare what
+the design needs, never what happens to pass. A door that must stay open by gravity
+needs past 90 degrees; declaring (0, 90) because that sweeps clean is writing the test
+to match the bug.
+
+**Nothing full width may cross the pivot line.** The mount that carries a hinge has to
+reach the pin from somewhere, so some of it always lives above or behind the pin, and
+any full-width material on the moving part that reaches past the pivot sweeps straight
+into it. The door that jammed at 45 did so against its own top edge, carried past the
+pin to support the knuckles; the knuckles got narrow tabs instead, sized to pass
+beside the mount, and the panel now starts at the pivot line.
+
+**Obstacles are boxes and prisms, never thin hand-drawn profiles.** Three nearly
+collinear points make a razor sliver, and OCCT answers a boolean against a degenerate
+solid with chunks of the other operand: measured once as a 152,000mm3 phantom
+collision at a pose that was actually clear. The sweep refuses any intersection that
+is not a subset of its inputs and names the solid to fix, but the fix is to model the
+obstacle as something with honest volume in the first place.
+
+**Tangent is clear, and clear is not clearance.** Collision is intersection volume, so
+two faces that kiss at zero volume pass, the closed door resting on its stop included.
+In plastic a zero-clearance pass is already a bind. The declared range should carry
+the same honesty about clearance that a tongue's `fit` carries about width.
+
+**The stop the sweep finds can be the detent the design wants.** The door that
+motivated all of this rests open at 240 degrees against the back of its own mount,
+held there by gravity, and that contact is a feature with a card entry, not a finding
+to engineer away. Read a jam before redesigning around it.
+
+**Never trust a swing worked out by hand.** The same hinge was hand-modelled three
+times and gave three answers, one of them "impossible"; the wrong one ran a convex
+test against a non-convex profile, which is exactly the kind of quiet modelling error
+a kernel boolean cannot make. The sweep is the authority, and it is cheap.
+
+One hinge sweeps at a time; the others hold their pose, which is the conservative
+reading of a mechanism you can only move one hand at a time. Printability rules stay
+off assemblies entirely: each part already answered them alone, and overhang measured
+on an assembled scene reports confident nonsense.
+
 ## Verification
 
 "It built" is not verification. `nurb verify` runs the machine-checkable part of
