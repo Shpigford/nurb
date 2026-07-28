@@ -48,7 +48,9 @@ nurb new <name>      create parts/<name>.py and its card
 nurb dev             watch, rebuild, serve the viewer on :7373 or the next free port
 nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
+nurb inspect [part]  faces, normals, concave edges, each finding on its face
 nurb rules           print the design doctrine
+nurb api             the vocabulary a part file gets, with signatures
 nurb skill           print an agent skill file for any AI harness
 nurb card [part]     regenerate a card's AUTO block
 nurb verify [part]   the doctrine's verification list, --strict-ish exit code
@@ -68,6 +70,9 @@ never should be.
 src/nurb/registry.py      @part, signature introspection
 src/nurb/builder.py       load, build, tessellate, GLB
 src/nurb/checks.py        printability rules, convexity, Finding/Context, variants
+src/nurb/polish.py        the bisecting polish pass, and chamfer with real errors
+src/nurb/probe.py         what `nurb inspect` measures, in the rules' own units
+src/nurb/api.py           the vocabulary, derived from __all__ so it cannot drift
 src/nurb/printers.toml    shipped printer profiles, named by a project's printer.toml
 src/nurb/card.py          the card's AUTO block
 src/nurb/extract.py       duplication across sibling parts, up to alpha-equivalence
@@ -201,7 +206,7 @@ channel floor on exact pitch, at full span, one per bracket and no more, for eve
 configuration. Its numbers are literals rather than imports from `system.py`, because a
 fit test that reads the same constant the part built from agrees with the part however
 wrong the constant is. A deliberate 0.1mm per interval pitch error is in the suite so
-the assertion is known to be able to fail. 178 tests.
+the assertion is known to be able to fail. 238 tests.
 
 **Thirteen parts found rule bugs that three parts could not.** `concave_cosmetic` was
 firing at the 2mm structural relief the doctrine prescribes for thin material, and
@@ -214,6 +219,18 @@ rather than by review, which is the argument for `examples/` being the calibrati
 The agent surface is in: `nurb rules` prints the doctrine from `src/nurb/doctrine.md`,
 `nurb card` regenerates each card's AUTO block from a build, `nurb render` screenshots the
 viewer headlessly, and `measurements.toml` carries dimensions with their provenance.
+
+**What an agent cannot ask, it reverse-engineers, and that is the expensive path.** A
+recorded 40-minute session spent about 95% of its output tokens thinking, and twenty-two
+of its thirty-eight shell commands were reading nurb's own source in site-packages or
+writing throwaway scripts to print a face centre. `nurb api` answers the first (the
+vocabulary with signatures, derived from `__all__` and from the live functions, so it
+cannot drift) and `nurb inspect` answers the second (faces, normals, concave edges, and
+each finding resolved to the face it fired on, in the units the rules report). `chamfer`
+shadows build123d's to append the doctrine's room rule on failure, because the kernel's
+own "try a smaller length value(s)" points at the wrong cause. `fillet` is deliberately
+not wrapped: build123d's fillet error already names `max_fillet()` and a smaller radius
+really is the fix there, so the chamfer rule would have been wrong half the time.
 
 `nurb extract` finds duplication across sibling parts up to alpha-equivalence and
 reports it; it does not rewrite, because naming the thing is the judgement and noticing

@@ -363,6 +363,35 @@ def cmd_rules(args):
     print(doctrine.read_text(encoding="utf-8"))
 
 
+def cmd_api(args):
+    """The vocabulary a part file gets, so nobody reads site-packages to find it."""
+    from . import api
+
+    for line in api.report():
+        print(line)
+
+
+def cmd_inspect(args):
+    """Measure a built part in the units the rules report it in.
+
+    Walks configurations like every other command, so a variant is inspected exactly
+    as a part is.
+    """
+    from . import builder, checks, probe
+
+    root = project_root()
+    for path in _resolve(root, args.part):
+        for name, overrides, ctx in _configs(path):
+            try:
+                shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+                found = checks.run(shape, ctx)
+            except Exception as exc:
+                print(f"  {name}: {type(exc).__name__}: {exc}")
+                continue
+            for line in probe.report(name, shape, ctx, found, limit=args.limit):
+                print(line)
+
+
 def cmd_skill(args):
     """Print the agent skill, for whatever harness the user's model lives in.
 
@@ -517,6 +546,14 @@ def main(argv=None):
 
     s = sub.add_parser("rules", help="print the design doctrine")
     s.set_defaults(fn=cmd_rules)
+
+    s = sub.add_parser("api", help="the vocabulary a part file gets, with signatures")
+    s.set_defaults(fn=cmd_api)
+
+    s = sub.add_parser("inspect", help="measure a built part: faces, normals, concave edges")
+    s.add_argument("part", nargs="?")
+    s.add_argument("--limit", type=int, default=12, help="how many faces and edges to list")
+    s.set_defaults(fn=cmd_inspect)
 
     s = sub.add_parser("skill", help="print an agent skill file for your AI harness")
     s.set_defaults(fn=cmd_skill)
