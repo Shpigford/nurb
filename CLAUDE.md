@@ -88,6 +88,10 @@ tests/                    rules and examples, both cases per rule
 
 ## Rules
 
+### Every session runs the dev server, every reply links it
+
+A SessionStart hook in `.claude/settings.json` starts `nurb dev` for the checkout (per-worktree state in `.claude/dev-server.log` and `.pid`). If it is somehow not running, start it in the background before doing anything else. Every reply to the user ends with the viewer URL: the browser is how the user judges a part, so work they were never pointed at is work they cannot see.
+
 ### Command names stay boring
 
 The primary user is a language model. An agent that has never seen this tool can

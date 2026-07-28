@@ -13,3 +13,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Per-worktree dev server state written by the SessionStart hook
+.claude/dev-server.log
+.claude/dev-server.pid

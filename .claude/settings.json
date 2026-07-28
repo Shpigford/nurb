@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/dev-server.sh",
+            "timeout": 60,
+            "statusMessage": "Starting nurb dev server"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "url=$(grep -oE 'http://127\\.0\\.0\\.1:[0-9]+' .claude/dev-server.log 2>/dev/null | tail -1); [ -n \"$url\" ] && echo \"The nurb viewer for this workspace is at $url. Include this URL in your reply so the user can open it.\"; exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "url=$(grep -oE 'http://127\\.0\\.0\\.1:[0-9]+' .claude/dev-server.log 2>/dev/null | tail -1); [ -n \"$url\" ] && printf '{\"systemMessage\":\"nurb viewer: %s\"}' \"$url\"; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}
