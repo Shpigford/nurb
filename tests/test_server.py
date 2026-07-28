@@ -229,7 +229,7 @@ def test_open_browser_fires_after_the_bind(tmp_path, monkeypatch):
     (tmp_path / "parts").mkdir()
     srv = Server(tmp_path, port=port, open_browser=True)
     opened = []
-    monkeypatch.setattr(server_mod.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(server_mod, "_open_viewer", lambda url: opened.append(url))
     monkeypatch.setattr(server_mod, "_update_nudge", lambda: None)
 
     async def go():
@@ -246,3 +246,27 @@ def test_open_browser_fires_after_the_bind(tmp_path, monkeypatch):
     if srv.observer:
         srv.observer.stop()
     assert opened == [f"http://127.0.0.1:{port}"]
+
+
+def test_open_viewer_uses_launchservices_on_macos(monkeypatch):
+    """webbrowser's AppleScript path opens Safari regardless of the system default,
+    so on macOS the viewer goes through /usr/bin/open instead (issue #18)."""
+    import subprocess
+
+    from nurb import server as server_mod
+
+    ran = []
+    monkeypatch.setattr(subprocess, "run", lambda argv, **kw: ran.append(argv))
+    monkeypatch.setattr("sys.platform", "darwin")
+    server_mod._open_viewer("http://127.0.0.1:7373")
+    assert ran == [["/usr/bin/open", "http://127.0.0.1:7373"]]
+
+
+def test_open_viewer_uses_webbrowser_elsewhere(monkeypatch):
+    from nurb import server as server_mod
+
+    opened = []
+    monkeypatch.setattr(server_mod.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr("sys.platform", "linux")
+    server_mod._open_viewer("http://127.0.0.1:7373")
+    assert opened == ["http://127.0.0.1:7373"]

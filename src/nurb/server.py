@@ -76,6 +76,23 @@ def _upgrade_command():
     return None
 
 
+def _open_viewer(url):
+    """Open the viewer in the user's default browser.
+
+    On macOS the stdlib webbrowser module drives an AppleScript `open location`,
+    which lands in Safari regardless of the LaunchServices default. /usr/bin/open
+    consults LaunchServices, so it opens the browser the user actually set. A failed
+    open is not fatal either way; the URL is already on stdout.
+    """
+    import subprocess
+    import sys
+
+    if sys.platform == "darwin":
+        subprocess.run(["/usr/bin/open", url], check=False)
+    else:
+        webbrowser.open(url)
+
+
 def _update_nudge():
     """One line on `nurb dev` stdout when PyPI has a newer release.
 
@@ -598,6 +615,6 @@ class Server:
             print(f"\n  nurb  http://127.0.0.1:{self.port}\n", flush=True)
             if self.open_browser:
                 # After the bind, or the browser lands on a connection refused.
-                webbrowser.open(f"http://127.0.0.1:{self.port}")
+                _open_viewer(f"http://127.0.0.1:{self.port}")
             threading.Thread(target=_update_nudge, daemon=True).start()
             await asyncio.Future()
