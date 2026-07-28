@@ -237,6 +237,17 @@ def assembly(fn):
 _EPS = 1e-4  # mm3; below this an intersection is numerical noise, not a collision
 
 
+def _inside(bb, outer, slack=0.5):
+    return (
+        bb.min.X >= outer.min.X - slack
+        and bb.min.Y >= outer.min.Y - slack
+        and bb.min.Z >= outer.min.Z - slack
+        and bb.max.X <= outer.max.X + slack
+        and bb.max.Y <= outer.max.Y + slack
+        and bb.max.Z <= outer.max.Z + slack
+    )
+
+
 def _hits(moved, others):
     """The overlap volume and where it is, or (0, None)."""
     worst, where = 0.0, None
@@ -248,12 +259,23 @@ def _hits(moved, others):
             vol = 0.0
         if vol > max(_EPS, worst):
             bb = common.bounding_box()
+            # A real intersection is a subset of both inputs. OCCT handed a
+            # degenerate solid can return chunks of the other operand instead,
+            # which would read as a huge phantom collision; refusing it loudly
+            # names the solid to fix, where a silent zero would hide it and a
+            # phantom finding would send someone redesigning a working hinge.
+            label = getattr(other, "label", "") or "a fixed part"
+            if not _inside(bb, other.bounding_box()):
+                raise ValueError(
+                    f"intersecting with {label} returned geometry outside it "
+                    f"({vol:.0f}mm3) -- that solid is likely degenerate"
+                )
             worst = vol
             where = (
                 (bb.min.X + bb.max.X) / 2,
                 (bb.min.Y + bb.max.Y) / 2,
                 (bb.min.Z + bb.max.Z) / 2,
-                getattr(other, "label", "") or "a fixed part",
+                label,
             )
     return worst, where
 
