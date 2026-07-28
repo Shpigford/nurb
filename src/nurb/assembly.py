@@ -56,6 +56,27 @@ class Hinge:
     at: float
     name: str
     step: float
+    param: str | None = None  # the keyword that drove `at`, when one did
+
+
+class _Named(float):
+    """A float that remembers which parameter it was.
+
+    The viewer wants to drive a joint without a rebuild, and for that it has to know
+    which slider is which hinge. Nothing in `hinge(at=open_deg)` says so -- by the
+    time the value arrives it is just 0.0. So the runtime hands the assembly function
+    its float arguments wrapped in these, and `hinge` reads the name straight off its
+    `at`. Passed through arithmetic the name is lost, which is the right behaviour:
+    `at=open_deg / 2` is no longer the slider's own value, and a rebuild is the only
+    honest way to pose it.
+    """
+
+    __slots__ = ("param",)
+
+    def __new__(cls, value, param):
+        self = float.__new__(cls, value)
+        self.param = param
+        return self
 
 
 @dataclass
@@ -150,6 +171,7 @@ def hinge(solid, axis, through, at=0.0, name=None, step=3.0):
         at=float(at),
         name=name or getattr(solid, "label", "") or "the moving part",
         step=float(step),
+        param=getattr(at, "param", None),
     )
     return posed
 
@@ -200,7 +222,11 @@ def assembly(fn):
         rec = _Recorder(draft=draft)
         _active.append(rec)
         try:
-            call = dict(kwargs)
+            # Floats go in knowing their own names, so `hinge(at=open_deg)` can tie
+            # the joint to the slider that drives it. Bools are ints; leave both.
+            call = {
+                k: _Named(v, k) if type(v) is float else v for k, v in kwargs.items()
+            }
             if takes_draft:
                 call["draft"] = draft
             result = fn(**call)

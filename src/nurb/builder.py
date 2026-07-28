@@ -197,7 +197,26 @@ def to_mesh(shape, tolerance=0.1):
 
 
 def to_glb(shape, tolerance=0.1):
-    return trimesh.Scene([to_mesh(shape, tolerance)]).export(file_type="glb")
+    """One GLB. A part is one blob; an assembly keeps its movers as named nodes.
+
+    The scene rides on the compound the same way checks.run reads it: an attribute,
+    not an import, so this file stays ignorant of how assemblies work. The node
+    names are the contract with the viewer -- `joint<i>` for each hinged solid in
+    declaration order, `fixed` for everything static, `context` for obstacles --
+    which is what lets a slider pose a joint client-side without a rebuild.
+    """
+    scene = getattr(shape, "_nurb_scene", None)
+    if scene is None:
+        return trimesh.Scene([to_mesh(shape, tolerance)]).export(file_type="glb")
+    out = trimesh.Scene()
+    for i, h in enumerate(scene.hinges):
+        name = f"joint{i}"
+        out.add_geometry(to_mesh(h.solid, tolerance), node_name=name, geom_name=name)
+    for name, group in (("fixed", scene.statics), ("context", scene.obstacles)):
+        if group:
+            merged = trimesh.util.concatenate([to_mesh(s, tolerance) for s in group])
+            out.add_geometry(merged, node_name=name, geom_name=name)
+    return out.export(file_type="glb")
 
 
 def stats(shape):

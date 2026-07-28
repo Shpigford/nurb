@@ -140,3 +140,37 @@ def test_printability_rules_stay_off_assemblies(project):
     path = write(project, "rig", FLAP_ASM)
     shape, _, _ = builder.build(path)
     assert all(f.rule == "motion" for f in checks.run(shape))
+
+
+def test_a_hinge_knows_which_parameter_posed_it(project):
+    """`hinge(at=open_deg)` ties the joint to the slider without anyone saying so.
+    Arithmetic strips the link, correctly: `at=open_deg / 2` is not the slider's own
+    value, and a rebuild is then the only honest way to pose it."""
+    path = write(project, "rig", FLAP_ASM)
+    shape, _, _ = builder.build(path)
+    assert shape._nurb_scene.hinges[0].param == "open_deg"
+
+    halved = write(project, "rig2", FLAP_ASM.replace("at=open_deg,", "at=open_deg / 2,"))
+    shape, _, _ = builder.build(halved)
+    assert shape._nurb_scene.hinges[0].param is None
+
+
+def test_an_assembly_glb_keeps_its_movers_as_named_nodes(project):
+    """The node names are the viewer's contract for posing a joint client-side."""
+    import io
+
+    import trimesh
+
+    path = write(project, "rig", FLAP_ASM)
+    shape, _, _ = builder.build(path)
+    glb = builder.to_glb(shape)
+    scene = trimesh.load(io.BytesIO(glb), file_type="glb")
+    names = set(scene.geometry)
+    assert "joint0" in names
+    assert "fixed" in names
+    # A plain part stays one anonymous blob; nothing downstream should start
+    # depending on node names existing for everything.
+    write(project, "plate", PLATE)
+    solid, _, _ = builder.build(project / "parts" / "plate.py")
+    plain = trimesh.load(io.BytesIO(builder.to_glb(solid)), file_type="glb")
+    assert len(plain.geometry) == 1

@@ -465,12 +465,20 @@ function sectionAttach() {
   for (const w of writers) scene.remove(w);
   writers = [];
   if (!mesh) return;
-  for (const mat of [stencilBack, stencilFront]) {
-    const w = new THREE.Mesh(mesh.geometry, mat);
-    w.position.copy(mesh.position);
-    w.renderOrder = 1;
-    scene.add(w);
-    writers.push(w);
+  mesh.updateMatrixWorld(true);
+  for (const child of mesh.children) {
+    if (!child.isMesh || child.name === 'context') continue;  // never cap the scenery
+    for (const mat of [stencilBack, stencilFront]) {
+      const w = new THREE.Mesh(child.geometry, mat);
+      // The writer's local matrix IS the child's world matrix -- the same object,
+      // not a copy -- so a joint posing the child mid-section drags its stencil
+      // writer along without anyone having to remember to re-attach.
+      w.matrixAutoUpdate = false;
+      w.matrix = child.matrixWorld;
+      w.renderOrder = 1;
+      scene.add(w);
+      writers.push(w);
+    }
   }
   sectionUpdate();
 }
@@ -630,6 +638,34 @@ function frame(box, from) {
 // ---- loading ----
 const loader = new GLTFLoader();
 
+// ---- joints ----
+// A hinged node poses on the GPU: T(origin) * R(axis, delta) * T(-origin) on top of
+// the matrix it loaded with. This is the whole reason assemblies export named nodes:
+// a slider drag becomes a transform at whatever rate the screen paints, instead of a
+// rebuild, a tessellation and a websocket push per tick.
+const jointNodes = new Map();  // param (or node name) -> { node, base, j }
+
+function poseJoint(param, deg) {
+  const rec = jointNodes.get(param);
+  if (!rec) return false;
+  const { node, base, j } = rec;
+  const o = new THREE.Vector3(...j.origin);
+  const d = new THREE.Vector3(...j.dir).normalize();
+  const M = new THREE.Matrix4().makeTranslation(o.x, o.y, o.z)
+    .multiply(new THREE.Matrix4().makeRotationAxis(d, THREE.MathUtils.degToRad(deg - j.at)))
+    .multiply(new THREE.Matrix4().makeTranslation(-o.x, -o.y, -o.z))
+    .multiply(base);
+  node.matrix.copy(M);
+  node.matrixWorldNeedsUpdate = true;
+  return true;
+}
+
+function applyJointPoses() {
+  for (const [param, rec] of jointNodes) {
+    poseJoint(param, values.has(param) ? values.get(param) : rec.j.at);
+  }
+}
+
 // `ready` is what a headless render waits on. Two frames after the geometry lands,
 // because one only guarantees the mesh is in the scene, not that it has been painted.
 // Set on every exit path including a failed build, or a render of a broken part hangs.
@@ -651,9 +687,12 @@ async function paint(name, { keepCamera }) {
     err.style.display = 'block';
     err.textContent = entry.traceback || entry.error;
     if (mesh) {                              // last good geometry stays, visibly stale
-      mesh.material.transparent = true;
-      mesh.material.opacity = 0.22;
-      mesh.material.needsUpdate = true;
+      mesh.traverse(o => {
+        if (!o.isMesh) return;
+        o.material.transparent = true;
+        o.material.opacity = 0.22;
+        o.material.needsUpdate = true;
+      });
     }
     hud(entry);
     checks(name);
@@ -663,22 +702,47 @@ async function paint(name, { keepCamera }) {
   err.style.display = 'none';
 
   const gltf = await loader.loadAsync(`/glb/${name}.glb?v=${entry.token}`);
-  const geo = [];
-  gltf.scene.traverse(o => { if (o.isMesh) geo.push(o.geometry); });
-  if (!geo.length) return;
+  const found = [];
+  gltf.scene.traverse(o => { if (o.isMesh) found.push(o); });
+  if (!found.length) return;
 
-  if (mesh) { scene.remove(mesh); mesh.geometry.dispose(); }
-  if (!geo[0].attributes.normal) geo[0].computeVertexNormals();  // never render unlit
-  mesh = new THREE.Mesh(geo[0], material.clone());
-  mesh.material.clippingPlanes = [plane];   // parked unless the section view is on
+  if (mesh) { scene.remove(mesh); mesh.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); }
+  // Always a group, even for one blob: a part is a group of one, an assembly is a
+  // group whose named children the joints move, and nothing downstream branches.
+  mesh = new THREE.Group();
+  for (const src of found) {
+    if (!src.geometry.attributes.normal) src.geometry.computeVertexNormals();  // never render unlit
+    const m = new THREE.Mesh(src.geometry, material.clone());
+    m.material.clippingPlanes = [plane];   // parked unless the section view is on
+    // The exporter names the node; the loader sometimes hangs the mesh under it.
+    m.name = src.name || (src.parent && src.parent.name) || '';
+    if (m.name === 'context') {
+      // Obstacles are scenery: the machine a part mounts to, the wall behind it.
+      // Ghosted, so the printed parts stay the subject of the picture.
+      m.material.transparent = true;
+      m.material.opacity = 0.3;
+    }
+    mesh.add(m);
+  }
   scene.add(mesh);
 
-  mesh.geometry.computeBoundingBox();
+  jointNodes.clear();
+  for (const j of (entry.joints || [])) {
+    const node = mesh.getObjectByName(j.node);
+    if (!node) continue;
+    node.matrixAutoUpdate = false;
+    jointNodes.set(j.param || j.node, { node, base: node.matrix.clone(), j });
+  }
+  // The GLB arrives posed at each joint's `at`; the sliders may have moved since a
+  // drag never rebuilds. Reposing here is what keeps a save from snapping the door.
+  applyJointPoses();
+
+  const bb = new THREE.Box3().setFromObject(mesh);
   // The grid is the build plate, so a part sits on it. Where a part's own origin
   // falls is a modeling datum and nothing to do with printing: Notch hangs
   // everything below z=0, which would put every part underneath the plate.
-  mesh.position.z = -mesh.geometry.boundingBox.min.z;
-  const box = mesh.geometry.boundingBox.clone().translate(mesh.position);
+  mesh.position.z = -bb.min.z;
+  const box = bb.clone().translate(new THREE.Vector3(0, 0, mesh.position.z));
   const size = box.getSize(new THREE.Vector3()).length();
   sectionAttach();
 
@@ -817,7 +881,8 @@ function params(e) {
   // to be draggable back. The panel is only cleared if it belongs to another part.
   if (e.error && panelSig && panelSig.startsWith(e.name + '|')) return;
   const rows = (e.params || []).filter(adjustable);
-  const sig = e.name + '|' + rows.map(p => `${p.name}:${p.default}:${p.family ? 1 : 0}`).join(',');
+  const sig = e.name + '|' + rows.map(p => `${p.name}:${p.default}:${p.family ? 1 : 0}`).join(',')
+    + '|' + (e.joints || []).map(j => `${j.param}:${j.lo}:${j.hi}`).join(',');
   if (sig === panelSig) { sync(rows); return; }
   panelSig = sig;
 
@@ -840,6 +905,7 @@ function params(e) {
       + `family (${shared.length})</summary>`;
   }
   for (const p of rows) {
+    const joint = (e.joints || []).find(j => j.param === p.name);
     const r = infer(p.default, p.kind === 'int');
     values.set(p.name, p.value); defaults.set(p.name, p.default);
     const row = document.createElement('div');
@@ -850,8 +916,15 @@ function params(e) {
       + `<input class="v" type="number" step="any"></div>`
       + `<input type="range">`;
     const num = row.querySelector('.v'), slide = row.querySelector('[type=range]');
-    slide.min = Math.min(r.lo, p.value); slide.max = Math.max(r.hi, p.value);
-    slide.step = r.step; slide.value = p.value;
+    if (joint) {
+      // A joint's range is declared, not guessed: the slider ends exactly where the
+      // sweep proved the motion does.
+      slide.min = joint.lo; slide.max = joint.hi; slide.step = 0.5;
+    } else {
+      slide.min = Math.min(r.lo, p.value); slide.max = Math.max(r.hi, p.value);
+      slide.step = r.step;
+    }
+    slide.value = p.value;
     slide.title = p.name;
     num.value = p.value;
 
@@ -868,6 +941,9 @@ function params(e) {
       if (v < +slide.min) slide.min = v;
       if (v > +slide.max) slide.max = v;
       slide.value = v;
+      // A pose is not an edit: the joint turns on the GPU and the geometry is
+      // untouched, so there is nothing to rebuild and nothing to mark stale.
+      if (joint && poseJoint(p.name, v)) return;
       markDirty();
       push(commit);
     };
@@ -906,6 +982,10 @@ function params(e) {
 function sync(rows) {
   for (const p of rows) {
     defaults.set(p.name, p.default);
+    // A joint's slider is client-authoritative: drags never pushed, so the server's
+    // value is always behind, and syncing to it would snap the door shut on every
+    // unrelated rebuild. The pose survives; `paint` re-applies it to fresh geometry.
+    if (jointNodes.has(p.name)) continue;
     const row = document.querySelector(`.p[data-name="${p.name}"]`);
     if (!row) continue;
     const num = row.querySelector('.v'), slide = row.querySelector('[type=range]');
