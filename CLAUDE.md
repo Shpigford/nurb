@@ -88,9 +88,9 @@ tests/                    rules and examples, both cases per rule
 
 ## Rules
 
-### Every session runs the dev server, every reply links it
+### This file is for developing nurb, not for using it
 
-A SessionStart hook in `.claude/settings.json` starts `nurb dev` for the checkout (per-worktree state in `.claude/dev-server.log` and `.pid`). If it is somehow not running, start it in the background before doing anything else. Every reply to the user ends with the viewer URL: the browser is how the user judges a part, so work they were never pointed at is work they cannot see.
+The part-design workflow (start `nurb dev` first thing, end every reply with the viewer URL, model while the user watches) belongs to the shipped skill (`src/nurb/agents.md`, mirrored into `skills/nurb/SKILL.md`) and applies in a user's parts project, never in this repo. Here you are building the tool. When verifying viewer or server changes, run `nurb dev` against `examples/notch` in the background and share the URL for that; `?part=<name>&variant=<name>` deep-links to the exact configuration you want looked at.
 
 ### Command names stay boring
 

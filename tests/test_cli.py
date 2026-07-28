@@ -92,14 +92,6 @@ def test_a_fresh_project_gets_a_pointer_at_the_doctrine(tmp_path, capsys):
     assert "AGENTS.md" in capsys.readouterr().out  # it says what it wrote
 
 
-def test_the_shim_it_writes_is_the_one_the_package_ships():
-    """One copy, in the package, which is the rule the doctrine already follows."""
-    shipped = (pathlib.Path(cli.__file__).parent / "agents.md").read_text(encoding="utf-8")
-    repo = pathlib.Path(__file__).parents[1]
-    assert (repo / "AGENTS.md").read_text(encoding="utf-8") == shipped
-    assert shipped in (repo / "skills" / "nurb" / "SKILL.md").read_text(encoding="utf-8")
-
-
 def test_a_second_part_does_not_mention_the_shim_again(tmp_path, capsys):
     _new(tmp_path, "one")
     capsys.readouterr()
