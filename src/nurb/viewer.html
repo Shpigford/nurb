@@ -815,7 +815,7 @@ function params(e) {
     row.dataset.name = p.name;
     row.innerHTML =
       `<div class="top"><span class="k" title="double-click to reset to ${p.default}">${p.name}</span>`
-      + `<input class="v" type="number"${r.int ? ' step="1"' : ''}></div>`
+      + `<input class="v" type="number" step="any"></div>`
       + `<input type="range">`;
     const num = row.querySelector('.v'), slide = row.querySelector('[type=range]');
     slide.min = Math.min(r.lo, p.value); slide.max = Math.max(r.hi, p.value);
@@ -823,22 +823,25 @@ function params(e) {
     slide.title = p.name;
     num.value = p.value;
 
+    // Quantization belongs to the slider alone, so it happens at the slider's events
+    // rather than in set(): a drag lands on the step (tidy only cleans up the float
+    // artifacts of stepping, 0.30000000000000004 into 0.3), while a typed number
+    // arrives exact. The range is a guess and the step is a guess; the number someone
+    // typed is neither, so typing 95.5 into an integer-stepped slider means 95.5.
     const set = (v, commit) => {
       if (!Number.isFinite(v)) return;
-      values.set(p.name, r.int ? Math.round(v) : tidy(v, r.step));
-      const now = values.get(p.name);
-      num.value = now;
-      // A typed value outside the guessed range widens it rather than clamping. The
-      // range is a guess; the number someone typed is not.
-      if (now < +slide.min) slide.min = now;
-      if (now > +slide.max) slide.max = now;
-      slide.value = now;
+      values.set(p.name, v);
+      num.value = v;
+      // A typed value outside the guessed range widens it rather than clamping.
+      if (v < +slide.min) slide.min = v;
+      if (v > +slide.max) slide.max = v;
+      slide.value = v;
       markDirty();
       push(commit);
     };
     setters.set(p.name, set);
-    slide.oninput = () => set(+slide.value, false);
-    slide.onchange = () => set(+slide.value, true);
+    slide.oninput = () => set(tidy(+slide.value, r.step), false);
+    slide.onchange = () => set(tidy(+slide.value, r.step), true);
     num.onchange = () => set(+num.value, true);
     row.querySelector('.k').ondblclick = () => set(p.default, true);
     (fold && p.family ? fold : box).appendChild(row);
@@ -943,8 +946,8 @@ function activeVariant(e) {
 
 // Picking a variant is loading its overrides: the same pipeline a slider drag uses, so
 // checks, export and the write button all just see the part flexed. Sent raw rather
-// than through the sliders' setters, whose step rounding would corrupt a value like
-// 25.16; sync() moves the sliders when the rebuild lands.
+// than through the sliders' setters, so the overrides land as one message instead of a
+// push per parameter; sync() moves the sliders when the rebuild lands.
 function applyVariant(name, v) {
   if (!sock || sock.readyState !== WebSocket.OPEN) return;
   pending = null; pendingFor = null;   // a drag in flight must not resurrect old values
