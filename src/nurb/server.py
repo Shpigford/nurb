@@ -255,11 +255,12 @@ class Server:
             body = json.dumps([self._wire(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
         if path.startswith("/vendor/"):
-            # three.js, shipped in the package. A CAD tool that needs a CDN is broken
-            # on a plane, and `nurb render` drives this same page.
+            # three.js and the UI font, shipped in the package. A CAD tool that needs
+            # a CDN is broken on a plane, and `nurb render` drives this same page.
+            types = {".js": "text/javascript; charset=utf-8", ".ttf": "font/ttf"}
             target = (VENDOR / path[len("/vendor/") :]).resolve()
-            if target.suffix == ".js" and target.is_relative_to(VENDOR) and target.is_file():
-                return self._resp(200, target.read_bytes(), "text/javascript; charset=utf-8")
+            if target.suffix in types and target.is_relative_to(VENDOR) and target.is_file():
+                return self._resp(200, target.read_bytes(), types[target.suffix])
             return self._resp(404, b"not found", "text/plain")
         if path.startswith("/glb/"):
             entry = self.state.get(path[5:].removesuffix(".glb"))
