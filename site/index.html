@@ -334,14 +334,14 @@
     <h2>You say it. It appears. This one is live.</h2>
   </div>
   <div class="chat reveal">
-    <div class="bub you">Make a stand for my iPhone with a slot for the charging cable underneath</div>
-    <div class="bub ai">Done: <b id="chat-dims">84.0 &times; 44.3 &times; 97.9 mm</b>, <span id="chat-status" class="live-ok">all checks clean</span>. Drag the sliders to tweak it.</div>
+    <div class="bub you">Make an adapter that connects my shop vac hose to the dust port on my table saw</div>
+    <div class="bub ai">Done: <b id="chat-dims">&Oslash;57.6 &rarr; &Oslash;35.0 &middot; 74 mm</b>, <span id="chat-status" class="live-ok">all checks clean</span>. Drag the sliders to tweak it.</div>
   </div>
   <div id="ws" class="reveal">
     <aside>
       <h1><svg><use href="#i-cube"/></svg><b>nurb</b><span>desk</span></h1>
       <div id="list">
-        <div class="item active"><span class="dot"></span><span class="name">phone_stand</span><span class="ms" id="ms">1 ms</span></div>
+        <div class="item active"><span class="dot"></span><span class="name">hose_adapter</span><span class="ms" id="ms">1 ms</span></div>
       </div>
       <div id="params"><h2>parameters</h2></div>
       <div id="ws-foot">v0.5.0 &middot; the sliders come from the part, not a settings screen</div>
@@ -369,10 +369,10 @@
   </div>
   <div class="cols reveal">
     <div class="chat">
-      <div class="bub you">The lip in front blocks the speaker. Shorter?</div>
-      <div class="bub ai">Dropped it to <b>8 mm</b>, just enough to catch the phone.</div>
-      <div class="bub you">Will a braided cable fit? Those are chunky</div>
-      <div class="bub ai">Measured one at <b>4.2 mm</b>, widened the slot to <b>6 mm</b>. Checks still clean, and the <b>stl</b> button has your file.</div>
+      <div class="bub you">It wobbles on the vac hose, way too loose</div>
+      <div class="bub ai">Measure the outside of the hose end for me. Calipers if you have them, a careful ruler works.</div>
+      <div class="bub you">57.4</div>
+      <div class="bub ai">Bored the cuff to <b>57.6 mm</b>, a snug push fit. Checks still clean, and the <b>stl</b> button has your file.</div>
     </div>
     <div class="facts">
       <div class="fact"><b>measures, never guesses</b><span>It asks for the real dimension instead of inventing one.</span></div>
@@ -398,8 +398,8 @@
     <div class="term">
       <div class="bar"><i></i><i></i><i></i>your browser</div>
       <div class="pane feed">
-        <div class="row"><span class="dot"></span><b>phone_stand</b> rebuilt</div>
-        <div class="row">84.0 &times; 44.3 &times; 97.9 mm</div>
+        <div class="row"><span class="dot"></span><b>hose_adapter</b> rebuilt</div>
+        <div class="row">&Oslash;57.6 &rarr; &Oslash;35.0 &middot; 74 mm</div>
         <div class="row">0.3 s &middot; your view stays put</div>
       </div>
       <div class="cap"><b>Watch it take shape.</b> Live, and the camera never jumps.</div>
@@ -407,9 +407,9 @@
     <div class="term">
       <div class="bar"><i></i><i></i><i></i>the check</div>
       <div class="pane mini-checks">
-        <div class="f pass"><svg class="ic"><use href="#i-ok"/></svg><span><b>overhangs</b> print without supports</span></div>
         <div class="f pass"><svg class="ic"><use href="#i-ok"/></svg><span><b>walls</b> thick enough everywhere</span></div>
-        <div class="f warn"><svg class="ic"><use href="#i-warn"/></svg><span><b>stability</b> tippy at 34&deg;, lean it forward</span></div>
+        <div class="f pass"><svg class="ic"><use href="#i-ok"/></svg><span><b>bed grip</b> plenty of plate contact</span></div>
+        <div class="f warn"><svg class="ic"><use href="#i-warn"/></svg><span><b>overhang</b> bore shoulder at 52&deg;, stretch the taper</span></div>
       </div>
       <div class="cap"><b>Failures get caught</b> before your printer finds them.</div>
     </div>
@@ -449,7 +449,7 @@
     </li>
     <li>
       <div class="body">
-        <span class="say">Make an iPhone 17 Pro stand with a slot for the charging cable that runs underneath</span>
+        <span class="say">Make an adapter that connects my shop vac hose to the dust port on my table saw</span>
         <p>Your AI models it, checks it, and sends you a link to watch. Looks right? <b>Print.</b></p>
       </div>
     </li>
@@ -475,72 +475,56 @@ import * as THREE from 'three';
 import { OrbitControls } from './vendor/three/OrbitControls.js';
 
 // ---- the demo part ----
-// A phone stand as a parametric extrusion: side profile in (depth, height), extruded
-// across width, cable slot as a groove sunk into the channel floor. Same part as the
-// page's exemplar prompt. All dimensions in mm, CAD coords, Z up.
-const GAP = 13.0;    // channel the phone sits in
-const CABLE = 4.5;   // groove depth; a chunky braided cable measures 4.2
-const SLOT = 6.0;    // groove width, matching the conversation above
+// A shop vac adapter as a parametric lathe: one cross-section in (radius, height)
+// revolved around the axis. The cuff slips over the vac hose, the tip slips into
+// the tool's dust port, a cone runs between them. Same part as the page's exemplar
+// prompt. All dimensions in mm, CAD coords, Z up.
 
 const PARAMS = [
-  { name: 'width',   d: 84.0, lo: 50,  hi: 130, step: 1   },
-  { name: 'lean',    d: 15.0, lo: 0,   hi: 40,  step: 1   },
-  { name: 'height',  d: 95.0, lo: 60,  hi: 140, step: 1   },
-  { name: 'wall',    d: 3.0,  lo: 1.6, hi: 5,   step: 0.1 },
-  { name: 'lip',     d: 14.0, lo: 6,   hi: 30,  step: 0.5 },
-  { name: 'foot',    d: 26.0, lo: 0,   hi: 45,  step: 1   },
-  { name: 'chamfer', d: 0.6,  lo: 0,   hi: 1.5, step: 0.05 },
+  { name: 'vac_end',  d: 57.6, lo: 30,  hi: 80, step: 0.1 },  // hose outside diameter; the cuff bores to this
+  { name: 'tool_end', d: 35.0, lo: 20,  hi: 75, step: 0.1 },  // port inside diameter; the tip mikes to this
+  { name: 'taper',    d: 30.0, lo: 8,   hi: 80, step: 1   },
+  { name: 'cuff',     d: 22.0, lo: 10,  hi: 40, step: 1   },
+  { name: 'wall',     d: 2.4,  lo: 1.0, hi: 4,  step: 0.1 },
+  { name: 'chamfer',  d: 0.8,  lo: 0,   hi: 1.5, step: 0.05 },
 ];
 const v = Object.fromEntries(PARAMS.map(p => [p.name, p.d]));
 
-// The lean pushes the top of the back rest behind the phone channel, so the base
-// keeps going as a rear foot; at the default lean its edge lands right under the top.
-// The cable groove opens upward and the underside is one flat slab, so printed as it
-// stands nothing overhangs: every face is vertical, near-vertical, or faces up.
-function profilePoints({ lean, height, wall, lip, foot }) {
-  const th = lean * Math.PI / 180, c = Math.cos(th), t = Math.tan(th);
-  const gFloor = wall * 0.55;                    // material left under the groove
-  const floorZ = gFloor + CABLE;                 // channel floor, cable clearance below the phone
-  const inner = wall + GAP;                      // inner face of the back rest at the floor
-  const topZ = floorZ + height * c;
-  const outer = inner + (wall - floorZ) * t + wall / c;   // outer face down at the foot
-  const yEnd = outer + Math.max(foot, 0.01);     // rear edge of the foot
-  const g0 = wall + (GAP - SLOT) / 2, g1 = g0 + SLOT;     // groove, centered in the channel
+// A chamfer needs twice its size of face around it, or the geometry self-intersects.
+// The real kernel refuses; here we clamp, and the checks say so.
+const effChamfer = p => Math.min(p.chamfer, p.wall * 0.45);
+
+// Printed cuff-down the outer cone converges, so the only downward face is the
+// bore's shoulder where the wide bore necks to the narrow one; the overhang check
+// watches exactly that angle. Chamfers flare the cuff's mouth so the hose finds it
+// and ease the tip's lead into the port.
+function profilePoints(p) {
+  const ch = effChamfer(p);
+  const r1 = p.vac_end / 2, r1o = r1 + p.wall;    // cuff bore and outside
+  const r2 = p.tool_end / 2, r2i = r2 - p.wall;   // tip outside and bore
+  const z1 = p.cuff, z2 = p.cuff + p.taper, top = z2 + p.cuff;
   return [
-    [0, 0], [yEnd, 0],
-    [yEnd, wall], [outer, wall],
-    [inner + (topZ - floorZ) * t + wall / c, topZ],
-    [inner + (topZ - floorZ) * t, topZ],
-    [inner, floorZ],
-    [g1, floorZ], [g1, gFloor], [g0, gFloor], [g0, floorZ],
-    [wall, floorZ], [wall, floorZ + lip], [0, floorZ + lip],
+    [r1 + ch, 0], [r1o, 0],            // cuff mouth, bore flared for the hose
+    [r1o, z1], [r2, z2],               // outside: cuff wall, then the cone
+    [r2, top - ch], [r2 - ch, top],    // tip wall, eased for the port
+    [r2i, top],                        // tip rim
+    [r2i, z2], [r1, z1],               // bore: neck back out to hose size
+    [r1, ch], [r1 + ch, 0],            // cuff bore, close the loop
   ];
 }
 
-// A chamfer needs twice its size of face around it, or the geometry self-intersects.
-// The real kernel refuses; here we clamp, and the checks say so.
-const effChamfer = p => Math.min(p.chamfer, p.wall * 0.2);
-
 function buildGeometry(p) {
-  const shape = new THREE.Shape();
-  const pts = profilePoints(p);
-  shape.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) shape.lineTo(pts[i][0], pts[i][1]);
-  shape.closePath();
-
-  const ch = effChamfer(p);
-  const geo = new THREE.ExtrudeGeometry(shape, ch > 0.01
-    ? { depth: p.width - 2 * ch, bevelEnabled: true, bevelThickness: ch,
-        bevelSize: ch, bevelOffset: -ch, bevelSegments: 1, curveSegments: 1 }
-    : { depth: p.width, bevelEnabled: false, curveSegments: 1 });
-
-  // Shape plane was (depth, height), extrusion ran along width. Permute into CAD:
-  // X = width, Y = depth, Z = height. Cyclic, so nothing turns inside out.
-  geo.applyMatrix4(new THREE.Matrix4().set(0,0,1,0, 1,0,0,0, 0,1,0,0, 0,0,0,1));
+  // At chamfer 0 the flare points collapse onto their neighbours; drop the
+  // duplicates or the lathe makes zero-area bands with NaN normals.
+  const raw = profilePoints(p);
+  const pts = raw.filter((q, i) => !i || Math.hypot(q[0] - raw[i-1][0], q[1] - raw[i-1][1]) > 1e-6);
+  let geo = new THREE.LatheGeometry(pts.map(([r, z]) => new THREE.Vector2(r, z)), 96);
+  geo.rotateX(Math.PI / 2);   // the lathe spins around Y; CAD is Z up
+  geo = geo.toNonIndexed();   // per-face normals, so the creases stay crisp
+  geo.computeVertexNormals();
   geo.computeBoundingBox();
   const b = geo.boundingBox;
   geo.translate(-(b.min.x + b.max.x) / 2, -(b.min.y + b.max.y) / 2, -b.min.z);
-  geo.computeVertexNormals();
   geo.computeBoundingBox();
   return geo;
 }
@@ -617,26 +601,27 @@ function frame(box) {
 // ---- checks, parameter-reactive like the real thing ----
 function findings(p) {
   const out = [];
-  const under = p.wall * 0.55;   // material left under the cable groove
-  if (under < 1.0) out.push({
-    sev: under < 0.75 ? 'fail' : 'warn', rule: 'min_wall',
-    msg: `${under.toFixed(2)}mm under the cable slot, floor is 1.0mm`,
+  if (p.wall < 1.6) out.push({
+    sev: p.wall < 1.2 ? 'fail' : 'warn', rule: 'min_wall',
+    msg: `${p.wall.toFixed(1)}mm walls on a part you push and twist; floor is 1.6mm`,
   });
-  if (p.chamfer > p.wall * 0.2 + 1e-9) out.push({
+  if (p.chamfer > p.wall * 0.45 + 1e-9) out.push({
     sev: 'warn', rule: 'polish',
     msg: `chamfer ${p.chamfer.toFixed(2)} needs 2× its size of face; clamped to ${effChamfer(p).toFixed(2)}`,
   });
-  const th = p.lean * Math.PI / 180;
-  const floorZ = p.wall * 0.55 + CABLE;
-  const depth = p.wall + GAP + (p.wall - floorZ) * Math.tan(th) + p.wall / Math.cos(th) + p.foot;
-  const reach = p.height * Math.sin(th) - p.foot;   // how far the top leans past the rear edge
-  if (reach > 8) out.push({
-    sev: reach > 20 ? 'fail' : 'warn', rule: 'stability',
-    msg: `back rest tops out ${reach.toFixed(0)}mm behind the rear foot; stretch the foot or ease the lean`,
+  // The radial step the bore crosses over the taper's height, as an angle from
+  // vertical: past 45° the shoulder droops, past 55° it needs supports that an
+  // inside surface can't have.
+  const drop = (p.vac_end - p.tool_end) / 2 + p.wall;
+  const deg = Math.atan2(Math.abs(drop), p.taper) * 180 / Math.PI;
+  if (deg > 45) out.push({
+    sev: deg > 55 ? 'fail' : 'warn', rule: 'overhang',
+    msg: `the bore's shoulder overhangs at ${deg.toFixed(0)}° printed cuff-down; stretch the taper`,
   });
-  if (p.height >= 130) out.push({
+  const len = 2 * p.cuff + p.taper;
+  if (len > 3.5 * p.tool_end) out.push({
     sev: 'warn', rule: 'projection_ratio',
-    msg: `${p.height.toFixed(0)}mm of reach on a ${depth.toFixed(0)}mm footprint`,
+    msg: `${len.toFixed(0)}mm of adapter levering on a Ø${p.tool_end.toFixed(0)} port`,
   });
   return out;
 }
@@ -662,10 +647,10 @@ function rebuild() {
   mesh = new THREE.Mesh(geo, material);
   scene.add(mesh);
   const ms = Math.max(1, Math.round(performance.now() - t0));
-  const b = geo.boundingBox, s = b.getSize(new THREE.Vector3());
-  const dims = `${s.x.toFixed(1)} × ${s.y.toFixed(1)} × ${s.z.toFixed(1)} mm`;
+  const b = geo.boundingBox;
+  const dims = `Ø${v.vac_end.toFixed(1)} → Ø${v.tool_end.toFixed(1)} · ${(2 * v.cuff + v.taper).toFixed(0)} mm`;
   document.getElementById('hud').innerHTML =
-    `<b>phone_stand</b><br>${dims.replace(/×/g, '&times;')}<br>${ms} ms`;
+    `<b>hose_adapter</b><br>${dims}<br>${ms} ms`;
   document.getElementById('ms').textContent = `${ms} ms`;
   paintChecks(v);
   // The conversation above the workspace answers the sliders too.
@@ -732,7 +717,7 @@ document.getElementById('dl-stl').onclick = ev => {
   const lab = ev.currentTarget.querySelector('span');
   lab.textContent = 'building';
   const url = URL.createObjectURL(new Blob([stlBytes(mesh.geometry)], { type: 'model/stl' }));
-  const a = Object.assign(document.createElement('a'), { href: url, download: 'phone_stand.stl' });
+  const a = Object.assign(document.createElement('a'), { href: url, download: 'hose_adapter.stl' });
   a.click();
   URL.revokeObjectURL(url);
   setTimeout(() => { lab.textContent = 'stl'; }, 600);
@@ -756,7 +741,7 @@ const io = new IntersectionObserver(es => {
 for (const el of document.querySelectorAll('.reveal')) io.observe(el);
 
 // The message in step one types itself, once, when it scrolls into view.
-const LINE = 'Make an iPhone 17 Pro stand with a slot for the charging cable';
+const LINE = 'Make an adapter from my shop vac hose to the dust port on my table saw';
 const typer = document.getElementById('typer');
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
   typer.textContent = LINE;

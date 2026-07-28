@@ -24,7 +24,7 @@ Or `nurb skill` prints the same skill file out for you. Later, `nurb update` upg
 
 Open your agent in the directory where the project should live, and talk:
 
-> Make an iPhone 17 Pro stand with a slot for the charging cable that runs underneath the stand
+> Make an adapter that connects my shop vac hose to the dust port on my table saw
 
 The agent does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and starts `nurb dev` so you get a link to watch. Every save updates the browser without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `stl`, print. A `write` button saves your slider values back into the file's defaults, where the agent will see them.
 
@@ -34,7 +34,7 @@ The agent does the rest: reads the design doctrine, creates the project, models 
 from nurb import *
 
 @part
-def phone_stand(width=84.0, lean=15.0, wall=3.0, draft=False):
+def hose_adapter(vac_end=57.6, tool_end=35.0, wall=2.4, draft=False):
     ...
 ```
 
