@@ -198,17 +198,6 @@ class Server:
             ]
         return entry
 
-    def rebuild_all(self):
-        for path in builder.find_parts(self.root):
-            entry = self.rebuild(path)
-            self.check(path)
-            status = entry["error"] or f"{entry['ms']}ms"
-            note = ""
-            if entry.get("findings"):
-                bad = sum(1 for f in entry["findings"] if f["severity"] == "fail")
-                note = f"  {len(entry['findings'])} finding(s), {bad} to fix"
-            print(f"  {entry['name']}: {status}{note}", flush=True)
-
     # ---------- http ----------
 
     async def http(self, connection, request):
@@ -552,6 +541,11 @@ class Server:
         self.watch()
         # Held too: asyncio only keeps weak references to tasks.
         self.drain_task = asyncio.create_task(self.drain())
+        # The whole project goes through the same queue a save does, so the bind never
+        # waits on a build. An agent hands out the URL the moment it prints, and a
+        # project's worth of builds behind it was seconds of connection refused.
+        for path in builder.find_parts(self.root):
+            self.queue.put_nowait(str(path))
         async with serve(
             self.ws, "127.0.0.1", self.port, process_request=self.http, origins=self.origins
         ):

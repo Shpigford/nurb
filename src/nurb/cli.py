@@ -526,7 +526,6 @@ def cmd_dev(args):
     port = _pick_port(args.port)
     server = Server(root, port=port, draft=args.draft, open_browser=args.open)
     print(f"  building {root.name}/parts")
-    server.rebuild_all()
     try:
         asyncio.run(server.run())
     except KeyboardInterrupt:
