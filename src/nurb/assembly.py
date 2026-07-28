@@ -86,6 +86,7 @@ class Scene:
     hinges: list = field(default_factory=list)
     statics: list = field(default_factory=list)  # placed parts that do not move
     obstacles: list = field(default_factory=list)  # context geometry, never printed
+    uses: tuple = ()  # the part files use() built, so a watcher can rebuild dependents
 
 
 @dataclass
@@ -93,6 +94,7 @@ class _Recorder:
     draft: bool = False
     hinges: dict = field(default_factory=dict)  # id(solid) -> Hinge
     obstacles: dict = field(default_factory=dict)  # id(solid) -> name
+    uses: set = field(default_factory=set)  # resolved paths use() has built
 
 
 _active = []  # the recorder for the @assembly call currently executing, if any
@@ -118,27 +120,46 @@ def _caller_root():
     return start
 
 
-_built = {}  # (path, mtime, overrides, draft) -> shape
+_built = {}  # (path, stamp, overrides, draft) -> shape
+
+# Geometry can come from outside the part file: measured() reads measurements.toml
+# and any part can import from system.py. A cache keyed on the part's mtime alone
+# would keep serving the old solid after either of those changed -- silently, which
+# is the exact failure measurements.toml exists to prevent.
+_SHARED = ("system.py", "measurements.toml")
+
+
+def _stamp(root, path):
+    times = [path.stat().st_mtime_ns]
+    for name in _SHARED:
+        shared = root / name
+        if shared.is_file():
+            times.append(shared.stat().st_mtime_ns)
+    return max(times)
 
 
 def use(name, **overrides):
     """Build a sibling part by name and return its solid, placed where it was modelled.
 
-    Cached on the file's mtime, so dragging an assembly slider in the viewer does not
-    pay for a rebuild of every part it places. Each call returns a fresh wrapper around
-    the cached geometry, because the caller is about to move it and two assemblies
-    sharing one Python object would move each other.
+    Cached, so dragging an assembly slider in the viewer does not pay for a rebuild of
+    every part it places. The cache stamp covers the part file and the shared files
+    that can feed its geometry, so a save to any of them lands on the next build. Each
+    call returns a fresh wrapper around the cached geometry, because the caller is
+    about to move it and two assemblies sharing one Python object would move each
+    other.
     """
     from . import builder
 
     rec = _recorder("use()")
-    path = _caller_root() / "parts" / f"{name.replace('-', '_')}.py"
+    root = _caller_root()
+    path = root / "parts" / f"{name.replace('-', '_')}.py"
     if not path.is_file():
         raise FileNotFoundError(f"no part named {name!r} ({path} does not exist)")
-    key = (str(path), path.stat().st_mtime_ns, tuple(sorted(overrides.items())), rec.draft)
+    rec.uses.add(str(path))
+    key = (str(path), _stamp(root, path), tuple(sorted(overrides.items())), rec.draft)
     if key not in _built:
         _built[key] = builder.build(path, overrides=overrides or None, draft=rec.draft)[0]
-        # One mtime per file: a save invalidates, history does not accumulate.
+        # One stamp per file: a save invalidates, history does not accumulate.
         stale = [k for k in _built if k[0] == key[0] and k[1] != key[1]]
         for k in stale:
             del _built[k]
@@ -241,7 +262,7 @@ def assembly(fn):
                     f"hinge({h.name!r}) was declared but the hinged solid was not "
                     f"returned. Return what hinge() returned, not what went in."
                 )
-        scene = Scene()
+        scene = Scene(uses=tuple(sorted(rec.uses)))
         for s in solids:
             if id(s) in rec.hinges:
                 scene.hinges.append(rec.hinges[id(s)])

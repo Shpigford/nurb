@@ -155,6 +155,52 @@ def test_a_hinge_knows_which_parameter_posed_it(project):
     assert shape._nurb_scene.hinges[0].param is None
 
 
+def test_a_shared_file_edit_reaches_through_the_use_cache(project):
+    """measurements.toml and system.py feed geometry without touching the part
+    file's mtime, so the cache stamp has to cover them or an assembly keeps
+    serving the old solid -- silently, which is the failure measured() exists
+    to prevent."""
+    import os
+
+    # The module, not the decorator `from nurb import assembly` would fetch.
+    from nurb import assembly as _decorator  # noqa: F401  -- documents the trap
+    from nurb.assembly import _built
+
+    shared = project / "system.py"
+    shared.write_text("# shared\n")
+    write(project, "plate", PLATE)
+    path = write(project, "carrier", USE_ASM)
+
+    _built.clear()
+    builder.build(path)
+    before = set(_built)
+    assert len(before) == 1
+
+    stat = shared.stat()
+    os.utime(shared, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+    builder.build(path)
+    after = set(_built)
+    assert len(after) == 1
+    assert after != before  # the old entry was evicted, not joined
+
+
+def test_the_watcher_learns_dependents_from_the_scenes_already_built(project):
+    """Editing a part while watching its assembly is the whole editing loop, so a
+    changed part has to drag its assemblies into the rebuild."""
+    from nurb.server import Server
+
+    write(project, "plate", PLATE)
+    path = write(project, "carrier", USE_ASM)
+    shape, _, _ = builder.build(path)
+
+    srv = Server.__new__(Server)
+    srv.root = project
+    srv.state = {"carrier": {"name": "carrier", "shape": shape}}
+    plate = str(project / "parts" / "plate.py")
+    assert srv._dependents({plate}) == {str(path)}
+    assert srv._dependents({str(path)}) == set()  # nothing uses the assembly
+
+
 def test_an_assembly_glb_keeps_its_movers_as_named_nodes(project):
     """The node names are the viewer's contract for posing a joint client-side."""
     import io
