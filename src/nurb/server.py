@@ -182,23 +182,9 @@ class Server:
             entry["shape"] = shape  # kept for the check pass, never serialized
             scene = getattr(shape, "_nurb_scene", None)
             if scene is not None:
-                # The viewer's half of the joint contract: which GLB node each
-                # hinge is, about what axis it turns, and which slider drives it.
-                # With this a joint drag is a client-side transform at whatever
-                # rate the screen paints, not a rebuild round-trip per tick.
-                entry["joints"] = [
-                    {
-                        "node": f"joint{i}",
-                        "param": h.param,
-                        "name": h.name,
-                        "origin": [h.axis.position.X, h.axis.position.Y, h.axis.position.Z],
-                        "dir": [h.axis.direction.X, h.axis.direction.Y, h.axis.direction.Z],
-                        "lo": h.lo,
-                        "hi": h.hi,
-                        "at": h.at,
-                    }
-                    for i, h in enumerate(scene.hinges)
-                ]
+                from .assembly import wire
+
+                entry["joints"] = wire(scene)
         except Exception as exc:
             entry["glb"] = None
             entry["shape"] = None

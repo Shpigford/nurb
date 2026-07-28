@@ -35,12 +35,11 @@ carries about width.
 
 import copy
 import functools
-import inspect
 import pathlib
 import sys
 from dataclasses import dataclass, field
 
-from .registry import PartDef
+from .registry import PartDef, declared
 
 # Findings come from checks.py's vocabulary so an assembly's report reads exactly like
 # a part's: same severities, same line format, same sorting.
@@ -89,6 +88,32 @@ class Scene:
     uses: tuple = ()  # the part files use() built, so a watcher can rebuild dependents
 
 
+NODE = "joint{}"  # the GLB node for scene.hinges[i]; the exporter and the payload both speak it
+
+
+def wire(scene):
+    """The joints as the part payload carries them: which GLB node each hinge is,
+    about what axis it turns, and which slider drives it.
+
+    This is the viewer's half of the client-side posing contract. With it a joint
+    drag is a transform at whatever rate the screen paints, not a rebuild
+    round-trip per tick.
+    """
+    return [
+        {
+            "node": NODE.format(i),
+            "param": h.param,
+            "name": h.name,
+            "origin": [h.axis.position.X, h.axis.position.Y, h.axis.position.Z],
+            "dir": [h.axis.direction.X, h.axis.direction.Y, h.axis.direction.Z],
+            "lo": h.lo,
+            "hi": h.hi,
+            "at": h.at,
+        }
+        for i, h in enumerate(scene.hinges)
+    ]
+
+
 @dataclass
 class _Recorder:
     draft: bool = False
@@ -110,14 +135,12 @@ def _recorder(who):
 
 
 def _caller_root():
-    """The project of the file that called, found the way measurements finds it."""
+    """The project of the file that called, found the way the CLI finds it."""
+    from .cli import project_root
+
     frame = sys._getframe(2)
     here = frame.f_globals.get("__file__")
-    start = pathlib.Path(here).resolve().parent if here else pathlib.Path.cwd()
-    for d in [start, *start.parents]:
-        if (d / "parts").is_dir():
-            return d
-    return start
+    return project_root(pathlib.Path(here).resolve().parent if here else None)
 
 
 _built = {}  # (path, stamp, overrides, draft) -> shape
@@ -227,13 +250,7 @@ def assembly(fn):
     compounds them for display and carries the recorded joints on the compound, which
     is how `nurb check` knows to sweep instead of running the printability rules.
     """
-    sig = inspect.signature(fn)
-    params = {
-        n: (None if p.default is inspect.Parameter.empty else p.default)
-        for n, p in sig.parameters.items()
-        if n != "draft"
-    }
-    takes_draft = "draft" in sig.parameters
+    params, takes_draft = declared(fn)
 
     @functools.wraps(fn)
     def wrapped(**kwargs):

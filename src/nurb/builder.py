@@ -208,9 +208,11 @@ def to_glb(shape, tolerance=0.1):
     scene = getattr(shape, "_nurb_scene", None)
     if scene is None:
         return trimesh.Scene([to_mesh(shape, tolerance)]).export(file_type="glb")
+    from .assembly import NODE
+
     out = trimesh.Scene()
     for i, h in enumerate(scene.hinges):
-        name = f"joint{i}"
+        name = NODE.format(i)
         out.add_geometry(to_mesh(h.solid, tolerance), node_name=name, geom_name=name)
     for name, group in (("fixed", scene.statics), ("context", scene.obstacles)):
         if group:
