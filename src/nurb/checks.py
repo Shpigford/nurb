@@ -65,6 +65,14 @@ def rule(name):
 
 
 def run(shape, ctx=None, only=None):
+    # An assembly's compound carries its recorded joints, and motion is the only
+    # thing worth judging about it: overhang and min_wall on an assembled scene
+    # would report confident nonsense about parts that each checked clean alone.
+    scene = getattr(shape, "_nurb_scene", None)
+    if scene is not None:
+        from .assembly import sweep
+
+        return sweep(scene)
     ctx = ctx or Context()
     found = []
     for name, fn in RULES.items():

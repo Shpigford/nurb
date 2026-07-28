@@ -20,13 +20,18 @@ def test_own_names_are_whatever_init_adds_to_build123d():
 
 
 def test_the_documented_vocabulary_is_the_exported_one():
-    """What the doctrine names in prose: part, polish, the convexity pair, measured."""
+    """What the doctrine names in prose: part, polish, the convexity pair, measured,
+    and the assembly four."""
     assert set(api.own_names()) == {
         "part",
         "polish",
         "is_convex",
         "concave_edges",
         "measured",
+        "assembly",
+        "use",
+        "hinge",
+        "obstacle",
     }
 
 

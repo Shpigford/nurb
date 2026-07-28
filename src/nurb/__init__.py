@@ -14,6 +14,7 @@ import importlib.metadata as _metadata
 import build123d as _b3d
 from build123d import *  # noqa: F401,F403  -- geometry vocabulary
 
+from .assembly import assembly, hinge, obstacle, use  # noqa: E402
 from .checks import concave_edges, is_convex  # noqa: E402
 from .measurements import measured  # noqa: E402
 from .polish import chamfer, polish  # noqa: E402  -- must win, see below
@@ -39,6 +40,10 @@ __all__ = [
     "concave_edges",
     "measured",
     "polish",
+    "assembly",
+    "use",
+    "hinge",
+    "obstacle",
 ]
 # The version lives in pyproject.toml and nowhere else; a second copy here would drift.
 try:
