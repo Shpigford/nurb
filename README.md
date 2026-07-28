@@ -47,7 +47,9 @@ nurb new <name>     create parts/<name>.py and its card
 nurb dev            watch, rebuild, serve the viewer
 nurb build [part]   build once and report size
 nurb check [part]   run the printability rules, --strict for CI
+nurb inspect [part] faces, normals, concave edges, each finding on its face
 nurb rules          print the design doctrine
+nurb api            the vocabulary a part file gets, with signatures
 nurb skill          print an agent skill file for your AI harness
 nurb card [part]    regenerate a card's AUTO block
 nurb verify [part]  run the doctrine's verification list

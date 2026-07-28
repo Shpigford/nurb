@@ -16,7 +16,7 @@ from build123d import *  # noqa: F401,F403  -- geometry vocabulary
 
 from .checks import concave_edges, is_convex  # noqa: E402
 from .measurements import measured  # noqa: E402
-from .polish import polish  # noqa: E402
+from .polish import chamfer, polish  # noqa: E402  -- must win, see below
 from .registry import part  # noqa: E402  -- must win over any build123d name
 
 # `polish` is here because the doctrine prescribes the algorithm and every project
@@ -27,6 +27,11 @@ from .registry import part  # noqa: E402  -- must win over any build123d name
 # be written without it: chamfering an inside corner is the one polish mistake that looks
 # fine in code. `measured` is here because the alternative to asking for a dimension is
 # inventing one, and an invented one builds, checks clean and prints.
+# `chamfer` deliberately shadows build123d's. Same behaviour, same exception type;
+# what it adds is the doctrine's rule on the way out of a failure, because the kernel's
+# own advice is "try a smaller length value(s)" and following it is how a part ends up
+# with a 0.4mm chamfer that lands and prints as a defect. It is the most common way a
+# part stops building, so it is the one message worth owning.
 __all__ = [
     *getattr(_b3d, "__all__", [n for n in dir(_b3d) if not n.startswith("_")]),
     "part",

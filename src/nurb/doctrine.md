@@ -175,7 +175,9 @@ Specific to OCCT, and measured on real parts rather than reasoned about.
   "Failed creating a chamfer, try a smaller length value(s)". At 1mm the shelf fails
   with 1.66mm between the edges and builds with 2.16mm; at 0.5mm it builds with 1.16mm.
   The threshold tracks the chamfer exactly. This is the single most common way a part
-  stops building.
+  stops building, so `chamfer` says this much at the point of failure rather than
+  leaving the kernel's advice to stand: taking "try a smaller length" at its word is how
+  a part ends up with a 0.4mm chamfer that lands and then prints as a defect.
 - **One chamfered edge needs more than `chamfer_size` of face**, which is the same rule
   with one chamfer instead of two and is easy to miss because it looks like plenty of
   room. It bites wherever a polished edge sits beside something that is never polished:
@@ -304,7 +306,10 @@ Before presenting a part:
 
 1. **Flex the driving parameters up as well as down**, for example 4 to 6 to 2 to 4.
    Growth is what catches a frozen selector; shrinking alone passes a broken part.
-2. **Check fit-critical faces by coordinate** after any polish or resize.
+2. **Check fit-critical faces by coordinate** after any polish or resize. `nurb inspect`
+   lists them, with each finding resolved to the face it fired on. Which faces are
+   fit-critical is still yours to know, which is why this is not something `nurb verify`
+   can run for you.
 3. **Confirm the solid count**, which is almost always one.
 4. **Run `nurb check`.** Zero findings is the bar, and a finding fired at a part that
    prints fine is a bug in the rule, not something to accept quietly.
