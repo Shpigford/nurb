@@ -291,8 +291,8 @@
   <div id="empty">
     <div>
       <svg><use href="#i-cube"/></svg>
-      <div>no parts yet</div>
-      <code>nurb new &lt;name&gt;</code>
+      <div id="emptymsg">no parts yet</div>
+      <code id="emptycmd">nurb new &lt;name&gt;</code>
     </div>
   </div>
   <div id="tools">
@@ -979,6 +979,7 @@ function render() {
   // Here rather than on the sync message, so the first part written into an empty
   // project brings the tools back without a reload.
   document.body.classList.toggle('noparts', parts.size === 0);
+  emptyState();
   for (const e of parts.values()) {
     const row = document.createElement('div');
     row.className = 'item' + (e.name === current ? ' active' : '');
@@ -1088,17 +1089,48 @@ async function checkUpdate(installed) {
 }
 
 // ---- socket ----
+
+// "This project has no parts" and "the socket is down" must not read the same:
+// the first prescribes `nurb new`, the second means the viewer is blind.
+function emptyState() {
+  const live = sock && sock.readyState === WebSocket.OPEN;
+  document.getElementById('emptymsg').textContent = live ? 'no parts yet' : 'not connected';
+  document.getElementById('emptycmd').textContent = live ? 'nurb new <name>' : 'nurb dev';
+}
+
+// The socket is the only live channel, but /api/parts serves the same rows a sync
+// carries, so a viewer whose socket is down degrades to a static-but-correct view
+// instead of asserting an empty project.
+async function fallback() {
+  if (parts.size) return;
+  try {
+    const rows = await (await fetch('/api/parts')).json();
+    if (parts.size || !rows.length) return;  // a sync won the race, or truly empty
+    rows.forEach(p => parts.set(p.name, p));
+    current = parts.has(want) ? want : rows[0].name;
+    render();
+    show(current, { keepCamera: false });
+  } catch { /* server gone entirely; the empty state already says so */ }
+}
+
 function connect() {
   const ws = new WebSocket(`ws://${location.host}/ws`);
   sock = ws;
   const conn = document.getElementById('conn');
-  ws.onopen = () => conn.textContent = '';
+  // A handshake that hangs fires neither onopen nor onclose (#17 saw Chrome do
+  // exactly that on a pooled connection), which would leave "connecting" up forever
+  // with no retry. Give up and go around again on a fresh socket.
+  const stuck = setTimeout(() => ws.close(), 4000);
+  ws.onopen = () => { clearTimeout(stuck); conn.textContent = ''; emptyState(); };
   ws.onclose = () => {
+    clearTimeout(stuck);
     conn.textContent = 'reconnecting';
     // Nothing is coming back, so the in-flight rebuild has to be forgotten or the
     // sliders go dead for good.
     inflight = null;
     document.body.classList.remove('stale');
+    emptyState();
+    fallback();
     setTimeout(connect, 1000);
   };
   ws.onmessage = ev => {

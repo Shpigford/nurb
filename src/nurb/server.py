@@ -278,6 +278,11 @@ class Server:
                 "Content-Type": content_type,
                 "Content-Length": str(len(body)),
                 "Cache-Control": "no-store",
+                # websockets tears the connection down after a process_request
+                # response. Without this header the response reads as keep-alive,
+                # Chrome pools the socket, and its next request on it, including
+                # the /ws upgrade, dies silently (#17).
+                "Connection": "close",
             }
         )
         if attach:
