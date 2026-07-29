@@ -247,6 +247,19 @@ def cmd_export(args):
     out.mkdir(exist_ok=True)
     for path, name, overrides, _ in configs:
         shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+        scene = getattr(shape, "_nurb_scene", None)
+        if scene is not None:
+            # A merged scene is a weld, not a part, and its obstacles were never
+            # going to be printed. Named explicitly it is an error that says what
+            # to do instead; in a project sweep it just steps aside.
+            placed = ", ".join(sorted(pathlib.Path(u).stem for u in scene.uses))
+            if args.part:
+                sys.exit(
+                    f"  {name} is an assembly: placed parts, not one printable solid."
+                    + (f" Export the parts it places: {placed}." if placed else "")
+                )
+            print(f"  {name}: assembly, skipped (export the parts it places)")
+            continue
         for fmt in formats:
             target = out / f"{name}.{fmt}"
             if fmt == "stl":

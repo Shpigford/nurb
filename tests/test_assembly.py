@@ -201,6 +201,42 @@ def test_the_watcher_learns_dependents_from_the_scenes_already_built(project):
     assert srv._dependents({str(path)}) == set()  # nothing uses the assembly
 
 
+def test_export_refuses_an_assembly_by_name_and_steps_around_it_in_a_sweep(project, monkeypatch, capsys):
+    """A merged scene is a weld, and its obstacles were never going to be printed.
+    Named explicitly the refusal says which parts to export instead; a project
+    sweep skips it and still writes the real parts."""
+    import argparse
+
+    from nurb import cli
+
+    write(project, "plate", PLATE)
+    write(project, "carrier", USE_ASM)
+    monkeypatch.chdir(project)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_export(argparse.Namespace(part="carrier", formats=["stl"]))
+    assert "assembly" in str(exc.value.code)
+    assert "plate" in str(exc.value.code)
+    assert not (project / "build" / "carrier.stl").exists()
+
+    cli.cmd_export(argparse.Namespace(part=None, formats=["stl"]))
+    assert (project / "build" / "plate.stl").exists()
+    assert not (project / "build" / "carrier.stl").exists()
+    assert "skipped" in capsys.readouterr().out
+
+
+def test_the_viewer_export_route_refuses_an_assembly(project):
+    from nurb.server import Server
+
+    write(project, "plate", PLATE)
+    write(project, "carrier", USE_ASM)
+    srv = Server.__new__(Server)
+    srv.root = project
+    srv.overrides = {}
+    with pytest.raises(Exception, match="assembly"):
+        srv._export("carrier", "stl")
+
+
 def test_an_assembly_glb_keeps_its_movers_as_named_nodes(project):
     """The node names are the viewer's contract for posing a joint client-side."""
     import io

@@ -519,6 +519,7 @@ function sectionUpdate() {
 // Fetched rather than navigated, so a failed build lands in the note instead of
 // replacing the viewer with a traceback.
 for (const b of document.querySelectorAll('#download button')) {
+  b.dataset.title = b.title;  // restored when an assembly stops being on screen
   b.onclick = async () => {
     if (!current) return;
     // The label lives in a span so swapping it leaves the icon alone.
@@ -812,6 +813,13 @@ function hud(e) {
   document.getElementById('hud').innerHTML = e.error
     ? `<b>${e.name}</b><br>build failed`
     : `<b>${e.name}</b><br>${e.bbox.join(' &times; ')} mm<br>${e.ms} ms`;
+  // An assembly is placed parts, not one printable solid, so the manufacturing
+  // formats go dark on it; each placed part exports from its own entry.
+  const asm = Array.isArray(e.joints);
+  for (const b of document.querySelectorAll('#download button')) {
+    b.disabled = asm;
+    b.title = asm ? 'an assembly is placed parts; export each part instead' : b.dataset.title;
+  }
 }
 
 // ---- parameters ----

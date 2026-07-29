@@ -342,6 +342,14 @@ class Server:
         if path is None:  # deleted between the click and the build
             raise builder.BuildError(f"{name} is no longer on disk")
         shape, _, _ = builder.build(path, overrides=self.overrides.get(name), draft=False)
+        # The viewer already disables its buttons on an assembly; this catches the
+        # request anything else makes. A merged scene is a weld, and the obstacles
+        # in it were never going to be printed at all.
+        if getattr(shape, "_nurb_scene", None) is not None:
+            raise builder.BuildError(
+                f"{name} is an assembly: placed parts, not one printable solid. "
+                f"Export the parts it places."
+            )
         with tempfile.TemporaryDirectory() as scratch:
             target = pathlib.Path(scratch) / f"{name}.{fmt}"
             if fmt == "stl":
