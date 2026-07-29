@@ -21,12 +21,27 @@ jobs:
       # playwright without one. Without this the render tests do not skip, they fail.
       - run: uv run playwright install --with-deps chromium
 
-      - run: uv run pytest -q
+      # The suite is CPU-bound OCCT builds and parallelizes almost perfectly: -n auto
+      # cut it 3x on a laptop and the runner has four cores.
+      - run: uv run pytest -q -n auto
 
-      # The rules against the real library, on a machine that is not the one they were
-      # calibrated on. --strict is what makes a finding fail the build; the command
-      # reports and exits 0 without it, because a warning that blocks work gets switched
-      # off. Run from the project directory, since a project is any directory with parts/.
+  # The rules against the real library, on a machine that is not the one they were
+  # calibrated on. --strict is what makes a finding fail the build; the command
+  # reports and exits 0 without it, because a warning that blocks work gets switched
+  # off. Run from the project directory, since a project is any directory with parts/.
+  # A separate job because it needs no browser and its 13 serial builds would
+  # otherwise sit behind pytest instead of running beside it.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked --dev
+
       - name: nurb check --strict
         working-directory: examples/notch
         run: uv run --project ../.. nurb check --strict

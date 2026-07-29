@@ -33,7 +33,10 @@ Issues = "https://github.com/Shpigford/nurb/issues"
 render = ["playwright>=1.49"]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.8.0",
+]
 
 [project.scripts]
 nurb = "nurb.cli:main"
