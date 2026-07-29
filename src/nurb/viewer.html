@@ -330,7 +330,7 @@
       <button id="polishbtn" title="chamfer the exposed edges; off is the faster draft build"><svg><use href="#i-wand"/></svg><span>polish</span></button>
       <span class="sep"></span>
       <button id="sectionbtn" title="cut the part open along an axis"><svg><use href="#i-layers"/></svg><span>section</span></button>
-      <button id="ghostbtn" style="display:none" title="overlay the source mesh this part was rebuilt from"><svg><use href="#i-cube"/></svg><span>ghost</span></button>
+      <button id="ghostbtn" style="display:none" title="overlay the source mesh this part was rebuilt from; click again to see the source alone"><svg><use href="#i-cube"/></svg><span>ghost</span></button>
     </div>
     <div class="pill" id="cut">
       <button data-axis="x">x</button>
@@ -604,16 +604,37 @@ document.getElementById('sectionbtn').onclick = ev => {
   sectionUpdate();
 };
 // ---- ghost ----
-// The source mesh a part was rebuilt from, laid over the solid at 35% opacity.
-// Invented geometry pokes through the ghost; dropped detail is ghost with nothing
-// under it. Served aligned by the same rule `nurb compare` grades with.
-let ghosted = false;
+// The source mesh a part was rebuilt from. One click lays it over the solid at 35%
+// opacity, so invented geometry pokes through the ghost and dropped detail is ghost
+// with nothing under it; a second click hides the solid and shows the source alone,
+// which is what "let me look at the download" means; a third turns it off. Served
+// aligned by the same rule `nurb compare` grades with.
+let ghostMode = 0;  // 0 off, 1 overlaid, 2 source alone
 function ghostRemove() {
   if (!mesh) return;
   const g = mesh.getObjectByName('ghost');
   if (!g) return;
   mesh.remove(g);
   g.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+}
+function ghostApply() {
+  const btn = document.getElementById('ghostbtn');
+  btn.classList.toggle('on', ghostMode > 0);
+  btn.querySelector('span').textContent = ghostMode === 2 ? 'source' : 'ghost';
+  if (!mesh) return;
+  const g = mesh.getObjectByName('ghost');
+  for (const child of mesh.children) {
+    if (child.name !== 'ghost') child.visible = ghostMode !== 2;
+  }
+  if (!g) return;
+  g.visible = ghostMode > 0;
+  g.traverse(o => {
+    if (!o.isMesh) return;
+    o.material.transparent = ghostMode !== 2;
+    o.material.opacity = ghostMode === 2 ? 1.0 : 0.35;
+    o.material.depthWrite = ghostMode === 2;
+    o.material.needsUpdate = true;
+  });
 }
 async function ghostLoad(name, entry) {
   const host = mesh;
@@ -629,20 +650,18 @@ async function ghostLoad(name, entry) {
     if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
     const m = new THREE.Mesh(o.geometry, material.clone());
     m.material.color.set(0xd9a05a);
-    m.material.transparent = true;
-    m.material.opacity = 0.35;
-    m.material.depthWrite = false;
     m.material.clippingPlanes = [plane];
     group.add(m);
   });
   host.add(group);
+  ghostApply();
 }
-document.getElementById('ghostbtn').onclick = ev => {
-  ghosted = !ghosted;
-  ev.currentTarget.classList.toggle('on', ghosted);
+document.getElementById('ghostbtn').onclick = () => {
+  ghostMode = (ghostMode + 1) % 3;
   const e = current && parts.get(current);
-  if (!ghosted) ghostRemove();
-  else if (e && e.ghost) ghostLoad(current, e);
+  if (ghostMode === 0) ghostRemove();
+  else if (e && e.ghost && mesh && !mesh.getObjectByName('ghost')) ghostLoad(current, e);
+  ghostApply();
 };
 
 document.getElementById('cutpos').oninput = ev => { cutAt = +ev.target.value; sectionUpdate(); };
@@ -862,7 +881,7 @@ async function paint(name, { keepCamera }) {
   // A rebuild replaced the group the old ghost lived in, so an enabled ghost
   // refetches: the server realigns it against whatever the sliders now hold.
   document.getElementById('ghostbtn').style.display = entry.ghost ? '' : 'none';
-  if (ghosted && entry.ghost) ghostLoad(name, entry);
+  if (ghostMode > 0 && entry.ghost) ghostLoad(name, entry);
 }
 
 // Takes a name, not an entry. `show` awaits the GLB fetch, so an entry captured
