@@ -270,3 +270,56 @@ def test_open_viewer_uses_webbrowser_elsewhere(monkeypatch):
     monkeypatch.setattr("sys.platform", "linux")
     server_mod._open_viewer("http://127.0.0.1:7373")
     assert opened == ["http://127.0.0.1:7373"]
+
+
+GHOST_CARD = """# thing
+
+Rebuilt from a downloaded mesh.
+
+```toml
+source = "original.stl"
+```
+"""
+
+
+def ghost_project(tmp_path):
+    """A part whose card names the mesh it was rebuilt from, parked off-origin so
+    the route has real aligning to do."""
+    original = trimesh.creation.box(extents=[40, 30, 5])
+    original.apply_translation([100, 50, 9.5])
+    original.export(tmp_path / "original.stl")
+    (tmp_path / "parts").mkdir()
+    part = tmp_path / "parts" / "thing.py"
+    part.write_text(PART)
+    (tmp_path / "parts" / "thing.md").write_text(GHOST_CARD)
+    server = Server(tmp_path)
+    server.rebuild(part)
+    return server
+
+
+def test_a_card_source_flags_the_entry_and_stays_off_the_wire(tmp_path):
+    server = ghost_project(tmp_path)
+    entry = server.state["thing"]
+    assert entry["ghost"] is True
+    wire = json.loads(json.dumps(server._wire(entry)))
+    assert wire["ghost"] is True
+    assert "source" not in wire  # a local path is nobody's business in the browser
+
+
+def test_ghost_serves_the_source_aligned_onto_the_build(tmp_path):
+    server = ghost_project(tmp_path)
+    resp = asyncio.run(server.ghost("thing"))
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"] == "model/gltf-binary"
+    scene = trimesh.load(io.BytesIO(resp.body), file_type="glb")
+    ghost = trimesh.util.concatenate(list(scene.geometry.values()))
+    # the original sat at (100, 50, 7..12); aligned, it lands exactly on the part
+    assert ghost.bounds[0] == pytest.approx([-20, -15, -2.5], abs=1e-6)
+    assert ghost.bounds[1] == pytest.approx([20, 15, 2.5], abs=1e-6)
+
+
+def test_ghost_is_404_without_a_source(tmp_path):
+    server = project(tmp_path)
+    assert server.state["thing"]["ghost"] is False
+    assert asyncio.run(server.ghost("thing")).status_code == 404
+    assert asyncio.run(server.ghost("missing")).status_code == 404

@@ -143,6 +143,7 @@
   body.nogl #nogl { display: grid; }
   body.nogl #empty { display: none !important; }
   body.nogl #sectionbtn, body.nogl .sep:has(+ #sectionbtn), body.nogl #reframe { display: none; }
+  body.nogl #ghostbtn { display: none !important; }
   #checks {
     position: absolute; top: 14px; left: 16px; max-width: 46%; max-height: 60%;
     overflow: auto; display: none; font-size: 11px; line-height: 1.6;
@@ -329,6 +330,7 @@
       <button id="polishbtn" title="chamfer the exposed edges; off is the faster draft build"><svg><use href="#i-wand"/></svg><span>polish</span></button>
       <span class="sep"></span>
       <button id="sectionbtn" title="cut the part open along an axis"><svg><use href="#i-layers"/></svg><span>section</span></button>
+      <button id="ghostbtn" style="display:none" title="overlay the source mesh this part was rebuilt from"><svg><use href="#i-cube"/></svg><span>ghost</span></button>
     </div>
     <div class="pill" id="cut">
       <button data-axis="x">x</button>
@@ -601,6 +603,48 @@ document.getElementById('sectionbtn').onclick = ev => {
   document.getElementById('cut').classList.toggle('open', cutting);
   sectionUpdate();
 };
+// ---- ghost ----
+// The source mesh a part was rebuilt from, laid over the solid at 35% opacity.
+// Invented geometry pokes through the ghost; dropped detail is ghost with nothing
+// under it. Served aligned by the same rule `nurb compare` grades with.
+let ghosted = false;
+function ghostRemove() {
+  if (!mesh) return;
+  const g = mesh.getObjectByName('ghost');
+  if (!g) return;
+  mesh.remove(g);
+  g.traverse(o => { if (o.isMesh) { o.geometry.dispose(); o.material.dispose(); } });
+}
+async function ghostLoad(name, entry) {
+  const host = mesh;
+  if (!host || host.getObjectByName('ghost')) return;
+  const gltf = await loader.loadAsync(`/ghost/${name}.glb?v=${entry.token}`).catch(() => null);
+  // the await raced a part switch or a rebuild: this ghost aligns to geometry
+  // that is no longer on screen, so drop it and let the new paint refetch
+  if (!gltf || host !== mesh) return;
+  const group = new THREE.Group();
+  group.name = 'ghost';
+  gltf.scene.traverse(o => {
+    if (!o.isMesh) return;
+    if (!o.geometry.attributes.normal) o.geometry.computeVertexNormals();
+    const m = new THREE.Mesh(o.geometry, material.clone());
+    m.material.color.set(0xd9a05a);
+    m.material.transparent = true;
+    m.material.opacity = 0.35;
+    m.material.depthWrite = false;
+    m.material.clippingPlanes = [plane];
+    group.add(m);
+  });
+  host.add(group);
+}
+document.getElementById('ghostbtn').onclick = ev => {
+  ghosted = !ghosted;
+  ev.currentTarget.classList.toggle('on', ghosted);
+  const e = current && parts.get(current);
+  if (!ghosted) ghostRemove();
+  else if (e && e.ghost) ghostLoad(current, e);
+};
+
 document.getElementById('cutpos').oninput = ev => { cutAt = +ev.target.value; sectionUpdate(); };
 for (const b of document.querySelectorAll('#cut button')) {
   b.classList.toggle('on', b.dataset.axis === cutAxis);
@@ -814,6 +858,11 @@ async function paint(name, { keepCamera }) {
   hud(parts.get(name) || entry);
   checks(name);
   params(parts.get(name) || entry);
+
+  // A rebuild replaced the group the old ghost lived in, so an enabled ghost
+  // refetches: the server realigns it against whatever the sliders now hold.
+  document.getElementById('ghostbtn').style.display = entry.ghost ? '' : 'none';
+  if (ghosted && entry.ghost) ghostLoad(name, entry);
 }
 
 // Takes a name, not an entry. `show` awaits the GLB fetch, so an entry captured

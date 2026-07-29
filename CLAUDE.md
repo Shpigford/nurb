@@ -45,6 +45,8 @@ nurb dev             watch, rebuild, serve the viewer on :7373 or the next free 
 nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
 nurb inspect [part]  faces, normals, concave edges, each finding on its face
+nurb inspect <file>  measure a downloaded .stl/.3mf: planes, bores, pitches
+nurb compare <part> <file>  grade a rebuild against the mesh it came from
 nurb rules           print the design doctrine
 nurb api             the vocabulary a part file gets, with signatures
 nurb skill           print an agent skill file for any AI harness, --sync rewrites installed copies

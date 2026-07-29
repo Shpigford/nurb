@@ -28,6 +28,8 @@ nurb new <name>       create parts/<name>.py and its card
 nurb build [part]     build once, report size and timing
 nurb check [part]     the printability rules; on an assembly, the motion sweep. --strict for CI
 nurb inspect [part]   faces, normals, concave edges, each finding on its face
+nurb inspect <file>   measure a downloaded .stl/.3mf: planes, bores, pitches
+nurb compare <part> <file>  grade a rebuild against the mesh it came from
 nurb card [part]      regenerate a card's AUTO block
 nurb verify [part]    the doctrine's verification list: solids, flex, checks, card
 nurb render [part]    PNG into build/, so you can look at what you made

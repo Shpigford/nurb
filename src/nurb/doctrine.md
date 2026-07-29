@@ -295,7 +295,15 @@ somebody picks up a caliper.
 A measured value pays for itself across a family. Notch measured one bracket pitch and
 amortized it over sixteen parts.
 
-## Assemblies
+### Rebuilding a downloaded mesh
+
+Most shared models arrive as meshes, and editing one for real means rebuilding it as a part. The measurements come from `nurb inspect <file.stl>`: tessellation vertices lie on the true surfaces, so the planes, bores and pitches it reports are dimensions, not estimates. Snap what you read to intent the way you would a caliper: 39.97 is 40, a 3.4mm bore is an M3 clearance.
+
+**The mesh is the ground truth.** A download may bundle STEP or project files, and they are hints only: a bundled CAD file can carry features that never shipped. The first real port modelled a snap-fit system out of four tiny cylinders in the STEP; the printed meshes provably had none of it.
+
+**Grade the rebuild with `nurb compare <part> <file>`, and read its two directions differently.** Original-to-rebuilt distance is detail you dropped, which is a judgement call: dropping an embossed logo or a cosmetic wall wave is fine when the part's docstring says so. Rebuilt-to-original surface outside the original solid is material you invented, and it fails the run no matter how clean the averages are, because averages are exactly where an invented feature hides.
+
+**Record the provenance in the card.** A top-level `source = "originals/tray.3mf"` in the card's settings block, relative to the project root. The viewer then shows a ghost toggle that lays the original translucently over the rebuild, aligned exactly as compare grades it, so invented geometry pokes through the ghost and dropped detail is ghost with nothing under it.
 
 Every rule above judges one solid being manufactured. An assembly judges solids being
 used together: a door on its mount, a lid over the machine it covers. The failure it
