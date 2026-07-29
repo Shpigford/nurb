@@ -308,7 +308,23 @@ def test_the_skill_is_the_shim_with_a_trigger_on_top():
     # skills.sh parses strictly: a colon in the description made `npx skills add`
     # skip the whole file with "Nested mappings are not allowed".
     for line in shipped.split("---\n")[1].splitlines():
-        assert ": " not in line.split(": ", 1)[1], f"strict-YAML trap in: {line}"
+        _, separator, value = line.partition(": ")
+        if separator:
+            assert ": " not in value, f"strict-YAML trap in: {line}"
+
+
+def test_skill_frontmatter_version_is_the_package_version():
+    """The frontmatter version is what `nurb dev` compares an installed copy against,
+    so a release that bumps pyproject.toml without regenerating the skill files must
+    go red here rather than ship a check that never fires."""
+    import tomllib
+
+    repo = pathlib.Path(__file__).parents[1]
+    version = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    shipped = (pathlib.Path(cli.__file__).parent / "skill.md").read_text(encoding="utf-8")
+    frontmatter = shipped.split("---\n")[1].splitlines()
+    assert "metadata:" in frontmatter
+    assert f'  version: "{version}"' in frontmatter
 
 
 def test_skill_sync_rewrites_a_stale_copy_and_writes_the_shared_one_once(tmp_path, monkeypatch, capsys):

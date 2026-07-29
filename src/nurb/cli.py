@@ -435,6 +435,19 @@ def cmd_inspect(args):
                 print(line)
 
 
+def skill_targets():
+    """The two paths nurb's install flow writes the skill to.
+
+    skills.sh's universal directory and the Claude fallback. Shared with the dev
+    server's staleness nudge so the two never check different paths.
+    """
+    home = pathlib.Path.home()
+    return [
+        home / ".agents" / "skills" / "nurb" / "SKILL.md",
+        home / ".claude" / "skills" / "nurb" / "SKILL.md",
+    ]
+
+
 def cmd_skill(args):
     """Print the agent skill, for whatever harness the user's model lives in.
 
@@ -454,10 +467,7 @@ def cmd_skill(args):
         print(skill)
         return
     home = pathlib.Path.home()
-    targets = [
-        home / ".agents" / "skills" / "nurb" / "SKILL.md",
-        home / ".claude" / "skills" / "nurb" / "SKILL.md",
-    ]
+    targets = skill_targets()
     seen = set()
     found = False
     for target in targets:

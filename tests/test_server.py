@@ -270,3 +270,60 @@ def test_open_viewer_uses_webbrowser_elsewhere(monkeypatch):
     monkeypatch.setattr("sys.platform", "linux")
     server_mod._open_viewer("http://127.0.0.1:7373")
     assert opened == ["http://127.0.0.1:7373"]
+
+
+# --- the skill staleness nudge ------------------------------------------------
+
+
+def _install_skill(tmp_path, monkeypatch, text):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    target = tmp_path / ".claude" / "skills" / "nurb" / "SKILL.md"
+    target.parent.mkdir(parents=True)
+    target.write_text(text, encoding="utf-8")
+
+
+def test_skill_nudge_names_an_older_installed_copy(tmp_path, monkeypatch, capsys):
+    from nurb import server as server_mod
+
+    _install_skill(
+        tmp_path,
+        monkeypatch,
+        '---\nname: nurb\nmetadata:\n  version: "0.0.1"\n---\n\n# nurb\n',
+    )
+    server_mod._skill_nudge()
+    out = capsys.readouterr().out
+    assert "nurb skill 0.0.1" in out
+    assert "nurb skill --sync" in out
+
+
+def test_skill_nudge_treats_an_unversioned_copy_as_stale(tmp_path, monkeypatch, capsys):
+    """Copies installed before versioning began have no frontmatter version at all."""
+    from nurb import server as server_mod
+
+    _install_skill(tmp_path, monkeypatch, "# nurb\n")
+    server_mod._skill_nudge()
+    assert "nurb skill unversioned" in capsys.readouterr().out
+
+
+def test_skill_nudge_stays_quiet_on_current_and_newer_copies(tmp_path, monkeypatch, capsys):
+    """A skills.sh install from GitHub can be ahead of the package between releases;
+    calling it stale would invite a sync that downgrades it."""
+    from nurb import __version__
+    from nurb import server as server_mod
+
+    for version in (__version__, "999.0.0"):
+        _install_skill(
+            tmp_path / version,
+            monkeypatch,
+            f'---\nmetadata:\n  version: "{version}"\n---\n\n# nurb\n',
+        )
+        server_mod._skill_nudge()
+        assert capsys.readouterr().out == ""
+
+
+def test_skill_nudge_stays_quiet_with_nothing_installed(tmp_path, monkeypatch, capsys):
+    from nurb import server as server_mod
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    server_mod._skill_nudge()
+    assert capsys.readouterr().out == ""

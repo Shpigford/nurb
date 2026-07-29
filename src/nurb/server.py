@@ -93,12 +93,56 @@ def _open_viewer(url):
         webbrowser.open(url)
 
 
+def _installed_skill_version(text):
+    """The frontmatter version of an installed skill copy, or None before versioning began."""
+    if not text.startswith("---\n"):
+        return None
+    lines = text.split("---\n")[1].splitlines()
+    try:
+        start = lines.index("metadata:") + 1
+    except ValueError:
+        return None
+    for line in lines[start:]:
+        if not line.startswith("  "):
+            break
+        if line.startswith("  version: "):
+            return line.removeprefix("  version: ").strip().strip("\"'")
+    return None
+
+
+def _skill_nudge():
+    """One line on `nurb dev` stdout when the installed skill file is older than this nurb.
+
+    The skill is the agent's own instructions and no harness refreshes an installed
+    copy by itself, so after an upgrade the agent keeps modelling from the old
+    playbook. Compared by frontmatter version rather than bytes: between releases a
+    skills.sh install from GitHub is ahead of the package, and a byte diff would call
+    the newer copy stale and invite a downgrade.
+    """
+    from . import cli
+
+    for target in cli.skill_targets():
+        try:
+            text = target.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        installed = _installed_skill_version(text)
+        if installed is None or _newer(installed, __version__):
+            print(
+                f"  nurb skill {installed or 'unversioned'} ({__version__} available: nurb skill --sync)",
+                flush=True,
+            )
+            return
+
+
 def _update_nudge():
-    """One line on `nurb dev` stdout when PyPI has a newer release.
+    """One line on `nurb dev` stdout when PyPI has a newer release, and one when the installed skill file lags this package.
 
     A thread because the primary user is an agent reading stdout, and startup must
-    never wait on the network to say so.
+    never wait on the network to say so. The skill check goes first: it is local, so
+    its line lands even when PyPI does not answer.
     """
+    _skill_nudge()
     latest = _latest_on_pypi()
     if latest and _newer(__version__, latest):
         print(f"  nurb {__version__} ({latest} available: nurb update)", flush=True)

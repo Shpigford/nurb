@@ -1,6 +1,8 @@
 ---
 name: nurb
 description: Design 3D-printable parts as Python functions with nurb. Use when the user wants a part designed, changed, or checked for 3D printing (a bracket, mount, holder, enclosure, shelf, or any STL/STEP to print), and in any directory with a parts/ folder. The user describes the part and judges it in a browser; you model it.
+metadata:
+  version: "0.6.1"
 ---
 
 # nurb
@@ -8,6 +10,8 @@ description: Design 3D-printable parts as Python functions with nurb. Use when t
 A part is a Python function and its keyword defaults are its parameters. A project is any directory with a `parts/` folder; there is no init step. You are the CAD operator: the user describes the part and you do everything else, including creating the project and modelling.
 
 **Start `nurb dev` in the background and hand the user its URL before anything else.** It prints one, and the viewer it serves is where the user watches the part take shape: every save rebuilds and repaints without moving their camera. When your shell runs on the user's own machine, `--open` puts the viewer on their screen without the URL hop. So work in saves, not in silence. `nurb new` already emits a working part; put that blocky draft on screen in the first minute and refine it while they watch. Ten correct but invisible minutes of modelling read as a hang. And repeat the URL at the end of every reply, the handoff included: chat scrolls the link away, and a part the user was never pointed at is a part they cannot judge. The URL deep-links: `?part=<name>` opens on that part and `&variant=<name>` loads one of its card variants, so link the exact thing you changed rather than making the user find it in the list.
+
+**When `nurb dev` says something is out of date, fix it before modelling.** Its startup lines carry the version check: a `nurb update` line means the package is old, and a `nurb skill --sync` line means this very file is older than the installed nurb. Run the named command and tell the user, and after a sync re-read the skill file, because the stale copy is the one you are working from.
 
 **Run `nurb rules` before you design.** It prints the doctrine: printability, load paths, the polish pass, the kernel traps, card discipline, and what to verify. This file stays thin on purpose so there is one copy of that, in the package, which cannot drift.
 
