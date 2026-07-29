@@ -170,7 +170,9 @@ class Server:
             "findings": None,
             "variants": self._variants(path),
             "variant": None,
+            "source": self._source(path),
         }
+        entry["ghost"] = entry["source"] is not None
         try:
             shape, params, ms = self._build(path, name)
             entry["glb"] = builder.to_glb(shape, self.tolerance)
@@ -194,6 +196,25 @@ class Server:
             entry["traceback"] = _user_traceback(exc, path)
         self.state[name] = entry
         return entry
+
+    def _source(self, path):
+        """The card's `source` key: the mesh this part was rebuilt from, if any.
+
+        A top-level key rather than a `[part]` setting, because it is provenance,
+        not a printer tunable. The path is relative to the project root, like
+        measurements.toml, and a missing file reads as no source so a moved
+        original degrades to a hidden button, not a broken viewer.
+        """
+        from . import checks
+
+        try:
+            declared = checks.settings(path).get("source")
+        except Exception:
+            return None
+        if not isinstance(declared, str):
+            return None
+        target = (self.root / declared).resolve()
+        return target if target.is_file() else None
 
     @staticmethod
     def _variants(path):
@@ -291,6 +312,8 @@ class Server:
             if entry and entry["glb"]:
                 return self._resp(200, entry["glb"], "model/gltf-binary")
             return self._resp(404, b"no geometry", "text/plain")
+        if path.startswith("/ghost/"):
+            return await self.ghost(path[len("/ghost/") :].removesuffix(".glb"))
         if path == "/ws":
             return None  # let the websocket handshake proceed
         return self._resp(404, b"not found", "text/plain")
@@ -312,6 +335,32 @@ class Server:
         if attach:
             headers["Content-Disposition"] = f'attachment; filename="{attach}"'
         return Response(status, "OK" if status == 200 else "Error", headers, body)
+
+    async def ghost(self, name):
+        """The part's source mesh, aligned onto the current build.
+
+        Computed per request rather than cached: the alignment depends on whatever
+        the sliders hold right now, and a fetch is only ever a button press.
+        """
+        entry = self.state.get(name)
+        if not entry or not entry.get("source") or entry.get("shape") is None:
+            return self._resp(404, b"no source mesh", "text/plain")
+        try:
+            async with self.building:
+                body = await asyncio.to_thread(self._ghost, name)
+        except Exception as exc:
+            message = f"{type(exc).__name__}: {exc}"
+            return self._resp(500, message.encode(), "text/plain")
+        return self._resp(200, body, "model/gltf-binary")
+
+    def _ghost(self, name):
+        from . import mesh
+
+        entry = self.state[name]
+        part_mesh = builder.to_mesh(entry["shape"], self.tolerance)
+        loaded = mesh.load(entry["source"])
+        _, original = mesh.best_match(loaded, part_mesh)
+        return mesh.ghost_glb(part_mesh, original)
 
     # What the download button serves. This is the configurator: the parameters were
     # always introspectable and the sliders already drive them, so publishing a part is
@@ -383,7 +432,7 @@ class Server:
 
     @staticmethod
     def _meta(entry):
-        return {k: v for k, v in entry.items() if k not in ("glb", "shape")}
+        return {k: v for k, v in entry.items() if k not in ("glb", "shape", "source")}
 
     def _family(self):
         """Parameters most of this project's parts declare identically.

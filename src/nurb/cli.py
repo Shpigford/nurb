@@ -418,9 +418,27 @@ def cmd_inspect(args):
     """Measure a built part in the units the rules report it in.
 
     Walks configurations like every other command, so a variant is inspected exactly
-    as a part is.
+    as a part is. Given a mesh file instead of a part name, it measures the mesh:
+    that is the starting point for rebuilding a downloaded model as a part.
     """
     from . import builder, checks, probe
+
+    if args.part and args.part.lower().endswith((".stl", ".3mf")):
+        from . import mesh as meshmod
+
+        path = pathlib.Path(args.part)
+        if not path.is_file():
+            sys.exit(f"  no file at {args.part}")
+        try:
+            loaded = meshmod.load(path)
+        except Exception as exc:
+            sys.exit(f"  {path.name}: {exc}")
+        for name, m in loaded:
+            label = path.name if len(loaded) == 1 else f"{path.name} {name}"
+            for line in meshmod.report(label, m, limit=args.limit):
+                print(line)
+            print()
+        return
 
     root = project_root()
     for path in _resolve(root, args.part):
@@ -433,6 +451,41 @@ def cmd_inspect(args):
                 continue
             for line in probe.report(name, shape, ctx, found, limit=args.limit):
                 print(line)
+
+
+def cmd_compare(args):
+    """Grade a rebuilt part against the mesh it was rebuilt from.
+
+    The part builds at its defaults. A 3MF holding several objects compares against
+    the one whose bounding box is closest, and says which, so a multi-part download
+    does not need dissecting first.
+    """
+    from . import builder
+    from . import mesh as meshmod
+
+    root = project_root()
+    mesh_path = pathlib.Path(args.mesh)
+    if not mesh_path.is_file():
+        sys.exit(f"  no file at {args.mesh}")
+    try:
+        loaded = meshmod.load(mesh_path)
+    except Exception as exc:
+        sys.exit(f"  {mesh_path.name}: {exc}")
+
+    (path,) = _resolve(root, args.part)
+    try:
+        shape, _, _ = builder.build(path, draft=False)
+    except builder.BuildError as exc:
+        sys.exit(f"  {exc}")
+    part_mesh = builder.to_mesh(shape)
+
+    name, original = meshmod.best_match(loaded, part_mesh)
+    label = mesh_path.name if len(loaded) == 1 else f"{mesh_path.name} ({name})"
+    result = meshmod.compare(part_mesh, original)
+    for line in meshmod.compare_report(path.stem, label, result):
+        print(line)
+    if not result["ok"]:
+        sys.exit(1)
 
 
 def cmd_skill(args):
@@ -672,10 +725,17 @@ def main(argv=None):
     s = sub.add_parser("api", help="the vocabulary a part file gets, with signatures")
     s.set_defaults(fn=cmd_api)
 
-    s = sub.add_parser("inspect", help="measure a built part: faces, normals, concave edges")
-    s.add_argument("part", nargs="?")
+    s = sub.add_parser(
+        "inspect", help="measure a built part, or a downloaded .stl/.3mf mesh"
+    )
+    s.add_argument("part", nargs="?", help="a part name, or a path to a mesh file")
     s.add_argument("--limit", type=int, default=12, help="how many faces and edges to list")
     s.set_defaults(fn=cmd_inspect)
+
+    s = sub.add_parser("compare", help="grade a rebuilt part against the mesh it came from")
+    s.add_argument("part")
+    s.add_argument("mesh", help="path to the original .stl/.3mf")
+    s.set_defaults(fn=cmd_compare)
 
     s = sub.add_parser("skill", help="print an agent skill file for your AI harness")
     s.add_argument("--sync", action="store_true", help="rewrite installed copies from this package instead of printing")
