@@ -531,9 +531,13 @@ for (const b of document.querySelectorAll('#download button')) {
       const url = URL.createObjectURL(await r.blob());
       // A variant is a catalog entry, so its file carries the catalog name: sliders
       // sitting on hook_utility download hook_utility.stl, not hook_scissors.stl.
+      // An assembly comes back as one zip of its placed parts, named by the server;
+      // one download, because a second file dies silently on the browser's
+      // multiple-download permission.
+      const zip = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+\.zip)"/);
       const v = activeVariant(parts.get(current));
       const a = Object.assign(document.createElement('a'),
-                              { href: url, download: `${v ? v.name : current}.${fmt}` });
+                              { href: url, download: zip ? zip[1] : `${v ? v.name : current}.${fmt}` });
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
@@ -813,12 +817,16 @@ function hud(e) {
   document.getElementById('hud').innerHTML = e.error
     ? `<b>${e.name}</b><br>build failed`
     : `<b>${e.name}</b><br>${e.bbox.join(' &times; ')} mm<br>${e.ms} ms`;
-  // An assembly is placed parts, not one printable solid, so the manufacturing
-  // formats go dark on it; each placed part exports from its own entry.
+  // An assembly is placed parts, not one printable solid, so its buttons download
+  // one zip with a file per placed part. Only an assembly that places nothing goes
+  // dark: geometry built inline has no part file, and a part file is what a print is.
   const asm = Array.isArray(e.joints);
+  const placed = asm ? (e.uses || []) : null;
   for (const b of document.querySelectorAll('#download button')) {
-    b.disabled = asm;
-    b.title = asm ? 'an assembly is placed parts; export each part instead' : b.dataset.title;
+    b.disabled = asm && !placed.length;
+    b.title = !asm ? b.dataset.title
+      : placed.length ? `downloads the placed parts, zipped: ${placed.join(', ')}`
+      : 'this assembly places no parts; nothing to print';
   }
 }
 

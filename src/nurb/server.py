@@ -185,6 +185,8 @@ class Server:
                 from .assembly import wire
 
                 entry["joints"] = wire(scene)
+                # What the stl button downloads instead of the merged scene.
+                entry["uses"] = sorted(pathlib.Path(u).stem for u in scene.uses)
         except Exception as exc:
             entry["glb"] = None
             entry["shape"] = None
@@ -322,41 +324,62 @@ class Server:
             return self._resp(404, b"not found", "text/plain")
         try:
             async with self.building:
-                body = await asyncio.to_thread(self._export, name, fmt)
+                body, attach, mime = await asyncio.to_thread(self._export, name, fmt)
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             return self._resp(500, message.encode(), "text/plain")
-        return self._resp(200, body, self.EXPORTS[fmt], attach=f"{name}.{fmt}")
+        return self._resp(200, body, mime, attach=attach)
 
     def _export(self, name, fmt):
-        """Build at the values the sliders hold and export that.
+        """Build at the values the sliders hold and export that, as (body, filename, mime).
 
         Always the polished build, whatever the viewer is showing: draft is a preview
-        economy, and a file somebody downloads is on its way to a slicer.
+        economy, and a file somebody downloads is on its way to a slicer. An assembly
+        downloads one zip of the parts it places, each exported exactly as its own
+        entry would be: the merged scene is a weld, its obstacles were never going to
+        be printed, and one file per part as separate downloads dies silently on the
+        browser's multiple-download permission.
         """
+        import io
         import tempfile
+        import zipfile
 
         from build123d import export_step, export_stl
+
+        def solid(path, stem):
+            """(bytes, None) for a part, (None, scene) for an assembly."""
+            built, _, _ = builder.build(path, overrides=self.overrides.get(stem), draft=False)
+            scene = getattr(built, "_nurb_scene", None)
+            if scene is not None:
+                return None, scene
+            with tempfile.TemporaryDirectory() as scratch:
+                target = pathlib.Path(scratch) / f"{stem}.{fmt}"
+                (export_stl if fmt == "stl" else export_step)(built, str(target))
+                return target.read_bytes(), None
 
         path = next((p for p in builder.find_parts(self.root) if p.stem == name), None)
         if path is None:  # deleted between the click and the build
             raise builder.BuildError(f"{name} is no longer on disk")
-        shape, _, _ = builder.build(path, overrides=self.overrides.get(name), draft=False)
-        # The viewer already disables its buttons on an assembly; this catches the
-        # request anything else makes. A merged scene is a weld, and the obstacles
-        # in it were never going to be printed at all.
-        if getattr(shape, "_nurb_scene", None) is not None:
-            raise builder.BuildError(
-                f"{name} is an assembly: placed parts, not one printable solid. "
-                f"Export the parts it places."
-            )
-        with tempfile.TemporaryDirectory() as scratch:
-            target = pathlib.Path(scratch) / f"{name}.{fmt}"
-            if fmt == "stl":
-                export_stl(shape, str(target))
-            else:
-                export_step(shape, str(target))
-            return target.read_bytes()
+        body, scene = solid(path, name)
+        if scene is None:
+            return body, f"{name}.{fmt}", self.EXPORTS[fmt]
+        queue = sorted(pathlib.Path(u) for u in scene.uses)
+        if not queue:
+            raise builder.BuildError(f"{name} places no parts; nothing to print")
+        buf = io.BytesIO()
+        seen = set()
+        with zipfile.ZipFile(buf, "w") as bundle:
+            while queue:
+                placed = queue.pop(0)
+                if placed in seen:
+                    continue
+                seen.add(placed)
+                body, nested = solid(placed, placed.stem)
+                if nested is not None:  # an assembly placing an assembly
+                    queue += sorted(pathlib.Path(u) for u in nested.uses)
+                    continue
+                bundle.writestr(f"{placed.stem}.{fmt}", body)
+        return buf.getvalue(), f"{name}-{fmt}.zip", "application/zip"
 
     @staticmethod
     def _meta(entry):
