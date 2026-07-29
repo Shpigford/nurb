@@ -6,7 +6,7 @@ Here rather than on a CDN because a CAD tool that needs the network is broken on
 plane, and because `nurb render` drives this same page: without the network it used to
 serve the viewer, load the canvas, and then draw nothing at all, forever.
 
-Copied verbatim from the npm tarball:
+Copied verbatim from the npm tarball, with one comment-only exception noted below:
 
 | here | from `three@0.169.0` |
 |---|---|
@@ -18,6 +18,8 @@ Copied verbatim from the npm tarball:
 
 `BufferGeometryUtils` is not imported by the viewer. `GLTFLoader` imports it, and
 leaving it out is a 404 that only shows up when a model loads.
+
+The one deviation: four upstream comments in `GLTFLoader.js` (near `resourcePath`, around line 199) used a made-up personal-CDN domain as a placeholder URL, and security scanners auditing the repo flagged that unregistered domain as a suspicious download source (Snyk marked the nurb skill CRITICAL on skills.sh over it, GitHub issue #34). The comments here say `example.com` instead. Re-apply this when vendoring a new version if upstream still has its own placeholder.
 
 The build is minified and the addons are not, because that is how the package ships
 them. The `@license` header at the top of the minified build is part of the licence
