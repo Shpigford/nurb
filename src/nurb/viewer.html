@@ -71,7 +71,7 @@
      ResizeObserver, which calls setSize() again -- a resize loop that flickers. */
   canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
   /* The canvas is appended last, so overlays need to be lifted above it. */
-  #hud, #err, #tools, #empty, #checks { z-index: 1; }
+  #hud, #err, #tools, #empty, #checks, #nogl { z-index: 1; }
   #hud {
     position: absolute; left: 16px; bottom: 14px; color: var(--dim);
     font-size: 11px; pointer-events: none; line-height: 1.7;
@@ -126,14 +126,23 @@
   #cut button { padding: 4px 9px; color: var(--dim); }
   #cut button.on { color: var(--accent); background: rgba(110,231,168,.1); }
   #cut input { width: 110px; margin: 0 6px 0 4px; }
-  #empty { position: absolute; inset: 0; display: grid; place-items: center;
+  #empty, #nogl { position: absolute; inset: 0; display: grid; place-items: center;
            color: var(--dim); text-align: center; }
-  #empty svg { width: 44px; height: 44px; opacity: .45; margin-bottom: 10px; }
-  #empty code {
+  #empty svg, #nogl svg { width: 44px; height: 44px; opacity: .45; margin-bottom: 10px; }
+  #empty code, #nogl code {
     display: inline-block; margin-top: 8px; padding: 4px 10px; font: inherit;
     background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
     color: var(--text);
   }
+  /* Without WebGL the viewport holds the diagnosis, and it outranks the empty state:
+     "no parts yet" and "not connected" both prescribe the wrong fix (issue #37).
+     !important because the empty state's display is set inline from the script.
+     The section and reframe tools only manipulate the missing canvas, so they go;
+     downloads and the polish toggle are server-side and stay. */
+  #nogl { display: none; }
+  body.nogl #nogl { display: grid; }
+  body.nogl #empty { display: none !important; }
+  body.nogl #sectionbtn, body.nogl .sep:has(+ #sectionbtn), body.nogl #reframe { display: none; }
   #checks {
     position: absolute; top: 14px; left: 16px; max-width: 46%; max-height: 60%;
     overflow: auto; display: none; font-size: 11px; line-height: 1.6;
@@ -301,6 +310,15 @@
       <code id="emptycmd">nurb new &lt;name&gt;</code>
     </div>
   </div>
+  <div id="nogl">
+    <div>
+      <svg><use href="#i-warn"/></svg>
+      <div>WebGL unavailable in this browser, so there is no 3D view.<br>
+        The part list, checks and downloads still work.<br>
+        Chrome: check the graphics acceleration setting and</div>
+      <code>chrome://gpu</code>
+    </div>
+  </div>
   <div id="tools">
     <div class="pill">
       <div id="download">
@@ -360,14 +378,26 @@ camera.up.set(0, 0, 1);
 
 // stencil: the section view caps its cut with a stencil pass, and the buffer is off
 // by default. Without it the cap silently never draws.
-const renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.localClippingEnabled = true;
-main.appendChild(renderer.domElement);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.12;
+//
+// The constructor throws when WebGL is unavailable (recent Chrome has no software
+// fallback once graphics acceleration is off), and an uncaught throw here would kill
+// the whole module: no socket, no part list, no checks. None of those need a GPU, so
+// a failure turns the canvas into a diagnosis and leaves the rest of the viewer alive.
+let renderer = null, controls = null;
+try {
+  renderer = new THREE.WebGLRenderer({ antialias: true, stencil: true });
+} catch (e) {
+  console.error(e);
+  document.body.classList.add('nogl');
+}
+if (renderer) {
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.localClippingEnabled = true;
+  main.appendChild(renderer.domElement);
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.12;
+}
 
 // Declared up here rather than next to the code that uses it, because `show` writes
 // `ready` and a headless render polls it. Both happen after this module is evaluated, so
@@ -411,14 +441,15 @@ function resize() {
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
 }
-new ResizeObserver(resize).observe(main);
-resize();
-
-(function tick() {
-  requestAnimationFrame(tick);
-  controls.update();
-  renderer.render(scene, camera);
-})();
+if (renderer) {
+  new ResizeObserver(resize).observe(main);
+  resize();
+  (function tick() {
+    requestAnimationFrame(tick);
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+}
 
 // ---- section ----
 // A plain clip renders a solid as a shell: the near wall is cut away and the far wall is
@@ -584,7 +615,7 @@ for (const b of document.querySelectorAll('#cut button')) {
 // A rebuild is a geometry swap, never a camera reset. Reloads restore per part.
 const camKey = n => `nurb.cam.v2.${n}`;  // v2: parts now sit on the plate, not under it
 let saveTimer = null;
-controls.addEventListener('change', () => {
+if (controls) controls.addEventListener('change', () => {
   if (!current) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
@@ -711,6 +742,10 @@ async function paint(name, { keepCamera }) {
     return;
   }
   err.style.display = 'none';
+
+  // Without GL there is no scene to feed, but the geometry is the only thing missing:
+  // the hud, checks and params describe the build, not the picture of it.
+  if (!renderer) { hud(entry); checks(name); params(entry); return; }
 
   const gltf = await loader.loadAsync(`/glb/${name}.glb?v=${entry.token}`);
   const found = [];
