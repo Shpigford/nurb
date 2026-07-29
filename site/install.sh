@@ -53,9 +53,10 @@ main() {
   fi
 
   say ""
-  say "  done."
+  say "  done. nurb is installed and your AI now knows how to use it."
   say ""
-  say "  open your AI (Claude, Cursor, Codex...) in a fresh folder and say:"
+  say "  there is no app to open: nurb works through the AI you already talk to."
+  say "  open Claude, Cursor, Codex... in a fresh folder and ask for a part:"
   say ""
   say "      \"design me a phone stand\""
   say ""
