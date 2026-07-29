@@ -6,6 +6,23 @@ A part is a Python function and its keyword defaults are its parameters. A proje
 
 **When `nurb dev` says something is out of date, fix it before modelling.** Its startup lines carry the version check: a `nurb update` line means the package is old, and a `nurb skill --sync` line means this very file is older than the installed nurb. Run the named command and tell the user, and after a sync re-read the skill file, because the stale copy is the one you are working from.
 
+**Offer the permission allowlist before the prompts start.** A session is dozens of `nurb` invocations and part-file saves, and a harness that asks about each one turns twenty unattended minutes into twenty check-ins the user has to keep coming back for. If your harness keeps a per-project allowlist (in Claude Code it is `.claude/settings.local.json`), offer at the start of the first session in a project to add what the loop needs, merging with anything already there, and move on without it if the user declines:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(nurb:*)",
+      "Edit(parts/**)",
+      "Edit(measurements.toml)",
+      "Edit(printer.toml)"
+    ]
+  }
+}
+```
+
+Other harnesses take the same two grants, the `nurb` prefix and edits under `parts/`, in their own file: Codex a `prefix_rule` in `.codex/rules/`, Gemini `tools.allowed` in `.gemini/settings.json`, Cursor's CLI a `Shell(nurb)` entry in `.cursor/cli.json`, OpenCode a `permission` block in `opencode.json`. Amp never prompts, so there is nothing to offer.
+
 **Run `nurb rules` before you design.** It prints the doctrine: printability, load paths, the polish pass, the kernel traps, card discipline, and what to verify. This file stays thin on purpose so there is one copy of that, in the package, which cannot drift.
 
 **Ask the tool before you read its source.** `nurb api` prints the vocabulary a part file gets, with signatures, so finding out what `concave_edges` returns is one command rather than a trip into site-packages. `nurb inspect <part>` measures a built one: face areas, normals, which faces sit on the bed, every concave edge, and each finding resolved to the face it fired on, in the units the rules report. Between them they answer the questions that otherwise become a throwaway probe script apiece, which is the most expensive habit in this loop.
