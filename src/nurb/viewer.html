@@ -254,6 +254,15 @@
   .p.dirty input[type=range]::-moz-range-thumb { background: var(--accent); }
   input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px rgba(110,231,168,.25); }
   input[type=range]:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px rgba(110,231,168,.25); }
+  /* The flyout a hovered parameter row opens. It sits beside the sidebar rather than
+     under the cursor, so it never covers the slider it is explaining, and it floats
+     at body level because the panel scrolls and would clip anything inside it. */
+  #tip {
+    position: fixed; z-index: 2; max-width: 280px; display: none; pointer-events: none;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 11px; font-size: 11px; line-height: 1.55; color: var(--text);
+    box-shadow: 0 4px 16px rgba(0,0,0,.35);
+  }
   #write { display: none; width: 100%; margin-top: 10px; text-align: left; line-height: 1.4; }
   body.dirty #write { display: block; }
   #note { font-size: 11px; color: var(--dim); margin-top: 8px; white-space: pre-wrap; }
@@ -294,6 +303,7 @@
     </span>
   </div>
 </aside>
+<div id="tip"></div>
 <div id="upgrade">
   <div class="card">
     <p><b id="upnew"></b> is out. this is <span id="uphave"></span>.</p>
@@ -958,6 +968,44 @@ function markDirty() {
   }
 }
 
+// The flyout: the one line the part's docstring gives this parameter, nothing else.
+// A row the docstring says nothing about opens nothing. A short delay keeps it from
+// strobing as the cursor crosses the panel, and a scroll or a press dismisses it, so
+// it is gone the moment the hover becomes an interaction.
+const tip = document.getElementById('tip');
+let tipRow = null, tipTimer = null;
+
+function hideTip() {
+  clearTimeout(tipTimer);
+  tipRow = null;
+  tip.style.display = 'none';
+}
+
+function showTip(row) {
+  tip.textContent = row.dataset.doc;
+  // Measured after it has content: the clamp needs the height this text actually takes.
+  tip.style.display = 'block';
+  tip.style.left = (document.querySelector('aside').getBoundingClientRect().right + 8) + 'px';
+  const r = row.getBoundingClientRect();
+  tip.style.top = Math.max(8, Math.min(r.top, innerHeight - tip.offsetHeight - 8)) + 'px';
+}
+
+{
+  const box = document.getElementById('params');
+  box.addEventListener('mouseover', (ev) => {
+    const row = ev.target.closest('.p');
+    if (!row || !row.dataset.doc || row === tipRow) return;
+    clearTimeout(tipTimer);
+    tipRow = row;
+    tipTimer = setTimeout(() => showTip(row), 150);
+  });
+  box.addEventListener('mouseout', (ev) => {
+    if (tipRow && !tipRow.contains(ev.relatedTarget)) hideTip();
+  });
+  box.addEventListener('scroll', hideTip, { passive: true });
+  box.addEventListener('pointerdown', hideTip);
+}
+
 function params(e) {
   const box = document.getElementById('params');
   // A failed build reports no parameters, and clearing the panel here would take the
@@ -965,10 +1013,11 @@ function params(e) {
   // to be draggable back. The panel is only cleared if it belongs to another part.
   if (e.error && panelSig && panelSig.startsWith(e.name + '|')) return;
   const rows = (e.params || []).filter(adjustable);
-  const sig = e.name + '|' + rows.map(p => `${p.name}:${p.default}:${p.family ? 1 : 0}`).join(',')
+  const sig = e.name + '|' + rows.map(p => `${p.name}:${p.default}:${p.family ? 1 : 0}:${p.doc || ''}`).join(',')
     + '|' + (e.joints || []).map(j => `${j.param}:${j.lo}:${j.hi}`).join(',');
   if (sig === panelSig) { sync(rows); return; }
   panelSig = sig;
+  hideTip();   // the row it points at is about to be replaced
 
   values.clear(); defaults.clear(); setters.clear();
   box.classList.toggle('empty', !rows.length);
@@ -995,8 +1044,12 @@ function params(e) {
     const row = document.createElement('div');
     row.className = 'p';
     row.dataset.name = p.name;
+    // The doc is the `name: text` line the part's docstring gives this parameter,
+    // free prose for the flyout. Through dataset rather than the markup string so a
+    // quote in it cannot break out of the attribute.
+    row.dataset.doc = p.doc || '';
     row.innerHTML =
-      `<div class="top"><span class="k" title="double-click to reset to ${p.default}">${p.name}</span>`
+      `<div class="top"><span class="k">${p.name}</span>`
       + `<input class="v" type="number" step="any"></div>`
       + `<input type="range">`;
     const num = row.querySelector('.v'), slide = row.querySelector('[type=range]');
@@ -1009,7 +1062,6 @@ function params(e) {
       slide.step = r.step;
     }
     slide.value = p.value;
-    slide.title = p.name;
     num.value = p.value;
 
     // Quantization belongs to the slider alone, so it happens at the slider's events

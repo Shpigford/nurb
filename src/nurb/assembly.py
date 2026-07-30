@@ -39,7 +39,7 @@ import pathlib
 import sys
 from dataclasses import dataclass, field
 
-from .registry import PartDef, declared
+from .registry import PartDef, declared, param_docs
 
 # Findings come from checks.py's vocabulary so an assembly's report reads exactly like
 # a part's: same severities, same line format, same sorting.
@@ -291,7 +291,13 @@ def assembly(fn):
         comp._nurb_scene = scene
         return comp
 
-    wrapped._nurb = PartDef(fn=wrapped, name=fn.__name__, params=params, accepts_draft=True)
+    wrapped._nurb = PartDef(
+        fn=wrapped,
+        name=fn.__name__,
+        params=params,
+        accepts_draft=True,
+        docs=param_docs(fn, params),
+    )
     return wrapped
 
 

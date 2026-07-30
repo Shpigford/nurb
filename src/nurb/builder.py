@@ -132,6 +132,7 @@ def build(path, overrides=None, draft=False):
             "default": _safe(default),
             "value": _safe(kwargs[name]),
             "kind": _kind(default),
+            "doc": defn.docs.get(name),
         }
         for name, default in defn.params.items()
     ]

@@ -67,12 +67,14 @@ def test_the_kind_follows_the_default_not_wherever_the_slider_is(part_file):
     and the panel came back after a reload with an integer slider on a chamfer.
     """
     got = params(part_file, height=2)
-    assert got["height"] == {"name": "height", "default": 42.0, "value": 2, "kind": "float"}
+    assert got["height"] == {"name": "height", "default": 42.0, "value": 2, "kind": "float",
+                             "doc": None}
 
 
 def test_an_override_moves_the_value_and_leaves_the_default_alone(part_file):
     got = params(part_file, count=9)
-    assert got["count"] == {"name": "count", "default": 4, "value": 9, "kind": "int"}
+    assert got["count"] == {"name": "count", "default": 4, "value": 9, "kind": "int",
+                            "doc": None}
     assert got["height"]["value"] == got["height"]["default"] == 42.0
 
 
@@ -92,6 +94,42 @@ def test_a_default_json_cannot_carry_does_not_take_the_message_down(tmp_path):
     rows = builder.build(path)[1]
     assert rows[0]["kind"] == "other"
     assert json.dumps(rows)     # the point of the test
+
+
+DOCUMENTED = '''from nurb import *
+
+
+@part
+def told(count=4, height=42.0, draft=False):
+    """A test part that explains its parameters.
+
+    count: how many notches it gets
+    height: overall height, base to
+        the top of the tallest notch
+    draft: injected by the runtime, never a knob
+    Note: this line names no parameter and belongs to nothing
+    """
+    return Box(count, height, 5)
+'''
+
+
+def test_a_docstring_line_naming_a_parameter_becomes_its_doc(tmp_path):
+    """The tooltip on a slider comes from the part's own docstring, the one place a
+    function explains itself, so there is no parallel declaration to drift. A
+    deeper-indented line continues the one above it; `draft` and prose lines whose
+    first word is no parameter belong to nobody."""
+    (tmp_path / "parts").mkdir()
+    path = tmp_path / "parts" / "told.py"
+    path.write_text(DOCUMENTED)
+    got = params(path)
+    assert got["count"]["doc"] == "how many notches it gets"
+    assert got["height"]["doc"] == "overall height, base to the top of the tallest notch"
+    assert "draft" not in got
+    assert "Note" not in got
+
+
+def test_a_part_with_no_docstring_reports_no_docs(part_file):
+    assert all(r["doc"] is None for r in params(part_file).values())
 
 
 # ---- the server side ----

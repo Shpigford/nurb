@@ -21,6 +21,15 @@ def fit_coupon(
     label_relief=0.5,
     draft=False,
 ):
+    """A bare hanging plate for test-fitting the bracket channel.
+
+    side_clearance: gap between each channel wall and the bracket, the fit being dialed
+    bracket_count: how many brackets the coupon spans
+    item_height: how tall the plate is
+    item_depth: how thick the plate is, wall to front face
+    label_size: text height of the raised caption naming the clearance
+    label_relief: how far the caption stands off the front face
+    """
     plate = Pos(-item_depth / 2, span(bracket_count), -item_height / 2) * Box(
         item_depth, plate_width(bracket_count), item_height
     )

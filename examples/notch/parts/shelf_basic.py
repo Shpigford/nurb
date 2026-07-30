@@ -29,6 +29,21 @@ def shelf_basic(
     structural_chamfer=3.0,
     draft=False,
 ):
+    """A flat shelf on a hanging plate, with a lip and two triangular gussets.
+
+    bracket_count: how many brackets the shelf spans
+    item_height: how tall the plate on the wall is
+    item_depth: how thick the plate is, wall to front face
+    shelf_depth: how far the platform sticks out from the plate
+    shelf_thickness: how thick the platform is
+    lip_height: how far the front lip rises above the platform
+    lip_thickness: how thick the front lip is
+    gusset_thickness: how thick each triangular support fin is
+    gusset_tip: how much of each gusset's sharp outer corner is cut off
+    gusset_drop: how far below the plate's top edge the gussets peak
+    chamfer_size: size of the cosmetic chamfer on exposed edges
+    structural_chamfer: size of the load chamfer where the platform meets the plate
+    """
     if item_depth <= MIN_ITEM_DEPTH:
         raise ValueError(
             f"item_depth {item_depth} leaves no material behind the channel floor, so the "
