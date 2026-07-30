@@ -168,7 +168,7 @@
      point: anything that lands inside one round trip never dims at all, so the hook
      shows no state change and the shelf does. */
   #hud, #checks { transition: opacity .12s .25s; }
-  body.stale #hud, body.stale #checks { opacity: .32; }
+  body.stale #hud, body.stale #checks, #checks.pending { opacity: .32; }
 
   #foot { margin-top: auto; padding: 9px 12px; border-top: 1px solid var(--line);
           display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
@@ -525,7 +525,10 @@ function sectionUpdate() {
   cap.visible = on;
   for (const w of writers) w.visible = on;
   if (!on) { plane.constant = PARKED; return; }
-  const box = mesh.geometry.boundingBox.clone().translate(mesh.position);
+  // The group has no geometry of its own, and 'context' scenery must not stretch the
+  // cut range: the slider spans the printed parts, in world space, joints included.
+  const box = new THREE.Box3();
+  for (const c of mesh.children) if (c.isMesh && c.name !== 'context') box.expandByObject(c);
   const lo = box.min[cutAxis], hi = box.max[cutAxis];
   // A hair inside the bounds at each end, so neither extreme is a cut through nothing.
   const at = lo + (hi - lo) * (0.02 + 0.96 * cutAt);
@@ -653,7 +656,13 @@ function restoreCamera(name, box) {
     camera.near = span / 100; camera.far = span * 100;
     camera.updateProjectionMatrix();
     controls.update();
-    return true;
+    // sane() is a distance argument, not a visibility one: a stale camera can keep a
+    // sane distance and still look past the part, and restoring it paints a blank grid
+    // that reads as "still building". Reject any viewpoint the part is not actually in.
+    camera.updateMatrixWorld();
+    const f = new THREE.Frustum().setFromProjectionMatrix(
+      new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    return f.intersectsBox(box);
   } catch { return false; }
 }
 
@@ -822,9 +831,27 @@ async function paint(name, { keepCamera }) {
 function checks(name) {
   const e = parts.get(name);
   const box = document.getElementById('checks');
-  pins.clear();
   const found = e && e.findings;
-  if (!e || e.error || found === null || found === undefined) { box.style.display = 'none'; return; }
+  if (!e || e.error || found === null || found === undefined) {
+    // A rebuild's findings arrive in a `checked` message after its geometry, so
+    // mid-rebuild the part briefly has none. Hiding the panel here made it blink on
+    // every save; keep the last panel dim, but not its now-misplaced pins.
+    if (e && !e.error && box.dataset.for === name) {
+      box.classList.add('pending');
+      pins.visible = false;  // their old coordinates do not belong to the new mesh
+      return;
+    }
+    box.classList.remove('pending');
+    pins.visible = true;
+    pins.clear();
+    delete box.dataset.for;
+    box.style.display = 'none';
+    return;
+  }
+  box.classList.remove('pending');
+  pins.visible = true;
+  pins.clear();
+  box.dataset.for = name;
   box.style.display = 'block';
   if (!found.length) {
     box.innerHTML = '<h2>checks</h2><div class="ok"><svg class="ic"><use href="#i-ok"/></svg>clean</div>';
