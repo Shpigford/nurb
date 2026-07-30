@@ -62,6 +62,8 @@ nurb launcher        write viewer.command, a double-clickable `nurb dev`
 A project is any directory containing `parts/`. There is no init step, and there
 never should be.
 
+A release is a version bump merged to main: `uv version X.Y.Z`, plus the matching `version:` line in `src/nurb/skill.md` and `skills/nurb/SKILL.md` (a test enforces they agree). The publish workflow does the rest: PyPI upload, tag, GitHub release.
+
 ## Layout
 
 ```
