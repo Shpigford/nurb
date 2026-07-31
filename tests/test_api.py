@@ -28,6 +28,7 @@ def test_the_documented_vocabulary_is_the_exported_one():
         "is_convex",
         "concave_edges",
         "measured",
+        "stand",
         "assembly",
         "use",
         "hinge",

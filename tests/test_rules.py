@@ -6,7 +6,7 @@ finding is obvious from the geometry: a known angle, a known count, a known tip.
 
 from math import tan, radians
 
-from build123d import Box, Cylinder, Plane, Pos, Rot, extrude, Polygon
+from build123d import Align, Box, Cylinder, Plane, Pos, Rot, extrude, Polygon
 import pytest
 
 from nurb.checks import FAIL, WARN, Context, run
@@ -87,6 +87,60 @@ def test_top_heavy_lean_tips():
     assert found[0].severity == WARN
 
 
+def test_a_narrow_flat_foot_still_uses_its_center_of_mass():
+    """A slim rectangular foot is ordinary bed contact, not a diagonal facet."""
+    corner = (Align.MIN, Align.CENTER, Align.MIN)
+    shape = Box(4, 30, 20, align=corner) + Pos(2, 0, 16) * Box(
+        20, 30, 4, align=corner
+    )
+    assert len(shape.solids()) == 1
+    found = only(shape, "stability")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+
+
+def test_standing_on_a_facet_holds_by_adhesion_not_balance():
+    """A part stood at 45 always has its centre of mass outside the facet, so the
+    centre-of-mass test would warn on every diagonal print, including the bracket
+    this was calibrated against, which printed clean."""
+    from nurb import stand
+
+    assert only(stand(Box(4, 30, 30), tilt=45, facet=2.0), "stability") == []
+
+
+def test_standing_too_tall_on_a_facet_is_the_fin_signal():
+    """With fins declined, the rule is the referee for hand-tilted geometry."""
+    from nurb import stand
+
+    found = only(stand(Box(4, 30, 80), tilt=45, facet=2.0, fins=False), "stability")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+    assert "fin" in found[0].message
+
+
+def test_grown_fins_satisfy_every_rule_but_their_declared_slivers():
+    """The generated fin is one solid with the part, grounded, bridged at its tines,
+    thick enough for min_wall, and standing on pad strips that widen the stance past
+    the leverage rule. The tines' tiny faces are the one honest cost, and those are
+    declared on a card like any other earned sliver."""
+    from nurb import stand
+
+    finned = stand(Box(4, 30, 80), tilt=45, facet=2.0)
+    assert len(finned.solids()) == 1
+    assert only(finned, "stability") == []
+    assert only(finned, "floating") == []
+    assert only(finned, "overhang") == []
+    assert only(finned, "min_wall") == []
+
+
+def test_grown_fins_clear_the_stability_rule_on_a_tall_part():
+    """The fin pads widen the whole footprint; their own short edge is not the stance."""
+    from nurb import stand
+
+    finned = stand(Box(4, 30, 160), tilt=45, facet=2.0)
+    assert only(finned, "stability") == []
+
+
 # --- sliver ------------------------------------------------------------------
 
 
@@ -112,6 +166,16 @@ def test_build_volume_uses_the_best_orientation():
     assert only(tall, "build_volume", Context(bed=(256, 256, 300))) == [], "stands up"
     assert only(tall, "build_volume", Context(bed=(256, 256, 256))) != [], "260 > 256"
     assert only(tall, "build_volume", Context(bed=(100, 100, 100)))[0].severity == FAIL
+
+
+def test_build_volume_keeps_a_stood_parts_facet_on_the_bed():
+    """Once stand() cuts the bed facet, the check may rotate only around build-up."""
+    from nurb import stand
+
+    stood = stand(Box(4, 30, 160), tilt=45, facet=2.0, fins=False)
+    found = only(stood, "build_volume", Context(bed=(256, 256, 100)))
+    assert len(found) == 1
+    assert found[0].severity == FAIL
 
 
 # --- bridges vs cantilevers --------------------------------------------------
@@ -157,6 +221,15 @@ def test_bed_bevel_catches_a_chamfer_on_the_first_layer():
     assert len(only(bottom, "bed_bevel")) == 4
 
 
+def test_bed_bevel_catches_a_chamfer_beneath_a_narrow_wall():
+    """A long, narrow bottom face is not enough to call a normally seated wall stood."""
+    from build123d import Axis, chamfer
+
+    wall = Box(4, 30, 20)
+    bottom = chamfer(wall.edges().group_by(Axis.Z)[0], 1)
+    assert len(only(bottom, "bed_bevel")) == 4
+
+
 def test_bed_bevel_catches_a_circular_chamfer_on_the_first_layer():
     """The band is 1mm deep even though its plan-view bounding box is 20mm wide."""
     from build123d import chamfer
@@ -193,6 +266,41 @@ def test_bed_bevel_leaves_a_corbel_landing_on_the_plate_alone():
     # The same face against a part whose polish is 4mm, where 10mm of rise is back
     # inside chamfer territory. The rule is about scale, so it has to move with it.
     assert len(only(post, "bed_bevel", Context(cosmetic_chamfer=4.0))) == 1
+
+
+def test_floating_ignores_a_vertex_resting_on_material_below():
+    """The calipers-holder case, distilled: a corbel corner with every edge rising
+    away from it, sitting directly on the body underneath. The edge test alone called
+    it floating; the probe below is what clears it."""
+    shape = Box(20, 20, 10) + Pos(0, 0, 10) * Box(12, 12, 10)
+    assert only(shape, "floating") == []
+
+
+def test_floating_catches_a_tip_hanging_in_air():
+    """A leg tip whose faces all sit at 45 degrees: silent to the overhang rule,
+    unprintable anyway, because its first layer has nothing to sit on."""
+    from nurb import stand
+
+    bracket = Pos(2, 15, 20) * Box(4, 30, 40) + Pos(17, 15, 38) * Box(26, 30, 4)
+    found = only(stand(bracket, tilt=45, facet=2.0), "floating")
+    assert found and all(f.severity == FAIL for f in found)
+
+
+def test_floating_ignores_the_stairstep_corner_of_a_stood_slab():
+    """The second-lowest corner of a tilted slab has air straight below it and prints
+    fine: its silhouette descends to the facet, one layer resting on the next."""
+    from nurb import stand
+
+    assert only(stand(Box(4, 30, 40), tilt=45, facet=2.0), "floating") == []
+
+
+def test_bed_bevel_leaves_a_standing_part_alone():
+    """A 4mm wall stood at 45 rises 2.83mm off the plate, square in the chamfer band,
+    and rise cannot tell it from a bevel. The stance can: the part has no bottom face
+    whose rim a bevel could dress, only the facet it stands on."""
+    from nurb import stand
+
+    assert only(stand(Box(4, 30, 40), tilt=45, facet=2.0), "bed_bevel") == []
 
 
 def test_concave_cosmetic_catches_polish_in_an_inside_corner():

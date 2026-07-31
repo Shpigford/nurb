@@ -32,6 +32,9 @@ CARD = """# thing
 [part]
 min_wall = 10.0
 
+[variants.slim]
+note = "Half width for the narrow rail."
+
 [variants.slim.params]
 width = 15.0
 
@@ -64,7 +67,9 @@ def test_rebuild_carries_the_cards_variants(tmp_path):
     part = tmp_path / "parts" / "thing.py"
     (tmp_path / "parts" / "thing.md").write_text(CARD)
     entry = server.rebuild(part)
-    assert entry["variants"] == [{"name": "slim", "params": {"width": 15.0}}]
+    assert entry["variants"] == [
+        {"name": "slim", "params": {"width": 15.0}, "note": "Half width for the narrow rail."}
+    ]
     assert server._wire(entry)["variants"] == entry["variants"]
 
 

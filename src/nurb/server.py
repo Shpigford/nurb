@@ -241,16 +241,24 @@ class Server:
 
     @staticmethod
     def _variants(path):
-        """The card's variants, as the viewer shows them: a name and its overrides.
+        """The card's variants, as the viewer shows them: a name, its overrides, and
+        the card's note saying why it exists.
 
         A variant is one part flexed, which is exactly what the sliders do, so the
-        viewer treats picking one as loading its params. A card that will not parse
-        means no variants, not a broken part: the build itself never read the card.
+        viewer treats picking one as loading its params. The note rides along because
+        the params are the how and never the why: `diagonal = true` explains nothing
+        to someone who has not read the doctrine, and the card sentence does. A card
+        that will not parse means no variants, not a broken part: the build itself
+        never read the card.
         """
         from . import checks
 
         try:
-            return [{"name": n, "params": p} for n, p, _ in checks.configurations(path)[1:]]
+            notes = checks.settings(path).get("variants", {})
+            return [
+                {"name": n, "params": p, "note": notes.get(n, {}).get("note")}
+                for n, p, _ in checks.configurations(path)[1:]
+            ]
         except Exception:
             return []
 

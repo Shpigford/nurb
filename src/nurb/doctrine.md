@@ -60,6 +60,17 @@ bounding box and still exports, so nothing downstream catches it.
   structural or corbel, has to read as one system.
 - **Elephant's foot is a slicer setting**, not a CAD problem. Do not model around it.
 
+## Print orientation
+
+Parts print the way they are modelled, +z up, and for most parts that is the end of it. Orientation becomes a decision in exactly two situations: an overhang a corbel cannot carry without disfiguring the part, and a load that wraps a corner, where no flat orientation keeps every member strong.
+
+- **The two remedies for an overhang finding are a corbel and a tilt.** Reach for the corbel first: it is local, it keeps the part on its natural face, and it disappears into the design. Reach for the tilt when the whole part fights the bed. An open box printed upright wants support inside; printed flat it has one huge first layer that warps and three finishes that do not match; stood on a corner at 45 degrees, nothing needs support and every face is printed as perimeters, one finish.
+- **Layer bonds are about half strength**, measured near 50% of in-plane tensile for PLA and worse for ASA. A part loaded around a corner, which is every bracket and every L, has no flat orientation that keeps both legs loading in-plane: one of them always pulls its layers apart. Stood at 45 degrees neither does, and the load path never lies in a single weld plane. A tilt moves the weak plane rather than deleting it, so it is not automatic: a hook printed at an angle fails at the same load with the break somewhere else. It earns its keep on corners, not on straight pulls.
+- **`stand(part, tilt, axis, facet)` is the verb.** It rotates the part about a horizontal axis, seats it, and shaves the down corner flat, because a part standing on an unshaved corner meets the bed along a single extrusion line, and that line peels. The facet is 2mm minimum, measured across the flat. 45 degrees is the usual tilt and is not sacred: a shallow part stands at whatever angle brings everything inside the limit. Run the polish pass before standing, in the functional orientation.
+- **Stand a part on the corner that grounds every region, and prefer the lowest stance that does.** For an L that is the outside of its elbow, legs up in a V. The sign of the roll depends on which way the model faces, so check rather than reason: the same L rolled the other way stands on the end of one leg as a chevron, still grounded, still legal, but 60% taller on the same facet, and height on a facet is what spends the adhesion margin. The stance to refuse is the tent, elbow up, one leg's tip hanging in air, and it is easy to miss by eye because nothing about it looks steep: every face of the floating tip can sit at exactly 45 degrees, silent to the overhang rule. The `floating` rule fails any region whose first layer has nothing to sit on and `stability` judges the height, so `nurb check` on the stood variant settles the corner choice. Past grounded, inside the limit, and low, the tilt is taste: what remains is where the facet scar lands, which is the user's call.
+- **A diagonal print is a variant, and it is offered, never imposed.** The facet is cut from visible geometry, and whether that corner may go is not a printability question: only the user knows whether it shows. The pattern is a bool parameter, `diagonal=False`, that applies `stand()` when true, and a card variant that sets it, so it builds, checks against its own baselines, exports its own STL and shows in the viewer like any variant. Give the variant a `note` saying what the tilt buys and costs in plain words, "prints tilted on a flattened corner: no supports, and stronger across the corner", never in the doctrine's. Build it speculatively and link it, `?part=x&variant=x_diagonal`; the user judges by looking, and two lines delete it if they pass.
+- **Past about twenty times the facet width in height, adhesion is holding a lever, and `stand()` grows fins.** A compact part holds its facet by first-layer adhesion; a tall one needs support fins modelled into the part, never slicer supports, whose loose grip lets warp tension spring the part free mid-print. The recipe is print-farm practice with fixed numbers, so it is generated rather than judged: a thin blade at each side of the part hugging the lean across a small gap, each on a 1mm pad for its own adhesion, joined to the part only by horizontal tines a single layer tall and a bead wide, about 0.5 x 0.5mm, five or so, biased toward the bottom where the young print is least stable. After printing the fins lift off whole and the tine stubs rub off with a fingernail. The tines cost a handful of sub-millimetre faces, declared on the card like any other earned sliver. The stability warning remains the referee for what `stand()` did not build: pass `fins=False` to see it, and a part tilted by hand still gets it.
+
 ## Load path
 
 Work out where the weight sits and what it does at the mount before drawing anything.
@@ -249,6 +260,9 @@ exactly as they walk the part's own defaults, so it gets its own STL, its own ba
 and its own line in the AUTO block.
 
 ```toml
+[variants.shelf_gridfinity_3x2]
+note = "The same shelf sized for the wide bin: three columns instead of two."
+
 [variants.shelf_gridfinity_3x2.params]
 grid_x = 3
 bracket_count = 6
@@ -259,6 +273,8 @@ sliver = 26
 
 The test is whether it is the same geometry. A wider cradle on the same J is a variant.
 A different mechanism is a part, however similar the slab looks.
+
+`note` is one sentence saying why the variant exists, written in the user's words rather than the doctrine's, because the viewer shows it next to the variant and its reader is whoever is about to print the thing. The params are the how and never the why: `diagonal = true` explains nothing to someone who has not read the doctrine, and "prints tilted so it needs no supports" does.
 
 ## Measurements
 

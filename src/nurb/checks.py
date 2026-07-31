@@ -175,16 +175,33 @@ def sliver(shape, ctx):
 def build_volume(shape, ctx):
     """Does it fit on the printer at all."""
     size = shape.bounding_box().size
-    got = sorted([size.X, size.Y, size.Z], reverse=True)
-    fits = sorted(ctx.bed, reverse=True)
-    if all(g <= b for g, b in zip(got, fits)):
+    up = Vector(*ctx.up).normalized()
+    if _standing(shape, up) is None:
+        got = sorted([size.X, size.Y, size.Z], reverse=True)
+        fits = all(g <= b for g, b in zip(got, sorted(ctx.bed, reverse=True)))
+        orientation = "in any orientation"
+    else:
+        # A stance facet fixes the build direction. The part may turn on the plate,
+        # but rolling it onto another axis would put the facet in the air again.
+        bed, top = _span(shape, up)
+        footprint = sorted(
+            _span(shape, axis)[1] - _span(shape, axis)[0]
+            for axis in _bed_axes(up)
+        )
+        plate = sorted(ctx.bed[:2])
+        got = [top - bed, *footprint]
+        fits = top - bed <= ctx.bed[2] and all(
+            got <= available for got, available in zip(footprint, plate)
+        )
+        orientation = "in its fixed build orientation"
+    if fits:
         return []
     return [
         Finding(
             "build_volume",
             FAIL,
             f"{size.X:.0f} x {size.Y:.0f} x {size.Z:.0f}mm does not fit "
-            f"{ctx.bed[0]:.0f} x {ctx.bed[1]:.0f} x {ctx.bed[2]:.0f}mm in any orientation",
+            f"{ctx.bed[0]:.0f} x {ctx.bed[1]:.0f} x {ctx.bed[2]:.0f}mm {orientation}",
             value=round(max(got), 1),
         )
     ]
@@ -237,6 +254,13 @@ def _span(shape, up):
     return min(reach), max(reach)
 
 
+def _bed_axes(up):
+    """Two perpendicular directions across the build plate."""
+    guide = Vector(1, 0, 0) if abs(up.X) < 0.9 else Vector(0, 1, 0)
+    first = up.cross(guide).normalized()
+    return first, up.cross(first).normalized()
+
+
 def _reach(face, up):
     """How far a face protrudes, which is the smallest of its horizontal extents.
 
@@ -250,6 +274,97 @@ def _reach(face, up):
         if abs(axis.dot(up)) < 0.9
     ]
     return min(across) if across else 0.0
+
+
+# Height over stance width past which first-layer adhesion is holding a lever and a
+# part needs fins. Provisional, sitting between a 30mm bracket on a 2mm facet that
+# prints clean and a 60mm bar that does not survive without one. `stand()` grows its
+# fins at the same number, so the rule and the remedy cannot drift apart.
+LEVERAGE = 20
+
+
+def _standing(shape, up):
+    """The supported footprint width when a part stands rather than sits.
+
+    A part printed diagonally does not have a bottom face: it stands on a deliberate
+    narrow flat, the facet `stand()` cuts across its down corner, plus the pads of
+    any fins it grew. Several rules were calibrated on parts that sit, and a stance
+    is the case that breaks them: there is no bottom whose rim a bed bevel could
+    dress, and the centre of mass is always outside a 2mm strip.
+
+    Aspect ratio alone cannot identify it: a normally seated 4mm wall also has a long,
+    narrow bottom. The cut facet has two long edges against sloped body faces which
+    continue into other nonvertical faces; a bottom bevel instead ends at the vertical
+    wall it dresses. Once found, all real bed faces count toward support, so generated
+    fin pads widen the returned footprint. Returns None for a sitting part.
+    """
+    FACET = 5.0
+    bed, _ = _span(shape, up)
+    footing = [
+        f for f in shape.faces() if _span(f, up)[1] <= bed + 1e-4 and f.area >= 4.0
+    ]
+    if not footing:
+        return None
+    neighbours = None
+    facet = None
+    long_edge = None
+    for face in footing:
+        edges = list(face.edges())
+        if not edges:
+            continue
+        longest = max(edges, key=lambda edge: edge.length)
+        length = longest.length
+        if length <= 0:
+            continue
+        width = face.area / length
+        if width > FACET or length < 3 * width:
+            continue
+        if neighbours is None:
+            neighbours = edge_faces(shape)
+        stance_edges = 0
+        for edge in edges:
+            if edge.length < max(2 * width, 0.8 * length):
+                continue
+            pair = neighbours.get(edge, [])
+            if len(pair) != 2:
+                continue
+            other = pair[1] if pair[0] == face else pair[0]
+            tilt = abs(other.normal_at(edge.center()).dot(up))
+            if not 1e-4 < tilt < 0.9999:
+                continue
+            continues = False
+            for far_edge in other.edges():
+                if far_edge == edge or far_edge.length < 0.8 * edge.length:
+                    continue
+                far_pair = neighbours.get(far_edge, [])
+                if len(far_pair) != 2:
+                    continue
+                beyond = far_pair[1] if far_pair[0] == other else far_pair[0]
+                if beyond == face:
+                    continue
+                beyond_tilt = abs(beyond.normal_at(far_edge.center()).dot(up))
+                if 1e-4 < beyond_tilt < 0.9999:
+                    continues = True
+                    break
+            if continues:
+                stance_edges += 1
+        if stance_edges >= 2:
+            facet, long_edge = face, longest
+            break
+    if facet is None:
+        return None
+
+    along = long_edge.tangent_at(0)
+    along = (along - up * along.dot(up)).normalized()
+    across = up.cross(along).normalized()
+
+    def footprint(axis):
+        spans = [_span(face, axis) for face in footing]
+        return max(high for _, high in spans) - min(low for low, _ in spans)
+
+    # Leverage acts across the facet, in the direction of the lean. Its length along
+    # the corner already carries the first layer; fins extend support across it.
+    return footprint(across)
 
 
 def _bridged(solid, face, up, ctx):
@@ -305,7 +420,12 @@ def overhang(shape, ctx):
         crossing = _bridged(solid, face, up, ctx) if solid else None
         if crossing is not None and crossing <= ctx.bridge_limit:
             continue  # a bridge this printer walks across
-        if crossing is None and _reach(face, up) <= ctx.overhang_reach:
+        # A polish chamfer that a diagonal stand turns to face the bed is a strip
+        # `size * 1.42` wide, the same figure concave_cosmetic uses, and it prints:
+        # the flanks close over it at 45 degrees. Measured at 1.32mm on a stood
+        # bracket whose flat print is clean.
+        droop = max(ctx.overhang_reach, 1.42 * 1.15 * ctx.cosmetic_chamfer)
+        if crossing is None and _reach(face, up) <= droop:
             continue  # a ledge too shallow to droop, whatever its angle or length
         if crossing is not None:
             found.append(
@@ -332,14 +452,115 @@ def overhang(shape, ctx):
     return found
 
 
+@rule("floating")
+def floating(shape, ctx):
+    """A region whose first layer would be laid on air.
+
+    The overhang rule judges faces one at a time by angle, and a floating region can
+    present nothing steeper than the limit: stand an L on the end of one leg and the
+    other leg's tip hangs in space with every face at exactly 45 degrees. What gives
+    it away is the shape of the low point: a vertex above the bed with every edge
+    rising away from it. Somewhere to sit is what a first layer needs, and angle
+    cannot measure it.
+
+    Supported means one of two things, and both are needed. An edge running further
+    down: the second-lowest corner of a stood slab has air straight below it, but its
+    silhouette descends to the facet and every layer rests on the one before. Or
+    material straight below: the calipers holder's corbel corner has every edge
+    rising away from it and sits directly on the body underneath, which is what
+    flagged the edge test as insufficient when this rule first ran on the catalog.
+    The face gate mirrors the overhang rule's: a low point whose downward faces are
+    all chamfer-band strips is a polish artifact, not a region.
+    """
+    up = Vector(*ctx.up).normalized()
+    bed, _ = _span(shape, up)
+    droop = max(ctx.overhang_reach, 1.42 * 1.15 * ctx.cosmetic_chamfer)
+
+    def key(p):
+        return (round(p.X, 4), round(p.Y, 4), round(p.Z, 4))
+
+    # Directions leaving each vertex, off the edge tangents rather than the chords,
+    # keyed by position: the kernel hands back fresh objects on every call, so
+    # identity would never match anything.
+    leaving = {}
+    for edge in shape.edges():
+        try:
+            ends = (edge.position_at(0), edge.position_at(1))
+            tangents = (edge.tangent_at(0), -edge.tangent_at(1))
+        except Exception:
+            continue
+        for point, tangent in zip(ends, tangents):
+            leaving.setdefault(key(point), []).append(tangent)
+    faces_at = {}
+    for face in shape.faces():
+        for v in face.vertices():
+            faces_at.setdefault(key(Vector(v.X, v.Y, v.Z)), []).append(face)
+    solid = shape.solids()[0] if shape.solids() else None
+    found = []
+    for spot, directions in leaving.items():
+        here = Vector(*spot)
+        rise = here.dot(up) - bed
+        if rise <= 1e-4:
+            continue  # on the bed, which is the one place a low point belongs
+        if any(d.dot(up) < -1e-6 for d in directions):
+            continue  # material runs further down, so this is not the low point
+        below = here - up * 0.5
+        if solid and solid.is_inside((below.X, below.Y, below.Z)):
+            continue  # sitting on material, which is support however the edges run
+        # A bead anchored on both sides at its own layer is a bridge, and a fin's
+        # tine is exactly one: it starts in air and prints anyway, walked across
+        # from the part to the fin. Probed a bead out each way, just above the low
+        # point, so a floating tip, anchored on one side at best, stays a finding.
+        level = here + up * 0.15
+        horiz = [a for a in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1)) if abs(a.dot(up)) < 0.9]
+        def held(p):
+            return solid.is_inside((p.X, p.Y, p.Z))
+
+        if solid and any(held(level + d * 1.2) and held(level - d * 1.2) for d in horiz):
+            continue
+        wide = [
+            f
+            for f in faces_at.get(spot, [])
+            if min(n.dot(up) for n in _sample_normals(f)) < -0.03 and _reach(f, up) > droop
+        ]
+        if not wide:
+            continue
+        found.append(
+            Finding(
+                "floating",
+                FAIL,
+                f"a region's first layer sits on air, {rise:.1f}mm up with nothing below",
+                value=round(rise, 1),
+                where=tuple(round(v, 2) for v in here),
+            )
+        )
+    return found
+
+
 @rule("stability")
 def stability(shape, ctx):
     """Will it stand on the bed, or tip while printing."""
     up = Vector(*ctx.up).normalized()
-    bed, _ = _span(shape, up)
+    bed, top = _span(shape, up)
     footing = [f for f in shape.faces() if _span(f, up)[1] <= bed + 1e-4]
     if not footing:
         return [Finding("stability", FAIL, "nothing flat to stand on")]
+    stance = _standing(shape, up)
+    if stance is not None:
+        # Standing on a facet, the centre of mass is always outside it and the part
+        # is held by first-layer adhesion, not balance. What adhesion cannot hold is
+        # leverage; fins widen the stance, which is how growing them clears this.
+        if top - bed > LEVERAGE * stance:
+            return [
+                Finding(
+                    "stability",
+                    WARN,
+                    f"stands {top - bed:.0f}mm tall on a {stance:.1f}mm facet, "
+                    "more than adhesion holds; a support fin is the fix",
+                    value=round((top - bed) / stance, 1),
+                )
+            ]
+        return []
     com = shape.center(CenterOf.MASS)
     axes = [a for a in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1)) if abs(a.dot(up)) < 0.9]
     for axis in axes:
@@ -482,7 +703,7 @@ def configurations(part_path, base=None):
 
     out = [(stem, {}, fresh())]
     for name, variant in block.get("variants", {}).items():
-        extra = set(variant) - {"params", "accepted", "part", "printer"}
+        extra = set(variant) - {"params", "accepted", "part", "printer", "note"}
         if extra:
             raise ValueError(
                 f"{card.name}: variant {name} has {', '.join(sorted(extra))} at the top "
@@ -558,6 +779,12 @@ def bed_bevel(shape, ctx):
     """
     up = Vector(*ctx.up).normalized()
     bed, _ = _span(shape, up)
+    if _standing(shape, up) is not None:
+        # Standing on a facet, so every face at the plate is deliberately tilted and
+        # there is no bottom whose rim a bevel could dress. A 4mm wall stood at 45
+        # rises 2.83mm, square in the chamfer band, and prints fine: rise cannot tell
+        # it from a bevel, but the stance can.
+        return []
     found = []
     for face in shape.faces():
         low, high = _span(face, up)

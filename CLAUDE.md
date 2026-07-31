@@ -30,9 +30,9 @@ parallel `PARAMS` dict; the two would drift.
 skip the polish pass. Worth 20% on a real part, not the 18x a cube suggested: chamfers
 are 23% of the gridfinity shelf's build.
 
-The build is now nearly all of the loop. Tessellation used to look like the larger half
-at 620ms, and Phase 4 found that almost all of it was one iterator in build123d rather
-than any geometry; `builder._triangulate` reads the same triangles by index in 30ms.
+The build is nearly all of the loop. Tessellation used to look like the larger half at
+620ms, and almost all of that was one pathological iterator in build123d rather than
+any geometry; `builder._triangulate` reads the same triangles by index in 30ms.
 Write a continuous dimension as a float (`chamfer_size=1.0`) and a count as an int
 (`bracket_count=4`): the viewer reads the type of the default to decide whether that
 parameter's slider steps by one.
@@ -71,6 +71,7 @@ src/nurb/registry.py      @part, signature introspection
 src/nurb/builder.py       load, build, tessellate, GLB
 src/nurb/checks.py        printability rules, convexity, Finding/Context, variants
 src/nurb/polish.py        the bisecting polish pass, and chamfer with real errors
+src/nurb/orient.py        stand(), the diagonal print stance with its bed facet
 src/nurb/probe.py         what `nurb inspect` measures, in the rules' own units
 src/nurb/api.py           the vocabulary, derived from __all__ so it cannot drift
 src/nurb/printers.toml    shipped printer profiles, named by a project's printer.toml
@@ -195,67 +196,3 @@ as though every file will be read by a stranger.
 - No em-dashes in user-facing copy, docs, or comments.
 - Commit messages describe what changed and why, in plain sentences.
 - **Never hard-wrap prose. Ever.** One paragraph is one line; editors soft-wrap. This applies to every markdown and text file, and it applies even when the surrounding file is already wrapped: fix the paragraph you touch instead of matching the wrapping. Code, tables, and fenced blocks keep their formatting.
-
-## Current state
-
-Phases 1 through 5 are done. The whole Notch catalog lives in `examples/notch/`:
-sixteen catalog entries out of thirteen part files and nineteen shipped configurations,
-every one a single solid matching its Fusion bounding box, clean under
-`nurb check --strict`, and watertight when exported.
-
-`tests/test_notch_fit.py` is the hanging interface, asserted rather than read: every
-channel floor on exact pitch, at full span, one per bracket and no more, for every
-configuration. Its numbers are literals rather than imports from `system.py`, because a
-fit test that reads the same constant the part built from agrees with the part however
-wrong the constant is. A deliberate 0.1mm per interval pitch error is in the suite so
-the assertion is known to be able to fail. 238 tests.
-
-**Thirteen parts found rule bugs that three parts could not.** `concave_cosmetic` was
-firing at the 2mm structural relief the doctrine prescribes for thin material, and
-`bed_bevel` at the 45 degree corbel it prescribes for a raised feature. Both were
-recalibrated against measurements, not opinions: a relief is wider than polish, and a
-bottom chamfer rises by exactly its size where a corbel rises farther. `polish_edges` also
-had a gap, allowing a sloped edge that reaches the bed. Every one was found by a part
-rather than by review, which is the argument for `examples/` being the calibration set.
-
-The agent surface is in: `nurb rules` prints the doctrine from `src/nurb/doctrine.md`,
-`nurb card` regenerates each card's AUTO block from a build, `nurb render` screenshots the
-viewer headlessly, and `measurements.toml` carries dimensions with their provenance.
-
-**What an agent cannot ask, it reverse-engineers, and that is the expensive path.** A
-recorded 40-minute session spent about 95% of its output tokens thinking, and twenty-two
-of its thirty-eight shell commands were reading nurb's own source in site-packages or
-writing throwaway scripts to print a face centre. `nurb api` answers the first (the
-vocabulary with signatures, derived from `__all__` and from the live functions, so it
-cannot drift) and `nurb inspect` answers the second (faces, normals, concave edges, and
-each finding resolved to the face it fired on, in the units the rules report). `chamfer`
-shadows build123d's to append the doctrine's room rule on failure, because the kernel's
-own "try a smaller length value(s)" points at the wrong cause. `fillet` is deliberately
-not wrapped: build123d's fillet error already names `max_fillet()` and a smaller radius
-really is the fix there, so the chamfer rule would have been wrong half the time.
-
-`nurb extract` finds duplication across sibling parts up to alpha-equivalence and
-reports it; it does not rewrite, because naming the thing is the judgement and noticing
-is the mechanical part. Run over the finished port it found `system.slab()` in six files
-at once.
-
-The viewer has a slider per numeric parameter, inferred from the signature and nothing
-else, a section view that caps its cut so a solid still reads as solid, and a button
-that writes an exploration back into the file's defaults. three.js is vendored, so the
-viewer and `nurb render` both work with no network.
-
-**The live loop got about 20x faster in Phase 4, and not for a reason anyone would
-guess.** `Shape.tessellate` reads its triangles with `for t in poly.Triangles()`, and
-OCP's iterator over that array is pathological: 7790 triangles cost 536ms to iterate
-and 6.8ms to read by index, against 10ms for the meshing itself. `builder._triangulate`
-reads them by index and returns bit-identical geometry. Phase 1's recorded conclusion
-that "tessellation is the loop" was measuring that iterator.
-
-The README's original "not built yet" list is built. Printer profiles ship in
-`src/nurb/printers.toml`, named once per project by `printer.toml` (`nurb check
---printer x` tries another machine). `min_wall` corrects its ray chords with an
-inscribed sphere on exact kernel distances, gated so the sphere is only paid for where
-it could change the verdict; the far contact gets the same 0.3 cosine floor as the
-ray's exit filter, or a dimple's bowl reads as a thin wall (it did: 1.07mm in a 2.3mm
-web on the scraper). And the viewer is the configurator: `stl`/`step` buttons build at
-the slider values, polished, and hand back the file.
