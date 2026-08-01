@@ -277,6 +277,16 @@ def test_open_viewer_uses_webbrowser_elsewhere(monkeypatch):
     assert opened == ["http://127.0.0.1:7373"]
 
 
+def test_viewer_matches_websocket_security_to_the_page():
+    """An HTTPS reverse proxy needs wss; browsers block ws as mixed content."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    assert "location.protocol === 'https:' ? 'wss' : 'ws'" in viewer
+    assert "new WebSocket(`${scheme}://${location.host}/ws`)" in viewer
+    assert "new WebSocket(`ws://${location.host}/ws`)" not in viewer
+
+
 # --- the skill staleness nudge ------------------------------------------------
 
 

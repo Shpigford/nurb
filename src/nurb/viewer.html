@@ -1378,7 +1378,8 @@ async function fallback() {
 }
 
 function connect() {
-  const ws = new WebSocket(`ws://${location.host}/ws`);
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${scheme}://${location.host}/ws`);
   sock = ws;
   const conn = document.getElementById('conn');
   // A handshake that hangs fires neither onopen nor onclose (#17 saw Chrome do
