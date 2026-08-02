@@ -1,0 +1,57 @@
+# nurb evals
+
+How well do coding agents design 3D-printable parts with nurb? Each task in `tasks/` is an original part with seeded parametric dimensions. An agent gets a throwaway nurb project and the task instruction; the scorer builds whatever it wrote, headlessly, and grades the actual B-rep geometry. No human judging, no reference meshes, nothing to memorize.
+
+The current leaderboard is in [REPORT.md](REPORT.md).
+
+## The tasks
+
+Tasks come in classes, because the benchmark measures two different abilities:
+
+- **Spec tasks** (`tasks/cable_clip`): every dimension stated, zero interpretation. They measure execution fidelity, the floor.
+- **Function tasks** (`tasks/bundle_holder`): the problem, the measured interfaces, and the printer are stated, the geometry is not. Scoring is functional gates that are mechanical facts of the B-rep (the bundle has a retained place to sit, the screw has a bore, a seat, and driver access) plus a material-economy gradient, so a cleverer design legitimately wins without a human deciding it was clever. This is where models that can interpret outmaneuver models that can only follow.
+- **Judgment tasks** (`tasks/leg_cup`): the geometry is stated, but one real-world dimension is deliberately not on file and nobody can measure it right now. What is scored, beyond the geometry, is measurement discipline the way nurb's doctrine defines it: the part derives from `measured()` values (the scorer rebuilds it against a rewritten `measurements.toml` and the geometry must track), and the missing dimension is recorded as a provisional guess with provenance instead of baked into the code. A silent plausible number works tonight and is exactly what loses points. Because the graded artifact is the part plus the measurements entry next to it, this task is always graded inside a materialized project.
+
+Every scored check is stated in the task instruction; nothing unstated is ever graded.
+
+## What a row is
+
+A leaderboard row is one model at one effort level, run through a real agent CLI (`claude` or `codex`) on the contributor's own subscription. That is deliberate: it benchmarks what a nurb user actually runs, which is the model, the harness, and the shipped skill together. Every trial records the harness version, nurb version, evals version, and a content revision over the task, scorer, harness adapters, shipped nurb package, and lockfile; changing any of them makes a different row.
+
+Scoring is gate-then-grade. A part that does not build within the timeout, or builds anything other than exactly one solid, scores zero. Past the gate, three weighted stages: the printability rules under a context the task owns (0.3), the task's dimensional assertions against the B-rep (0.5), and flex probes that rebuild the part with a changed parameter and assert the geometry tracks, which catches hardcoded dimensions (0.2). Stage columns overlap by design: a part wrong at the stated size is wrong at every probed size too.
+
+Candidate code never runs in the scorer's process. It builds in an isolated worker and crosses into the trusted scorer only as BREP geometry, so forged output and mutated check registries score zero instead of a forged pass.
+
+## Running a row
+
+You need `uv` and the `claude` or `codex` CLI installed and logged in to your own subscription. Then:
+
+```
+cd evals
+uv sync --locked
+uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/cable_clip
+uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/bundle_holder
+uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/leg_cup
+uv run python -m nurb_evals.report results/claude-opus-high
+```
+
+Both runs append to the same `results.jsonl`; the report renders one table per task.
+
+Cost: trials spend your subscription, not API credit. A cable_clip trial has run 2 to 8 minutes of agent time depending on the model; three trials is a coffee, not an afternoon. The `--timeout` wall clock (default 900s per trial) is the only turn cap, so the worst case per row is 45 minutes.
+
+Each run leaves everything under `results/<harness>-<model>-<effort>/`: `results.jsonl` with one row per trial (full benchmark identity, score, stages, usage, durations), plus `<task>/trial_<n>/` holding the full JSON event transcript and the project the agent left behind. A row nobody can audit is a rumor, so all of it is kept.
+
+Trials run on your machine like any normal agent session. The live throwaway project sits outside the benchmark checkout, then moves under `results/` after the harness exits for auditing. `claude` runs with permissions skipped inside that project; `codex` uses its own workspace-write sandbox and an ephemeral home containing only your auth. Only run rows on a machine where you would run those agents anyway; containerized trials are a planned hardening step.
+
+## Submitting a row
+
+Open a PR that copies your `results/<label>/results.jsonl`, each `<task>/trial_<n>/transcript.txt`, and the auditable candidate source into `submissions/<label>/`. Preserve `project/parts/*.py` plus any project-root or package `.py` files they import; leave cards, meshes, renders, and other generated project files out. Replace machine-specific home paths in transcripts and source with `<home>` or `<workspace>`. `results/` itself is gitignored so a submission is always a deliberate copy, never a bulk commit of local runs.
+
+Rows land on the leaderboard in one of two tiers:
+
+- **self-reported**: the logs are present and format-valid.
+- **validated**: a maintainer re-ran your model and effort on a fresh seed and the scores matched within noise.
+
+The spot-check works because every assertion is parametric in the seed: the instruction, the fixture measurements, and the graded dimensions all move together. A planted or memorized solution scores zero on a seed it has never seen, so validation needs no trust in the submitted transcripts.
+
+What the spot-check cannot catch is a part written against the grader rather than the task: candidate code is built in its own process behind a B-rep boundary, which keeps it away from the check functions and the verdict, but it still chooses the geometry it exports, so a part that detects the grading process and builds something different for it would pass a re-run too. That is out of the benchmark's threat model, because a graded agent never sees the grader, and a contributor who does could forge the JSONL rows outright. The defense is that submitted parts are published and readable: a part file that inspects `sys.argv` is not a design, and gets the row rejected.

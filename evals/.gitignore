@@ -1,0 +1,3 @@
+# Local run output. Rows meant for the leaderboard get copied into a submission PR
+# deliberately, never committed wholesale from here.
+results/

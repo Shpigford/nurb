@@ -50,7 +50,7 @@ nurb api             the vocabulary a part file gets, with signatures
 nurb skill           print an agent skill file for any AI harness, --sync rewrites installed copies
 nurb update          upgrade nurb, then re-sync the installed skill to match
 nurb card [part]     regenerate a card's AUTO block
-nurb verify [part]   the doctrine's verification list, --strict-ish exit code
+nurb verify [part]   the doctrine's verification list
 nurb render [part]   write build/<part>.png, needs the render extra
 nurb export [part]   write STL and STEP into build/, --formats for GLB
 nurb extract         find duplication across sibling parts
@@ -88,6 +88,8 @@ src/nurb/cli.py           command surface
 examples/notch/           the real parts, which are also the calibration set
 tests/test_notch_fit.py   the hanging interface, asserted for every configuration
 tests/                    rules and examples, both cases per rule
+evals/                    the model leaderboard: tasks, scorer, CLI runner. Its own uv
+                          project with its own suite; see evals/README.md
 ```
 
 ## Rules
