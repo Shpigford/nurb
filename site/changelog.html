@@ -117,6 +117,21 @@
   <h1>What's new</h1>
   <p class="lede">Every nurb release, newest first. Install once, then <b>nurb update</b> keeps you current.</p>
 
+  <article class="release" id="v0.10.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.10.0">v0.10.0</a></span><time datetime="2026-08-02">August 2, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span><b>Rounded rims.</b> The top of a wall that rises and falls can now be rounded over in one step. Ask for it by name when you want the softer edge; everything else still gets a chamfer by default.</span></li>
+      <li><b class="tag new">new</b><span><b>Screw pockets.</b> A recessed pocket for a screw head can print facing the bed. The hole above it used to begin on thin air, and now two thin throwaway layers carry it, which the screw pushes straight through.</span></li>
+      <li><b class="tag new">new</b><span>A new check warns when a part has a hole rim floating over an open pocket, the failure the overhang rule stays quiet about.</span></li>
+      <li><b class="tag">improved</b><span>Exported STLs are meshed at printing scale, so a large tray is a fraction of the file it used to be, and every export reports its size and triangle count.</span></li>
+      <li><b class="tag">improved</b><span>A part too long for your bed now passes if it fits across the diagonal, which is how you would print it anyway.</span></li>
+      <li><b class="tag">improved</b><span>The viewer says when a part is rebuilding and counts the seconds, and sliders no longer snap back to old values or rebuild on every notch of a drag.</span></li>
+      <li><b class="tag">improved</b><span>A corner axis marker keeps orientation readable while you orbit, and finding pins can be hidden to see the geometry underneath them.</span></li>
+      <li><b class="tag">fixed</b><span>The viewer connects when nurb is served over HTTPS behind a proxy, instead of hanging at connecting.</span></li>
+      <li><b class="tag">fixed</b><span>Starting the viewer falls back to another port instead of refusing to open when one is already running.</span></li>
+    </ul>
+  </article>
+
   <article class="release" id="v0.9.0">
     <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.9.0">v0.9.0</a></span><time datetime="2026-07-31">July 31, 2026</time></div>
     <ul>
