@@ -704,7 +704,13 @@ class Server:
                 status = entry["error"] or f"{entry['ms']}ms"
                 print(f"  {entry['name']}: {status}", flush=True)
                 await self.broadcast(entry)
-                # Geometry has landed, so the rules can take their time.
+                # Geometry has landed, so the rules can take their time. Not the lock,
+                # though: with another rebuild already waiting, these findings describe
+                # a solid the next build is about to replace, and the slider that
+                # queued it would sit behind them. The last build in a burst still
+                # gets its checks.
+                if not self.queue.empty():
+                    continue
                 async with self.building:
                     entry = await asyncio.to_thread(self.check, path)
                 if entry and entry.get("findings") is not None:

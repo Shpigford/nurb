@@ -273,6 +273,8 @@ def crown(wall, radius=None):
     # made OCCT segfault, hang, or fuse to nothing.
     flush = radius > t / 2 - WELD
     grow = radius + weld if flush else radius
+    path_pts = _decimate(path_pts)
+    n = len(path_pts)
     for shift in (0, n // 7, 2 * n // 7, 3 * n // 7):
         rotated = path_pts[shift:] + path_pts[:shift]
         out = wall + _pipe(Spline(*rotated, periodic=True), grow)
@@ -287,6 +289,34 @@ def crown(wall, radius=None):
             "or the roofline transitions away from the edge and rebuild.",
         ],
     )
+
+
+def _decimate(pts, tolerance=0.01):
+    """Thin the samples where the path is straight, before they become spline poles.
+
+    The gates want dense samples; the spline does not, and its poles are what every
+    consumer downstream pays for: the sweep, the fuse, the viewer's tessellation and
+    the check pass all scale with them (measured on the demo tray: 860 poles put the
+    check pass at 44s). The spacing follows the local bend, `sqrt(8 * R * tolerance)`
+    being the chord whose sagitta is the tolerance, so corners keep every sample and
+    a straight run keeps one in five. Graded by never outrunning the last kept
+    sample's own target, because an interpolating spline rings where the spacing
+    jumps; Douglas-Peucker thinning, which is all jumps, welded slivers onto every
+    corner that this scheme does not.
+    """
+    n = len(pts)
+    spacing = []
+    for i in range(n):
+        r = _circumradius(pts[i - 1], pts[i], pts[(i + 1) % n])
+        s = math.sqrt(8 * r * tolerance) if math.isfinite(r) else 2.5
+        spacing.append(max(SPACING, min(2.5, s)))
+    keep, acc = [0], 0.0
+    for i in range(1, n):
+        acc += (pts[i] - pts[i - 1]).length
+        if acc >= min(spacing[i], spacing[keep[-1]]):
+            keep.append(i)
+            acc = 0.0
+    return [pts[i] for i in keep]
 
 
 def _mesh_volume(shape, tolerance=0.1):

@@ -174,6 +174,21 @@
      shows no state change and the shelf does. */
   #hud, #checks { transition: opacity .12s .25s; }
   body.stale #hud, body.stale #checks, #checks.pending { opacity: .32; }
+  /* The rebuild pill and the little spinner beside "parameters". Same .25s delay as
+     the dimming above: a build that lands inside one round trip never shows either,
+     so a light part stays silent and a crowned tray says what the wait is. */
+  .spin { flex: none; width: 10px; height: 10px; border-radius: 50%;
+          border: 1.5px solid var(--line); border-top-color: var(--accent);
+          animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #building { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+              display: flex; align-items: center; gap: 7px; padding: 5px 12px;
+              border-radius: 999px; background: var(--panel); border: 1px solid var(--line);
+              color: var(--dim); font-size: 11px; pointer-events: none;
+              opacity: 0; transition: opacity .12s .25s; }
+  body.stale #building { opacity: 1; }
+  #params h2 .spin { margin-left: 7px; opacity: 0; transition: opacity .12s .25s; }
+  body.stale #params h2 .spin { opacity: 1; }
 
   #foot { margin-top: auto; padding: 9px 12px; border-top: 1px solid var(--line);
           display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
@@ -358,6 +373,7 @@
     <button id="reframe" title="refit the camera to the part"><svg><use href="#i-focus"/></svg><span>reframe</span></button>
   </div>
   <div id="hud"></div>
+  <div id="building"><span class="spin"></span><span>rebuilding</span><span id="buildsecs"></span></div>
   <div id="checks"></div>
   <div id="err"></div>
 </main>
@@ -1097,7 +1113,7 @@ function params(e) {
   box.classList.toggle('empty', !rows.length);
   if (!rows.length) { box.innerHTML = ''; document.body.classList.remove('dirty'); return; }
 
-  box.innerHTML = '<h2>parameters<a id="resetall" title="reset every parameter">'
+  box.innerHTML = '<h2>parameters<span class="spin"></span><a id="resetall" title="reset every parameter">'
     + '<svg><use href="#i-reset"/></svg>reset</a></h2>';
   // Split, not filtered: a family constant stays reachable, it just stops competing for
   // attention with the dimensions this part actually owns.
@@ -1222,7 +1238,27 @@ function sync(rows) {
 // is already looking at something else, and a boolean cannot tell "mine came back" from
 // "someone else's did": clicking another part mid-rebuild used to leave the flag stuck
 // on forever, which killed every slider in the session.
-let pending = null, pendingFor = null, inflight = null, timer = null, sock = null;
+let pending = null, pendingFor = null, pendingCommitted = false;
+let inflight = null, timer = null, sock = null, staleSince = 0;
+
+// The pill's clock. A crown rebuild is seconds, not the 60-430ms the protocol was
+// clocked against, and a wait with no number reads as a hang.
+setInterval(() => {
+  const t = document.getElementById('buildsecs');
+  if (t) t.textContent = document.body.classList.contains('stale')
+    ? `${Math.max(1, Math.round((Date.now() - staleSince) / 1000))}s` : '';
+}, 500);
+
+function beginStale() {
+  if (!document.body.classList.contains('stale')) staleSince = Date.now();
+  document.body.classList.add('stale');
+}
+
+// A part whose last build took seconds does not get a rebuild per drag notch: the
+// mid-drag value would hold the slot that long while the release value waits behind
+// it, which is how one gesture became a 20 second round trip. Light parts keep the
+// live preview.
+function slow() { return ((parts.get(current) || {}).ms || 0) > 2000; }
 
 function push(commit) {
   lastNote = null;                      // moving a slider answers the last write
@@ -1230,9 +1266,10 @@ function push(commit) {
   if (note) note.textContent = '';
   pending = dirty();
   pendingFor = current;
+  pendingCommitted = commit;
   clearTimeout(timer);
   if (commit) flush();                  // released the slider, or typed a number
-  else timer = setTimeout(flush, 90);   // skip the values a drag passed straight over
+  else if (!slow()) timer = setTimeout(flush, 90);  // skip values a drag passed over
 }
 
 function flush() {
@@ -1240,10 +1277,11 @@ function flush() {
   // Values collected for a part the user has since left. The server still holds that
   // part's overrides, so dropping this loses nothing.
   if (pendingFor !== current) { pending = null; return; }
+  if (!pendingCommitted && slow()) return;  // mid-drag on a heavy part waits for release
   const payload = pending;
   pending = null;
   inflight = current;
-  document.body.classList.add('stale');
+  beginStale();
   sock.send(JSON.stringify({ type: 'params', name: current, values: payload }));
 }
 
@@ -1281,7 +1319,7 @@ function applyVariant(name, v) {
   if (!sock || sock.readyState !== WebSocket.OPEN) return;
   pending = null; pendingFor = null;   // a drag in flight must not resurrect old values
   inflight = name;
-  document.body.classList.add('stale');
+  beginStale();
   sock.send(JSON.stringify({ type: 'params', name, values: { ...v.params } }));
 }
 
