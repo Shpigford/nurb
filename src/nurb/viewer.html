@@ -556,7 +556,11 @@ const stencilFront = new THREE.MeshBasicMaterial({
 const cap = new THREE.Mesh(
   new THREE.PlaneGeometry(1, 1),
   new THREE.MeshStandardMaterial({
-    color: 0xc9a227, metalness: 0.0, roughness: 0.85, side: THREE.DoubleSide,
+    // Violet, because the cap is the one surface that is not part material and must
+    // not impersonate anything that is a signal: amber is a warn pin, red a fail pin,
+    // green the accent, blue-gray the part itself. The shipped gold sat on the same
+    // hue as the warn pins, and a pin on a cut ceiling is the section view's whole job.
+    color: 0x8578cf, metalness: 0.0, roughness: 0.85, side: THREE.DoubleSide,
     stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc,
     stencilFail: THREE.ReplaceStencilOp,
     stencilZFail: THREE.ReplaceStencilOp,
