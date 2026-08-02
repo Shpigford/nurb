@@ -200,10 +200,51 @@ Scoring mechanics:
 
 ---
 
+## Phase 6: Print-physics function task (`shelf_bracket`)
+
+### Objective
+
+The corpus's fourth task and second function task: one where print physics is the binding constraint rather than a lint afterthought. The obvious shape for the stated problem carries an unprintable overhang, and the score separates models that design around physics (a gusseted or chamfered transition, or an orientation chosen so the part prints as it sits) from models that emit the textbook shape and eat the FAIL.
+
+### Rationale
+
+Phase 5 closed the machinery: three classes proven, scorer contract complete (weighted misfits, parameter and measurement probes, audit hook), so this phase is pure content. Print physics is the pick because it is nurb's actual differentiator (no other CAD benchmark scores printability at all, per RESEARCH.md) and nothing in the corpus yet forces a model to reckon with it: cable_clip and leg_cup print trivially, and bundle_holder's support-free constraint has not been the thing any real trial failed on. One task, exhaustively fair, adversarial round included; the phase 4 and 5 records say every task needs one.
+
+### Task design (sketch; the executing session pins the checks)
+
+`shelf_bracket`: a wall bracket holding a small shelf ledge of stated depth clear of the wall, mounted with two screws, on the P1S. Stated: the mounting interface (screw spacing and diameters, back-plate contact), the ledge's working surface (depth, width, height above the lower screw, flatness, load-bearing span as a continuous boolean), support-free printing as it sits, and the material gradient. Not stated: the shape between wall and ledge, or how the part sits on the bed.
+
+Design intents to preserve while pinning checks:
+
+- The naive shape (flat back plate, horizontal ledge at 90 degrees, printed upright) must genuinely fail lint via the frozen Context's overhang rule, and at least two honest escapes must exist: geometry (a 45-degree gusset or chamfered transition under the ledge) and orientation (modelled so it sits print-friendly, e.g. on its side, with the mounting contract expressed in the part's own frame). Both escapes score full marks; the task must not privilege one.
+- The mounting and ledge gates are stated relative to the part's own frame (back face, ledge normal), never the bed, so orientation freedom does not rotate the functional checks out from under the part. bundle_holder's orientation contract is the pattern to adapt, loosened to leave the bed pose free.
+- Functional checks stay continuous (booleans against ledge-sized and screw-sized volumes); phase 5's lesson about mapping the union of the probes applies from the start, not after the adversary reports.
+- Two chamfered edges need room between them (CLAUDE.md): the gusset-plus-polish combination is where OCCT's chamfer collisions live, so the reference set needs a polished positive control from day one.
+
+### Tasks
+
+- [ ] `evals/tasks/shelf_bracket/{task.py,fixture/}`: instance (seeded ledge depth/width and screw spacing), instruction, misfits, flex probes; no scorer changes expected.
+- [ ] Reference set: good (gusseted), good (reoriented), polished positive control, the naive 90-degree overhang (lint FAIL, dims clean), plus the usual gate/dims/flex negatives.
+- [ ] Fairness suite in the established shape; designed score order recorded before grading.
+- [ ] Adversarial round by a fresh-context agent; map the probe-coverage union first (phase 5 lesson); every cheat becomes a control.
+- [ ] Fresh-context verification against these criteria.
+- [ ] Real trials only with Josh's go-ahead.
+
+### Success Criteria
+
+- `cd evals && uv run pytest -q` passes with the shelf_bracket suite; root suite unaffected.
+- The naive-overhang reference loses lint points under the frozen Context while passing dims, and both honest escapes (gusset, reorientation) score 1.0.
+- Every flawed reference lands in a recorded designed order with the flaw named in its intended stage; seed drives instruction and assertions together.
+- Existing task reference grades unchanged (no scorer edits, or proven score-neutral if any).
+- Grading one part completes in under 30s; the adversarial round ran and its findings are recorded with cheat geometries as controls.
+
+---
+
 ## Post-Implementation
 
-- [ ] Corpus: the remaining core tasks (chamfer-heavy spec task, overhang trap, refusal-to-guess/measured() judgment task, an assembly task, more function tasks).
-- [ ] CI format-validation for community PRs; leaderboard rendering.
+- [ ] Corpus: the remaining core tasks after phase 6 (chamfer-heavy spec task, an assembly task, more function tasks toward the ten of the research's core set).
+- [ ] Consider publishing at three or four tasks rather than waiting for ten: three classes with honest confidence intervals is a defensible benchmark, community rows cost contributors nothing, and later tasks benefit from public scrutiny. Josh's call.
+- [ ] CI format-validation for community PRs; leaderboard rendering (site/ vs separate repo, open since RESEARCH.md).
 
 ## Notes
 

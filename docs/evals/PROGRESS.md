@@ -151,6 +151,19 @@ None.
 - The two infrastructure cheats split on whether the graded agent could reach them. The self-recording paperwork cheat is reachable (a model could plausibly write measurements from its part file), so the audit now reads the pre-build snapshot. Exported-B-rep tampering and grading-process detection are not reachable (the agent never sees the grader) and are unfixable against a contributor who owns the machine and could forge rows anyway; `os._exit` closes the atexit variant for free, and the boundary is documented in README.md rather than papered over.
 #### Blockers
 
+### Phase 6: Print-physics function task (shelf_bracket)
+**Status:** Not Started (scoped 2026-08-02; design sketch and criteria in IMPLEMENTATION.md Phase 6)
+**Verified:** No
+
+#### Tasks Completed
+#### Evidence
+#### Decisions Made
+- Scoped as pure content: no scorer changes expected, since phase 5 completed the contract. The task makes print physics the binding constraint, with two honest escapes (gusset geometry, print-friendly orientation) that must both score 1.0.
+#### Blockers
+
+### Queued fix (found 2026-08-02, deferred while fable rows run)
+`grade.py`'s outer timeout kills the scoring process with a plain `subprocess.run(timeout=...)`, which orphans the candidate grandchild when the outer timer fires before scoring's own killpg: ~20 leaked `hangs.py` candidates from this session's test runs were found spinning on CPU (killed by hand). Fix is the same shape as run.py's: Popen with `start_new_session=True` and killpg on timeout, plus a regression that forces the outer timer to fire first (tiny outer timeout on hangs.py) and asserts no candidate survives. Deferred because scorer files are content-hashed into row identity per trial, and editing grade.py mid-row would split the in-flight fable rows across two benchmark revisions.
+
 ---
 
 ## Session Log
