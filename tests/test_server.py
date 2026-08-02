@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -227,6 +228,26 @@ def sent(server):
     return out
 
 
+def test_sync_and_http_fallback_carry_the_printer_bed(tmp_path):
+    server = project(tmp_path)
+    (tmp_path / "printer.toml").write_text("bed = [180, 120, 180]\n")
+
+    assert server._sync()["bed"] == [180, 120]
+    response = asyncio.run(server.http(None, SimpleNamespace(path="/api/sync")))
+    assert json.loads(response.body)["bed"] == [180, 120]
+
+
+def test_rebuild_broadcast_carries_a_changed_printer_bed(tmp_path):
+    server = project(tmp_path)
+    out = sent(server)
+    (tmp_path / "printer.toml").write_text("bed = [180, 120, 180]\n")
+
+    asyncio.run(server.broadcast(server.state["thing"]))
+
+    assert out[0]["type"] == "rebuilt"
+    assert out[0]["bed"] == [180, 120]
+
+
 def test_upgrade_declines_outside_a_uv_tool_install(tmp_path):
     server = Server(tmp_path)
     out = sent(server)
@@ -332,6 +353,25 @@ def test_viewer_matches_websocket_security_to_the_page():
     assert "location.protocol === 'https:' ? 'wss' : 'ws'" in viewer
     assert "new WebSocket(`${scheme}://${location.host}/ws`)" in viewer
     assert "new WebSocket(`ws://${location.host}/ws`)" not in viewer
+
+
+def test_viewer_updates_the_bed_outside_the_initial_socket_sync():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    socket = viewer.split("ws.onmessage =", 1)[1]
+    assert socket.index("bedUpdate(msg.bed);") < socket.index("if (msg.type === 'sync')")
+    assert "fetch('/api/sync')" in viewer
+
+
+def test_viewer_centers_printed_geometry_without_assembly_context():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    paint = viewer.split("async function paint", 1)[1].split("// Takes a name", 1)[0]
+    centering = paint.split("const plated =", 1)[1].split("const size =", 1)[0]
+    assert "c.name !== 'context'" in centering
+    assert "mesh.position.set(-at.x, -at.y, -plated.min.z)" in centering
 
 
 def test_section_reaims_after_a_new_parts_camera_is_restored():

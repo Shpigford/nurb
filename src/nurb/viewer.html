@@ -447,9 +447,35 @@ const key = new THREE.DirectionalLight(0xffffff, 1.8);
 key.position.set(1, -1.4, 2);
 scene.add(key);
 
-const grid = new THREE.GridHelper(400, 40, 0x3a3f4a, 0x24272e);
-grid.rotation.x = Math.PI / 2;   // GridHelper is XZ; we want XY
-scene.add(grid);
+// The grid is the build plate, drawn at the printer's bed size so the plate edge
+// means what it says. Sized from the server; until its first message it shows the
+// same default bed the checks assume. 10mm cells, like the GridHelper it replaced,
+// which had to go because a bed is a rectangle and GridHelper only draws squares.
+const plateEdge = new THREE.LineBasicMaterial({ color: 0x3a3f4a });
+const plateCell = new THREE.LineBasicMaterial({ color: 0x24272e });
+let grid = null, bedXY = [256, 256];
+function plate([w, d]) {
+  if (grid) {
+    scene.remove(grid);
+    for (const c of grid.children) c.geometry.dispose();
+  }
+  const hw = w / 2, hd = d / 2, cells = [], edge = [];
+  for (let x = 10; x < hw; x += 10) cells.push(x, -hd, 0, x, hd, 0, -x, -hd, 0, -x, hd, 0);
+  for (let y = 10; y < hd; y += 10) cells.push(-hw, y, 0, hw, y, 0, -hw, -y, 0, hw, -y, 0);
+  edge.push(0, -hd, 0, 0, hd, 0, -hw, 0, 0, hw, 0, 0);  // center cross, where a part lands
+  edge.push(-hw, -hd, 0, hw, -hd, 0, hw, -hd, 0, hw, hd, 0,
+            hw, hd, 0, -hw, hd, 0, -hw, hd, 0, -hw, -hd, 0);
+  const seg = (pts, mat) => new THREE.LineSegments(
+    new THREE.BufferGeometry().setAttribute('position',
+      new THREE.BufferAttribute(new Float32Array(pts), 3)), mat);
+  grid = new THREE.Group();
+  grid.add(seg(cells, plateCell), seg(edge, plateEdge));
+  scene.add(grid);
+}
+plate(bedXY);
+function bedUpdate(bed) {
+  if (bed && (bed[0] !== bedXY[0] || bed[1] !== bedXY[1])) plate(bedXY = bed);
+}
 
 // Findings get a pin at their reported point, in the same shifted space as the mesh.
 const pins = new THREE.Group();
@@ -673,8 +699,11 @@ function sectionUpdate() {
   // An absolute ?cut position gets the same treatment: clamped just inside, so z:0mm
   // cuts the bottom skin instead of grazing the surface and drawing nothing. It sits
   // where it says regardless of cutSign, which only picks the half that survives.
-  const at = cutMm !== null
-    ? Math.min(hi - (hi - lo) * 0.002, Math.max(lo + (hi - lo) * 0.002, cutMm))
+  // x and y positions are quoted in the part's own coordinates, z from the bed, so
+  // the centering shift is added back for the first two and already folded into z.
+  const mm = cutMm === null ? null : cutAxis === 'z' ? cutMm : cutMm + mesh.position[cutAxis];
+  const at = mm !== null
+    ? Math.min(hi - (hi - lo) * 0.002, Math.max(lo + (hi - lo) * 0.002, mm))
     : lo + (hi - lo) * (0.02 + 0.96 * t);
   const dir = AXES[cutAxis];
   plane.normal.set(-cutSign * dir[0], -cutSign * dir[1], -cutSign * dir[2]);  // keeps the side the normal points at
@@ -967,12 +996,20 @@ async function paint(name, { keepCamera }) {
   // drag never rebuilds. Reposing here is what keeps a save from snapping the door.
   applyJointPoses();
 
+  // Obstacles are context for an assembly, not things going onto the printer. Keep
+  // them in the camera frame, but do not let an offset wall move the printed parts
+  // away from the plate center or lift them off it.
   const bb = new THREE.Box3().setFromObject(mesh);
-  // The grid is the build plate, so a part sits on it. Where a part's own origin
-  // falls is a modeling datum and nothing to do with printing: Notch hangs
-  // everything below z=0, which would put every part underneath the plate.
-  mesh.position.z = -bb.min.z;
-  const box = bb.clone().translate(new THREE.Vector3(0, 0, mesh.position.z));
+  const plated = new THREE.Box3();
+  for (const c of mesh.children) if (c.isMesh && c.name !== 'context') plated.expandByObject(c);
+  if (plated.isEmpty()) plated.copy(bb);  // a context-only scene still needs a sane view
+  // The grid is the build plate, so a part sits on it, centered, the way a slicer
+  // plates it. Where a part's own origin falls is a modeling datum and nothing to
+  // do with printing: Notch hangs everything below z=0 and entirely to one side of
+  // x=0, which put every part underneath the plate and off in a corner of it.
+  const at = plated.getCenter(new THREE.Vector3());
+  mesh.position.set(-at.x, -at.y, -plated.min.z);
+  const box = bb.clone().translate(mesh.position);
   const size = box.getSize(new THREE.Vector3()).length();
 
   // Only reframe when the part changed scale enough that the camera is lost.
@@ -1043,18 +1080,18 @@ function checks(name) {
     + `<svg class="ic"><use href="#i-${f.severity === 'fail' ? 'fail' : 'warn'}"/></svg>`
     + `<span class="rule">${f.rule}</span><span>${f.message}</span></div>`).join('');
   box.innerHTML = `<h2>checks <span class="n">${found.length}</span></h2>${rows}`;
-  const lift = mesh ? mesh.position.z : 0;
+  const shift = mesh ? mesh.position : new THREE.Vector3();
   for (const f of found) {
     if (f.face && f.face.length) {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(f.face), 3));
       const glow = new THREE.Mesh(g, glowMat[f.severity] || glowMat.warn);
-      glow.position.z = lift;   // the same shift that puts the part on the plate
+      glow.position.copy(shift);   // the same shift that plates the part
       pins.add(glow);
     }
     if (!f.where) continue;
     const pin = new THREE.Mesh(pinGeom, pinMat[f.severity] || pinMat.warn);
-    pin.position.set(f.where[0], f.where[1], f.where[2] + lift);
+    pin.position.set(f.where[0] + shift.x, f.where[1] + shift.y, f.where[2] + shift.z);
     pin.scale.setScalar(Math.max(0.6, lastSize ? lastSize / 90 : 1));
     pin.renderOrder = 999;  // per mesh, not on the group: a Group's renderOrder only
                             // reaches its children in some three.js versions
@@ -1563,13 +1600,15 @@ function emptyState() {
   document.getElementById('emptycmd').textContent = live ? 'nurb new <name>' : 'nurb dev';
 }
 
-// The socket is the only live channel, but /api/parts serves the same rows a sync
-// carries, so a viewer whose socket is down degrades to a static-but-correct view
+// The socket is the only live channel, but /api/sync serves the same snapshot, so a
+// viewer whose socket is down degrades to a static-but-correct view
 // instead of asserting an empty project.
 async function fallback() {
   if (parts.size) return;
   try {
-    const rows = await (await fetch('/api/parts')).json();
+    const msg = await (await fetch('/api/sync')).json();
+    const rows = msg.parts || [];
+    bedUpdate(msg.bed);
     if (parts.size || !rows.length) return;  // a sync won the race, or truly empty
     rows.forEach(p => parts.set(p.name, p));
     current = parts.has(want) ? want : rows[0].name;
@@ -1601,6 +1640,7 @@ function connect() {
   };
   ws.onmessage = ev => {
     const msg = JSON.parse(ev.data);
+    bedUpdate(msg.bed);
     if (msg.type === 'sync') {
       project = msg.project || '';
       document.getElementById('project').textContent = project;

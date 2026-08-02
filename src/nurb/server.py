@@ -355,6 +355,9 @@ class Server:
             return self._resp(200, VIEWER.read_bytes(), "text/html; charset=utf-8")
         if path.startswith("/export/"):
             return await self.export(path[len("/export/") :])
+        if path == "/api/sync":
+            body = json.dumps(self._sync()).encode()
+            return self._resp(200, body, "application/json")
         if path == "/api/parts":
             body = json.dumps([self._wire(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
@@ -500,22 +503,37 @@ class Server:
             out["params"] = [{**p, "family": p["name"] in family} for p in out["params"]]
         return out
 
+    def _bed(self):
+        """The plate the viewer draws, in mm, from the project's printer profile.
+
+        A broken printer.toml must not take the handshake down with it; the checks
+        already report it per part, so the viewer just gets the default bed.
+        """
+        from . import checks
+
+        try:
+            return list(checks.printer(self.root).bed[:2])
+        except Exception:
+            return list(checks.Context().bed[:2])
+
     # ---------- websocket ----------
+
+    def _sync(self):
+        """The project snapshot shared by the socket and its HTTP fallback."""
+        return {
+            "type": "sync",
+            "project": self.root.name,
+            "bed": self._bed(),
+            "version": __version__,
+            "upgradable": _upgrade_command() is not None,
+            "draft": self.draft,
+            "parts": [self._wire(e) for e in self.state.values()],
+        }
 
     async def ws(self, connection):
         self.clients.add(connection)
         try:
-            payload = json.dumps(
-                {
-                    "type": "sync",
-                    "project": self.root.name,
-                    "version": __version__,
-                    "upgradable": _upgrade_command() is not None,
-                    "draft": self.draft,
-                    "parts": [self._wire(e) for e in self.state.values()],
-                }
-            )
-            await connection.send(payload)
+            await connection.send(json.dumps(self._sync()))
             async for raw in connection:
                 await self.command(raw)
         finally:
@@ -636,7 +654,9 @@ class Server:
                 self.clients.discard(client)
 
     async def broadcast(self, entry, kind="rebuilt"):
-        await self.send({"type": kind, **self._wire(entry)})
+        # printer.toml is watched like a part source. Carrying the current bed on the
+        # rebuild is what lets that edit resize an already-open viewer.
+        await self.send({"type": kind, "bed": self._bed(), **self._wire(entry)})
 
     # ---------- watching ----------
 
