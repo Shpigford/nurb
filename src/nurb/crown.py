@@ -40,7 +40,7 @@ Every tolerance here was measured, not reasoned about:
 
 import math
 
-from build123d import Axis, Circle, Kind, Plane, Solid, Spline, Vector, Wire, section
+from build123d import Circle, Kind, Plane, Solid, Spline, Vector, Wire, section
 
 SPACING = 0.5  # mm between path samples
 WELD = 0.05  # minimum mm of bead past a flush wall face: the union needs interference
@@ -197,14 +197,27 @@ def crown(wall, radius=None):
     # midline: where the roofline slopes across the wall the top face tilts, one edge
     # rides higher than the other, and a bead centred on either would leave the other
     # showing. The bead centres between them, and the tilt decides the weld below.
+    # OCCT's own line-face intersector, because `Shape.intersect` wraps every hit in
+    # topology and costs 2ms a probe; this is 30x cheaper and answers identically,
+    # measured against it point for point.
+    from OCP.BRepIntCurveSurface import BRepIntCurveSurface_Inter
+    from OCP.gp import gp_Ax1, gp_Dir, gp_Lin, gp_Pnt
+
+    prober = BRepIntCurveSurface_Inter()
+
     def top_at(x, y, p):
-        hits = wall.intersect(Axis((x, y, bb.min.Z - 1), (0, 0, 1)))
-        tops = [v.Z for h in hits or [] for v in h.vertices()]
-        if not tops:
+        line = gp_Lin(gp_Ax1(gp_Pnt(x, y, 0), gp_Dir(0, 0, 1)))
+        prober.Init(wall.wrapped, line, 1e-6)
+        best = None
+        while prober.More():
+            z = prober.Pnt().Z()
+            best = z if best is None or z > best else best
+            prober.Next()
+        if best is None:
             raise ValueError(
                 f"crown found no wall above the centreline at ({p.X:.1f}, {p.Y:.1f})"
             )
-        return max(tops)
+        return best
 
     reach = t / 2 - INSET
     path_pts, tilt = [], 0.0
@@ -250,24 +263,30 @@ def crown(wall, radius=None):
                 "thicken the wall so the same slope tilts it less.",
             ],
         )
+    # The pipe is one face that wraps the whole way round and closes on itself, and
+    # fusing that face against the wall sometimes leaves a corrupt record behind: an
+    # area that measures negative, a volume off by up to 19%, on geometry that still
+    # tessellates watertight at exactly the expected volume. Where the seam sits
+    # decides it, so a union that comes back corrupt is retried with the seam moved a
+    # seventh of the way round. Every attempt to normalise the topology instead
+    # (halved sweeps, trimmed spines, tangent-matched thirds, divided closed faces)
+    # made OCCT segfault, hang, or fuse to nothing.
     flush = radius > t / 2 - WELD
-    bead = _pipe(Spline(*path_pts, periodic=True), radius + weld if flush else radius)
-    out = wall + bead
-    # The gate is measured off the tessellation, not `out.volume`: OCCT's volume
-    # property misreads the pipe's seam face by up to 19% either way on geometry that
-    # tessellates watertight at exactly the expected volume, while real fuse garbage
-    # measures at or near zero. Meshed at the builder's own tolerance, so the build
-    # that follows finds its triangulation already done.
-    if not out.is_valid or _mesh_volume(out) <= 0.9 * wall.volume:
-        raise _refuse(
-            "the crown bead built but would not weld onto the wall.",
-            [
-                "This is the kernel refusing, not the part, and it usually means the",
-                "geometry is right at one of the limits above. Nudge the plan fillets",
-                "or the roofline transitions away from the edge and rebuild.",
-            ],
-        )
-    return out
+    grow = radius + weld if flush else radius
+    for shift in (0, n // 7, 2 * n // 7, 3 * n // 7):
+        rotated = path_pts[shift:] + path_pts[:shift]
+        out = wall + _pipe(Spline(*rotated, periodic=True), grow)
+        clean = out.is_valid and not any(f.area < 0 for f in out.faces())
+        if clean and (out.volume > wall.volume or _mesh_volume(out) > 0.9 * wall.volume):
+            return out
+    raise _refuse(
+        "the crown bead built but would not weld onto the wall.",
+        [
+            "This is the kernel refusing, not the part, and it usually means the",
+            "geometry is right at one of the limits above. Nudge the plan fillets",
+            "or the roofline transitions away from the edge and rebuild.",
+        ],
+    )
 
 
 def _mesh_volume(shape, tolerance=0.1):
