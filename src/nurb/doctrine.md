@@ -302,6 +302,8 @@ depth = measured("shelf_depth")
 An unknown name raises, naming what is on file. That failure is the point: it is the
 moment to ask rather than to pick something plausible.
 
+**A published number is a measurement, not a guess.** When the part mates with a manufactured product or a published standard, a VESA mount, a gridfinity bin, a camera thread, the number already exists in a datasheet, and making somebody caliper a hole pattern a standards body fixed is friction wearing rigor's clothes. Research it, record it like any other measurement with `how` naming the source ("VESA MIS-D 100, manufacturer product page"), and ask only for what nobody published, like the opening the finished thing has to fit. Two limits keep this honest: the user's actual object outranks the spec when the two disagree, because clones drift, and a number inferred from a product photo or a listing's marketing copy was never published at all, so it is a guess and gets marked like one.
+
 **When there is nobody to ask**, write the guess down and mark it `provisional = true`.
 The danger was never the guess, it is that a guess and a measurement look identical six
 months later. `how` is still required, because "eyeballed against a broom" tells the
