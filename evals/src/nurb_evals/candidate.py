@@ -10,6 +10,8 @@ import os
 import pathlib
 import shutil
 import sys
+import threading
+import time
 
 from build123d import export_brep
 
@@ -32,7 +34,23 @@ def _stage(part, measurements, root):
     return target
 
 
+def _die_when_orphaned():
+    """Exit as soon as the grading stack above is gone.
+
+    This process runs in its own session so the scorer can kill it selectively, which
+    also means nothing kills it automatically when the scorer dies first (an
+    interrupted test run, the outer grade timeout racing the inner one). On a hanging
+    part that leftover spins forever; a session was found carrying twenty of them."""
+    parent = os.getppid()
+    while True:
+        now = os.getppid()
+        if now == 1 or now != parent:
+            os._exit(1)
+        time.sleep(1.0)
+
+
 def main():
+    threading.Thread(target=_die_when_orphaned, daemon=True).start()
     ap = argparse.ArgumentParser(description="build isolated eval candidate shapes")
     ap.add_argument("part")
     ap.add_argument("request")

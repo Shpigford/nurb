@@ -220,3 +220,35 @@ def test_materialize_writes_a_startable_project(tmp_path):
     assert "bambu_p1s" in (root / "printer.toml").read_text()
     text = (root / "measurements.toml").read_text()
     assert "value = 8.0" in text and "how =" in text, "a measurement without provenance is a guess"
+
+
+def test_an_orphaned_candidate_exits_instead_of_spinning(tmp_path):
+    """The candidate runs in its own session so the scorer can kill it selectively,
+    which also means nothing kills it when the scorer dies first. It has to notice
+    the orphaning itself, or a hanging part leaves a process spinning forever."""
+    import os
+    import signal
+
+    request = tmp_path / "request.json"
+    request.write_text("[{}]", encoding="utf-8")
+    wrapper = (
+        "import subprocess, sys\n"
+        f"p = subprocess.Popen([sys.executable, '-m', 'nurb_evals.candidate',"
+        f" {str(SOLUTIONS / 'hangs.py')!r}, {str(request)!r}, {str(tmp_path / 'out')!r}],"
+        " start_new_session=True)\n"
+        "print(p.pid)\n"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", wrapper], capture_output=True, text=True, timeout=30
+    )
+    pid = int(done.stdout)
+
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.5)
+    os.kill(pid, signal.SIGKILL)
+    pytest.fail("the orphaned candidate was still running 20s after its parent died")

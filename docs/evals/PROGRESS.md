@@ -1,6 +1,6 @@
 # nurb LLM Eval Suite Progress
 
-## Status: Phase 5 Complete (no leg_cup rows yet, and the fable bundle_holder row is still pending re-run; both need Josh's go-ahead on usage. See REPORT.md)
+## Status: Phase 5 Complete and rows current (fable re-run and first leg_cup row landed 2026-08-02; phase 6 scoped, not started)
 
 ## Quick Reference
 - Research: `docs/evals/RESEARCH.md`
@@ -161,8 +161,16 @@ None.
 - Scoped as pure content: no scorer changes expected, since phase 5 completed the contract. The task makes print physics the binding constraint, with two honest escapes (gusset geometry, print-friendly orientation) that must both score 1.0.
 #### Blockers
 
-### Queued fix (found 2026-08-02, deferred while fable rows run)
-`grade.py`'s outer timeout kills the scoring process with a plain `subprocess.run(timeout=...)`, which orphans the candidate grandchild when the outer timer fires before scoring's own killpg: ~20 leaked `hangs.py` candidates from this session's test runs were found spinning on CPU (killed by hand). Fix is the same shape as run.py's: Popen with `start_new_session=True` and killpg on timeout, plus a regression that forces the outer timer to fire first (tiny outer timeout on hangs.py) and asserts no candidate survives. Deferred because scorer files are content-hashed into row identity per trial, and editing grade.py mid-row would split the in-flight fable rows across two benchmark revisions.
+### Orphaned-candidate fix (queued during the fable rows, landed after)
+~20 leaked `hangs.py` candidate processes from earlier sessions were found spinning on CPU (killed by hand). The queued diagnosis (grade.py's outer kill) turned out wrong on inspection: candidates run in their own sessions precisely so the scorer can kill them selectively, so no ancestor's process-group kill can reach them, from grade.py or anywhere else. The landed fix is in the candidate itself: a watchdog thread exits the process the moment its parent is gone (`getppid()` becomes 1 or changes), which covers every death of the stack above it, including an interrupted test run. Regression: a wrapper spawns the candidate on hangs.py and dies immediately; the orphan must be gone within 20s (it exits in ~3).
+
+### Fable rows (run 2026-08-02 with Josh's go-ahead)
+- bundle_holder re-run under the coexistence instruction: 1.000 x 3 (~12.7 min and ~12k tokens per trial). The pending row is closed; REPORT.md now shows fable 1.000 / codex 0.933 / haiku 0.253.
+- leg_cup first row: 1.000 x 3, the cheapest row yet (~13k tokens, ~3.5 min per trial). Audited like a cheater before trusting it: three distinct authored parts, none matching good.py, all reading measured() for all three names; all three measurements.toml files record lift honestly (provisional = true, real provenance notes like "measure the real gap at the bench and update"); zero `nurb dev` attempts in any transcript; trial 1 independently re-graded to the same 1.0.
+- Sanitized transcripts, parts, and (for leg_cup) measurements.toml copied under `submissions/claude-fable-high/`; leak scan clean; REPORT.md regenerated with all three task tables.
+
+### Unattributed working-tree changes (2026-08-02, flagged to Josh)
+Between the last pre-commit suite run and the "commit it" commit, changes appeared in the tree that this session did not author: candidate.py's `_stage` upgraded to copy the whole candidate project (so parts can import root-level helpers; my version copied the part file alone), a matching `test_measurement_probes_preserve_project_helpers`, and a handful of tests elsewhere. Reviewed after the fact: sound, better than what they replaced, and green in the full suites. Presumed to be Josh or a parallel session; recorded here because they shipped in commit fe31200 without in-session review.
 
 ---
 
