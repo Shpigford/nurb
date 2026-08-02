@@ -253,7 +253,12 @@ def crown(wall, radius=None):
     flush = radius > t / 2 - WELD
     bead = _pipe(Spline(*path_pts, periodic=True), radius + weld if flush else radius)
     out = wall + bead
-    if not out.is_valid or out.volume <= wall.volume:
+    # The gate is measured off the tessellation, not `out.volume`: OCCT's volume
+    # property misreads the pipe's seam face by up to 19% either way on geometry that
+    # tessellates watertight at exactly the expected volume, while real fuse garbage
+    # measures at or near zero. Meshed at the builder's own tolerance, so the build
+    # that follows finds its triangulation already done.
+    if not out.is_valid or _mesh_volume(out) <= 0.9 * wall.volume:
         raise _refuse(
             "the crown bead built but would not weld onto the wall.",
             [
@@ -263,6 +268,20 @@ def crown(wall, radius=None):
             ],
         )
     return out
+
+
+def _mesh_volume(shape, tolerance=0.1):
+    """The tessellation's volume, by the divergence theorem over its triangles."""
+    from .builder import _triangulate
+
+    points, tris = _triangulate(shape, tolerance)
+    total = 0.0
+    for i, j, k in tris:
+        (ax, ay, az), (bx, by, bz), (cx, cy, cz) = points[i], points[j], points[k]
+        total += (
+            ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)
+        )
+    return total / 6.0
 
 
 def _pipe(path, radius):
