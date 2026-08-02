@@ -25,6 +25,7 @@ def test_the_documented_vocabulary_is_the_exported_one():
     assert set(api.own_names()) == {
         "part",
         "polish",
+        "crown",
         "is_convex",
         "concave_edges",
         "measured",

@@ -1,6 +1,6 @@
 # Research: a crown() helper for variable-height rims
 
-Status: research only, nothing implemented. Written 2026-08-02 while triaging issue #55, so a future session can pick this up cold. The branch `issue-55` shipped the small fixes from that issue; this is the one big item deliberately left out.
+Status: implemented, 2026-08-02, as `crown()` in `src/nurb/crown.py`. Approach B below is what shipped, and the spike found three kernel traps the plan did not predict, all recorded with their measurements in that module's docstring: build123d's sweep walks its path with a corrected Frenet frame that fails erratically on these paths (the fix is OCP's pipe shell on a fixed vertical binormal, exact for a circular profile); a bead exactly flush with the wall faces is tangent along its whole length and the fuse returns garbage, so the bead carries a 0.05mm interference weld; and a roofline transition that crosses a wall instead of running along it tilts the top face across the thickness, so the bead centres between the two top edges and widens past flush up to a cap, refusing beyond it. The refusals for tight plan corners, sheer steps, tapering walls and non-loops each name their own fix, per the acceptance list. The rest of this document is kept as the record of why.
 
 ## The problem
 
