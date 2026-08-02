@@ -603,8 +603,13 @@ function sectionUpdate() {
   // A hair inside the bounds at each end, so neither extreme is a cut through nothing.
   const at = lo + (hi - lo) * (0.02 + 0.96 * cutAt);
   const dir = AXES[cutAxis];
-  plane.normal.set(-dir[0], -dir[1], -dir[2]);   // keeps the side the normal points at
-  plane.constant = at;
+  // Keep the half beyond the plane, so the cut face looks at the camera. A fixed
+  // side means half of all viewpoints see only the part's own outside and nothing
+  // says why: the cross-section is physically facing away. Which half survives
+  // follows the camera as it orbits past the plane.
+  const s = camera.position[cutAxis] >= at ? 1 : -1;
+  plane.normal.set(-s * dir[0], -s * dir[1], -s * dir[2]);  // keeps the side the normal points at
+  plane.constant = s * at;
   const span = box.getSize(new THREE.Vector3()).length();
   cap.scale.set(span, span, 1);
   // Centred on the part, not on coplanarPoint, which is where the plane passes the
@@ -695,6 +700,7 @@ for (const b of document.querySelectorAll('#cut button')) {
 const camKey = n => `nurb.cam.v2.${n}`;  // v2: parts now sit on the plate, not under it
 let saveTimer = null;
 if (controls) controls.addEventListener('change', () => {
+  if (cutting) sectionUpdate();  // the kept half tracks which side the camera is on
   if (!current) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {

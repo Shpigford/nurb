@@ -702,8 +702,8 @@ def hole_ceiling(shape, ctx):
                 Finding(
                     "hole_ceiling",
                     WARN,
-                    f"a {width:.1f}mm hole rim is laid on air over the opening below; "
-                    f"counterbore() steps the transition into bridges",
+                    f"a {width:.1f}mm hole rim would print on air over the opening "
+                    f"below; stepped bridging layers are the fix",
                     value=round(width, 1),
                     where=tuple(round(v, 2) for v in centre),
                 )
