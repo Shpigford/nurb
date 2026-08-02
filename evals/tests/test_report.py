@@ -133,3 +133,22 @@ def test_committed_report_rows_match_the_submissions():
         if line.startswith("|"):
             assert line in committed
     assert "nurb 0.9.0" in committed
+
+
+def test_site_page_renders_from_the_committed_submissions():
+    """The benchmarks page is generated from the same rows as the report, so it can
+    never disagree with it. Structure is asserted, not numbers: rows will change."""
+    from nurb_evals import site
+    from nurb_evals.report import rows_from, summarize
+
+    paths = sorted(
+        str(p) for p in site.SUBMISSIONS.iterdir() if (p / "results.jsonl").is_file()
+    )
+    page = site.render(summarize(rows_from(paths)))
+    for token in ("{jobs}", "{cards}", "{trial_count}", "{job_count}"):
+        assert token not in page
+    for title, _ in site.JOBS.values():
+        assert title in page
+    assert "fable" in page and "min/part" in page
+    committed = (site.SITE).read_text(encoding="utf-8")
+    assert committed == page, "site/benchmarks.html is stale: run python -m nurb_evals.site"
