@@ -1200,6 +1200,13 @@ function sync(rows) {
     if (!row) continue;
     const num = row.querySelector('.v'), slide = row.querySelector('[type=range]');
     if (document.activeElement === num || document.activeElement === slide) continue;
+    // A rebuild carries the values it was built with, and a slow build lands after the
+    // sliders have moved on: syncing then would snap a fresher drag back to the stale
+    // value just as `settled` resends the new one. While a newer send is pending or
+    // away the sliders are the authority; the server's echo wins once it has caught
+    // up, which is also what lets a variant's values land, because `settled` clears
+    // the slot before this runs.
+    if ((pending !== null || inflight !== null) && values.get(p.name) !== p.value) continue;
     values.set(p.name, p.value);
     num.value = p.value; slide.value = p.value;
   }
