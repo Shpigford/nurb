@@ -13,6 +13,11 @@ class BuildError(Exception):
     pass
 
 
+# What a bridge surface multiplies the part color by in the viewer. Blue, because that
+# is what every slicer's preview paints bridges, so the association is already learned.
+BRIDGE_TINT = (89, 166, 255, 255)
+
+
 class UnknownParams(BuildError):
     """An override named a parameter the part does not declare.
 
@@ -139,7 +144,7 @@ def build(path, overrides=None, draft=False):
     return shape, params, elapsed
 
 
-def _triangulate(shape, tolerance):
+def _triangulate(shape, tolerance, up=(0, 0, 1)):
     """Vertices and triangles, read straight out of OCCT.
 
     This is what `Shape.tessellate` does, and it exists because of one line in it.
@@ -152,17 +157,34 @@ def _triangulate(shape, tolerance):
     Everything else here matches `tessellate` deliberately, including the winding flip
     on a reversed face and the per-face vertex offset.
     """
+    from build123d import GeomType, Vector
     from OCP.BRep import BRep_Tool
     from OCP.TopAbs import TopAbs_Orientation
     from OCP.TopLoc import TopLoc_Location
 
     shape.mesh(tolerance)
-    points, faces, offset = [], [], 0
+    up = Vector(*up).normalized()
+    # Flat ceilings above the bed get tinted, the way a slicer previews bridges: these
+    # are the surfaces the printer lays on air, and they are otherwise invisible in a
+    # shaded render. This is how a stepped counterbore shows its work: the sacrificial
+    # shelves light up where a naive pocket shows one floating ceiling. The colors are
+    # multipliers over the viewer's material, so white is "no tint". Classified off the
+    # triangulation's own nodes in a second pass, never off bounding_box(): that call
+    # quietly destroys the cached triangulation, at shape and face level both, and the
+    # symptom is an empty mesh with no error anywhere.
+    points, faces, ceilings, offset = [], [], [], 0
     for face in shape.faces():
         loc = TopLoc_Location()
         poly = BRep_Tool.Triangulation_s(face.wrapped, loc)
         if poly is None:  # a face OCCT declined to triangulate takes no vertices with it
             continue
+        try:
+            flat_ceiling = (
+                face.geom_type == GeomType.PLANE
+                and face.normal_at(face.center()).dot(up) < -0.97
+            )
+        except Exception:
+            flat_ceiling = False
         trsf = loc.Transformation()
         reverse = face.wrapped.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
         for i in range(1, poly.NbNodes() + 1):
@@ -175,8 +197,19 @@ def _triangulate(shape, tolerance):
             if reverse:
                 b, c = c, b
             faces.append((a + offset - 1, b + offset - 1, c + offset - 1))
+        if flat_ceiling:
+            ceilings.append((offset, poly.NbNodes()))
         offset += poly.NbNodes()
-    return points, faces
+    colors = [(255, 255, 255, 255)] * len(points)
+    if points:
+        def height(p):
+            return p[0] * up.X + p[1] * up.Y + p[2] * up.Z
+
+        bed = min(height(p) for p in points)
+        for start, count in ceilings:
+            if min(height(points[i]) for i in range(start, start + count)) > bed + 1e-4:
+                colors[start : start + count] = [BRIDGE_TINT] * count
+    return points, faces, colors
 
 
 def face_triangles(face):
@@ -212,7 +245,7 @@ def face_triangles(face):
     return out
 
 
-def to_mesh(shape, tolerance=0.1):
+def to_mesh(shape, tolerance=0.1, up=(0, 0, 1)):
     """Tessellate to a triangle mesh.
 
     process=False matters: OCCT already splits vertices at face boundaries, which
@@ -220,17 +253,18 @@ def to_mesh(shape, tolerance=0.1):
     weld them merges the box corners and smears the normals across perpendicular
     faces, which renders as a shadeless blob.
     """
-    points, faces = _triangulate(shape, tolerance)
+    points, faces, colors = _triangulate(shape, tolerance, up)
     mesh = trimesh.Trimesh(
         vertices=np.array(points, dtype=np.float64),
         faces=np.array(faces, dtype=np.int64),
+        vertex_colors=np.array(colors, dtype=np.uint8),
         process=False,
     )
     mesh.vertex_normals  # populate before export, or the GLB ships without normals
     return mesh
 
 
-def to_glb(shape, tolerance=0.1):
+def to_glb(shape, tolerance=0.1, up=(0, 0, 1)):
     """One GLB. A part is one blob; an assembly keeps its movers as named nodes.
 
     The scene rides on the compound the same way checks.run reads it: an attribute,
@@ -241,16 +275,16 @@ def to_glb(shape, tolerance=0.1):
     """
     scene = getattr(shape, "_nurb_scene", None)
     if scene is None:
-        return trimesh.Scene([to_mesh(shape, tolerance)]).export(file_type="glb")
+        return trimesh.Scene([to_mesh(shape, tolerance, up)]).export(file_type="glb")
     from .assembly import NODE
 
     out = trimesh.Scene()
     for i, h in enumerate(scene.hinges):
         name = NODE.format(i)
-        out.add_geometry(to_mesh(h.solid, tolerance), node_name=name, geom_name=name)
+        out.add_geometry(to_mesh(h.solid, tolerance, up), node_name=name, geom_name=name)
     for name, group in (("fixed", scene.statics), ("context", scene.obstacles)):
         if group:
-            merged = trimesh.util.concatenate([to_mesh(s, tolerance) for s in group])
+            merged = trimesh.util.concatenate([to_mesh(s, tolerance, up) for s in group])
             out.add_geometry(merged, node_name=name, geom_name=name)
     return out.export(file_type="glb")
 

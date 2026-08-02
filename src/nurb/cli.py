@@ -243,16 +243,16 @@ def _artifact_size(path):
 def cmd_export(args):
     from build123d import export_step
 
-    from . import builder
+    from . import builder, checks
 
     root = project_root()
     formats = args.formats or _project_formats(root) or list(DEFAULT_FORMATS)
     configs = _collect_exports(_resolve(root, args.part))
     out = root / "build"
     out.mkdir(exist_ok=True)
-    queue = [(path, name, overrides) for path, name, overrides, _ in configs]
+    queue = list(configs)
     while queue:
-        path, name, overrides = queue.pop(0)
+        path, name, overrides, ctx = queue.pop(0)
         shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
         scene = getattr(shape, "_nurb_scene", None)
         if scene is not None:
@@ -267,7 +267,7 @@ def cmd_export(args):
             if not placed:
                 sys.exit(f"  {name} is an assembly that places no parts; nothing to print")
             print(f"  {name}: exporting the {len(placed)} part(s) it places")
-            queue = [(p, p.stem, None) for p in placed] + queue
+            queue = [(p, p.stem, None, checks.from_card(p)) for p in placed] + queue
             continue
         for fmt in formats:
             target = out / f"{name}.{fmt}"
@@ -276,7 +276,7 @@ def cmd_export(args):
             elif fmt == "step":
                 export_step(shape, str(target))
             elif fmt == "glb":
-                target.write_bytes(builder.to_glb(shape, 0.02))
+                target.write_bytes(builder.to_glb(shape, 0.02, up=ctx.up))
             else:
                 # The print used to sit outside this chain, so a typo in `--formats`
                 # reported a filename that was never written and exited 0.

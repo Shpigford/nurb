@@ -194,13 +194,11 @@ def render(root, paths, out_dir, view=None, size=(1200, 900), chrome=False, time
     """Write a PNG per part. Returns [(part_path, png_path)].
 
     A section render gets its own filename, so cutting a part open never overwrites
-    the picture of it whole. A cut keeps the low side of its axis, so the exposed face
-    looks up the axis; iso already faces +x and +z but looks at -y, and a y cut shot
-    from there would show the intact back of the part. Unless a view was asked for, a
-    section stands where the cut can be seen.
+    the picture of it whole. No view gymnastics for a cut: the viewer keeps whichever
+    half the camera faces, so any view arrives looking at the cross-section.
     """
     if view is None:
-        view = "0.7,0.75,0.6" if cut and cut[0] == "y" else "iso"
+        view = "iso"
     out_dir = pathlib.Path(out_dir)
     shots = [
         {

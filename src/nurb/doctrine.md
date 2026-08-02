@@ -48,6 +48,7 @@ bounding box and still exports, so nothing downstream catches it.
   +z, so every functional feature is grounded. A vertical extrusion or a vertical
   through hole is self-supporting. A shelf, loop, or band floated partway up with a gap
   underneath is not.
+- **A counterbore prints mouth toward the bed, and that floats its ceiling.** The shelf the screw head bears on is laid flat over the open pocket, and the smaller hole's first rim is a circle drawn on air; the `hole_ceiling` finding is this exact case, and it appears on any hole rising out of a bridged roof, not just screw pockets. Never answer it with supports inside a pocket nobody can clean: cut the hole with `counterbore(hole_dia, head_dia, head_depth, depth)`, which steps the transition through two sacrificial bridge layers, a slot bridged chord-to-chord across the pocket and the same slot turned ninety degrees across the first, so each layer spans only what the one before it laid and the whole stack prints support-free. Reach for it whenever a design wants a screw head, a nut, or any wider recess on the bed side of a hole.
 - **Corbel rule.** Grounded does not mean a column to the bed. Support-free means no
   layer overhanging past 45 degrees. Where material would run to the plate only to
   satisfy printing, carry the feature on a 45 degree underside instead: a short vertical
@@ -123,8 +124,7 @@ profile, not with a dress-up feature.**
 
 The polish pass runs last, after structure is finished.
 
-1. **Chamfers are the default on exposed edges**, 1mm, never below 0.8mm. A consistent
-   faceted look that prints reliably beats a fillet default.
+1. **Chamfers are the default on exposed edges**, 1mm, never below 0.8mm. A consistent faceted look that prints reliably beats a fillet default. The one sanctioned round-edge treatment is `crown`, for the top rim of a closed perimeter wall, and it is **asked for, never assumed**: reach for it when the user wants a rounded rim, or when a mating part genuinely requires one, and chamfer the rim like any other edge otherwise. It exists because filleting a variable-height roofline directly dies in OCCT's corner capping, not because rims want beads.
 2. **No chamfers lying in the back face or the bottom face.** The back sits against the
    wall and the bottom is the bed-contact face. Chamfering an edge that lies in either
    buys nothing, and where a bottom chamfer meets another one it makes sliver facets and

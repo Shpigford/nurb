@@ -657,6 +657,74 @@ def floating(shape, ctx):
     return found
 
 
+@rule("hole_ceiling")
+def hole_ceiling(shape, ctx):
+    """A blind hole's flat ceiling with a smaller hole continuing through it.
+
+    The counterbore case: a screw pocket printed mouth-down floats the shelf its head
+    bears on, and the through hole's first rim is a circle drawn on air. The overhang
+    rule cannot see it, deliberately: a ceiling with material all around reads as a
+    bridge, and a bridge the printer walks across is not a finding. What a bridge
+    cannot carry cleanly is a hole rim inside it, laid on sagging lines with nothing
+    under the perimeter, which is why this looks for the piercing rather than the span.
+
+    Found on the B-rep directly: a horizontal downward face with an inner wire is a
+    pierced ceiling. The one thing the wire alone cannot tell is what pierced it, so
+    the probe above settles it: void continuing up is a hole and a finding; material
+    is a boss hanging through, which carries its own rim. The remedy is `counterbore()`,
+    which steps the transition so each layer bridges only what the one before it laid,
+    and whose own stepped stack leaves no pierced ceiling for this rule to find.
+    """
+    up = Vector(*ctx.up).normalized()
+    bed, _ = _span(shape, up)
+    solid = shape.solids()[0] if shape.solids() else None
+    found = []
+    for face in shape.faces():
+        if face.geom_type != GeomType.PLANE:
+            continue
+        if face.normal_at(face.center()).dot(up) > -0.97:
+            continue  # not a flat ceiling
+        if _span(face, up)[0] <= bed + 1e-4:
+            continue  # the first layer, where every mouth belongs
+        for wire in face.inner_wires():
+            # The box centre, not wire.center(): a curve's own centre is its centre
+            # of mass, which for a circle is a point on the rim, not the middle.
+            centre = wire.bounding_box().center()
+            width = min(
+                _span(wire, axis)[1] - _span(wire, axis)[0]
+                for axis in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1))
+                if abs(axis.dot(up)) < 0.9
+            )
+            # Probe just inside the wire rather than at its box centre. A hollow boss
+            # carries the rim as surely as a solid one, but its centre is still void
+            # and looks exactly like a hole. `_into_face` finds the material side of
+            # the boundary, so its opposite is the region the wire encloses.
+            carried = []
+            if solid:
+                step = min(0.05, width / 4)
+                for edge in wire.edges():
+                    try:
+                        point = edge.position_at(0.5)
+                        inward = -_into_face(face, point, edge.tangent_at(0.5))
+                        above = point + inward * step + up * 0.02
+                        carried.append(solid.is_inside((above.X, above.Y, above.Z)))
+                    except Exception:
+                        continue
+            if carried and all(carried):
+                continue  # a solid or hollow boss through the ceiling, not a hole
+            found.append(
+                Finding(
+                    "hole_ceiling",
+                    WARN,
+                    f"a {width:.1f}mm hole rim would print on air over the opening "
+                    f"below; stepped bridging layers are the fix",
+                    value=round(width, 1),
+                    where=tuple(round(v, 2) for v in centre),
+                )
+            )
+    return found
+
+
 @rule("stability")
 def stability(shape, ctx):
     """Will it stand on the bed, or tip while printing."""
