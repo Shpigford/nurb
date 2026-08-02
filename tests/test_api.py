@@ -29,6 +29,7 @@ def test_the_documented_vocabulary_is_the_exported_one():
         "concave_edges",
         "measured",
         "stand",
+        "counterbore",
         "assembly",
         "use",
         "hinge",
