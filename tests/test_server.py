@@ -4,9 +4,11 @@ import asyncio
 import io
 import json
 
+import numpy as np
 import pytest
 import trimesh
 
+from nurb.builder import BRIDGE_TINT
 from nurb.server import Server
 
 PART = """from nurb import *
@@ -91,6 +93,35 @@ def test_rebuild_names_a_non_numeric_variant_from_its_built_values(tmp_path):
     assert server.overrides["thing"] == {"tall": True}
     assert entry["bbox"] == [10.0, 10.0, 20.0]
     assert entry["variant"] == "tall"
+
+
+def test_rebuild_tints_ceilings_against_the_cards_build_direction(tmp_path):
+    root = tmp_path
+    (root / "parts").mkdir()
+    part = root / "parts" / "thing.py"
+    part.write_text(
+        """from nurb import *
+
+@part
+def thing():
+    return Box(6, 6, 20) + Pos(0, 0, 12) * Box(30, 30, 4)
+"""
+    )
+    (root / "parts" / "thing.md").write_text(
+        """# thing
+
+```toml
+[part]
+up = [0, 0, -1]
+```
+"""
+    )
+
+    entry = Server(root).rebuild(part)
+    scene = trimesh.load(io.BytesIO(entry["glb"]), file_type="glb")
+    colors = next(iter(scene.geometry.values())).visual.vertex_colors
+
+    assert not np.any(np.all(colors == BRIDGE_TINT, axis=1))
 
 
 def test_failed_build_has_no_active_variant(tmp_path):
@@ -285,6 +316,15 @@ def test_viewer_matches_websocket_security_to_the_page():
     assert "location.protocol === 'https:' ? 'wss' : 'ws'" in viewer
     assert "new WebSocket(`${scheme}://${location.host}/ws`)" in viewer
     assert "new WebSocket(`ws://${location.host}/ws`)" not in viewer
+
+
+def test_section_reaims_after_a_new_parts_camera_is_restored():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    paint = viewer.split("async function paint", 1)[1].split("// Takes a name", 1)[0]
+    assert "function sectionAttach(reaim) {\n  if (reaim) cutSign = 0;" in viewer
+    assert paint.index("restoreCamera(name, box)") < paint.index("sectionAttach(!keepCamera);")
 
 
 # --- the skill staleness nudge ------------------------------------------------

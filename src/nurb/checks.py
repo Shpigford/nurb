@@ -690,14 +690,28 @@ def hole_ceiling(shape, ctx):
             # The box centre, not wire.center(): a curve's own centre is its centre
             # of mass, which for a circle is a point on the rim, not the middle.
             centre = wire.bounding_box().center()
-            above = centre + up * 0.2
-            if solid and solid.is_inside((above.X, above.Y, above.Z)):
-                continue  # a boss through the ceiling, not a hole
             width = min(
                 _span(wire, axis)[1] - _span(wire, axis)[0]
                 for axis in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1))
                 if abs(axis.dot(up)) < 0.9
             )
+            # Probe just inside the wire rather than at its box centre. A hollow boss
+            # carries the rim as surely as a solid one, but its centre is still void
+            # and looks exactly like a hole. `_into_face` finds the material side of
+            # the boundary, so its opposite is the region the wire encloses.
+            carried = []
+            if solid:
+                step = min(0.05, width / 4)
+                for edge in wire.edges():
+                    try:
+                        point = edge.position_at(0.5)
+                        inward = -_into_face(face, point, edge.tangent_at(0.5))
+                        above = point + inward * step + up * 0.02
+                        carried.append(solid.is_inside((above.X, above.Y, above.Z)))
+                    except Exception:
+                        continue
+            if carried and all(carried):
+                continue  # a solid or hollow boss through the ceiling, not a hole
             found.append(
                 Finding(
                     "hole_ceiling",

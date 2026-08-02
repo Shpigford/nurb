@@ -423,6 +423,18 @@ def test_a_boss_through_a_ceiling_is_not_a_hole():
     assert only(shape, "hole_ceiling") == []
 
 
+def test_a_hollow_boss_through_a_ceiling_carries_its_rim():
+    """A tube is still support even though probing its bounding-box centre finds
+    the through hole rather than the wall that actually meets the ceiling."""
+    seated = (Align.CENTER, Align.CENTER, Align.MIN)
+    shape = (
+        Cylinder(4, 20, align=seated)
+        + Pos(0, 0, 10) * Cylinder(8, 3, align=seated)
+        - Cylinder(2, 30, align=seated)
+    )
+    assert only(shape, "hole_ceiling") == []
+
+
 def test_a_counterbore_mouth_on_the_bed_is_the_first_layer():
     """The plate's bottom face is pierced by the pocket too, and warning about the
     first layer is how a checker gets switched off."""

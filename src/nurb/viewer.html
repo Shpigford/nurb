@@ -572,7 +572,8 @@ cap.visible = false;
 cap.onAfterRender = r => r.clearStencil();
 scene.add(cap);
 
-function sectionAttach() {
+function sectionAttach(reaim) {
+  if (reaim) cutSign = 0;  // a different part gets aimed from its own restored camera
   for (const w of writers) scene.remove(w);
   writers = [];
   if (!mesh) return;
@@ -892,7 +893,6 @@ async function paint(name, { keepCamera }) {
   mesh.position.z = -bb.min.z;
   const box = bb.clone().translate(new THREE.Vector3(0, 0, mesh.position.z));
   const size = box.getSize(new THREE.Vector3()).length();
-  sectionAttach();
 
   // Only reframe when the part changed scale enough that the camera is lost.
   const jumped = lastSize && (size / lastSize > 3 || lastSize / size > 3);
@@ -912,6 +912,9 @@ async function paint(name, { keepCamera }) {
     reframe.style.display = (jumped || lost) ? 'inline-flex' : 'none';
   }
   reframe.onclick = () => { frame(box); reframe.style.display = 'none'; };
+  // The cut side comes from the camera, so attach only after this part's saved camera
+  // has been restored (or its default frame chosen), never from the part just removed.
+  sectionAttach(!keepCamera);
   lastSize = size;
   hud(parts.get(name) || entry);
   checks(name);
