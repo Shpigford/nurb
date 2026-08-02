@@ -17,6 +17,7 @@ from build123d import *  # noqa: F401,F403  -- geometry vocabulary
 from .assembly import assembly, hinge, obstacle, use  # noqa: E402
 from .checks import concave_edges, is_convex  # noqa: E402
 from .crown import crown  # noqa: E402
+from .holes import counterbore  # noqa: E402
 from .measurements import measured  # noqa: E402
 from .orient import stand  # noqa: E402
 from .polish import chamfer, polish  # noqa: E402  -- must win, see below
@@ -37,6 +38,9 @@ from .registry import part  # noqa: E402  -- must win over any build123d name
 # `crown` is here because rounding a variable-height rim by hand is an eight-step sweep
 # construction (issue #55), and every direct fillet of such a rim dies in OCCT's corner
 # capping. It is the doctrine's one sanctioned round-edge treatment.
+# `counterbore` is here because the naive alternative is two cylinders that build,
+# check as an ordinary bridge, and print a screw seat on sagging air: the stepped
+# bridging stack is fixed print-farm practice, not a judgement, so it is generated.
 # `chamfer` deliberately shadows build123d's. Same behaviour, same exception type;
 # what it adds is the doctrine's rule on the way out of a failure, because the kernel's
 # own advice is "try a smaller length value(s)" and following it is how a part ends up
@@ -53,6 +57,7 @@ __all__ = [
     "polish",
     "crown",
     "stand",
+    "counterbore",
     "assembly",
     "use",
     "hinge",

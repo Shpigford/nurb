@@ -370,6 +370,78 @@ def test_concave_cosmetic_does_not_mistake_a_pocket_for_a_chamfer():
     assert only(Box(20, 20, 20) - Pos(0, 0, 8) * Box(6, 6, 6), "concave_cosmetic") == []
 
 
+# --- hole ceilings -----------------------------------------------------------
+
+
+def counterbored_plate():
+    """A 10mm plate with a naive counterbore, mouth on the bed: a 3.4mm hole over a
+    6.2mm head pocket, the shelf between them laid flat over the open pocket."""
+    plate = Box(30, 30, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    seated = (Align.CENTER, Align.CENTER, Align.MIN)
+    return plate - Cylinder(1.7, 30, align=seated) - Cylinder(3.1, 3, align=seated)
+
+
+def test_naive_counterbore_floats_its_hole_rim():
+    """The overhang rule reads the shelf as a bridge and stays quiet on purpose; what
+    it cannot see is the 3.4mm rim inside the bridge, drawn on air."""
+    found = only(counterbored_plate(), "hole_ceiling")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+    assert found[0].value == pytest.approx(3.4, abs=0.05)
+    assert only(counterbored_plate(), "overhang") == []
+
+
+def test_stepped_counterbore_answers_the_finding():
+    """The same pocket cut with counterbore() leaves nothing for any rule: every
+    ceiling in the stack is a short bridge the existing rules already allow."""
+    from nurb import counterbore
+
+    plate = Box(30, 30, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    stepped = plate - counterbore(hole_dia=3.4, head_dia=6.2, head_depth=3, depth=12)
+    assert len(stepped.solids()) == 1
+    assert run(stepped) == []
+
+
+def test_hole_through_a_bridged_roof_is_the_same_finding():
+    """Not only screw pockets: a vertical hole meeting a channel roof from above puts
+    its rim on the same sagging bridge lines."""
+    shape = Box(40, 40, 20) - Pos(0, 0, 6) * Box(10, 60, 6) - Pos(0, 0, 15) * Cylinder(2, 14)
+    found = only(shape, "hole_ceiling")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+
+
+def test_a_boss_through_a_ceiling_is_not_a_hole():
+    """The inner wire alone cannot tell a hole from a column passing through the
+    ceiling, and a column carries its own rim. The probe above settles it."""
+    seated = (Align.CENTER, Align.CENTER, Align.MIN)
+    shape = (
+        Box(30, 30, 20, align=seated)
+        - Box(20, 20, 10, align=seated)
+        + Cylinder(2, 10, align=seated)
+    )
+    assert only(shape, "hole_ceiling") == []
+
+
+def test_a_hollow_boss_through_a_ceiling_carries_its_rim():
+    """A tube is still support even though probing its bounding-box centre finds
+    the through hole rather than the wall that actually meets the ceiling."""
+    seated = (Align.CENTER, Align.CENTER, Align.MIN)
+    shape = (
+        Cylinder(4, 20, align=seated)
+        + Pos(0, 0, 10) * Cylinder(8, 3, align=seated)
+        - Cylinder(2, 30, align=seated)
+    )
+    assert only(shape, "hole_ceiling") == []
+
+
+def test_a_counterbore_mouth_on_the_bed_is_the_first_layer():
+    """The plate's bottom face is pierced by the pocket too, and warning about the
+    first layer is how a checker gets switched off."""
+    found = only(counterbored_plate(), "hole_ceiling")
+    assert all(f.where[2] > 0 for f in found)
+
+
 # --- wall thickness ----------------------------------------------------------
 
 

@@ -217,10 +217,15 @@ class Server:
         }
         try:
             shape, params, ms = self._build(path, name)
-            entry["glb"] = builder.to_glb(shape, self.tolerance)
             entry.update(builder.stats(shape))
             entry["params"] = params
             entry["variant"] = self._active_variant(params, entry["variants"])
+            try:
+                up = self._context(path, entry["variant"]).up
+            except Exception:
+                # A bad card is reported by the check pass; it must not hide geometry.
+                up = (0, 0, 1)
+            entry["glb"] = builder.to_glb(shape, self.tolerance, up=up)
             entry["ms"] = round(ms, 1)
             entry["error"] = None
             entry["shape"] = shape  # kept for the check pass, never serialized
@@ -275,6 +280,18 @@ class Server:
                 return variant["name"]
         return None
 
+    @staticmethod
+    def _context(path, variant):
+        """The check context belonging to the values currently on screen."""
+        from . import checks
+
+        configs = checks.configurations(path)
+        ctx = configs[0][2]
+        for name, _, variant_ctx in configs[1:]:
+            if name == variant:
+                return variant_ctx
+        return ctx
+
     def check(self, path):
         """Run the rules on the last good build.
 
@@ -292,12 +309,7 @@ class Server:
             # settings judge it: shelf_gridfinity_2x1 accepts 10 slivers, not the
             # base part's 18. Matched on the built values, never on a mode flag, so
             # one slider drag off the variant honestly puts the base rules back.
-            configs = checks.configurations(path)
-            ctx = configs[0][2]
-            for name, _, vctx in configs[1:]:
-                if name == entry["variant"]:
-                    ctx = vctx
-                    break
+            ctx = self._context(path, entry["variant"])
             found = checks.run(entry["shape"], ctx)
             entry["findings"] = [
                 {

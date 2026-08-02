@@ -551,7 +551,7 @@ if (renderer) {
 const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 const PARKED = 1e6;   // "off", without changing the array length and recompiling shaders
 const plane = new THREE.Plane(new THREE.Vector3(0, 0, -1), PARKED);
-let cutAxis = 'z', cutAt = 0.5, cutting = false, writers = [];
+let cutAxis = 'z', cutAt = 0.5, cutting = false, cutSign = 0, writers = [];
 
 const stencilBase = {
   depthWrite: false, depthTest: false, colorWrite: false,
@@ -572,7 +572,11 @@ const stencilFront = new THREE.MeshBasicMaterial({
 const cap = new THREE.Mesh(
   new THREE.PlaneGeometry(1, 1),
   new THREE.MeshStandardMaterial({
-    color: 0xc9a227, metalness: 0.0, roughness: 0.85, side: THREE.DoubleSide,
+    // Violet, because the cap is the one surface that is not part material and must
+    // not impersonate anything that is a signal: amber is a warn pin, red a fail pin,
+    // green the accent, blue-gray the part itself. The shipped gold sat on the same
+    // hue as the warn pins, and a pin on a cut ceiling is the section view's whole job.
+    color: 0x8578cf, metalness: 0.0, roughness: 0.85, side: THREE.DoubleSide,
     stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc,
     stencilFail: THREE.ReplaceStencilOp,
     stencilZFail: THREE.ReplaceStencilOp,
@@ -584,7 +588,8 @@ cap.visible = false;
 cap.onAfterRender = r => r.clearStencil();
 scene.add(cap);
 
-function sectionAttach() {
+function sectionAttach(reaim) {
+  if (reaim) cutSign = 0;  // a different part gets aimed from its own restored camera
   for (const w of writers) scene.remove(w);
   writers = [];
   if (!mesh) return;
@@ -616,11 +621,19 @@ function sectionUpdate() {
   const box = new THREE.Box3();
   for (const c of mesh.children) if (c.isMesh && c.name !== 'context') box.expandByObject(c);
   const lo = box.min[cutAxis], hi = box.max[cutAxis];
+  // The cut faces the camera as it stood when the section opened or the axis was
+  // picked, so the first look always shows the cross-section instead of the part's
+  // own outside. Chosen once and then left alone: a side that follows the camera
+  // swaps the surviving half mid-orbit, and with the slider near an end that
+  // collapses the whole part to a sliver the moment the view crosses the plane.
+  if (!cutSign) cutSign = camera.position[cutAxis] >= (lo + hi) / 2 ? 1 : -1;
+  // Normalized so dragging right always keeps more material, whichever side survives.
+  const t = cutSign === 1 ? cutAt : 1 - cutAt;
   // A hair inside the bounds at each end, so neither extreme is a cut through nothing.
-  const at = lo + (hi - lo) * (0.02 + 0.96 * cutAt);
+  const at = lo + (hi - lo) * (0.02 + 0.96 * t);
   const dir = AXES[cutAxis];
-  plane.normal.set(-dir[0], -dir[1], -dir[2]);   // keeps the side the normal points at
-  plane.constant = at;
+  plane.normal.set(-cutSign * dir[0], -cutSign * dir[1], -cutSign * dir[2]);  // keeps the side the normal points at
+  plane.constant = cutSign * at;
   const span = box.getSize(new THREE.Vector3()).length();
   cap.scale.set(span, span, 1);
   // Centred on the part, not on coplanarPoint, which is where the plane passes the
@@ -686,6 +699,7 @@ document.getElementById('polishbtn').onclick = () => {
 
 document.getElementById('sectionbtn').onclick = ev => {
   cutting = !cutting;
+  cutSign = 0;  // re-aim the cut at wherever the camera is now
   ev.currentTarget.classList.toggle('on', cutting);
   document.getElementById('cut').classList.toggle('open', cutting);
   sectionUpdate();
@@ -701,6 +715,7 @@ for (const b of document.querySelectorAll('#cut button')) {
   b.classList.toggle('on', b.dataset.axis === cutAxis);
   b.onclick = () => {
     cutAxis = b.dataset.axis;
+    cutSign = 0;  // a new axis re-aims at the camera the same way opening does
     for (const o of document.querySelectorAll('#cut button')) o.classList.toggle('on', o === b);
     sectionUpdate();
   };
@@ -861,6 +876,9 @@ async function paint(name, { keepCamera }) {
     if (!src.geometry.attributes.normal) src.geometry.computeVertexNormals();  // never render unlit
     const m = new THREE.Mesh(src.geometry, material.clone());
     m.material.clippingPlanes = [plane];   // parked unless the section view is on
+    // The builder tints bridge surfaces slicer-blue via vertex colors, multipliers
+    // over the material color, so a mesh without them renders exactly as before.
+    if (src.geometry.attributes.color) m.material.vertexColors = true;
     // The exporter names the node; the loader sometimes hangs the mesh under it.
     m.name = src.name || (src.parent && src.parent.name) || '';
     if (m.name === 'context') {
@@ -891,7 +909,6 @@ async function paint(name, { keepCamera }) {
   mesh.position.z = -bb.min.z;
   const box = bb.clone().translate(new THREE.Vector3(0, 0, mesh.position.z));
   const size = box.getSize(new THREE.Vector3()).length();
-  sectionAttach();
 
   // Only reframe when the part changed scale enough that the camera is lost.
   const jumped = lastSize && (size / lastSize > 3 || lastSize / size > 3);
@@ -911,6 +928,9 @@ async function paint(name, { keepCamera }) {
     reframe.style.display = (jumped || lost) ? 'inline-flex' : 'none';
   }
   reframe.onclick = () => { frame(box); reframe.style.display = 'none'; };
+  // The cut side comes from the camera, so attach only after this part's saved camera
+  // has been restored (or its default frame chosen), never from the part just removed.
+  sectionAttach(!keepCamera);
   lastSize = size;
   hud(parts.get(name) || entry);
   checks(name);
