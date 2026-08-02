@@ -13,6 +13,11 @@ class BuildError(Exception):
     pass
 
 
+# What a bridge surface multiplies the part color by in the viewer. Blue, because that
+# is what every slicer's preview paints bridges, so the association is already learned.
+BRIDGE_TINT = (89, 166, 255, 255)
+
+
 class UnknownParams(BuildError):
     """An override named a parameter the part does not declare.
 
@@ -152,17 +157,33 @@ def _triangulate(shape, tolerance):
     Everything else here matches `tessellate` deliberately, including the winding flip
     on a reversed face and the per-face vertex offset.
     """
+    from build123d import GeomType
     from OCP.BRep import BRep_Tool
     from OCP.TopAbs import TopAbs_Orientation
     from OCP.TopLoc import TopLoc_Location
 
     shape.mesh(tolerance)
-    points, faces, offset = [], [], 0
+    # Flat ceilings above the bed get tinted, the way a slicer previews bridges: these
+    # are the surfaces the printer lays on air, and they are otherwise invisible in a
+    # shaded render. This is how a stepped counterbore shows its work: the sacrificial
+    # shelves light up where a naive pocket shows one floating ceiling. The colors are
+    # multipliers over the viewer's material, so white is "no tint". Classified off the
+    # triangulation's own nodes in a second pass, never off bounding_box(): that call
+    # quietly destroys the cached triangulation, at shape and face level both, and the
+    # symptom is an empty mesh with no error anywhere.
+    points, faces, ceilings, offset = [], [], [], 0
     for face in shape.faces():
         loc = TopLoc_Location()
         poly = BRep_Tool.Triangulation_s(face.wrapped, loc)
         if poly is None:  # a face OCCT declined to triangulate takes no vertices with it
             continue
+        try:
+            flat_ceiling = (
+                face.geom_type == GeomType.PLANE
+                and face.normal_at(face.center()).Z < -0.97
+            )
+        except Exception:
+            flat_ceiling = False
         trsf = loc.Transformation()
         reverse = face.wrapped.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
         for i in range(1, poly.NbNodes() + 1):
@@ -175,8 +196,16 @@ def _triangulate(shape, tolerance):
             if reverse:
                 b, c = c, b
             faces.append((a + offset - 1, b + offset - 1, c + offset - 1))
+        if flat_ceiling:
+            ceilings.append((offset, poly.NbNodes()))
         offset += poly.NbNodes()
-    return points, faces
+    colors = [(255, 255, 255, 255)] * len(points)
+    if points:
+        bed = min(p[2] for p in points)
+        for start, count in ceilings:
+            if min(points[i][2] for i in range(start, start + count)) > bed + 1e-4:
+                colors[start : start + count] = [BRIDGE_TINT] * count
+    return points, faces, colors
 
 
 def to_mesh(shape, tolerance=0.1):
@@ -187,10 +216,11 @@ def to_mesh(shape, tolerance=0.1):
     weld them merges the box corners and smears the normals across perpendicular
     faces, which renders as a shadeless blob.
     """
-    points, faces = _triangulate(shape, tolerance)
+    points, faces, colors = _triangulate(shape, tolerance)
     mesh = trimesh.Trimesh(
         vertices=np.array(points, dtype=np.float64),
         faces=np.array(faces, dtype=np.int64),
+        vertex_colors=np.array(colors, dtype=np.uint8),
         process=False,
     )
     mesh.vertex_normals  # populate before export, or the GLB ships without normals

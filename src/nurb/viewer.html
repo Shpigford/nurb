@@ -855,6 +855,9 @@ async function paint(name, { keepCamera }) {
     if (!src.geometry.attributes.normal) src.geometry.computeVertexNormals();  // never render unlit
     const m = new THREE.Mesh(src.geometry, material.clone());
     m.material.clippingPlanes = [plane];   // parked unless the section view is on
+    // The builder tints bridge surfaces slicer-blue via vertex colors, multipliers
+    // over the material color, so a mesh without them renders exactly as before.
+    if (src.geometry.attributes.color) m.material.vertexColors = true;
     // The exporter names the node; the loader sometimes hangs the mesh under it.
     m.name = src.name || (src.parent && src.parent.name) || '';
     if (m.name === 'context') {
