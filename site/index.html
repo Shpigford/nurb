@@ -62,6 +62,11 @@
   header nav a { color: var(--dim); }
   header nav a:hover { color: var(--text); text-decoration: none; }
   header nav a.gh { color: var(--text); }
+  header .menu-btn { display: none; margin-left: auto; padding: 8px; background: none;
+                     border: 0; color: var(--text); cursor: pointer; }
+  header .menu-btn svg { display: block; width: 20px; height: 20px; }
+  header .menu-btn .x, header.open .menu-btn .bars { display: none; }
+  header.open .menu-btn .x { display: block; }
 
   /* ---- hero ---- */
   #hero { padding: 92px 24px 64px; text-align: center; position: relative; }
@@ -290,7 +295,13 @@
     #ws main { order: 1; }
     #checks { max-width: 80%; }
     #hint { left: auto; right: 14px; transform: none; }
-    header nav a:not(.gh) { display: none; }
+    header .menu-btn { display: block; }
+    header nav { display: none; position: absolute; top: 54px; left: 0; right: 0;
+                 flex-direction: column; gap: 0; padding: 4px 24px 12px;
+                 background: var(--bg); border-bottom: 1px solid var(--line);
+                 box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+    header.open nav { display: flex; }
+    header nav a { padding: 11px 0; font-size: 15px; }
   }
 </style>
 </head>
@@ -307,15 +318,30 @@
 <header>
   <div class="wrap">
     <a class="logo" href="#"><svg><use href="#i-cube"/></svg>nurb</a>
+    <button class="menu-btn" aria-label="menu" aria-expanded="false">
+      <svg class="bars" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2.5" y1="5.5" x2="17.5" y2="5.5"/><line x1="2.5" y1="10" x2="17.5" y2="10"/><line x1="2.5" y1="14.5" x2="17.5" y2="14.5"/></svg>
+      <svg class="x" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="4.5" y1="4.5" x2="15.5" y2="15.5"/><line x1="15.5" y1="4.5" x2="4.5" y2="15.5"/></svg>
+    </button>
     <nav>
       <a href="#demo">try it</a>
       <a href="#how">how it works</a>
       <a href="#checks-sec">checks</a>
       <a href="#start">get started</a>
+      <a href="/changelog">changelog</a>
       <a class="gh" href="https://github.com/Shpigford/nurb">github &nearr;</a>
     </nav>
   </div>
 </header>
+<script>
+  const hdr = document.querySelector('header');
+  const menuBtn = hdr.querySelector('.menu-btn');
+  menuBtn.addEventListener('click', () =>
+    menuBtn.setAttribute('aria-expanded', hdr.classList.toggle('open')));
+  hdr.querySelector('nav').addEventListener('click', () => {
+    hdr.classList.remove('open');
+    menuBtn.setAttribute('aria-expanded', 'false');
+  });
+</script>
 
 <section id="hero" class="wrap">
   <div class="kicker">design 3d-printable parts by talking</div>
@@ -461,6 +487,7 @@
     <span>&copy; 2026 Ordinary Systems LLC</span>
     <a href="https://github.com/Shpigford/nurb/blob/main/LICENSE">FSL-1.1-MIT</a>
     <span class="spacer"></span>
+    <a href="/changelog">changelog</a>
     <a href="https://github.com/Shpigford/nurb">github</a>
     <a href="https://x.com/Shpigford">@shpigford</a>
     <a href="https://github.com/Shpigford/nurb/issues/new">send feedback</a>
