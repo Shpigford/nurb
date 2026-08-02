@@ -535,7 +535,7 @@ if (renderer) {
 const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 const PARKED = 1e6;   // "off", without changing the array length and recompiling shaders
 const plane = new THREE.Plane(new THREE.Vector3(0, 0, -1), PARKED);
-let cutAxis = 'z', cutAt = 0.5, cutting = false, writers = [];
+let cutAxis = 'z', cutAt = 0.5, cutting = false, cutSign = 0, writers = [];
 
 const stencilBase = {
   depthWrite: false, depthTest: false, colorWrite: false,
@@ -604,16 +604,19 @@ function sectionUpdate() {
   const box = new THREE.Box3();
   for (const c of mesh.children) if (c.isMesh && c.name !== 'context') box.expandByObject(c);
   const lo = box.min[cutAxis], hi = box.max[cutAxis];
+  // The cut faces the camera as it stood when the section opened or the axis was
+  // picked, so the first look always shows the cross-section instead of the part's
+  // own outside. Chosen once and then left alone: a side that follows the camera
+  // swaps the surviving half mid-orbit, and with the slider near an end that
+  // collapses the whole part to a sliver the moment the view crosses the plane.
+  if (!cutSign) cutSign = camera.position[cutAxis] >= (lo + hi) / 2 ? 1 : -1;
+  // Normalized so dragging right always keeps more material, whichever side survives.
+  const t = cutSign === 1 ? cutAt : 1 - cutAt;
   // A hair inside the bounds at each end, so neither extreme is a cut through nothing.
-  const at = lo + (hi - lo) * (0.02 + 0.96 * cutAt);
+  const at = lo + (hi - lo) * (0.02 + 0.96 * t);
   const dir = AXES[cutAxis];
-  // Keep the half beyond the plane, so the cut face looks at the camera. A fixed
-  // side means half of all viewpoints see only the part's own outside and nothing
-  // says why: the cross-section is physically facing away. Which half survives
-  // follows the camera as it orbits past the plane.
-  const s = camera.position[cutAxis] >= at ? 1 : -1;
-  plane.normal.set(-s * dir[0], -s * dir[1], -s * dir[2]);  // keeps the side the normal points at
-  plane.constant = s * at;
+  plane.normal.set(-cutSign * dir[0], -cutSign * dir[1], -cutSign * dir[2]);  // keeps the side the normal points at
+  plane.constant = cutSign * at;
   const span = box.getSize(new THREE.Vector3()).length();
   cap.scale.set(span, span, 1);
   // Centred on the part, not on coplanarPoint, which is where the plane passes the
@@ -679,6 +682,7 @@ document.getElementById('polishbtn').onclick = () => {
 
 document.getElementById('sectionbtn').onclick = ev => {
   cutting = !cutting;
+  cutSign = 0;  // re-aim the cut at wherever the camera is now
   ev.currentTarget.classList.toggle('on', cutting);
   document.getElementById('cut').classList.toggle('open', cutting);
   sectionUpdate();
@@ -694,6 +698,7 @@ for (const b of document.querySelectorAll('#cut button')) {
   b.classList.toggle('on', b.dataset.axis === cutAxis);
   b.onclick = () => {
     cutAxis = b.dataset.axis;
+    cutSign = 0;  // a new axis re-aims at the camera the same way opening does
     for (const o of document.querySelectorAll('#cut button')) o.classList.toggle('on', o === b);
     sectionUpdate();
   };
@@ -704,7 +709,6 @@ for (const b of document.querySelectorAll('#cut button')) {
 const camKey = n => `nurb.cam.v2.${n}`;  // v2: parts now sit on the plate, not under it
 let saveTimer = null;
 if (controls) controls.addEventListener('change', () => {
-  if (cutting) sectionUpdate();  // the kept half tracks which side the camera is on
   if (!current) return;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
