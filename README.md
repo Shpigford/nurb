@@ -51,14 +51,14 @@ nurb new <name>     create parts/<name>.py and its card
 nurb dev            watch, rebuild, serve the viewer
 nurb build [part]   build once and report size
 nurb check [part]   run the printability rules, --strict for CI
-nurb inspect [part] faces, normals, concave edges, each finding on its face
+nurb inspect [part] faces, normals, concave edges, each finding on its face; --render for stills
 nurb rules          print the design doctrine
 nurb api            the vocabulary a part file gets, with signatures
 nurb skill          print an agent skill file for your AI harness, --sync rewrites installed copies
 nurb update         upgrade nurb, then re-sync the installed skill to match
 nurb card [part]    regenerate a card's AUTO block
-nurb verify [part]  run the doctrine's verification list
-nurb render [part]  write a PNG into build/
+nurb verify [part]  run the doctrine's verification list; --report bundles it with renders
+nurb render [part]  write a PNG into build/renders/; --section cuts it open
 nurb export [part]  write STL and STEP into build/, --formats for GLB
 nurb extract        find duplication across parts
 nurb launcher       write viewer.command, a double-clickable `nurb dev`
@@ -118,7 +118,8 @@ parts/<name>.md     its card
 system.py           optional: shared constants and geometry
 measurements.toml   optional: real-world dimensions with provenance
 printer.toml        optional: which machine this project prints on
-build/              generated, gitignored
+build/              generated exports, gitignored
+build/renders/      generated PNGs and verification reports
 ```
 
 ## Speed

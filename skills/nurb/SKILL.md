@@ -32,7 +32,7 @@ Other harnesses take the same two grants, the `nurb` prefix and edits under `par
 
 **Run `nurb rules` before you design.** It prints the doctrine: printability, load paths, the polish pass, the kernel traps, card discipline, and what to verify. This file stays thin on purpose so there is one copy of that, in the package, which cannot drift.
 
-**Ask the tool before you read its source.** `nurb api` prints the vocabulary a part file gets, with signatures, so finding out what `concave_edges` returns is one command rather than a trip into site-packages. `nurb inspect <part>` measures a built one: face areas, normals, which faces sit on the bed, every concave edge, and each finding resolved to the face it fired on, in the units the rules report. Between them they answer the questions that otherwise become a throwaway probe script apiece, which is the most expensive habit in this loop.
+**Ask the tool before you read its source.** `nurb api` prints the vocabulary a part file gets, with signatures, so finding out what `concave_edges` returns is one command rather than a trip into site-packages. `nurb inspect <part>` measures a built one: face areas, normals, which faces sit on the bed, every concave edge, and each finding resolved to the face it fired on, in the units the rules report. Between them they answer the questions that otherwise become a throwaway probe script apiece, which is the most expensive habit in this loop. When a finding fires and the fix is not obvious from its message, run `nurb inspect --render` and look before you edit: one PNG per finding, camera standing at the face it fired on with that face painted. A wall message that names its own thickness needs no photograph, but any edit that starts with guessing which face is guilty costs a rebuild cycle the look would have saved.
 
 **Ask before you model.** Anything the part has to fit (an opening, a bracket, the object it holds) is a question for the user: ask for those measurements in one batch, up front, using your harness's question tool if it has one, and record the answers in `measurements.toml` the way the doctrine describes. Anything that is taste rather than fit becomes a parameter instead of a question, because the viewer's sliders are how the user answers those. A guessed proportion costs one slider drag; a guessed clearance prints the wrong part.
 
@@ -52,10 +52,10 @@ nurb api              the vocabulary a part file gets, with signatures
 nurb new <name>       create parts/<name>.py and its card
 nurb build [part]     build once, report size and timing
 nurb check [part]     the printability rules; on an assembly, the motion sweep. --strict for CI
-nurb inspect [part]   faces, normals, concave edges, each finding on its face
+nurb inspect [part]   faces, normals, concave edges, each finding on its face; --render pictures each finding
 nurb card [part]      regenerate a card's AUTO block
-nurb verify [part]    the doctrine's verification list: solids, flex, checks, card
-nurb render [part]    PNG into build/, so you can look at what you made
+nurb verify [part]    the doctrine's verification list: solids, flex, checks, card. --report bundles verdict and renders into build/renders/
+nurb render [part]    PNG into build/renders/, so you can look at what you made; --section z:4mm cuts it open
 nurb export [part]    STL and STEP into build/, --formats for GLB
 nurb extract          find duplication across parts
 nurb dev              watch, rebuild, serve the viewer on :7373 or the next free port

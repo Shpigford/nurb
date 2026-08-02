@@ -299,14 +299,30 @@ class Server:
                     ctx = vctx
                     break
             found = checks.run(entry["shape"], ctx)
+            # Each finding carries the triangles of the face it fired on, so the viewer
+            # can paint the face itself instead of dropping a pin near it. Rounded to
+            # 0.01mm, which is display precision, not geometry.
+            from . import probe
+
+            # Resolved only when something fired: most checks in the dev loop come
+            # back clean, and measuring every face to annotate nothing is pure cost.
+            rows = probe.finding_faces(entry["shape"], ctx, found) if found else []
+            if any(row is not None for row in rows):
+                # checks.run cleans the tessellation the rebuild left on the shape,
+                # so the faces have to be meshed again before their triangles exist.
+                # Same tolerance as the GLB, so the glow lies exactly on the mesh.
+                entry["shape"].mesh(self.tolerance)
             entry["findings"] = [
                 {
                     "rule": f.rule,
                     "severity": f.severity,
                     "message": f.message,
                     "where": list(f.where) if f.where else None,
+                    "face": [round(v, 2) for v in builder.face_triangles(row["face"])]
+                    if row is not None
+                    else None,
                 }
-                for f in found
+                for f, row in zip(found, rows)
             ]
         except Exception as exc:
             entry["findings"] = [

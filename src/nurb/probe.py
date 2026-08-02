@@ -113,6 +113,17 @@ def _on_face(rows, where):
     return max(hits, key=lambda r: r["area"]) if hits else None
 
 
+def finding_faces(shape, ctx, findings):
+    """The face row each finding fired on, in findings order, None where there is none.
+
+    This is `_on_face` run for a whole findings list, and it is what lets anything
+    downstream point at a finding instead of quoting its coordinate: the viewer paints
+    the row's face, and `inspect --render` stands a camera along its normal.
+    """
+    rows, _ = faces(shape, ctx)
+    return [_on_face(rows, f.where) for f in findings]
+
+
 def _face_line(row):
     normal = _label(row["normal"]) if row["normal"] is not None else row["kind"]
     value = row["droop"]

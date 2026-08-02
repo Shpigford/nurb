@@ -128,6 +128,22 @@ def test_check_judges_a_matching_variant_by_its_own_settings(tmp_path):
     assert "min_wall" in rules
 
 
+def test_findings_carry_the_triangles_of_their_face(tmp_path):
+    """A finding arrives with its face as a flat triangle list, so the viewer can paint
+    the guilty face instead of dropping a pin near it. The subtlety guarded here:
+    checks.run cleans the tessellation the rebuild left on the shape, so the check pass
+    has to mesh again before any triangles exist to read."""
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    (tmp_path / "parts" / "thing.md").write_text(CARD)
+    server.rebuild(part)
+    walls = [f for f in server.check(part)["findings"] if f["rule"] == "min_wall"]
+    assert walls, "the base card demands 10mm of a 5mm plate"
+    face = walls[0]["face"]
+    assert face, "the finding lost its face"
+    assert len(face) % 9 == 0, "not whole triangles of three corners"
+
+
 def test_export_builds_at_the_slider_values(tmp_path):
     server = project(tmp_path)
     server.overrides["thing"] = {"width": 15.0}
