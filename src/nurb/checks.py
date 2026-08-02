@@ -9,7 +9,7 @@ see each other, and `run` gathers them.
 
 import pathlib
 from dataclasses import dataclass, field, replace
-from math import asin, degrees
+from math import asin, atan2, cos, degrees, pi, sin
 
 from build123d import Axis, CenterOf, GeomType, Vector
 
@@ -179,19 +179,25 @@ def build_volume(shape, ctx):
     if _standing(shape, up) is None:
         got = sorted([size.X, size.Y, size.Z], reverse=True)
         fits = all(g <= b for g, b in zip(got, sorted(ctx.bed, reverse=True)))
+        if not fits:
+            # The box is the wrong question for a part that fits turned on the
+            # plate: issue #55's 364mm tray sits on a 350mm bed at 36 degrees.
+            fits = _fits_rotated(shape, ctx.bed)
         orientation = "in any orientation"
     else:
         # A stance facet fixes the build direction. The part may turn on the plate,
         # but rolling it onto another axis would put the facet in the air again.
         bed, top = _span(shape, up)
+        height = top - bed
         footprint = sorted(
             _span(shape, axis)[1] - _span(shape, axis)[0]
             for axis in _bed_axes(up)
         )
         plate = sorted(ctx.bed[:2])
-        got = [top - bed, *footprint]
-        fits = top - bed <= ctx.bed[2] and all(
-            got <= available for got, available in zip(footprint, plate)
+        got = [height, *footprint]
+        fits = height <= ctx.bed[2] and (
+            all(got <= available for got, available in zip(footprint, plate))
+            or _fits_rotated(shape, ctx.bed, up)
         )
         orientation = "in its fixed build orientation"
     if fits:
@@ -259,6 +265,120 @@ def _bed_axes(up):
     guide = Vector(1, 0, 0) if abs(up.X) < 0.9 else Vector(0, 1, 0)
     first = up.cross(guide).normalized()
     return first, up.cross(first).normalized()
+
+
+def _hull(points):
+    """Convex hull of 2d points, by monotone chain."""
+    pts = sorted({(round(float(x), 2), round(float(y), 2)) for x, y in points})
+    if len(pts) <= 2:
+        return pts
+
+    def turn(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    out = []
+    for chain in (pts, reversed(pts)):
+        base = len(out)
+        for p in chain:
+            while len(out) - base >= 2 and turn(out[-2], out[-1], p) <= 0:
+                out.pop()
+            out.append(p)
+        out.pop()
+    return out
+
+
+def _rotated_spans(points, angle):
+    c, s = cos(angle), sin(angle)
+    xs = [x * c - y * s for x, y in points]
+    ys = [x * s + y * c for x, y in points]
+    return max(xs) - min(xs), max(ys) - min(ys)
+
+
+def _footprint_fits(points, plate):
+    """Whether a 2d footprint fits a rectangular plate at some rotation.
+
+    Between orientations parallel to hull edges, the vertices supporting each side
+    of the bounding box stay fixed. The worst normalized span can reach its minimum
+    only at one of those boundaries or where the two normalized spans cross, so those
+    finite candidates give the exact answer without an angle grid.
+    """
+    hull = _hull(points)
+    if not hull:
+        return False
+
+    quarter = pi / 2
+    cuts = {0.0, quarter}
+    if len(hull) > 1:
+        for p, q in zip(hull, hull[1:] + hull[:1]):
+            edge = atan2(q[1] - p[1], q[0] - p[0])
+            cuts.add((-edge) % quarter)
+    cuts = sorted(cuts)
+    candidates = list(cuts)
+    orientations = (plate, plate[::-1])
+
+    for low, high in zip(cuts, cuts[1:]):
+        if high - low <= 1e-12:
+            continue
+        mid = (low + high) / 2
+        c, s = cos(mid), sin(mid)
+
+        def x_at(p):
+            return p[0] * c - p[1] * s
+
+        def y_at(p):
+            return p[0] * s + p[1] * c
+
+        x_high, x_low = max(hull, key=x_at), min(hull, key=x_at)
+        y_high, y_low = max(hull, key=y_at), min(hull, key=y_at)
+        dx, dy = x_high[0] - x_low[0], x_high[1] - x_low[1]
+        ex, ey = y_high[0] - y_low[0], y_high[1] - y_low[1]
+
+        for across, deep in orientations:
+            cos_term = deep * dx - across * ey
+            sin_term = -deep * dy - across * ex
+            if abs(cos_term) + abs(sin_term) <= 1e-12:
+                continue
+            crossing = atan2(-cos_term, sin_term) % pi
+            if low < crossing < high:
+                candidates.append(crossing)
+
+    for angle in candidates:
+        width, depth = _rotated_spans(hull, angle)
+        if any(
+            width <= across + 1e-6 and depth <= deep + 1e-6
+            for across, deep in orientations
+        ):
+            return True
+    return False
+
+
+def _fits_rotated(shape, bed, up=None):
+    """Whether the part fits the plate turned about some build axis.
+
+    The slow path, reached only after the bounding box has already failed. The
+    footprint is the hull of a tessellation rather than of the B-rep's own
+    vertices, because a curved outline has vertices only at its seams.
+    """
+    from . import builder
+
+    verts = builder.to_mesh(shape, 0.1).vertices
+    if up is not None:
+        first, second = _bed_axes(up)
+
+        def projected(point):
+            point = Vector(*point)
+            return point.dot(first), point.dot(second)
+
+        footprint = [projected(point) for point in verts]
+        return _footprint_fits(footprint, bed[:2])
+
+    for axis in range(3):
+        if verts[:, axis].max() - verts[:, axis].min() > bed[2] + 1e-6:
+            continue
+        flat = [c for c in range(3) if c != axis]
+        if _footprint_fits(verts[:, flat], bed[:2]):
+            return True
+    return False
 
 
 def _reach(face, up):

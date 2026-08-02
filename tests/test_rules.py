@@ -4,7 +4,7 @@ A rule that agrees with itself proves nothing. These are all cases where the exp
 finding is obvious from the geometry: a known angle, a known count, a known tip.
 """
 
-from math import tan, radians
+from math import cos, radians, sin, tan
 
 from build123d import Align, Box, Cylinder, Plane, Pos, Rot, extrude, Polygon
 import pytest
@@ -161,11 +161,40 @@ def test_sliver_counts_and_the_baseline_silences_it():
 
 
 def test_build_volume_uses_the_best_orientation():
-    """300 x 10 x 10 does not fit a 256 bed lying down, but it fits standing up."""
+    """260 x 10 x 10 does not fit a 256 bed square-on, but it fits standing up."""
     tall = Box(260, 10, 10)
     assert only(tall, "build_volume", Context(bed=(256, 256, 300))) == [], "stands up"
-    assert only(tall, "build_volume", Context(bed=(256, 256, 256))) != [], "260 > 256"
     assert only(tall, "build_volume", Context(bed=(100, 100, 100)))[0].severity == FAIL
+
+
+def test_build_volume_allows_a_diagonal_footprint():
+    """The box is not the part: a 300mm bar lies on a 256mm bed at 30-odd degrees,
+    and issue #55's 364mm tray sits on a 350mm bed the same way. Past the bed's
+    diagonal, no rotation saves it."""
+    bed = Context(bed=(256, 256, 100))  # too short to stand either bar on end
+    assert only(Box(300, 10, 10), "build_volume", bed) == []
+    assert only(Box(400, 10, 10), "build_volume", bed)[0].severity == FAIL
+
+
+def test_build_volume_finds_a_narrow_rotation_window():
+    """A long part can have less than 0.1 degrees of usable rotation."""
+    angle = radians(36.05)
+    bed = Context(
+        bed=(
+            300 * cos(angle) + 10 * sin(angle) + 0.1,
+            300 * sin(angle) + 10 * cos(angle) + 0.1,
+            100,
+        )
+    )
+    assert only(Box(300, 10, 10), "build_volume", bed) == []
+
+
+def test_build_volume_turns_a_stood_part_on_the_plate():
+    """A stance fixes build-up, not rotation around build-up."""
+    from nurb import stand
+
+    stood = stand(Box(4, 120, 20), tilt=45, facet=2.0, fins=False)
+    assert only(stood, "build_volume", Context(bed=(100, 100, 100))) == []
 
 
 def test_build_volume_keeps_a_stood_parts_facet_on_the_bed():

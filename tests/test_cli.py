@@ -55,6 +55,14 @@ def test_an_unasked_port_walks_past_one_that_is_busy():
         assert cli._is_free(busy) is False
 
 
+def test_an_exhausted_walk_falls_back_to_an_ephemeral_port(monkeypatch):
+    """Forty viewers is not a reason to refuse to start (issue #55)."""
+    monkeypatch.setattr(cli, "_is_free", lambda port: False)
+    port = cli._pick_port(None)
+    assert port not in range(cli.DEFAULT_PORT, cli.DEFAULT_PORT + 40)
+    assert port > 0
+
+
 def test_asking_for_a_busy_port_is_an_error_not_a_suggestion():
     """`--port 7373` picking 7374 would open a tab onto somebody else's parts."""
     import socket
@@ -269,6 +277,23 @@ def test_export_reads_the_projects_formats(tmp_path, monkeypatch):
     assert not (tmp_path / "build" / "thing.step").exists()
     cli.cmd_export(argparse.Namespace(part=None, formats=["step"]))
     assert (tmp_path / "build" / "thing.step").exists()
+
+
+def test_stl_is_meshed_for_printing_not_archival(tmp_path):
+    """build123d's 1e-3mm default made a 145x364mm tray 97k triangles (issue #55).
+
+    Fresh shapes per export, because OCCT caches the triangulation on the shape and
+    an export at a coarser tolerance silently reuses an existing finer mesh.
+    """
+    from build123d import Cylinder, export_stl
+
+    from nurb import builder
+
+    export_stl(Cylinder(20, 40), str(tmp_path / "default.stl"))
+    builder.write_stl(Cylinder(20, 40), tmp_path / "ours.stl")
+    assert builder.stl_triangles(tmp_path / "ours.stl") < builder.stl_triangles(
+        tmp_path / "default.stl"
+    )
 
 
 def test_the_shim_promises_what_export_actually_writes():

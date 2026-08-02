@@ -235,8 +235,13 @@ def _project_formats(root):
     return block.get("export", {}).get("formats")
 
 
+def _artifact_size(path):
+    n = path.stat().st_size
+    return f"{n / 1e6:.1f}MB" if n >= 1e6 else f"{n / 1e3:.0f}kB"
+
+
 def cmd_export(args):
-    from build123d import export_step, export_stl
+    from build123d import export_step
 
     from . import builder
 
@@ -267,7 +272,7 @@ def cmd_export(args):
         for fmt in formats:
             target = out / f"{name}.{fmt}"
             if fmt == "stl":
-                export_stl(shape, str(target))
+                builder.write_stl(shape, target)
             elif fmt == "step":
                 export_step(shape, str(target))
             elif fmt == "glb":
@@ -276,7 +281,10 @@ def cmd_export(args):
                 # The print used to sit outside this chain, so a typo in `--formats`
                 # reported a filename that was never written and exited 0.
                 sys.exit(f"  no exporter for {fmt!r}. have: {', '.join(FORMATS)}")
-            print(f"  {target.relative_to(root)}")
+            note = _artifact_size(target)
+            if fmt == "stl":
+                note += f", {builder.stl_triangles(target):,} triangles"
+            print(f"  {target.relative_to(root)}  {note}")
 
 
 # What OCCT says when a chamfer will not land. A part refusing to grow in its own words
@@ -596,7 +604,13 @@ def _pick_port(asked):
     for port in range(DEFAULT_PORT, DEFAULT_PORT + 40):
         if _is_free(port):
             return port
-    sys.exit(f"  nothing free between {DEFAULT_PORT} and {DEFAULT_PORT + 40}")
+    # Forty viewers is unusual but not a reason to refuse to start (issue #55 hit
+    # this wall): fall back to whatever the OS hands out, as headless renders do.
+    import socket
+
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 def cmd_dev(args):

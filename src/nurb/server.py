@@ -396,7 +396,7 @@ class Server:
         import tempfile
         import zipfile
 
-        from build123d import export_step, export_stl
+        from build123d import export_step
 
         def solid(path, stem):
             """(bytes, None) for a part, (None, scene) for an assembly."""
@@ -406,7 +406,10 @@ class Server:
                 return None, scene
             with tempfile.TemporaryDirectory() as scratch:
                 target = pathlib.Path(scratch) / f"{stem}.{fmt}"
-                (export_stl if fmt == "stl" else export_step)(built, str(target))
+                if fmt == "stl":
+                    builder.write_stl(built, target)
+                else:
+                    export_step(built, str(target))
                 return target.read_bytes(), None
 
         path = next((p for p in builder.find_parts(self.root) if p.stem == name), None)

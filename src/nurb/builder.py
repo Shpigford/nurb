@@ -222,6 +222,27 @@ def to_glb(shape, tolerance=0.1):
     return out.export(file_type="glb")
 
 
+def write_stl(shape, target):
+    """Write an STL meshed for printing rather than for archival.
+
+    build123d's export_stl defaults to 1e-3mm linear deflection, an order finer than
+    a nozzle reproduces: issue #55's 145x364mm tray meshed to 97k triangles and
+    4.7MB, and the slicer turned the micro-segments into constant braking along the
+    walls. A 0.01mm chord error is invisible at FDM scale and cuts the mesh to a
+    fraction.
+    """
+    from build123d import export_stl
+
+    export_stl(shape, str(target), tolerance=0.01, angular_tolerance=0.2)
+
+
+def stl_triangles(target):
+    """Triangle count of a binary STL, from the header."""
+    with open(target, "rb") as f:
+        f.seek(80)
+        return int.from_bytes(f.read(4), "little")
+
+
 def stats(shape):
     bb = shape.bounding_box()
     return {
