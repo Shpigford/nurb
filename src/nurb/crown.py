@@ -135,7 +135,11 @@ def _circumradius(a, b, c):
 
 
 def crown(wall, radius=None):
-    """Round the top of a closed perimeter wall with one smooth bead.
+    """Round the top of a closed perimeter wall with one smooth bead, on request.
+
+    The doctrine's default for every exposed edge, rims included, stays the chamfer;
+    this is for the part whose user asked for a rounded rim, or whose mating geometry
+    genuinely needs one.
 
     The bead is a pipe swept along the wall's top centreline, so it rises and falls
     with the roofline and the crowned wall stands `radius` prouder than it was built.

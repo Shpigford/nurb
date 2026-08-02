@@ -123,7 +123,7 @@ profile, not with a dress-up feature.**
 
 The polish pass runs last, after structure is finished.
 
-1. **Chamfers are the default on exposed edges**, 1mm, never below 0.8mm. A consistent faceted look that prints reliably beats a fillet default. The one sanctioned round-edge treatment is `crown`, for the top rim of a closed perimeter wall: a rim a hand wraps around wants a bead, not a facet, and filleting a variable-height roofline directly dies in OCCT's corner capping. Everywhere else the chamfer rule stands.
+1. **Chamfers are the default on exposed edges**, 1mm, never below 0.8mm. A consistent faceted look that prints reliably beats a fillet default. The one sanctioned round-edge treatment is `crown`, for the top rim of a closed perimeter wall, and it is **asked for, never assumed**: reach for it when the user wants a rounded rim, or when a mating part genuinely requires one, and chamfer the rim like any other edge otherwise. It exists because filleting a variable-height roofline directly dies in OCCT's corner capping, not because rims want beads.
 2. **No chamfers lying in the back face or the bottom face.** The back sits against the
    wall and the bottom is the bed-contact face. Chamfering an edge that lies in either
    buys nothing, and where a bottom chamfer meets another one it makes sliver facets and
