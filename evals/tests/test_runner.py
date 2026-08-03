@@ -113,8 +113,12 @@ def test_rows_carry_the_matrix_identity(tmp_path):
     row = runner.trial(Stub(GOOD), TASK, SEED, 2, tmp_path, model="some-model", effort="high")
     assert (row["harness"], row["model"], row["effort"]) == ("stub", "some-model", "high")
     assert row["seed"] == SEED and row["trial"] == 2
-    assert row["nurb_version"] == "0.9.0"
-    assert row["benchmark_version"] == "0.1.0"
+    # The row pins whatever nurb is actually installed, never a literal that rots
+    # on every release.
+    import importlib.metadata
+
+    assert row["nurb_version"] == importlib.metadata.version("nurb")
+    assert row["benchmark_version"] == importlib.metadata.version("nurb-evals")
     assert len(row["benchmark_revision"]) == 12
     json.dumps(row)  # a row must survive the JSONL sink
 
