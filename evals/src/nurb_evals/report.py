@@ -142,10 +142,46 @@ def table(summary):
     return "\n".join(lines).rstrip() + "\n"
 
 
+EVALS = pathlib.Path(__file__).parents[2]
+
+HEADER = """\
+# nurb leaderboard
+
+Generated from the committed submissions by `python -m nurb_evals.report --write`, so it can never disagree with them; the reader-facing version is [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html), built from the same rows. Matching rows pool across submissions, single runs included, and every row's transcripts and parts live under [submissions/](submissions/). See [README.md](README.md) to run one.
+"""
+
+EMPTY = """\
+No rows yet. Run one on your own subscription:
+
+```
+curl -fsSL https://nurb.dev/bench.sh | sh
+```
+"""
+
+
+def write(submissions=None, out=None):
+    """Regenerate REPORT.md from the committed submissions. The contribute wizard
+    calls this so a PR ships with the report its rows produce."""
+    submissions = pathlib.Path(submissions or EVALS / "submissions")
+    out = pathlib.Path(out or EVALS / "REPORT.md")
+    summary = summarize(rows_from(sorted(submissions.glob("*/results.jsonl"))))
+    body = table(summary) if summary else EMPTY
+    out.write_text(HEADER + "\n" + body, encoding="utf-8")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description="results.jsonl rows to a leaderboard table")
-    ap.add_argument("results", nargs="+", help="results.jsonl files or their directories")
+    ap.add_argument("results", nargs="*", help="results.jsonl files or their directories")
+    ap.add_argument(
+        "--write", action="store_true", help="regenerate REPORT.md from the committed submissions"
+    )
     args = ap.parse_args()
+    if args.write:
+        print(f"wrote {write()}")
+        return
+    if not args.results:
+        ap.error("results paths required unless --write")
     sys.stdout.write(table(summarize(rows_from(args.results))))
 
 

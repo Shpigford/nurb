@@ -125,14 +125,12 @@ def test_committed_submission_artifacts_are_complete_and_sanitized():
     # from community and maintainer runs of the released pipeline.
 
 
-def test_committed_report_rows_match_the_submissions():
-    evals = pathlib.Path(__file__).parents[1]
-    submitted = report.rows_from(sorted((evals / "submissions").glob("*/results.jsonl")))
-    generated = report.table(report.summarize(submitted))
-    committed = (evals / "REPORT.md").read_text(encoding="utf-8")
-    for line in generated.splitlines():
-        if line.startswith("|"):
-            assert line in committed
+def test_committed_report_matches_the_submissions(tmp_path):
+    """REPORT.md is generated, never hand-edited, so submissions and report can
+    never drift; the wizard regenerates it with every staged contribution."""
+    regenerated = report.write(out=tmp_path / "REPORT.md").read_text(encoding="utf-8")
+    committed = (pathlib.Path(__file__).parents[1] / "REPORT.md").read_text(encoding="utf-8")
+    assert committed == regenerated, "REPORT.md is stale: run python -m nurb_evals.report --write"
 
 
 def test_site_page_renders_from_the_committed_submissions():
