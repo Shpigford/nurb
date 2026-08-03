@@ -448,12 +448,25 @@ def render(summary):
         for title, blurb in JOBS.values()
     )
     combos = _combos(summary)
-    cards = "\n".join(_card(key, tasks) for key, tasks in combos)
+    if combos:
+        answers = _answers(combos)
+        gap = html.escape(GAP_NOTE)
+        chart = _chart(combos)
+        cards = "\n".join(_card(key, tasks) for key, tasks in combos)
+    else:
+        answers = (
+            '<div class="answer"><div class="have">No rows on file yet</div>'
+            '<div class="pick">be the first</div>'
+            '<div class="why">the one-liner below runs the benchmark on your own subscription and stages a submission</div></div>'
+        )
+        gap = ""
+        chart = '<p class="chart-lead">The chart appears with the first submitted rows.</p>'
+        cards = '<p class="chart-lead">Nothing yet.</p>'
     page = HEAD  # plain token replacement: the CSS is full of braces str.format would eat
     for token, value in (
-        ("{answers}", _answers(combos)),
-        ("{gap_note}", html.escape(GAP_NOTE)),
-        ("{chart}", _chart(combos)),
+        ("{answers}", answers),
+        ("{gap_note}", gap),
+        ("{chart}", chart),
         ("{jobs}", jobs),
         ("{cards}", cards),
         ("{trial_count}", str(sum(r["trials"] for r in summary))),

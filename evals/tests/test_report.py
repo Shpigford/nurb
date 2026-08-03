@@ -149,6 +149,7 @@ def test_site_page_renders_from_the_committed_submissions():
         assert token not in page
     for title, _ in site.JOBS.values():
         assert title in page
-    assert "fable" in page and "min/part" in page
+    # With rows on file the page shows per-part times; with none, the empty state.
+    assert "min/part" in page or "No rows on file yet" in page
     committed = (site.SITE).read_text(encoding="utf-8")
     assert committed == page, "site/benchmarks.html is stale: run python -m nurb_evals.site"
