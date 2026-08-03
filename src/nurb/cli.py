@@ -158,6 +158,15 @@ def cmd_check(args):
             base = checks.printer(root, args.printer)
         except ValueError as exc:
             sys.exit(f"  {exc}")
+    else:
+        # A profile picked up from a file is invisible, and invisible is how two
+        # machines check the same part differently for no stated reason.
+        try:
+            profile, source = checks.profile_choice(root)
+        except ValueError:
+            profile = None  # a broken file gets its real error on the first part
+        if profile:
+            print(f"  printer: {profile} ({source})")
     worst = 0
     for path in _resolve(root, args.part):
         configs = _configs(path, base=base)
@@ -215,24 +224,27 @@ def _collect_exports(paths):
     return found
 
 
-def _project_formats(root):
-    """printer.toml's `[export] formats`, the project's standing preference.
+def _standing_formats(root):
+    """`[export] formats`, from the project's printer.toml, then the global config.
 
     A syntax error is left for checks.printer to report, which every export
     reaches on its way to a Context and which names the file and the line.
     """
     import tomllib
 
-    from .checks import PRINTER_FILE
+    from . import checks
 
-    file = root / PRINTER_FILE
-    if not file.is_file():
-        return None
-    try:
-        block = tomllib.loads(file.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:
-        return None
-    return block.get("export", {}).get("formats")
+    for file in (root / checks.PRINTER_FILE, checks.global_file()):
+        if not file.is_file():
+            continue
+        try:
+            block = tomllib.loads(file.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError:
+            continue
+        formats = block.get("export", {}).get("formats")
+        if formats:
+            return formats
+    return None
 
 
 def _artifact_size(path):
@@ -246,7 +258,7 @@ def cmd_export(args):
     from . import builder, checks
 
     root = project_root()
-    formats = args.formats or _project_formats(root) or list(DEFAULT_FORMATS)
+    formats = args.formats or _standing_formats(root) or list(DEFAULT_FORMATS)
     configs = _collect_exports(_resolve(root, args.part))
     out = root / "build"
     out.mkdir(exist_ok=True)
@@ -285,6 +297,15 @@ def cmd_export(args):
             if fmt == "stl":
                 note += f", {builder.stl_triangles(target):,} triangles"
             print(f"  {target.relative_to(root)}  {note}")
+        # A file this export did not rewrite still sits in build/ looking current,
+        # and a stale STEP shared as fresh is worse than a missing one.
+        for fmt in (f for f in FORMATS if f not in formats):
+            stale = out / f"{name}.{fmt}"
+            if stale.exists():
+                print(
+                    f"  {stale.relative_to(root)}  not rewritten ({fmt} is not in this "
+                    f"export's formats), delete it or add the format"
+                )
 
 
 # What OCCT says when a chamfer will not land. A part refusing to grow in its own words
@@ -502,8 +523,8 @@ ISO = (0.588, -0.630, 0.504)
 def _renders(root):
     """Where every camera-made file lands: stills, sections, finding shots, reports.
 
-    build/ itself is the catalog of deliverables, the STL and STEP a slicer picks
-    from, and pictures were drowning it. Everything made to be looked at rather than
+    build/ itself is the catalog of deliverables, the STL a slicer picks up, and
+    pictures were drowning it. Everything made to be looked at rather than
     printed lives one level down instead.
     """
     return root / "build" / "renders"
@@ -717,7 +738,7 @@ DEFAULT_PORT = 7373
 
 # GLB is the viewer's format, so it is on request rather than written every time.
 FORMATS = ("stl", "step", "glb")
-DEFAULT_FORMATS = ("stl", "step")
+DEFAULT_FORMATS = ("stl",)
 
 
 def _is_free(port):
@@ -897,7 +918,7 @@ def main(argv=None):
     s.add_argument("part", nargs="?")
     s.add_argument(
         "--formats", nargs="+", default=None,
-        help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: glb",
+        help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: step, glb",
     )
     s.set_defaults(fn=cmd_export)
 

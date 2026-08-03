@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+import pathlib
 from types import SimpleNamespace
 
 import numpy as np
@@ -246,6 +247,51 @@ def test_rebuild_broadcast_carries_a_changed_printer_bed(tmp_path):
 
     assert out[0]["type"] == "rebuilt"
     assert out[0]["bed"] == [180, 120]
+
+
+def test_global_config_change_queues_every_part(tmp_path, monkeypatch):
+    """The global printer file lives outside both directories normally watched."""
+    from nurb import checks
+    from nurb import server as server_mod
+
+    config = checks.global_file()
+    config.parent.mkdir(parents=True)
+    config.write_text('profile = "bambu_a1_mini"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+    server.loop = SimpleNamespace(call_soon_threadsafe=lambda fn, arg: fn(arg))
+
+    class FakeObserver:
+        def __init__(self):
+            self.scheduled = []
+
+        def schedule(self, handler, path, recursive):
+            self.scheduled.append((handler, path, recursive))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(server_mod, "Observer", FakeObserver)
+    server.watch()
+    watched = next(
+        handler
+        for handler, path, _ in server.observer.scheduled
+        if pathlib.Path(path) == config.parent
+    )
+    watched.on_any_event(
+        SimpleNamespace(
+            is_directory=False,
+            src_path=str(config.parent / "unrelated.py"),
+            dest_path="",
+        )
+    )
+    assert server.queue.empty()
+
+    watched.on_any_event(
+        SimpleNamespace(is_directory=False, src_path=str(config), dest_path="")
+    )
+
+    assert server.queue.get_nowait() == str(tmp_path / "parts" / "thing.py")
 
 
 def test_upgrade_declines_outside_a_uv_tool_install(tmp_path):

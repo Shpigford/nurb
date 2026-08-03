@@ -654,30 +654,38 @@ class Server:
                 self.clients.discard(client)
 
     async def broadcast(self, entry, kind="rebuilt"):
-        # printer.toml is watched like a part source. Carrying the current bed on the
-        # rebuild is what lets that edit resize an already-open viewer.
+        # Printer settings are watched like part sources. Carrying the current bed on
+        # the rebuild is what lets an edit resize an already-open viewer.
         await self.send({"type": kind, "bed": self._bed(), **self._wire(entry)})
 
     # ---------- watching ----------
 
     def watch(self):
+        from . import checks
+
         server = self
         parts_dir = self.root / "parts"
+        global_config = checks.global_file().resolve()
 
         class Handler(FileSystemEventHandler):
             def on_any_event(self, event):
                 if event.is_directory:
                     return
-                path = pathlib.Path(getattr(event, "dest_path", "") or event.src_path)
+                path = pathlib.Path(
+                    getattr(event, "dest_path", "") or event.src_path
+                ).resolve()
                 # "." skips the atomic-save temp files editors and sed leave behind
                 if path.name.startswith((".", "_")):
                     return
-                # printer.toml changes every part's checks and measurements.toml can
-                # feed any part's geometry, so either rebuilds the project the way
-                # system.py does: they land in the else branch below.
-                if path.suffix not in (".py", ".md") and path.name not in (
-                    "printer.toml",
-                    "measurements.toml",
+                if path != global_config and path.parent not in (parts_dir, server.root):
+                    return
+                # Printer settings change every part's checks, whether they came from
+                # the project or the global config. measurements.toml can feed any
+                # part's geometry, so all three rebuild the whole project below.
+                if (
+                    path != global_config
+                    and path.suffix not in (".py", ".md")
+                    and path.name not in ("printer.toml", "measurements.toml")
                 ):
                     return
                 # A card carries what the part has already justified, so editing one
@@ -702,6 +710,12 @@ class Server:
         self.observer = Observer()
         self.observer.schedule(Handler(), str(parts_dir), recursive=False)
         self.observer.schedule(Handler(), str(self.root), recursive=False)
+        global_dir = global_config.parent
+        if global_dir.is_dir() and global_dir not in {
+            parts_dir.resolve(),
+            self.root.resolve(),
+        }:
+            self.observer.schedule(Handler(), str(global_dir), recursive=False)
         self.observer.daemon = True
         self.observer.start()
 

@@ -52,7 +52,7 @@ nurb update          upgrade nurb, then re-sync the installed skill to match
 nurb card [part]     regenerate a card's AUTO block
 nurb verify [part]   the doctrine's verification list, --strict-ish exit code, --report bundles it with renders
 nurb render [part]   write build/renders/<part>.png, --section cuts it open, needs the render extra
-nurb export [part]   write STL and STEP into build/, --formats for GLB
+nurb export [part]   write STL into build/, --formats for STEP or GLB
 nurb extract         find duplication across sibling parts
 nurb launcher        write viewer.command, a double-clickable `nurb dev`
 ```

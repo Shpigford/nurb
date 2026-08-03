@@ -772,6 +772,42 @@ PRINTERS = pathlib.Path(__file__).parent / "printers.toml"
 PRINTER_FILE = "printer.toml"  # optional, at the project root, like measurements.toml
 
 
+def global_file():
+    """~/.config/nurb/config.toml, the machine's standing answers.
+
+    A printer is a fact about the workshop, not the project, so it is named once
+    here instead of in every printer.toml. Same schema as printer.toml, read fresh
+    each call because tests move it with XDG_CONFIG_HOME.
+    """
+    import os
+
+    base = os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config"
+    return pathlib.Path(base) / "nurb" / "config.toml"
+
+
+def _read_toml(file, label):
+    import tomllib
+
+    if not file.is_file():
+        return {}
+    try:
+        return tomllib.loads(file.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"{label}: not valid TOML ({exc})") from exc
+
+
+def profile_choice(root):
+    """The profile a project resolves to and where it was named: the project's
+    printer.toml, then the global config. (None, None) when neither says."""
+    block = _read_toml(pathlib.Path(root) / PRINTER_FILE, PRINTER_FILE)
+    if block.get("profile"):
+        return block["profile"], PRINTER_FILE
+    home = _read_toml(global_file(), str(global_file()))
+    if home.get("profile"):
+        return home["profile"], "global"
+    return None, None
+
+
 def profiles():
     """The shipped printer profiles: machine facts, keyed by name."""
     import tomllib
@@ -786,24 +822,19 @@ def _project_root(part_path):
 
 
 def printer(root, name=None):
-    """The machine's Context: a shipped profile, then the project's printer.toml.
+    """The machine's Context: a shipped profile, then the global config, then the
+    project's printer.toml.
 
     A bed size belongs to the machine, not to a part, so it is picked once here
-    rather than written onto every card. The file names a shipped profile and can
-    override any check setting machine-wide; a card still wins for what its part
-    has justified, because `_apply` runs the card on top of this.
+    rather than written onto every card. Either file names a shipped profile and can
+    override any check setting machine-wide; the project's wins over the global's,
+    and a card still wins for what its part has justified, because `_apply` runs the
+    card on top of this.
     """
-    import tomllib
-
     ctx = Context()
-    block = {}
-    file = pathlib.Path(root) / PRINTER_FILE
-    if file.is_file():
-        try:
-            block = tomllib.loads(file.read_text(encoding="utf-8"))
-        except tomllib.TOMLDecodeError as exc:
-            raise ValueError(f"{PRINTER_FILE}: not valid TOML ({exc})") from exc
-    name = name or block.pop("profile", None)
+    home = _read_toml(global_file(), str(global_file()))
+    block = _read_toml(pathlib.Path(root) / PRINTER_FILE, PRINTER_FILE)
+    name = name or block.get("profile") or home.get("profile")
     if name:
         have = profiles()
         if name not in have:
@@ -811,9 +842,11 @@ def printer(root, name=None):
                 f"no printer profile called {name!r}. have: {', '.join(sorted(have))}"
             )
         _apply(ctx, {"printer": have[name]}, f"profile {name!r}")
-    block.pop("profile", None)  # named on the command line, so the file's loses
-    block.pop("export", None)  # a workflow preference, not a machine fact; cmd_export reads it
-    return _apply(ctx, {"printer": block}, PRINTER_FILE)
+    # profile is resolved above; export is a workflow preference cmd_export reads
+    for settings_block, where in ((home, str(global_file())), (block, PRINTER_FILE)):
+        facts = {k: v for k, v in settings_block.items() if k not in ("profile", "export")}
+        _apply(ctx, {"printer": facts}, where)
+    return ctx
 
 
 # --- per part settings -------------------------------------------------------

@@ -330,13 +330,70 @@ def test_export_reads_the_projects_formats(tmp_path, monkeypatch):
     parts = tmp_path / "parts"
     parts.mkdir()
     (parts / "thing.py").write_text(PLAIN)
-    (tmp_path / "printer.toml").write_text('[export]\nformats = ["stl"]\n')
+    (tmp_path / "printer.toml").write_text('[export]\nformats = ["stl", "step"]\n')
     monkeypatch.chdir(tmp_path)
     cli.cmd_export(argparse.Namespace(part=None, formats=None))
     assert (tmp_path / "build" / "thing.stl").exists()
-    assert not (tmp_path / "build" / "thing.step").exists()
-    cli.cmd_export(argparse.Namespace(part=None, formats=["step"]))
     assert (tmp_path / "build" / "thing.step").exists()
+    (tmp_path / "build" / "thing.step").unlink()
+    cli.cmd_export(argparse.Namespace(part=None, formats=["stl"]))
+    assert not (tmp_path / "build" / "thing.step").exists()
+
+
+def test_export_flags_the_formats_it_left_stale(tmp_path, monkeypatch, capsys):
+    """An old STEP sitting next to a fresh STL looks current, and sharing it as
+    current is the upgrade trap of the STL-only default. The export says so."""
+    import argparse
+
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    monkeypatch.chdir(tmp_path)
+    cli.cmd_export(argparse.Namespace(part=None, formats=["stl", "step"]))
+    capsys.readouterr()
+    cli.cmd_export(argparse.Namespace(part=None, formats=["stl"]))
+    out = capsys.readouterr().out
+    assert "thing.step" in out
+    assert "not rewritten" in out
+
+
+def _global_config(text):
+    from nurb.checks import global_file
+
+    global_file().parent.mkdir(parents=True, exist_ok=True)
+    global_file().write_text(text)
+
+
+def test_export_falls_back_to_the_global_formats(tmp_path, monkeypatch):
+    """The global config covers projects that say nothing; printer.toml still wins."""
+    import argparse
+
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    _global_config('[export]\nformats = ["stl", "step"]\n')
+    monkeypatch.chdir(tmp_path)
+    cli.cmd_export(argparse.Namespace(part=None, formats=None))
+    assert (tmp_path / "build" / "thing.step").exists()
+    (tmp_path / "build" / "thing.step").unlink()
+    (tmp_path / "printer.toml").write_text('[export]\nformats = ["stl"]\n')
+    cli.cmd_export(argparse.Namespace(part=None, formats=None))
+    assert not (tmp_path / "build" / "thing.step").exists()
+
+
+def test_check_says_where_the_printer_came_from(tmp_path, monkeypatch, capsys):
+    """A profile picked up from a file is invisible without this line, and invisible
+    is how two machines check the same part differently for no stated reason."""
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    _global_config('profile = "bambu_a1_mini"\n')
+    monkeypatch.chdir(tmp_path)
+    cli.main(["check"])
+    assert "printer: bambu_a1_mini (global)" in capsys.readouterr().out
+    (tmp_path / "printer.toml").write_text('profile = "prusa_mk4s"\n')
+    cli.main(["check"])
+    assert "printer: prusa_mk4s (printer.toml)" in capsys.readouterr().out
 
 
 def test_stl_is_meshed_for_printing_not_archival(tmp_path):
@@ -358,8 +415,8 @@ def test_stl_is_meshed_for_printing_not_archival(tmp_path):
 
 def test_the_shim_promises_what_export_actually_writes():
     shim = (pathlib.Path(cli.__file__).parent / "agents.md").read_text(encoding="utf-8")
-    assert "STL and STEP" in shim
-    assert list(cli.DEFAULT_FORMATS) == ["stl", "step"]
+    assert "STL into build/" in shim
+    assert list(cli.DEFAULT_FORMATS) == ["stl"]
 
 
 # --- the agent skill ----------------------------------------------------------

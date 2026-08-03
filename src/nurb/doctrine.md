@@ -241,7 +241,9 @@ Plus two machine-facing pieces:
   the sentence that earns it, because a count on its own is a magic number. Machine facts
   stay out of it: a bed size belongs to the machine, so it lives in `printer.toml` at the
   project root, which names a shipped profile (`profile = "bambu_a1_mini"`) and can
-  override any check setting machine-wide.
+  override any check setting machine-wide. A printer is really a fact about the workshop,
+  not the project, so `~/.config/nurb/config.toml` takes the same schema and covers every
+  project on the machine; `printer.toml` overrides it where they disagree.
 
 ```toml
 [part]

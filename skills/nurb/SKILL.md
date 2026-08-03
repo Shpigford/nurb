@@ -55,13 +55,13 @@ nurb inspect [part]   faces, normals, concave edges, each finding on its face; -
 nurb card [part]      regenerate a card's AUTO block
 nurb verify [part]    the doctrine's verification list: solids, flex, checks, card. --report bundles verdict and renders into build/renders/
 nurb render [part]    PNG into build/renders/, so you can look at what you made; --section z:4mm cuts it open
-nurb export [part]    STL and STEP into build/, --formats for GLB
+nurb export [part]    STL into build/, --formats for STEP or GLB
 nurb extract          find duplication across parts
 nurb dev              watch, rebuild, serve the viewer on :7373 or the next free port
 nurb launcher         rewrite viewer.command, the double-clickable `nurb dev` a project is born with
 ```
 
-A standing preference is a file, not a flag you have to remember: a user who never wants STEP gets `formats = ["stl"]` under `[export]` in `printer.toml`, and every bare `nurb export` honors it.
+A standing preference is a file, not a flag you have to remember, and a printer is a fact about the workshop, not the project. When the user tells you what machine they own, record it once in `~/.config/nurb/config.toml` (`profile = "bambu_a1_mini"`) so no project ever asks again; check that file before asking, because they may have answered in an earlier project. The same file takes an `[export]` table (`formats = ["stl", "step"]` for a user who always wants STEP alongside), and every bare `nurb export` honors it. `printer.toml` at the project root takes the same schema and wins where they disagree, which is what makes it the right place for the exception: the one project aimed at a different machine.
 
 Read `parts/<name>.md` before editing `parts/<name>.py`. Its `## Don't` section is what was tried and rejected, and it is the only place that records it.
 
