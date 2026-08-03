@@ -125,6 +125,10 @@ HEAD = """\
   .pct.na { color: var(--dimmer); }
   .fine { color: var(--dimmer); font-size: .82rem; margin-top: 2.6rem; max-width: 70ch; }
   .fine a { color: var(--dim); }
+  .contribute { margin-top: 2.4rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.3rem; }
+  .contribute b { color: var(--accent); }
+  .contribute code { display: block; margin-top: .6rem; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: .55rem .8rem; overflow-x: auto; white-space: nowrap; }
+  .contribute span { color: var(--dim); font-size: .88rem; }
   footer { border-top: 1px solid var(--line); padding: 1.4rem 2rem; display: flex; gap: 1.4rem; color: var(--dimmer); font-size: .85rem; }
 </style>
 </head>
@@ -147,6 +151,13 @@ HEAD = """\
 
 <h2>The models</h2>
 {cards}
+
+<div class="contribute">
+  <b>Add your model to this page</b>
+  <span> &mdash; one line, runs on your own subscription, walks you through the rest. A single run counts; it pools with everyone else's.</span>
+  <code>curl -fsSL https://nurb.dev/bench.sh | sh</code>
+  <span>Or paste that line to your AI and let it drive.</span>
+</div>
 
 <p class="fine">Early days and a small sample: {trial_count} graded parts across {job_count} jobs so far, more of both on the way. Each bar is the average of every attempt on file and the tick marks are the attempts themselves, because a small sample deserves to look like one; anyone's submitted runs pool into these bars, single runs included. The grading is deterministic, a fixed rubric measured on the part's actual geometry, so the only randomness is the model's. “First-try prints” counts attempts that came back essentially perfect. Every row is reproducible: the raw results, full transcripts, and the grading code are <a href="https://github.com/Shpigford/nurb/blob/main/evals/REPORT.md">on GitHub</a>, and anyone can <a href="https://github.com/Shpigford/nurb/blob/main/evals/README.md">run a model we have not covered</a> on their own subscription and submit the row.</p>
 </main>

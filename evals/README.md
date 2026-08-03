@@ -24,7 +24,15 @@ Candidate code never runs in the scorer's process. It builds in an isolated work
 
 ## Running a row
 
-You need `uv` and the `claude` or `codex` CLI installed and logged in to your own subscription. Then:
+The easy way is the wizard, from anywhere (or paste the line to your AI and let it drive):
+
+```
+curl -fsSL https://nurb.dev/bench.sh | sh
+```
+
+It detects which agent CLIs you have, offers the models from a menu so you never guess a spelling, runs the trials on your subscription, sanitizes the artifacts, and stages a submission-ready directory with the PR command printed at the end. Agents and scripts can skip the questions with flags: `uv run python -m nurb_evals.contribute --harness claude --model sonnet --effort medium`.
+
+The manual way needs `uv` and the `claude` or `codex` CLI installed and logged in to your own subscription. Then:
 
 ```
 cd evals
