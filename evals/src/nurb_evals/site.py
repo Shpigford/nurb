@@ -187,6 +187,12 @@ def _card(key, tasks):
     total = sum(r["trials"] for r in tasks.values())
     firsts = sum(sum(s >= PASS for s in r["scores"]) for r in tasks.values())
     minutes = sum(r["wall_s"] for r in tasks.values()) / len(tasks) / 60
+    capped = sum(r.get("capped", 0) for r in tasks.values())
+    # A capped trial was killed mid-session, so its duration is a floor: say so
+    # instead of averaging kills in as if they were finishes.
+    time_note = f"~{minutes:.0f} min/part"
+    if capped:
+        time_note = f"~{minutes:.0f}+ min/part (hit the 15 min limit on {capped})"
     bars = []
     for task in JOBS:
         name = html.escape(JOBS[task][0])
@@ -203,7 +209,7 @@ def _card(key, tasks):
   <div class="top">
     <span class="model">{html.escape(model)} <small>({html.escape(effort)} effort)</small></span>
     <span class="runs">{html.escape(runs_on)}</span>
-    <span class="first">first-try prints <b>{firsts}/{total}</b> &middot; ~{minutes:.0f} min/part</span>
+    <span class="first">first-try prints <b>{firsts}/{total}</b> &middot; {time_note}</span>
   </div>{verdict_html}
   <div class="bars">
     {"".join(bars)}

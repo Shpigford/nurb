@@ -93,6 +93,9 @@ def summarize(rows):
             "pass@3": pass_at(3, n, passes),
             "tokens": _mean([_tokens(t) for t in trials]),
             "wall_s": _mean([t.get("harness_s") for t in trials]),
+            # Killed at the wall clock, so the trial's duration is a floor, not a
+            # measurement: anything averaging wall_s owes the reader this count.
+            "capped": sum("wall-clock cap" in (t.get("error") or "") for t in trials),
             "scores": scores,
         })
     out.sort(key=lambda r: (r["task"], -r["score"]))
