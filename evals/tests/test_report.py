@@ -125,17 +125,26 @@ def test_committed_submission_artifacts_are_complete_and_sanitized():
     # from community and maintainer runs of the released pipeline.
 
 
-def test_committed_report_matches_the_submissions(tmp_path):
-    """REPORT.md is generated, never hand-edited, so submissions and report can
-    never drift; the wizard regenerates it with every staged contribution."""
-    regenerated = report.write(out=tmp_path / "REPORT.md").read_text(encoding="utf-8")
-    committed = (pathlib.Path(__file__).parents[1] / "REPORT.md").read_text(encoding="utf-8")
-    assert committed == regenerated, "REPORT.md is stale: run python -m nurb_evals.report --write"
+# Deliberately absent here: any comparison of the generated report or page against
+# the committed copies. A submission PR is a pure addition that leaves both alone,
+# so the committed copies lag the submissions between publishes by design; the
+# leaderboard skill regenerates them when a maintainer publishes. Two dogfooded
+# submission PRs went red on exactly that comparison before this note existed.
+
+
+def test_report_write_covers_every_submitted_row(tmp_path):
+    """The generator itself: write() renders every committed submission's rows."""
+    generated = report.write(out=tmp_path / "REPORT.md").read_text(encoding="utf-8")
+    evals = pathlib.Path(__file__).parents[1]
+    rows = list(report.rows_from(sorted((evals / "submissions").glob("*/results.jsonl"))))
+    for summary in report.summarize(rows):
+        assert summary["model"] in generated and summary["task"] in generated
+    if not rows:
+        assert "No rows yet" in generated
 
 
 def test_site_page_renders_from_the_committed_submissions():
-    """The benchmarks page is generated from the same rows as the report, so it can
-    never disagree with it. Structure is asserted, not numbers: rows will change."""
+    """The page renders from whatever submissions exist; structure, not numbers."""
     from nurb_evals import site
     from nurb_evals.report import rows_from, summarize
 
@@ -149,5 +158,3 @@ def test_site_page_renders_from_the_committed_submissions():
         assert title in page
     # With rows on file the page shows per-part times; with none, the empty state.
     assert "min/part" in page or "No rows on file yet" in page
-    committed = (site.SITE).read_text(encoding="utf-8")
-    assert committed == page, "site/benchmarks.html is stale: run python -m nurb_evals.site"
