@@ -62,7 +62,7 @@ VERDICTS = {
     ),
     ("claude", "opus", "high"): (
         "Claude subscription",
-        "Also flawless, every part on every job, just slower than fable: it twice ran the clock out double-checking a part that was already perfect. If fable is not on your plan, this is the same answer with more patience required.",
+        "Flawless on everything it has rows for, a notch slower than fable. Its design-job row is being re-run under a longer session limit after the old limit cut its trials short; the numbers here are only from completed sessions.",
     ),
     ("codex", "gpt-5.5", "medium"): (
         "ChatGPT subscription (Codex)",
@@ -70,7 +70,7 @@ VERDICTS = {
     ),
     ("claude", "sonnet", "high"): (
         "Claude subscription",
-        "Perfect on instructions and honest about the unmeasured dimension. Its own designs are the gap: elegant cradles that would fail on the printer, with big unsupported overhangs, one wall too thin, one that tips. Check its parts before printing.",
+        "Perfect on instructions and honest about the unmeasured dimension, but slow. Its design-job trials all ran past the old session limit and were graded mid-thought, which is not a fair grade in either direction, so that row was thrown out and is being re-run with a longer limit.",
     ),
     ("claude", "haiku", "low"): (
         "Claude subscription (budget model)",
