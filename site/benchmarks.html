@@ -106,13 +106,17 @@
 
 <h2>The short answer</h2>
 <div class="answers">
-<div class="answer"><div class="have">No rows on file yet</div><div class="pick">be the first</div><div class="why">the one-liner below runs the benchmark on your own subscription and stages a submission</div></div>
+<div class="answer" style="border-top-color:#2f9fb5">
+  <div class="have">Have Claude?</div>
+  <div class="pick">run haiku <small>at low effort</small></div>
+  <div class="why">0/3 first-try prints &middot; ~6 min/part</div>
 </div>
-<p class="gap"></p>
+</div>
+<p class="gap">In a hurry on a Claude plan? No fast Claude option has been benchmarked yet: every Claude row so far ran at its usual effort. Lower-effort rows are next, and the chart below will grow a line per model as they land.</p>
 
 <h2>The tradeoff</h2>
 <p class="chart-lead">Every benchmarked model and effort level, placed by how often its parts print right the first time against how long it takes per part. Up and to the left is better.</p>
-<p class="chart-lead">The chart appears with the first submitted rows.</p>
+<div class="chart"><svg viewBox="0 0 840 380" role="img" aria-label="First-try prints against minutes per part for every benchmarked model"><line x1="56" y1="334" x2="816" y2="334" stroke="var(--line)" stroke-width="1"/><text x="48" y="338" text-anchor="end" font-size="11" fill="var(--dimmer)">0%</text><line x1="56" y1="257" x2="816" y2="257" stroke="var(--line)" stroke-width="1"/><text x="48" y="261" text-anchor="end" font-size="11" fill="var(--dimmer)">25%</text><line x1="56" y1="180" x2="816" y2="180" stroke="var(--line)" stroke-width="1"/><text x="48" y="184" text-anchor="end" font-size="11" fill="var(--dimmer)">50%</text><line x1="56" y1="103" x2="816" y2="103" stroke="var(--line)" stroke-width="1"/><text x="48" y="107" text-anchor="end" font-size="11" fill="var(--dimmer)">75%</text><line x1="56" y1="26" x2="816" y2="26" stroke="var(--line)" stroke-width="1"/><text x="48" y="30" text-anchor="end" font-size="11" fill="var(--dimmer)">100%</text><line x1="246" y1="26" x2="246" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="246" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">3</text><line x1="436" y1="26" x2="436" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="436" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">6</text><line x1="626" y1="26" x2="626" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="626" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">9</text><line x1="816" y1="26" x2="816" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="816" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">12</text><text x="816" y="372" text-anchor="end" font-size="11" fill="var(--dim)">minutes per part &rarr;</text><text x="14" y="16" font-size="11" fill="var(--dim)">printed right first try</text><circle class="dot" cx="460" cy="334" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>haiku (low effort): 0/3 first-try, ~6 min/part</title></circle><text x="472" y="338" text-anchor="start" font-size="12" fill="var(--text)">haiku <tspan fill="var(--dimmer)">&middot; low</tspan></text></svg><div class="chart-legend"><span><i style="background:#2f9fb5"></i>Claude</span><span><i style="background:#8f75e0"></i>ChatGPT (Codex)</span></div></div>
 
 <h2>The jobs</h2>
 <div class="jobs">
@@ -123,7 +127,19 @@
 
 <h2>The receipts</h2>
 <p class="chart-lead">Per-model detail: the verdict, and every job's score with a tick per attempt. Click a model to open it.</p>
-<p class="chart-lead">Nothing yet.</p>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">haiku <small>(low effort)</small></span>
+    <span class="runs">Claude subscription (budget model)</span>
+    <span class="first">first-try prints <b>0/3</b> &middot; ~6 min/part</span>
+  </div></summary>
+  <div class="body">
+  <p class="verdict">Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round. And it wrote its guess for the unmeasured dimension down as if it had measured it, the mistake that ruins a print six months later.</p>
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i class="low" style="width:58%"></i><u style="left:calc(57.8% - 1px)" title="attempt: 0.578"></u></div><div class="pct">58%</div><div class="name">Design from a problem</div><div class="bar"><i class="low" style="width:34%"></i><u style="left:calc(34.2% - 1px)" title="attempt: 0.342"></u></div><div class="pct">34%</div><div class="name">Handle a missing measurement</div><div class="bar"><i class="mid" style="width:82%"></i><u style="left:calc(82.5% - 1px)" title="attempt: 0.825"></u></div><div class="pct">82%</div>
+  </div>
+  </div>
+</details>
 
 <div class="contribute">
   <b>Add your model to this page.</b>
@@ -132,7 +148,7 @@
   <span>Or paste that line to your AI and let it drive.</span>
 </div>
 
-<p class="fine">Early days: 0 graded parts across 0 jobs. Each bar averages every attempt on file, and the ticks are the attempts themselves; a small sample should look like one.</p>
+<p class="fine">Early days: 3 graded parts across 3 jobs. Each bar averages every attempt on file, and the ticks are the attempts themselves; a small sample should look like one.</p>
 <p class="fine">Grading is a fixed rubric measured on the part's actual geometry, so the only randomness is the model's. Raw results, full transcripts, and the grading code are <a href="https://github.com/Shpigford/nurb/blob/main/evals/REPORT.md">on GitHub</a>.</p>
 </main>
 <footer>
