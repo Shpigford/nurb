@@ -203,7 +203,14 @@ def _cross_sections(shape, bb):
             sections.append(None)  # no material at this station: entirely free
             continue
         polys = list(path.polygons_full)
-        sections.append(shapely.union_all(polys) if polys else None)
+        if not polys:
+            sections.append(None)
+            continue
+        # Snapped to a micron grid, three orders below every scored tolerance:
+        # sections of a curved surface are near-identical polygons whose iterated
+        # intersections otherwise compound new vertices without bound (a real tube
+        # cradle reached 1.2 million, and grading it blew the one-minute cap).
+        sections.append(shapely.set_precision(shapely.union_all(polys), 0.001))
     return stations, weights, sections
 
 
@@ -276,11 +283,6 @@ def _retention(shape, bb, bundle, installs=()):
 
     span = float(weights.sum())
 
-    def held(u, v):
-        point = shapely.Point(u, v)
-        share = sum(w for w, pen in zip(weights, pens) if not pen.contains(point))
-        return share / span >= HOLD - 1e-6
-
     # Each polygon's representative point is guaranteed interior, which is what
     # finds the sliver of fit region a snug tunnel leaves; the grid covers the rest.
     parts = list(getattr(region, "geoms", [region]))
@@ -292,11 +294,27 @@ def _retention(shape, bb, bundle, installs=()):
         for u in np.arange(u0, u1 + step, step)
         for v in np.arange(v0, v1 + step, step)
     ]
+
+    # The same candidates, predicates, and order as the point-at-a-time search this
+    # replaces, batched: an open curved design (a tube cradle) makes the fit region
+    # large and every section polygon curve-heavy at once, and the per-point loop
+    # spent minutes of CPU where the grader allows one, zeroing legitimate parts.
+    coords = np.asarray(candidates, dtype=np.float64)
+    shapely.prepare(region)
+    inside = shapely.contains(region, shapely.points(coords))
+    held = np.zeros((2, len(coords)))
+    for shifted, axis in ((coords + (0.0, SHIFT), 0), (coords + (SHIFT, 0.0), 1)):
+        points = shapely.points(shifted)
+        blocked = np.zeros(len(coords))
+        for weight, pen in zip(weights, pens):
+            shapely.prepare(pen)
+            blocked += weight * ~shapely.contains(pen, points)
+        held[axis] = blocked / span
+    retained = inside & (held[0] >= HOLD - 1e-6) & (held[1] >= HOLD - 1e-6)
+
     screwed_out = False
-    for u, v in candidates:
-        if not region.contains(shapely.Point(u, v)):
-            continue
-        if held(u, v + SHIFT) and held(u + SHIFT, v):
+    for keep, (u, v) in zip(retained, candidates):
+        if keep:
             if _coexists(u, v, r, bb.min.X, installs):
                 return None
             screwed_out = True

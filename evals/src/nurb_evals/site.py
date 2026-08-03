@@ -42,13 +42,21 @@ VERDICTS = {
         "Claude subscription",
         "Flawless so far: every part, every job, right the first time. When a measurement was missing, it did the honest thing unprompted. The premium pick.",
     ),
+    ("claude", "opus", "high"): (
+        "Claude subscription",
+        "Also flawless, every part on every job, just slower than fable: it twice ran the clock out double-checking a part that was already perfect. If fable is not on your plan, this is the same answer with more patience required.",
+    ),
     ("codex", "gpt-5.5", "medium"): (
         "ChatGPT subscription (Codex)",
-        "Excellent and fast. Built every part; one design quietly stopped fitting when the cable bundle grew, which is the kind of flaw you find after printing.",
+        "Excellent and fast, and honest about the unmeasured dimension. One design quietly stopped fitting when the cable bundle grew, which is the kind of flaw you find after printing.",
+    ),
+    ("claude", "sonnet", "high"): (
+        "Claude subscription",
+        "Perfect on instructions and honest about the unmeasured dimension. Its own designs are the gap: elegant cradles that would fail on the printer, with big unsupported overhangs, one wall too thin, one that tips. Check its parts before printing.",
     ),
     ("claude", "haiku", "low"): (
         "Claude subscription (budget model)",
-        "Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round.",
+        "Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round. And it wrote its guess for the unmeasured dimension down as if it had measured it, the mistake that ruins a print six months later.",
     ),
 }
 
