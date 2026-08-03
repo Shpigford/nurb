@@ -30,7 +30,7 @@ The easy way is the wizard, from anywhere (or paste the line to your AI and let 
 curl -fsSL https://nurb.dev/bench.sh | sh
 ```
 
-It detects which agent CLIs you have, offers the models from a menu so you never guess a spelling, runs the trials on your subscription, sanitizes the artifacts, and stages a submission-ready directory with the PR command printed at the end. Agents and scripts can skip the questions with flags: `uv run python -m nurb_evals.contribute --harness claude --model sonnet --effort medium`.
+It detects which agent CLIs you have, offers the models from a menu so you never guess a spelling, runs the trials on your subscription, sanitizes the artifacts, regenerates the report and the page, and then offers to open the pull request itself with the GitHub CLI: branch, commit, push, fork only if you lack push access, PR URL printed. Re-running the same model and effort appends to the same branch and updates the same PR, which is how one contributor's runs pool. Agents and scripts can skip every question with flags: `uv run python -m nurb_evals.contribute --harness claude --model sonnet --effort medium --pr yes`.
 
 The manual way needs `uv` and the `claude` or `codex` CLI installed and logged in to your own subscription. Then:
 

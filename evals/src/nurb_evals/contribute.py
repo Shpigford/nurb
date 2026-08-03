@@ -16,6 +16,7 @@ import json
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import tomllib
 
@@ -116,6 +117,12 @@ def main():
     ap.add_argument("--tasks", default=",".join(TASKS), help="comma-separated, default all")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--timeout", type=float, default=3600.0)
+    ap.add_argument(
+        "--pr",
+        choices=("ask", "yes", "no"),
+        default="ask",
+        help="open the pull request automatically (default: ask)",
+    )
     args = ap.parse_args()
 
     print("\nnurb benchmark contribution\n———————————————————————————")
@@ -219,21 +226,111 @@ def main():
     )
     report_module.write(EVALS / "submissions", EVALS / "REPORT.md")
 
-    # First dogfooding run went wrong two ways this text now prevents: the commit
-    # commands ran in a different nurb checkout than the clone the wizard staged
-    # into, and the fork step failed for someone with push access. Absolute paths,
-    # and both routes.
     repo = EVALS.parent
     print(
-        f"\nDone. Staged in THIS checkout ({repo}):\n"
+        f"\nDone. Staged in this checkout ({repo}):\n"
         f"  {sub}\n"
-        f"  {site_module.SITE}  (the regenerated leaderboard page)\n"
-        f"  {EVALS / 'REPORT.md'}  (the regenerated report)\n\n"
-        f"To put it on the leaderboard, from {repo}:\n"
-        f"  git checkout -b bench-{label}\n"
+        f"  {site_module.SITE}\n"
+        f"  {EVALS / 'REPORT.md'}\n"
+    )
+
+    # Handing a contributor five git commands is where two dogfooding runs died
+    # (wrong checkout, stale branch, accidental nested-repo add). The wizard owns
+    # the whole submission: it knows the right checkout because it is standing in it.
+    want = args.pr
+    if want == "ask":
+        if _gh_ready(repo):
+            try:
+                raw = input("Open the pull request now? [Y/n]: ").strip().lower()
+                want = "no" if raw in ("n", "no") else "yes"
+            except EOFError:
+                want = "no"
+        else:
+            print("GitHub CLI (gh) not found or not signed in; printing the manual steps.")
+            want = "no"
+    if want == "yes":
+        url, problem = open_pr(label, repo)
+        if url:
+            print(
+                f"\nSubmitted: {url}\n\n"
+                f"Every run counts, including a single one: matching rows pool on the "
+                f"leaderboard, and a bad score is data, not an embarrassment."
+            )
+            return
+        print(f"\nCould not open the PR automatically ({problem}); the manual steps:")
+    _manual_steps(label, repo)
+
+
+def _gh_ready(repo):
+    if not shutil.which("gh"):
+        return False
+    return _run(["gh", "auth", "status"], repo).returncode == 0
+
+
+def _run(cmd, cwd):
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+
+def _tail(done):
+    text = (done.stderr or done.stdout or "").strip()
+    return text.splitlines()[-1] if text else f"exit {done.returncode}"
+
+
+def open_pr(label, repo):
+    """Branch, commit, push, and open the PR from the wizard's own checkout,
+    forking first only when push access is missing. Re-running the same label
+    appends to the same branch, which updates the same PR: that is how one
+    contributor's runs pool. Returns (url, None) or (None, what went wrong)."""
+    branch = f"bench-{label}"
+    if _run(["git", "rev-parse", "--verify", branch], repo).returncode == 0:
+        done = _run(["git", "checkout", branch], repo)
+    else:
+        done = _run(["git", "checkout", "-b", branch], repo)
+    if done.returncode != 0:
+        return None, f"git checkout: {_tail(done)}"
+
+    _run(["git", "add", "evals/submissions", "evals/REPORT.md", "site/benchmarks.html"], repo)
+    done = _run(["git", "commit", "-m", f"benchmark row: {label}"], repo)
+    if done.returncode != 0 and "nothing to commit" not in (done.stdout + done.stderr):
+        return None, f"git commit: {_tail(done)}"
+
+    push = _run(["git", "push", "-u", "origin", branch], repo)
+    if push.returncode != 0:
+        fork = _run(["gh", "repo", "fork", "--remote", "--remote-name", "fork"], repo)
+        if fork.returncode != 0:
+            return None, f"gh repo fork: {_tail(fork)}"
+        push = _run(["git", "push", "-u", "fork", branch], repo)
+        if push.returncode != 0:
+            return None, f"git push: {_tail(push)}"
+
+    done = _run(
+        [
+            "gh", "pr", "create",
+            "--title", f"benchmark row: {label}",
+            "--body",
+            "Automated submission from the contribute wizard. Matching rows pool on "
+            "the leaderboard; transcripts, parts, and the regenerated report and "
+            "page are included.",
+        ],
+        repo,
+    )
+    if done.returncode == 0:
+        return done.stdout.strip().splitlines()[-1], None
+    # A PR for this branch may already exist from an earlier run of the same label.
+    view = _run(["gh", "pr", "view", branch, "--json", "url", "-q", ".url"], repo)
+    if view.returncode == 0 and view.stdout.strip():
+        return view.stdout.strip(), None
+    return None, f"gh pr create: {_tail(done)}"
+
+
+def _manual_steps(label, repo):
+    print(
+        f"\nFrom {repo}:\n"
+        f"  git checkout -b bench-{label}   # or 'git checkout bench-{label}' if it exists\n"
         f"  git add evals/submissions evals/REPORT.md site/benchmarks.html\n"
         f"  git commit -m 'benchmark row: {label}'\n"
-        f"  gh repo fork Shpigford/nurb --clone=false   # skip if you have push access\n"
+        f"  gh repo fork Shpigford/nurb --remote   # skip if you have push access\n"
+        f"  git push -u origin bench-{label}\n"
         f"  gh pr create --title 'benchmark row: {label}' --fill\n\n"
         f"Every run counts, including a single one: matching rows pool on the "
         f"leaderboard, and a bad score is data, not an embarrassment."

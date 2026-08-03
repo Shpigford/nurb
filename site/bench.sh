@@ -27,17 +27,28 @@ main() {
     command -v uv >/dev/null 2>&1 || fail "uv installed but did not land on PATH; open a new terminal and rerun"
   fi
 
-  dir="nurb-bench"
-  if [ -d "$dir/evals" ]; then
-    say "[2/3] $dir/ already cloned; pulling the latest benchmark"
-    git -C "$dir" pull --ff-only >/dev/null 2>&1 || say "      (pull skipped; using the checkout as it is)"
+  # Re-running from inside a checkout must never nest another clone inside it:
+  # the first dogfooding run produced nurb-bench/nurb-bench and a submission
+  # staged where no git command could find it.
+  if [ -f "evals/src/nurb_evals/contribute.py" ]; then
+    say "[2/3] already inside a nurb checkout; using it as it is"
+  elif [ -f "../evals/src/nurb_evals/contribute.py" ]; then
+    say "[2/3] already inside a nurb checkout; using it as it is"
+    cd ..
   else
-    say "[2/3] cloning the benchmark into ./$dir"
-    git clone --depth 1 https://github.com/Shpigford/nurb "$dir" || fail "clone failed"
+    dir="nurb-bench"
+    if [ -d "$dir/evals" ]; then
+      say "[2/3] $dir/ already cloned; pulling the latest benchmark"
+      git -C "$dir" pull --ff-only >/dev/null 2>&1 || say "      (pull skipped; using the checkout as it is)"
+    else
+      say "[2/3] cloning the benchmark into ./$dir"
+      git clone --depth 1 https://github.com/Shpigford/nurb "$dir" || fail "clone failed"
+    fi
+    cd "$dir" || fail "clone is missing"
   fi
 
   say "[3/3] preparing and starting the wizard"
-  cd "$dir/evals" || fail "clone is missing evals/"
+  cd evals || fail "checkout is missing evals/"
   uv sync >/dev/null || fail "uv sync failed"
 
   # `curl | sh` leaves stdin owned by the pipe; the wizard needs the keyboard.

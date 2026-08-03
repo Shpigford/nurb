@@ -64,6 +64,7 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
             "--effort", "low",
             "--tasks", "cable_clip",
             "--seed", str(SEED),
+            "--pr", "no",
         ],
     )
     contribute.main()
@@ -89,6 +90,43 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     assert "stub-model" in (root / "REPORT.md").read_text(encoding="utf-8")
 
     printed = capsys.readouterr().out
-    assert "Staged in THIS checkout" in printed and str(root) in printed
+    assert "Staged in this checkout" in printed and str(root) in printed
     assert "benchmark row: stub-stub-model-low" in printed
     assert "skip if you have push access" in printed
+
+
+def test_open_pr_drives_git_and_gh_end_to_end(tmp_path, monkeypatch):
+    """The wizard owns the submission: branch, commit, push, PR, in its own
+    checkout. Faked git/gh log every invocation; the fake branch check fails so
+    the create-branch path runs, and pr create returns the URL."""
+    import os
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "log"
+    (bin_dir / "git").write_text(
+        '#!/bin/sh\necho "git $@" >> %s\n'
+        'case "$1 $2" in "rev-parse --verify") exit 1;; esac\nexit 0\n' % log,
+        encoding="utf-8",
+    )
+    (bin_dir / "gh").write_text(
+        '#!/bin/sh\necho "gh $@" >> %s\n'
+        'case "$1 $2" in "pr create") echo "https://github.com/Shpigford/nurb/pull/999";; esac\nexit 0\n' % log,
+        encoding="utf-8",
+    )
+    for f in bin_dir.iterdir():
+        f.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+    url, problem = contribute.open_pr("stub-stub-model-low", tmp_path)
+    assert problem is None
+    assert url == "https://github.com/Shpigford/nurb/pull/999"
+    logged = log.read_text(encoding="utf-8")
+    for needle in (
+        "git checkout -b bench-stub-stub-model-low",
+        "git add evals/submissions evals/REPORT.md site/benchmarks.html",
+        "git commit -m benchmark row: stub-stub-model-low",
+        "git push -u origin bench-stub-stub-model-low",
+        "gh pr create --title benchmark row: stub-stub-model-low",
+    ):
+        assert needle in logged
