@@ -2,9 +2,11 @@
 
 Each trial gets a fresh materialized project, the harness CLI runs there on the
 contributor's own subscription, and whatever lands at the task's stated part path is
-graded by the Phase 1 subprocess grader. The wall-clock timeout is the turn cap: the
-current CLIs expose no reliable turn limit, and a model that needs half an hour of
-retries is an answer too, just not a good one.
+graded by the Phase 1 subprocess grader. The wall-clock timeout exists to stop
+runaway sessions, not to measure anything: time per part is one of the three numbers
+a user actually decides on (time, money, accuracy), so the cap sits high enough that
+a model that finishes gets its true time recorded, a capped trial is labeled as
+censored everywhere the time is shown, and the cap itself lands in the row.
 
 Everything is kept: the result row, the harness transcript, and the project the model
 left behind, because a leaderboard row nobody can audit is a rumor.
@@ -58,7 +60,7 @@ def _invoke(cmd, *, cwd, env, timeout):
         return process.returncode, stdout or "", stderr or "", True
 
 
-def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=900.0):
+def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=3600.0):
     task = scoring.load_task(task_dir)
     benchmark = scoring.benchmark_identity(task_dir)
     task_name = pathlib.Path(task_dir).name
@@ -135,6 +137,7 @@ def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=900.0):
         "stages": verdict["stages"],
         "error": verdict["error"] or error,
         "harness_s": harness_s,
+        "timeout_s": timeout,
         "usage": h.usage(stdout),
     }
 
@@ -147,7 +150,7 @@ def parser():
     ap.add_argument("--trials", type=_positive_int, default=3)
     ap.add_argument("--model", required=True)
     ap.add_argument("--effort", required=True)
-    ap.add_argument("--timeout", type=float, default=900.0)
+    ap.add_argument("--timeout", type=float, default=3600.0)
     ap.add_argument("--out", default=None, help="defaults to results/<harness>-<model>-<effort>")
     return ap
 

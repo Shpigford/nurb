@@ -116,8 +116,9 @@ HEAD = """\
   .verdict { color: var(--dim); font-size: .92rem; max-width: 68ch; margin-bottom: .9rem; }
   .bars { display: grid; grid-template-columns: max-content 1fr max-content; gap: .35rem .8rem; align-items: center; font-size: .85rem; }
   .bars .name { color: var(--dim); white-space: nowrap; }
-  .bar { height: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
-  .bar i { display: block; height: 100%; background: var(--accent); }
+  .bar { position: relative; height: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; }
+  .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+  .bar u { position: absolute; top: -3px; width: 2px; height: 12px; background: var(--text); opacity: .55; border-radius: 1px; }
   .bar i.mid { background: var(--amber); }
   .bar i.low { background: var(--bad); }
   .pct { text-align: right; min-width: 6.5ch; }
@@ -147,7 +148,7 @@ HEAD = """\
 <h2>The models</h2>
 {cards}
 
-<p class="fine">Early days and a small sample: {trial_count} graded parts across {job_count} jobs so far, more of both on the way. Scores are the average across three attempts per job; “first-try prints” counts attempts that came back essentially perfect. Every row is reproducible: the raw results, full transcripts, and the grading code are <a href="https://github.com/Shpigford/nurb/blob/main/evals/REPORT.md">on GitHub</a>, and anyone can <a href="https://github.com/Shpigford/nurb/blob/main/evals/README.md">run a model we have not covered</a> on their own subscription and submit the row.</p>
+<p class="fine">Early days and a small sample: {trial_count} graded parts across {job_count} jobs so far, more of both on the way. Each bar is the average of three attempts and the tick marks are the attempts themselves, because three attempts is a small sample and deserves to look like one. The grading is deterministic, a fixed rubric measured on the part's actual geometry, so the only randomness is the model's. “First-try prints” counts attempts that came back essentially perfect. Every row is reproducible: the raw results, full transcripts, and the grading code are <a href="https://github.com/Shpigford/nurb/blob/main/evals/REPORT.md">on GitHub</a>, and anyone can <a href="https://github.com/Shpigford/nurb/blob/main/evals/README.md">run a model we have not covered</a> on their own subscription and submit the row.</p>
 </main>
 <footer>
   <a href="index.html">nurb.dev</a>
@@ -173,10 +174,17 @@ def _combos(summary):
     return [(key, tasks) for _, key, tasks in order]
 
 
-def _bar(score):
+def _bar(score, scores):
+    """The bar is the mean; the ticks are the individual attempts. Three attempts is
+    a small sample and the honest rendering shows all three instead of dressing
+    their mean up as a precise percentage."""
     pct = round(score * 100)
     tone = "" if score >= 0.9 else " class=\"mid\"" if score >= 0.6 else " class=\"low\""
-    return f'<div class="bar"><i{tone} style="width:{pct}%"></i></div><div class="pct">{pct}%</div>'
+    ticks = "".join(
+        f'<u style="left:calc({min(s * 100, 99.0):.1f}% - 1px)" title="attempt: {s:.3f}"></u>'
+        for s in scores
+    )
+    return f'<div class="bar"><i{tone} style="width:{pct}%"></i>{ticks}</div><div class="pct">{pct}%</div>'
 
 
 def _card(key, tasks):
@@ -203,7 +211,7 @@ def _card(key, tasks):
                 '<div class="bar"></div><div class="pct na">not yet run</div>'
             )
         else:
-            bars.append(f'<div class="name">{name}</div>{_bar(row["score"])}')
+            bars.append(f'<div class="name">{name}</div>{_bar(row["score"], row["scores"])}')
     verdict_html = f'\n  <p class="verdict">{html.escape(verdict)}</p>' if verdict else ""
     return f"""<div class="card">
   <div class="top">

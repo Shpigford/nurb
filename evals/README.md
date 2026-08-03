@@ -37,7 +37,7 @@ uv run python -m nurb_evals.report results/claude-opus-high
 
 Both runs append to the same `results.jsonl`; the report renders one table per task.
 
-Cost: trials spend your subscription, not API credit. A cable_clip trial has run 2 to 8 minutes of agent time depending on the model; three trials is a coffee, not an afternoon. The `--timeout` wall clock (default 900s per trial) is the only turn cap, so the worst case per row is 45 minutes.
+Cost: trials spend your subscription, not API credit. A cable_clip trial has run 2 to 8 minutes of agent time depending on the model; three trials is a coffee, not an afternoon. The `--timeout` wall clock (default 3600s per trial) exists to stop runaway sessions, not to measure: time per part is one of the three numbers a user decides on, so the cap sits high enough that a finishing model records its true time. A trial that still hits it is reported as censored, never as a duration, and the cap used lands in the row.
 
 Each run leaves everything under `results/<harness>-<model>-<effort>/`: `results.jsonl` with one row per trial (full benchmark identity, score, stages, usage, durations), plus `<task>/trial_<n>/` holding the full JSON event transcript and the project the agent left behind. A row nobody can audit is a rumor, so all of it is kept.
 
