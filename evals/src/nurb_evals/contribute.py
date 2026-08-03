@@ -207,6 +207,7 @@ def main():
     # The published page regenerates here, not as a step the contributor has to
     # remember: the submission ships with the benchmarks.html it produces, so the
     # stale-page test passes on the PR as opened.
+    from . import report as report_module
     from . import site as site_module
 
     paths = sorted(
@@ -216,6 +217,7 @@ def main():
         site_module.render(site_module.summarize(site_module.rows_from(paths))),
         encoding="utf-8",
     )
+    report_module.write(EVALS / "submissions", EVALS / "REPORT.md")
 
     # First dogfooding run went wrong two ways this text now prevents: the commit
     # commands ran in a different nurb checkout than the clone the wizard staged
@@ -225,10 +227,11 @@ def main():
     print(
         f"\nDone. Staged in THIS checkout ({repo}):\n"
         f"  {sub}\n"
-        f"  {site_module.SITE}  (the regenerated leaderboard page, commit it too)\n\n"
+        f"  {site_module.SITE}  (the regenerated leaderboard page)\n"
+        f"  {EVALS / 'REPORT.md'}  (the regenerated report)\n\n"
         f"To put it on the leaderboard, from {repo}:\n"
         f"  git checkout -b bench-{label}\n"
-        f"  git add evals/submissions site/benchmarks.html\n"
+        f"  git add evals/submissions evals/REPORT.md site/benchmarks.html\n"
         f"  git commit -m 'benchmark row: {label}'\n"
         f"  gh repo fork Shpigford/nurb --clone=false   # skip if you have push access\n"
         f"  gh pr create --title 'benchmark row: {label}' --fill\n\n"

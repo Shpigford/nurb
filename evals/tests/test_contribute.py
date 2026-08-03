@@ -86,6 +86,7 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     # benchmarks.html its rows produce and the stale-page test passes as opened.
     page = (root / "benchmarks.html").read_text(encoding="utf-8")
     assert "stub-model" in page
+    assert "stub-model" in (root / "REPORT.md").read_text(encoding="utf-8")
 
     printed = capsys.readouterr().out
     assert "Staged in THIS checkout" in printed and str(root) in printed
