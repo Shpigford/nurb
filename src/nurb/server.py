@@ -217,10 +217,15 @@ class Server:
         }
         try:
             shape, params, ms = self._build(path, name)
-            entry["glb"] = builder.to_glb(shape, self.tolerance)
             entry.update(builder.stats(shape))
             entry["params"] = params
             entry["variant"] = self._active_variant(params, entry["variants"])
+            try:
+                up = self._context(path, entry["variant"]).up
+            except Exception:
+                # A bad card is reported by the check pass; it must not hide geometry.
+                up = (0, 0, 1)
+            entry["glb"] = builder.to_glb(shape, self.tolerance, up=up)
             entry["ms"] = round(ms, 1)
             entry["error"] = None
             entry["shape"] = shape  # kept for the check pass, never serialized
@@ -275,6 +280,18 @@ class Server:
                 return variant["name"]
         return None
 
+    @staticmethod
+    def _context(path, variant):
+        """The check context belonging to the values currently on screen."""
+        from . import checks
+
+        configs = checks.configurations(path)
+        ctx = configs[0][2]
+        for name, _, variant_ctx in configs[1:]:
+            if name == variant:
+                return variant_ctx
+        return ctx
+
     def check(self, path):
         """Run the rules on the last good build.
 
@@ -292,21 +309,32 @@ class Server:
             # settings judge it: shelf_gridfinity_2x1 accepts 10 slivers, not the
             # base part's 18. Matched on the built values, never on a mode flag, so
             # one slider drag off the variant honestly puts the base rules back.
-            configs = checks.configurations(path)
-            ctx = configs[0][2]
-            for name, _, vctx in configs[1:]:
-                if name == entry["variant"]:
-                    ctx = vctx
-                    break
+            ctx = self._context(path, entry["variant"])
             found = checks.run(entry["shape"], ctx)
+            # Each finding carries the triangles of the face it fired on, so the viewer
+            # can paint the face itself instead of dropping a pin near it. Rounded to
+            # 0.01mm, which is display precision, not geometry.
+            from . import probe
+
+            # Resolved only when something fired: most checks in the dev loop come
+            # back clean, and measuring every face to annotate nothing is pure cost.
+            rows = probe.finding_faces(entry["shape"], ctx, found) if found else []
+            if any(row is not None for row in rows):
+                # checks.run cleans the tessellation the rebuild left on the shape,
+                # so the faces have to be meshed again before their triangles exist.
+                # Same tolerance as the GLB, so the glow lies exactly on the mesh.
+                entry["shape"].mesh(self.tolerance)
             entry["findings"] = [
                 {
                     "rule": f.rule,
                     "severity": f.severity,
                     "message": f.message,
                     "where": list(f.where) if f.where else None,
+                    "face": [round(v, 2) for v in builder.face_triangles(row["face"])]
+                    if row is not None
+                    else None,
                 }
-                for f in found
+                for f, row in zip(found, rows)
             ]
         except Exception as exc:
             entry["findings"] = [
@@ -327,6 +355,9 @@ class Server:
             return self._resp(200, VIEWER.read_bytes(), "text/html; charset=utf-8")
         if path.startswith("/export/"):
             return await self.export(path[len("/export/") :])
+        if path == "/api/sync":
+            body = json.dumps(self._sync()).encode()
+            return self._resp(200, body, "application/json")
         if path == "/api/parts":
             body = json.dumps([self._wire(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
@@ -396,7 +427,7 @@ class Server:
         import tempfile
         import zipfile
 
-        from build123d import export_step, export_stl
+        from build123d import export_step
 
         def solid(path, stem):
             """(bytes, None) for a part, (None, scene) for an assembly."""
@@ -406,7 +437,10 @@ class Server:
                 return None, scene
             with tempfile.TemporaryDirectory() as scratch:
                 target = pathlib.Path(scratch) / f"{stem}.{fmt}"
-                (export_stl if fmt == "stl" else export_step)(built, str(target))
+                if fmt == "stl":
+                    builder.write_stl(built, target)
+                else:
+                    export_step(built, str(target))
                 return target.read_bytes(), None
 
         path = next((p for p in builder.find_parts(self.root) if p.stem == name), None)
@@ -469,22 +503,37 @@ class Server:
             out["params"] = [{**p, "family": p["name"] in family} for p in out["params"]]
         return out
 
+    def _bed(self):
+        """The plate the viewer draws, in mm, from the project's printer profile.
+
+        A broken printer.toml must not take the handshake down with it; the checks
+        already report it per part, so the viewer just gets the default bed.
+        """
+        from . import checks
+
+        try:
+            return list(checks.printer(self.root).bed[:2])
+        except Exception:
+            return list(checks.Context().bed[:2])
+
     # ---------- websocket ----------
+
+    def _sync(self):
+        """The project snapshot shared by the socket and its HTTP fallback."""
+        return {
+            "type": "sync",
+            "project": self.root.name,
+            "bed": self._bed(),
+            "version": __version__,
+            "upgradable": _upgrade_command() is not None,
+            "draft": self.draft,
+            "parts": [self._wire(e) for e in self.state.values()],
+        }
 
     async def ws(self, connection):
         self.clients.add(connection)
         try:
-            payload = json.dumps(
-                {
-                    "type": "sync",
-                    "project": self.root.name,
-                    "version": __version__,
-                    "upgradable": _upgrade_command() is not None,
-                    "draft": self.draft,
-                    "parts": [self._wire(e) for e in self.state.values()],
-                }
-            )
-            await connection.send(payload)
+            await connection.send(json.dumps(self._sync()))
             async for raw in connection:
                 await self.command(raw)
         finally:
@@ -605,28 +654,38 @@ class Server:
                 self.clients.discard(client)
 
     async def broadcast(self, entry, kind="rebuilt"):
-        await self.send({"type": kind, **self._wire(entry)})
+        # Printer settings are watched like part sources. Carrying the current bed on
+        # the rebuild is what lets an edit resize an already-open viewer.
+        await self.send({"type": kind, "bed": self._bed(), **self._wire(entry)})
 
     # ---------- watching ----------
 
     def watch(self):
+        from . import checks
+
         server = self
         parts_dir = self.root / "parts"
+        global_config = checks.global_file().resolve()
 
         class Handler(FileSystemEventHandler):
             def on_any_event(self, event):
                 if event.is_directory:
                     return
-                path = pathlib.Path(getattr(event, "dest_path", "") or event.src_path)
+                path = pathlib.Path(
+                    getattr(event, "dest_path", "") or event.src_path
+                ).resolve()
                 # "." skips the atomic-save temp files editors and sed leave behind
                 if path.name.startswith((".", "_")):
                     return
-                # printer.toml changes every part's checks and measurements.toml can
-                # feed any part's geometry, so either rebuilds the project the way
-                # system.py does: they land in the else branch below.
-                if path.suffix not in (".py", ".md") and path.name not in (
-                    "printer.toml",
-                    "measurements.toml",
+                if path != global_config and path.parent not in (parts_dir, server.root):
+                    return
+                # Printer settings change every part's checks, whether they came from
+                # the project or the global config. measurements.toml can feed any
+                # part's geometry, so all three rebuild the whole project below.
+                if (
+                    path != global_config
+                    and path.suffix not in (".py", ".md")
+                    and path.name not in ("printer.toml", "measurements.toml")
                 ):
                     return
                 # A card carries what the part has already justified, so editing one
@@ -651,6 +710,12 @@ class Server:
         self.observer = Observer()
         self.observer.schedule(Handler(), str(parts_dir), recursive=False)
         self.observer.schedule(Handler(), str(self.root), recursive=False)
+        global_dir = global_config.parent
+        if global_dir.is_dir() and global_dir not in {
+            parts_dir.resolve(),
+            self.root.resolve(),
+        }:
+            self.observer.schedule(Handler(), str(global_dir), recursive=False)
         self.observer.daemon = True
         self.observer.start()
 
@@ -701,7 +766,13 @@ class Server:
                 status = entry["error"] or f"{entry['ms']}ms"
                 print(f"  {entry['name']}: {status}", flush=True)
                 await self.broadcast(entry)
-                # Geometry has landed, so the rules can take their time.
+                # Geometry has landed, so the rules can take their time. Not the lock,
+                # though: with another rebuild already waiting, these findings describe
+                # a solid the next build is about to replace, and the slider that
+                # queued it would sit behind them. The last build in a burst still
+                # gets its checks.
+                if not self.queue.empty():
+                    continue
                 async with self.building:
                     entry = await asyncio.to_thread(self.check, path)
                 if entry and entry.get("findings") is not None:

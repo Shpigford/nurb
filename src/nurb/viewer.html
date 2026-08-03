@@ -147,6 +147,7 @@
   body.nogl #nogl { display: grid; }
   body.nogl #empty { display: none !important; }
   body.nogl #sectionbtn, body.nogl .sep:has(+ #sectionbtn), body.nogl #reframe { display: none; }
+  body.nogl #pinsbtn, body.nogl .sep:has(+ #pinsbtn) { display: none; }
   #checks {
     position: absolute; top: 14px; left: 16px; max-width: 46%; max-height: 60%;
     overflow: auto; display: none; font-size: 11px; line-height: 1.6;
@@ -173,6 +174,21 @@
      shows no state change and the shelf does. */
   #hud, #checks { transition: opacity .12s .25s; }
   body.stale #hud, body.stale #checks, #checks.pending { opacity: .32; }
+  /* The rebuild pill and the little spinner beside "parameters". Same .25s delay as
+     the dimming above: a build that lands inside one round trip never shows either,
+     so a light part stays silent and a crowned tray says what the wait is. */
+  .spin { flex: none; width: 10px; height: 10px; border-radius: 50%;
+          border: 1.5px solid var(--line); border-top-color: var(--accent);
+          animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #building { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+              display: flex; align-items: center; gap: 7px; padding: 5px 12px;
+              border-radius: 999px; background: var(--panel); border: 1px solid var(--line);
+              color: var(--dim); font-size: 11px; pointer-events: none;
+              opacity: 0; transition: opacity .12s .25s; }
+  body.stale #building { opacity: 1; }
+  #params h2 .spin { margin-left: 7px; opacity: 0; transition: opacity .12s .25s; }
+  body.stale #params h2 .spin { opacity: 1; }
 
   #foot { margin-top: auto; padding: 9px 12px; border-top: 1px solid var(--line);
           display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
@@ -274,7 +290,10 @@
   /* ?bare hides the chrome so a render is geometry on the plate and nothing else.
      Findings and sizes are text, and the CLI already prints them better than a PNG. */
   body.bare { grid-template-columns: 1fr; }
-  body.bare aside, body.bare #hud, body.bare #checks, body.bare #tools { display: none; }
+  /* !important on #checks: the panel is shown by setting inline display, which would
+     otherwise beat this rule the first time a bare render has findings to report. */
+  body.bare aside, body.bare #hud, body.bare #tools { display: none; }
+  body.bare #checks { display: none !important; }
   /* Nothing to reframe or cut through yet, and this is the first screen a new project
      shows. */
   body.noparts #tools { display: none; }
@@ -294,6 +313,7 @@
   <symbol id="i-cube" viewBox="0 0 18 18"><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="currentColor" opacity=".3" stroke-width="0"/><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><polyline points="12.251 7.1035 9 9 5.75 7.1035" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><line x1="9.0005" y1="12.7817" x2="9" y2="9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-variant" viewBox="0 0 12 12"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><line x1="11.25" y1="8.75" x2="6.25" y2="8.75"/><circle cx="4.25" cy="8.75" r="2"/><line x1="2.25" y1="8.75" x2=".75" y2="8.75"/><line x1=".75" y1="3.25" x2="5.75" y2="3.25"/><circle cx="7.75" cy="3.25" r="2"/><line x1="9.75" y1="3.25" x2="11.25" y2="3.25"/></g></symbol>
   <symbol id="i-cubes" viewBox="0 0 18 18"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M4.648,8.086l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="8.84 10.005 5.25 12.087 1.66 10.005"/><line x1="5.25" y1="16.25" x2="5.25" y2="12.087"/><path d="M12.148,8.086l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="16.34 10.005 12.75 12.087 9.16 10.005"/><line x1="12.75" y1="16.25" x2="12.75" y2="12.087"/><path d="M8.398,1.586l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="12.59 3.505 9 5.587 5.41 3.505"/><line x1="9" y1="9.75" x2="9" y2="5.587"/></g></symbol>
+  <symbol id="i-pin" viewBox="0 0 12 12"><path d="M6 .75c-2.35 0-4.25 1.87-4.25 4.18 0 3.07 4.25 6.32 4.25 6.32s4.25-3.25 4.25-6.32C10.25 2.62 8.35.75 6 .75Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><circle cx="6" cy="4.9" r="1.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-reset" viewBox="0 0 18 18"><path d="M5.25 9.5L3 7.25L0.75 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M13.495 13.345C12.3587 14.5226 10.7641 15.25 9 15.25C5.548 15.25 2.75 12.45 2.75 9C2.75 8.4 2.834 7.83003 2.99 7.28003" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M12.75 8.5L15 10.75L17.25 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M4.50629 4.65564C5.64249 3.48544 7.23658 2.75 8.99998 2.75C12.452 2.75 15.25 5.55 15.25 9C15.25 9.58 15.171 10.14 15.024 10.67" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
 </svg>
 <aside>
@@ -344,6 +364,8 @@
       <button id="polishbtn" title="chamfer the exposed edges; off is the faster draft build"><svg><use href="#i-wand"/></svg><span>polish</span></button>
       <span class="sep"></span>
       <button id="sectionbtn" title="cut the part open along an axis"><svg><use href="#i-layers"/></svg><span>section</span></button>
+      <span class="sep"></span>
+      <button id="pinsbtn" class="on" title="hide the finding markers to see what they cover; the checks stay on"><svg><use href="#i-pin"/></svg><span>pins</span></button>
     </div>
     <div class="pill" id="cut">
       <button data-axis="x">x</button>
@@ -354,6 +376,7 @@
     <button id="reframe" title="refit the camera to the part"><svg><use href="#i-focus"/></svg><span>reframe</span></button>
   </div>
   <div id="hud"></div>
+  <div id="building"><span class="spin"></span><span>rebuilding</span><span id="buildsecs"></span></div>
   <div id="checks"></div>
   <div id="err"></div>
 </main>
@@ -424,9 +447,35 @@ const key = new THREE.DirectionalLight(0xffffff, 1.8);
 key.position.set(1, -1.4, 2);
 scene.add(key);
 
-const grid = new THREE.GridHelper(400, 40, 0x3a3f4a, 0x24272e);
-grid.rotation.x = Math.PI / 2;   // GridHelper is XZ; we want XY
-scene.add(grid);
+// The grid is the build plate, drawn at the printer's bed size so the plate edge
+// means what it says. Sized from the server; until its first message it shows the
+// same default bed the checks assume. 10mm cells, like the GridHelper it replaced,
+// which had to go because a bed is a rectangle and GridHelper only draws squares.
+const plateEdge = new THREE.LineBasicMaterial({ color: 0x3a3f4a });
+const plateCell = new THREE.LineBasicMaterial({ color: 0x24272e });
+let grid = null, bedXY = [256, 256];
+function plate([w, d]) {
+  if (grid) {
+    scene.remove(grid);
+    for (const c of grid.children) c.geometry.dispose();
+  }
+  const hw = w / 2, hd = d / 2, cells = [], edge = [];
+  for (let x = 10; x < hw; x += 10) cells.push(x, -hd, 0, x, hd, 0, -x, -hd, 0, -x, hd, 0);
+  for (let y = 10; y < hd; y += 10) cells.push(-hw, y, 0, hw, y, 0, -hw, -y, 0, hw, -y, 0);
+  edge.push(0, -hd, 0, 0, hd, 0, -hw, 0, 0, hw, 0, 0);  // center cross, where a part lands
+  edge.push(-hw, -hd, 0, hw, -hd, 0, hw, -hd, 0, hw, hd, 0,
+            hw, hd, 0, -hw, hd, 0, -hw, hd, 0, -hw, -hd, 0);
+  const seg = (pts, mat) => new THREE.LineSegments(
+    new THREE.BufferGeometry().setAttribute('position',
+      new THREE.BufferAttribute(new Float32Array(pts), 3)), mat);
+  grid = new THREE.Group();
+  grid.add(seg(cells, plateCell), seg(edge, plateEdge));
+  scene.add(grid);
+}
+plate(bedXY);
+function bedUpdate(bed) {
+  if (bed && (bed[0] !== bedXY[0] || bed[1] !== bedXY[1])) plate(bedXY = bed);
+}
 
 // Findings get a pin at their reported point, in the same shifted space as the mesh.
 const pins = new THREE.Group();
@@ -442,10 +491,66 @@ const pinMat = {
   fail: new THREE.MeshBasicMaterial({ color: 0xf87171, depthTest: false, depthWrite: false }),
   warn: new THREE.MeshBasicMaterial({ color: 0xf0c274, depthTest: false, depthWrite: false }),
 };
+// Pins share one geometry; glows each own theirs, so clearing must dispose the latter.
+function clearPins() {
+  for (const c of pins.children) if (c.geometry !== pinGeom) c.geometry.dispose();
+  pins.clear();
+}
+// Drawing through the solid cuts both ways: a pin over the exact corner being diagnosed
+// hides the geometry it is diagnosing (issue #55). `pinsWanted` is the user's toggle,
+// `pinsPlaced` is the rebuild lifecycle; a pin shows only when both agree. ?marks=0
+// starts the toggle off, for a still that wants the part checked but pictured clean.
+let pinsWanted = q.get('marks') !== '0', pinsPlaced = true;
+function syncPins() { pins.visible = pinsWanted && pinsPlaced; }
 
 const material = new THREE.MeshStandardMaterial({
   color: 0x9aa6b8, metalness: 0.05, roughness: 0.62, flatShading: false,
 });
+
+// ---- axis triad ----
+// Issue #55: a tray's front kept reading as its rear while orbiting. A corner triad
+// pinned to the model axes gives the eye something fixed to hold onto. Its camera
+// orbits the origin in lockstep with the main one, so the triad turns with the part.
+const triad = new THREE.Scene();
+const triadCam = new THREE.PerspectiveCamera(45, 1, 0.1, 20);
+triadCam.up.set(0, 0, 1);
+{
+  const axes = new THREE.AxesHelper(1);
+  axes.setColors(new THREE.Color(0xf87171), new THREE.Color(0x6ee7a8), new THREE.Color(0x60a5fa));
+  triad.add(axes);
+  const label = (text, color, x, y, z) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    g.font = '600 76px ui-monospace, SFMono-Regular, Menlo, monospace';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = color;
+    g.fillText(text, 64, 68);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c) }));
+    s.position.set(x, y, z);
+    s.scale.setScalar(0.55);
+    triad.add(s);
+  };
+  label('x', '#f87171', 1.42, 0, 0);
+  label('y', '#6ee7a8', 0, 1.42, 0);
+  label('z', '#60a5fa', 0, 0, 1.42);
+}
+const TRIAD = { size: 100, pad: 10 };
+function renderTriad() {
+  if (bare) return;   // headless stills document the part, not the viewer chrome
+  // 45deg fov at this distance keeps the labels inside the inset from every angle.
+  triadCam.position.copy(camera.position).sub(controls.target).setLength(4.2);
+  triadCam.lookAt(0, 0, 0);
+  renderer.autoClear = false;
+  renderer.clearDepth();
+  renderer.setScissorTest(true);
+  renderer.setScissor(lastW - TRIAD.size - TRIAD.pad, TRIAD.pad, TRIAD.size, TRIAD.size);
+  renderer.setViewport(lastW - TRIAD.size - TRIAD.pad, TRIAD.pad, TRIAD.size, TRIAD.size);
+  renderer.render(triad, triadCam);
+  renderer.setScissorTest(false);
+  renderer.setViewport(0, 0, lastW, lastH);
+  renderer.autoClear = true;
+}
 
 let lastW = 0, lastH = 0;
 function resize() {
@@ -463,6 +568,7 @@ if (renderer) {
     requestAnimationFrame(tick);
     controls.update();
     renderer.render(scene, camera);
+    renderTriad();
   })();
 }
 
@@ -480,7 +586,23 @@ if (renderer) {
 const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] };
 const PARKED = 1e6;   // "off", without changing the array length and recompiling shaders
 const plane = new THREE.Plane(new THREE.Vector3(0, 0, -1), PARKED);
-let cutAxis = 'z', cutAt = 0.5, cutting = false, writers = [];
+let cutAxis = 'z', cutAt = 0.5, cutMm = null, cutting = false, cutSign = 0, writers = [];
+
+// ?cut=z opens the section view mid-part before the first paint; ?cut=z:0.7 places it as
+// a fraction of the span and ?cut=z:4mm at an absolute position, measured from the bed
+// for z because that is how every wall thickness in a finding is quoted. This is how a
+// headless render sees inside a part, and it makes a section a shareable URL. Which half
+// survives is cutSign's call, made from wherever the camera stands once the part frames,
+// so any view of a deep-linked cut arrives looking at the cross-section.
+{
+  const m = (q.get('cut') || '').match(/^([xyz])(?::(-?\d*\.?\d+)(mm)?)?$/);
+  if (m) {
+    cutAxis = m[1];
+    cutting = true;
+    if (m[3]) cutMm = +m[2];
+    else if (m[2] !== undefined) cutAt = Math.min(1, Math.max(0, +m[2]));
+  }
+}
 
 const stencilBase = {
   depthWrite: false, depthTest: false, colorWrite: false,
@@ -498,10 +620,29 @@ const stencilFront = new THREE.MeshBasicMaterial({
   stencilZFail: THREE.DecrementWrapStencilOp,
   stencilZPass: THREE.DecrementWrapStencilOp,
 });
+// The face a finding fired on, painted onto the solid. Depth-tested, unlike the pins:
+// a glow you can see through a wall would say the wrong face is guilty, and the honest
+// consequence is that an underside glow is only visible from underneath, which is what
+// `nurb inspect --render` stands the camera for. polygonOffset keeps it from z-fighting
+// the surface it sits on; the clipping plane keeps a section from leaving glows afloat.
+// Declared here rather than with the pins because the plane has to exist first.
+const glowMat = {};
+for (const [sev, color] of [['fail', 0xf87171], ['warn', 0xf0c274]]) {
+  glowMat[sev] = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.45, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+    depthWrite: false, clippingPlanes: [plane],
+  });
+}
+
 const cap = new THREE.Mesh(
   new THREE.PlaneGeometry(1, 1),
   new THREE.MeshStandardMaterial({
-    color: 0xc9a227, metalness: 0.0, roughness: 0.85, side: THREE.DoubleSide,
+    // Violet, because the cap is the one surface that is not part material and must
+    // not impersonate anything that is a signal: amber is a warn pin, red a fail pin,
+    // green the accent, blue-gray the part itself. The shipped gold sat on the same
+    // hue as the warn pins, and a pin on a cut ceiling is the section view's whole job.
+    color: 0x8578cf, metalness: 0.0, roughness: 0.85, side: THREE.DoubleSide,
     stencilWrite: true, stencilRef: 0, stencilFunc: THREE.NotEqualStencilFunc,
     stencilFail: THREE.ReplaceStencilOp,
     stencilZFail: THREE.ReplaceStencilOp,
@@ -513,7 +654,8 @@ cap.visible = false;
 cap.onAfterRender = r => r.clearStencil();
 scene.add(cap);
 
-function sectionAttach() {
+function sectionAttach(reaim) {
+  if (reaim) cutSign = 0;  // a different part gets aimed from its own restored camera
   for (const w of writers) scene.remove(w);
   writers = [];
   if (!mesh) return;
@@ -545,11 +687,27 @@ function sectionUpdate() {
   const box = new THREE.Box3();
   for (const c of mesh.children) if (c.isMesh && c.name !== 'context') box.expandByObject(c);
   const lo = box.min[cutAxis], hi = box.max[cutAxis];
+  // The cut faces the camera as it stood when the section opened or the axis was
+  // picked, so the first look always shows the cross-section instead of the part's
+  // own outside. Chosen once and then left alone: a side that follows the camera
+  // swaps the surviving half mid-orbit, and with the slider near an end that
+  // collapses the whole part to a sliver the moment the view crosses the plane.
+  if (!cutSign) cutSign = camera.position[cutAxis] >= (lo + hi) / 2 ? 1 : -1;
+  // Normalized so dragging right always keeps more material, whichever side survives.
+  const t = cutSign === 1 ? cutAt : 1 - cutAt;
   // A hair inside the bounds at each end, so neither extreme is a cut through nothing.
-  const at = lo + (hi - lo) * (0.02 + 0.96 * cutAt);
+  // An absolute ?cut position gets the same treatment: clamped just inside, so z:0mm
+  // cuts the bottom skin instead of grazing the surface and drawing nothing. It sits
+  // where it says regardless of cutSign, which only picks the half that survives.
+  // x and y positions are quoted in the part's own coordinates, z from the bed, so
+  // the centering shift is added back for the first two and already folded into z.
+  const mm = cutMm === null ? null : cutAxis === 'z' ? cutMm : cutMm + mesh.position[cutAxis];
+  const at = mm !== null
+    ? Math.min(hi - (hi - lo) * 0.002, Math.max(lo + (hi - lo) * 0.002, mm))
+    : lo + (hi - lo) * (0.02 + 0.96 * t);
   const dir = AXES[cutAxis];
-  plane.normal.set(-dir[0], -dir[1], -dir[2]);   // keeps the side the normal points at
-  plane.constant = at;
+  plane.normal.set(-cutSign * dir[0], -cutSign * dir[1], -cutSign * dir[2]);  // keeps the side the normal points at
+  plane.constant = cutSign * at;
   const span = box.getSize(new THREE.Vector3()).length();
   cap.scale.set(span, span, 1);
   // Centred on the part, not on coplanarPoint, which is where the plane passes the
@@ -615,18 +773,33 @@ document.getElementById('polishbtn').onclick = () => {
 
 document.getElementById('sectionbtn').onclick = ev => {
   cutting = !cutting;
+  cutSign = 0;  // re-aim the cut at wherever the camera is now
   ev.currentTarget.classList.toggle('on', cutting);
   document.getElementById('cut').classList.toggle('open', cutting);
   sectionUpdate();
 };
-document.getElementById('cutpos').oninput = ev => { cutAt = +ev.target.value; sectionUpdate(); };
+
+document.getElementById('pinsbtn').onclick = ev => {
+  pinsWanted = !pinsWanted;
+  ev.currentTarget.classList.toggle('on', pinsWanted);
+  syncPins();
+};
+document.getElementById('pinsbtn').classList.toggle('on', pinsWanted);
+// Dragging takes over from an absolute ?cut= position: the slider is the fraction.
+document.getElementById('cutpos').oninput = ev => { cutAt = +ev.target.value; cutMm = null; sectionUpdate(); };
 for (const b of document.querySelectorAll('#cut button')) {
   b.classList.toggle('on', b.dataset.axis === cutAxis);
   b.onclick = () => {
     cutAxis = b.dataset.axis;
+    cutSign = 0;  // a new axis re-aims at the camera the same way opening does
     for (const o of document.querySelectorAll('#cut button')) o.classList.toggle('on', o === b);
     sectionUpdate();
   };
+}
+if (cutting) {  // a ?cut= URL arrives with the section already open, so the pill agrees
+  document.getElementById('sectionbtn').classList.add('on');
+  document.getElementById('cut').classList.add('open');
+  document.getElementById('cutpos').value = cutAt;
 }
 
 // ---- camera persistence ----
@@ -681,6 +854,17 @@ function restoreCamera(name, box) {
   } catch { return false; }
 }
 
+// A view is a name from VIEWS or a bare "x,y,z" direction. The vector form exists for
+// stills aimed at a particular face: the CLI computes where to stand from the geometry,
+// and the viewer only has to stand there.
+function viewDir(from) {
+  if (VIEWS[from]) return VIEWS[from];
+  const v = (from || '').split(',').map(Number);
+  if (v.length !== 3 || !v.every(isFinite)) return null;
+  const len = Math.hypot(...v);
+  return len ? v.map(c => c / len) : null;
+}
+
 function frame(box, from) {
   const size = box.getSize(new THREE.Vector3());
   const mid = box.getCenter(new THREE.Vector3());
@@ -689,11 +873,13 @@ function frame(box, from) {
   // headroom that orbiting comfortably does, so it gets a tighter fit.
   const pad = from ? 1.45 : 2.1;
   const dist = span / (2 * Math.tan((camera.fov * Math.PI / 180) / 2)) * pad;
-  const dir = VIEWS[from] || VIEWS.iso;
+  const dir = viewDir(from) || VIEWS.iso;
   // Straight down is degenerate in a Z-up scene: the view direction is parallel to the
-  // camera's up vector, and the orientation comes out undefined rather than wrong.
+  // camera's up vector, and the orientation comes out undefined rather than wrong. With
+  // computed directions in play, near-vertical counts: a normal a hair off +Z would
+  // otherwise flicker between orientations.
   camera.up.set(0, 0, 1);
-  if (!dir[0] && !dir[1]) camera.up.set(0, 1, 0);
+  if (Math.abs(dir[0]) < 1e-4 && Math.abs(dir[1]) < 1e-4) camera.up.set(0, 1, 0);
   camera.position.set(mid.x + dist * dir[0], mid.y + dist * dir[1], mid.z + dist * dir[2]);
   controls.target.copy(mid);
   camera.near = span / 100; camera.far = span * 100;
@@ -784,6 +970,9 @@ async function paint(name, { keepCamera }) {
     if (!src.geometry.attributes.normal) src.geometry.computeVertexNormals();  // never render unlit
     const m = new THREE.Mesh(src.geometry, material.clone());
     m.material.clippingPlanes = [plane];   // parked unless the section view is on
+    // The builder tints bridge surfaces slicer-blue via vertex colors, multipliers
+    // over the material color, so a mesh without them renders exactly as before.
+    if (src.geometry.attributes.color) m.material.vertexColors = true;
     // The exporter names the node; the loader sometimes hangs the mesh under it.
     m.name = src.name || (src.parent && src.parent.name) || '';
     if (m.name === 'context') {
@@ -807,14 +996,21 @@ async function paint(name, { keepCamera }) {
   // drag never rebuilds. Reposing here is what keeps a save from snapping the door.
   applyJointPoses();
 
+  // Obstacles are context for an assembly, not things going onto the printer. Keep
+  // them in the camera frame, but do not let an offset wall move the printed parts
+  // away from the plate center or lift them off it.
   const bb = new THREE.Box3().setFromObject(mesh);
-  // The grid is the build plate, so a part sits on it. Where a part's own origin
-  // falls is a modeling datum and nothing to do with printing: Notch hangs
-  // everything below z=0, which would put every part underneath the plate.
-  mesh.position.z = -bb.min.z;
-  const box = bb.clone().translate(new THREE.Vector3(0, 0, mesh.position.z));
+  const plated = new THREE.Box3();
+  for (const c of mesh.children) if (c.isMesh && c.name !== 'context') plated.expandByObject(c);
+  if (plated.isEmpty()) plated.copy(bb);  // a context-only scene still needs a sane view
+  // The grid is the build plate, so a part sits on it, centered, the way a slicer
+  // plates it. Where a part's own origin falls is a modeling datum and nothing to
+  // do with printing: Notch hangs everything below z=0 and entirely to one side of
+  // x=0, which put every part underneath the plate and off in a corner of it.
+  const at = plated.getCenter(new THREE.Vector3());
+  mesh.position.set(-at.x, -at.y, -plated.min.z);
+  const box = bb.clone().translate(mesh.position);
   const size = box.getSize(new THREE.Vector3()).length();
-  sectionAttach();
 
   // Only reframe when the part changed scale enough that the camera is lost.
   const jumped = lastSize && (size / lastSize > 3 || lastSize / size > 3);
@@ -834,6 +1030,9 @@ async function paint(name, { keepCamera }) {
     reframe.style.display = (jumped || lost) ? 'inline-flex' : 'none';
   }
   reframe.onclick = () => { frame(box); reframe.style.display = 'none'; };
+  // The cut side comes from the camera, so attach only after this part's saved camera
+  // has been restored (or its default frame chosen), never from the part just removed.
+  sectionAttach(!keepCamera);
   lastSize = size;
   hud(parts.get(name) || entry);
   checks(name);
@@ -853,19 +1052,22 @@ function checks(name) {
     // every save; keep the last panel dim, but not its now-misplaced pins.
     if (e && !e.error && box.dataset.for === name) {
       box.classList.add('pending');
-      pins.visible = false;  // their old coordinates do not belong to the new mesh
+      pinsPlaced = false;  // their old coordinates do not belong to the new mesh
+      syncPins();
       return;
     }
     box.classList.remove('pending');
-    pins.visible = true;
-    pins.clear();
+    pinsPlaced = true;
+    syncPins();
+    clearPins();
     delete box.dataset.for;
     box.style.display = 'none';
     return;
   }
   box.classList.remove('pending');
-  pins.visible = true;
-  pins.clear();
+  pinsPlaced = true;
+  syncPins();
+  clearPins();
   box.dataset.for = name;
   box.style.display = 'block';
   if (!found.length) {
@@ -878,11 +1080,18 @@ function checks(name) {
     + `<svg class="ic"><use href="#i-${f.severity === 'fail' ? 'fail' : 'warn'}"/></svg>`
     + `<span class="rule">${f.rule}</span><span>${f.message}</span></div>`).join('');
   box.innerHTML = `<h2>checks <span class="n">${found.length}</span></h2>${rows}`;
-  const lift = mesh ? mesh.position.z : 0;
+  const shift = mesh ? mesh.position : new THREE.Vector3();
   for (const f of found) {
+    if (f.face && f.face.length) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(f.face), 3));
+      const glow = new THREE.Mesh(g, glowMat[f.severity] || glowMat.warn);
+      glow.position.copy(shift);   // the same shift that plates the part
+      pins.add(glow);
+    }
     if (!f.where) continue;
     const pin = new THREE.Mesh(pinGeom, pinMat[f.severity] || pinMat.warn);
-    pin.position.set(f.where[0], f.where[1], f.where[2] + lift);
+    pin.position.set(f.where[0] + shift.x, f.where[1] + shift.y, f.where[2] + shift.z);
     pin.scale.setScalar(Math.max(0.6, lastSize ? lastSize / 90 : 1));
     pin.renderOrder = 999;  // per mesh, not on the group: a Group's renderOrder only
                             // reaches its children in some three.js versions
@@ -1033,7 +1242,7 @@ function params(e) {
   box.classList.toggle('empty', !rows.length);
   if (!rows.length) { box.innerHTML = ''; document.body.classList.remove('dirty'); return; }
 
-  box.innerHTML = '<h2>parameters<a id="resetall" title="reset every parameter">'
+  box.innerHTML = '<h2>parameters<span class="spin"></span><a id="resetall" title="reset every parameter">'
     + '<svg><use href="#i-reset"/></svg>reset</a></h2>';
   // Split, not filtered: a family constant stays reachable, it just stops competing for
   // attention with the dimensions this part actually owns.
@@ -1136,6 +1345,13 @@ function sync(rows) {
     if (!row) continue;
     const num = row.querySelector('.v'), slide = row.querySelector('[type=range]');
     if (document.activeElement === num || document.activeElement === slide) continue;
+    // A rebuild carries the values it was built with, and a slow build lands after the
+    // sliders have moved on: syncing then would snap a fresher drag back to the stale
+    // value just as `settled` resends the new one. While a newer send is pending or
+    // away the sliders are the authority; the server's echo wins once it has caught
+    // up, which is also what lets a variant's values land, because `settled` clears
+    // the slot before this runs.
+    if ((pending !== null || inflight !== null) && values.get(p.name) !== p.value) continue;
     values.set(p.name, p.value);
     num.value = p.value; slide.value = p.value;
   }
@@ -1151,7 +1367,27 @@ function sync(rows) {
 // is already looking at something else, and a boolean cannot tell "mine came back" from
 // "someone else's did": clicking another part mid-rebuild used to leave the flag stuck
 // on forever, which killed every slider in the session.
-let pending = null, pendingFor = null, inflight = null, timer = null, sock = null;
+let pending = null, pendingFor = null, pendingCommitted = false;
+let inflight = null, timer = null, sock = null, staleSince = 0;
+
+// The pill's clock. A crown rebuild is seconds, not the 60-430ms the protocol was
+// clocked against, and a wait with no number reads as a hang.
+setInterval(() => {
+  const t = document.getElementById('buildsecs');
+  if (t) t.textContent = document.body.classList.contains('stale')
+    ? `${Math.max(1, Math.round((Date.now() - staleSince) / 1000))}s` : '';
+}, 500);
+
+function beginStale() {
+  if (!document.body.classList.contains('stale')) staleSince = Date.now();
+  document.body.classList.add('stale');
+}
+
+// A part whose last build took seconds does not get a rebuild per drag notch: the
+// mid-drag value would hold the slot that long while the release value waits behind
+// it, which is how one gesture became a 20 second round trip. Light parts keep the
+// live preview.
+function slow() { return ((parts.get(current) || {}).ms || 0) > 2000; }
 
 function push(commit) {
   lastNote = null;                      // moving a slider answers the last write
@@ -1159,9 +1395,10 @@ function push(commit) {
   if (note) note.textContent = '';
   pending = dirty();
   pendingFor = current;
+  pendingCommitted = commit;
   clearTimeout(timer);
   if (commit) flush();                  // released the slider, or typed a number
-  else timer = setTimeout(flush, 90);   // skip the values a drag passed straight over
+  else if (!slow()) timer = setTimeout(flush, 90);  // skip values a drag passed over
 }
 
 function flush() {
@@ -1169,10 +1406,11 @@ function flush() {
   // Values collected for a part the user has since left. The server still holds that
   // part's overrides, so dropping this loses nothing.
   if (pendingFor !== current) { pending = null; return; }
+  if (!pendingCommitted && slow()) return;  // mid-drag on a heavy part waits for release
   const payload = pending;
   pending = null;
   inflight = current;
-  document.body.classList.add('stale');
+  beginStale();
   sock.send(JSON.stringify({ type: 'params', name: current, values: payload }));
 }
 
@@ -1210,7 +1448,7 @@ function applyVariant(name, v) {
   if (!sock || sock.readyState !== WebSocket.OPEN) return;
   pending = null; pendingFor = null;   // a drag in flight must not resurrect old values
   inflight = name;
-  document.body.classList.add('stale');
+  beginStale();
   sock.send(JSON.stringify({ type: 'params', name, values: { ...v.params } }));
 }
 
@@ -1362,13 +1600,15 @@ function emptyState() {
   document.getElementById('emptycmd').textContent = live ? 'nurb new <name>' : 'nurb dev';
 }
 
-// The socket is the only live channel, but /api/parts serves the same rows a sync
-// carries, so a viewer whose socket is down degrades to a static-but-correct view
+// The socket is the only live channel, but /api/sync serves the same snapshot, so a
+// viewer whose socket is down degrades to a static-but-correct view
 // instead of asserting an empty project.
 async function fallback() {
   if (parts.size) return;
   try {
-    const rows = await (await fetch('/api/parts')).json();
+    const msg = await (await fetch('/api/sync')).json();
+    const rows = msg.parts || [];
+    bedUpdate(msg.bed);
     if (parts.size || !rows.length) return;  // a sync won the race, or truly empty
     rows.forEach(p => parts.set(p.name, p));
     current = parts.has(want) ? want : rows[0].name;
@@ -1400,6 +1640,7 @@ function connect() {
   };
   ws.onmessage = ev => {
     const msg = JSON.parse(ev.data);
+    bedUpdate(msg.bed);
     if (msg.type === 'sync') {
       project = msg.project || '';
       document.getElementById('project').textContent = project;

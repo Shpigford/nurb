@@ -9,7 +9,7 @@ see each other, and `run` gathers them.
 
 import pathlib
 from dataclasses import dataclass, field, replace
-from math import asin, degrees
+from math import asin, atan2, cos, degrees, pi, sin
 
 from build123d import Axis, CenterOf, GeomType, Vector
 
@@ -179,19 +179,25 @@ def build_volume(shape, ctx):
     if _standing(shape, up) is None:
         got = sorted([size.X, size.Y, size.Z], reverse=True)
         fits = all(g <= b for g, b in zip(got, sorted(ctx.bed, reverse=True)))
+        if not fits:
+            # The box is the wrong question for a part that fits turned on the
+            # plate: issue #55's 364mm tray sits on a 350mm bed at 36 degrees.
+            fits = _fits_rotated(shape, ctx.bed)
         orientation = "in any orientation"
     else:
         # A stance facet fixes the build direction. The part may turn on the plate,
         # but rolling it onto another axis would put the facet in the air again.
         bed, top = _span(shape, up)
+        height = top - bed
         footprint = sorted(
             _span(shape, axis)[1] - _span(shape, axis)[0]
             for axis in _bed_axes(up)
         )
         plate = sorted(ctx.bed[:2])
-        got = [top - bed, *footprint]
-        fits = top - bed <= ctx.bed[2] and all(
-            got <= available for got, available in zip(footprint, plate)
+        got = [height, *footprint]
+        fits = height <= ctx.bed[2] and (
+            all(got <= available for got, available in zip(footprint, plate))
+            or _fits_rotated(shape, ctx.bed, up)
         )
         orientation = "in its fixed build orientation"
     if fits:
@@ -259,6 +265,120 @@ def _bed_axes(up):
     guide = Vector(1, 0, 0) if abs(up.X) < 0.9 else Vector(0, 1, 0)
     first = up.cross(guide).normalized()
     return first, up.cross(first).normalized()
+
+
+def _hull(points):
+    """Convex hull of 2d points, by monotone chain."""
+    pts = sorted({(round(float(x), 2), round(float(y), 2)) for x, y in points})
+    if len(pts) <= 2:
+        return pts
+
+    def turn(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    out = []
+    for chain in (pts, reversed(pts)):
+        base = len(out)
+        for p in chain:
+            while len(out) - base >= 2 and turn(out[-2], out[-1], p) <= 0:
+                out.pop()
+            out.append(p)
+        out.pop()
+    return out
+
+
+def _rotated_spans(points, angle):
+    c, s = cos(angle), sin(angle)
+    xs = [x * c - y * s for x, y in points]
+    ys = [x * s + y * c for x, y in points]
+    return max(xs) - min(xs), max(ys) - min(ys)
+
+
+def _footprint_fits(points, plate):
+    """Whether a 2d footprint fits a rectangular plate at some rotation.
+
+    Between orientations parallel to hull edges, the vertices supporting each side
+    of the bounding box stay fixed. The worst normalized span can reach its minimum
+    only at one of those boundaries or where the two normalized spans cross, so those
+    finite candidates give the exact answer without an angle grid.
+    """
+    hull = _hull(points)
+    if not hull:
+        return False
+
+    quarter = pi / 2
+    cuts = {0.0, quarter}
+    if len(hull) > 1:
+        for p, q in zip(hull, hull[1:] + hull[:1]):
+            edge = atan2(q[1] - p[1], q[0] - p[0])
+            cuts.add((-edge) % quarter)
+    cuts = sorted(cuts)
+    candidates = list(cuts)
+    orientations = (plate, plate[::-1])
+
+    for low, high in zip(cuts, cuts[1:]):
+        if high - low <= 1e-12:
+            continue
+        mid = (low + high) / 2
+        c, s = cos(mid), sin(mid)
+
+        def x_at(p):
+            return p[0] * c - p[1] * s
+
+        def y_at(p):
+            return p[0] * s + p[1] * c
+
+        x_high, x_low = max(hull, key=x_at), min(hull, key=x_at)
+        y_high, y_low = max(hull, key=y_at), min(hull, key=y_at)
+        dx, dy = x_high[0] - x_low[0], x_high[1] - x_low[1]
+        ex, ey = y_high[0] - y_low[0], y_high[1] - y_low[1]
+
+        for across, deep in orientations:
+            cos_term = deep * dx - across * ey
+            sin_term = -deep * dy - across * ex
+            if abs(cos_term) + abs(sin_term) <= 1e-12:
+                continue
+            crossing = atan2(-cos_term, sin_term) % pi
+            if low < crossing < high:
+                candidates.append(crossing)
+
+    for angle in candidates:
+        width, depth = _rotated_spans(hull, angle)
+        if any(
+            width <= across + 1e-6 and depth <= deep + 1e-6
+            for across, deep in orientations
+        ):
+            return True
+    return False
+
+
+def _fits_rotated(shape, bed, up=None):
+    """Whether the part fits the plate turned about some build axis.
+
+    The slow path, reached only after the bounding box has already failed. The
+    footprint is the hull of a tessellation rather than of the B-rep's own
+    vertices, because a curved outline has vertices only at its seams.
+    """
+    from . import builder
+
+    verts = builder.to_mesh(shape, 0.1).vertices
+    if up is not None:
+        first, second = _bed_axes(up)
+
+        def projected(point):
+            point = Vector(*point)
+            return point.dot(first), point.dot(second)
+
+        footprint = [projected(point) for point in verts]
+        return _footprint_fits(footprint, bed[:2])
+
+    for axis in range(3):
+        if verts[:, axis].max() - verts[:, axis].min() > bed[2] + 1e-6:
+            continue
+        flat = [c for c in range(3) if c != axis]
+        if _footprint_fits(verts[:, flat], bed[:2]):
+            return True
+    return False
 
 
 def _reach(face, up):
@@ -537,6 +657,74 @@ def floating(shape, ctx):
     return found
 
 
+@rule("hole_ceiling")
+def hole_ceiling(shape, ctx):
+    """A blind hole's flat ceiling with a smaller hole continuing through it.
+
+    The counterbore case: a screw pocket printed mouth-down floats the shelf its head
+    bears on, and the through hole's first rim is a circle drawn on air. The overhang
+    rule cannot see it, deliberately: a ceiling with material all around reads as a
+    bridge, and a bridge the printer walks across is not a finding. What a bridge
+    cannot carry cleanly is a hole rim inside it, laid on sagging lines with nothing
+    under the perimeter, which is why this looks for the piercing rather than the span.
+
+    Found on the B-rep directly: a horizontal downward face with an inner wire is a
+    pierced ceiling. The one thing the wire alone cannot tell is what pierced it, so
+    the probe above settles it: void continuing up is a hole and a finding; material
+    is a boss hanging through, which carries its own rim. The remedy is `counterbore()`,
+    which steps the transition so each layer bridges only what the one before it laid,
+    and whose own stepped stack leaves no pierced ceiling for this rule to find.
+    """
+    up = Vector(*ctx.up).normalized()
+    bed, _ = _span(shape, up)
+    solid = shape.solids()[0] if shape.solids() else None
+    found = []
+    for face in shape.faces():
+        if face.geom_type != GeomType.PLANE:
+            continue
+        if face.normal_at(face.center()).dot(up) > -0.97:
+            continue  # not a flat ceiling
+        if _span(face, up)[0] <= bed + 1e-4:
+            continue  # the first layer, where every mouth belongs
+        for wire in face.inner_wires():
+            # The box centre, not wire.center(): a curve's own centre is its centre
+            # of mass, which for a circle is a point on the rim, not the middle.
+            centre = wire.bounding_box().center()
+            width = min(
+                _span(wire, axis)[1] - _span(wire, axis)[0]
+                for axis in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1))
+                if abs(axis.dot(up)) < 0.9
+            )
+            # Probe just inside the wire rather than at its box centre. A hollow boss
+            # carries the rim as surely as a solid one, but its centre is still void
+            # and looks exactly like a hole. `_into_face` finds the material side of
+            # the boundary, so its opposite is the region the wire encloses.
+            carried = []
+            if solid:
+                step = min(0.05, width / 4)
+                for edge in wire.edges():
+                    try:
+                        point = edge.position_at(0.5)
+                        inward = -_into_face(face, point, edge.tangent_at(0.5))
+                        above = point + inward * step + up * 0.02
+                        carried.append(solid.is_inside((above.X, above.Y, above.Z)))
+                    except Exception:
+                        continue
+            if carried and all(carried):
+                continue  # a solid or hollow boss through the ceiling, not a hole
+            found.append(
+                Finding(
+                    "hole_ceiling",
+                    WARN,
+                    f"a {width:.1f}mm hole rim would print on air over the opening "
+                    f"below; stepped bridging layers are the fix",
+                    value=round(width, 1),
+                    where=tuple(round(v, 2) for v in centre),
+                )
+            )
+    return found
+
+
 @rule("stability")
 def stability(shape, ctx):
     """Will it stand on the bed, or tip while printing."""
@@ -584,6 +772,42 @@ PRINTERS = pathlib.Path(__file__).parent / "printers.toml"
 PRINTER_FILE = "printer.toml"  # optional, at the project root, like measurements.toml
 
 
+def global_file():
+    """~/.config/nurb/config.toml, the machine's standing answers.
+
+    A printer is a fact about the workshop, not the project, so it is named once
+    here instead of in every printer.toml. Same schema as printer.toml, read fresh
+    each call because tests move it with XDG_CONFIG_HOME.
+    """
+    import os
+
+    base = os.environ.get("XDG_CONFIG_HOME") or pathlib.Path.home() / ".config"
+    return pathlib.Path(base) / "nurb" / "config.toml"
+
+
+def _read_toml(file, label):
+    import tomllib
+
+    if not file.is_file():
+        return {}
+    try:
+        return tomllib.loads(file.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"{label}: not valid TOML ({exc})") from exc
+
+
+def profile_choice(root):
+    """The profile a project resolves to and where it was named: the project's
+    printer.toml, then the global config. (None, None) when neither says."""
+    block = _read_toml(pathlib.Path(root) / PRINTER_FILE, PRINTER_FILE)
+    if block.get("profile"):
+        return block["profile"], PRINTER_FILE
+    home = _read_toml(global_file(), str(global_file()))
+    if home.get("profile"):
+        return home["profile"], "global"
+    return None, None
+
+
 def profiles():
     """The shipped printer profiles: machine facts, keyed by name."""
     import tomllib
@@ -598,24 +822,19 @@ def _project_root(part_path):
 
 
 def printer(root, name=None):
-    """The machine's Context: a shipped profile, then the project's printer.toml.
+    """The machine's Context: a shipped profile, then the global config, then the
+    project's printer.toml.
 
     A bed size belongs to the machine, not to a part, so it is picked once here
-    rather than written onto every card. The file names a shipped profile and can
-    override any check setting machine-wide; a card still wins for what its part
-    has justified, because `_apply` runs the card on top of this.
+    rather than written onto every card. Either file names a shipped profile and can
+    override any check setting machine-wide; the project's wins over the global's,
+    and a card still wins for what its part has justified, because `_apply` runs the
+    card on top of this.
     """
-    import tomllib
-
     ctx = Context()
-    block = {}
-    file = pathlib.Path(root) / PRINTER_FILE
-    if file.is_file():
-        try:
-            block = tomllib.loads(file.read_text(encoding="utf-8"))
-        except tomllib.TOMLDecodeError as exc:
-            raise ValueError(f"{PRINTER_FILE}: not valid TOML ({exc})") from exc
-    name = name or block.pop("profile", None)
+    home = _read_toml(global_file(), str(global_file()))
+    block = _read_toml(pathlib.Path(root) / PRINTER_FILE, PRINTER_FILE)
+    name = name or block.get("profile") or home.get("profile")
     if name:
         have = profiles()
         if name not in have:
@@ -623,9 +842,11 @@ def printer(root, name=None):
                 f"no printer profile called {name!r}. have: {', '.join(sorted(have))}"
             )
         _apply(ctx, {"printer": have[name]}, f"profile {name!r}")
-    block.pop("profile", None)  # named on the command line, so the file's loses
-    block.pop("export", None)  # a workflow preference, not a machine fact; cmd_export reads it
-    return _apply(ctx, {"printer": block}, PRINTER_FILE)
+    # profile is resolved above; export is a workflow preference cmd_export reads
+    for settings_block, where in ((home, str(global_file())), (block, PRINTER_FILE)):
+        facts = {k: v for k, v in settings_block.items() if k not in ("profile", "export")}
+        _apply(ctx, {"printer": facts}, where)
+    return ctx
 
 
 # --- per part settings -------------------------------------------------------

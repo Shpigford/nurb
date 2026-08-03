@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nurb · changelog</title>
+<meta name="description" content="What's new in nurb, release by release.">
+<meta property="og:title" content="nurb · changelog">
+<meta property="og:description" content="What's new in nurb, release by release.">
+<meta property="og:url" content="https://nurb.dev/changelog">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cg stroke='%236ee7a8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' fill='none'%3E%3Cpath d='m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z' fill='%236ee7a8' fill-opacity='.3' stroke-width='0'/%3E%3Cpath d='m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z'/%3E%3Cpolyline points='12.251 7.1035 9 9 5.75 7.1035'/%3E%3Cline x1='9.0005' y1='12.7817' x2='9' y2='9'/%3E%3C/g%3E%3C/svg%3E">
+<style>
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url(vendor/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf) format("truetype");
+    font-weight: 100 800;
+    font-display: swap;
+  }
+  :root {
+    --bg: #16181d; --panel: #1d2027; --panel2: #191c22; --line: #2b2f38;
+    --text: #e6e8ec; --dim: #868d9b; --dimmer: #565d6b;
+    --accent: #6ee7a8; --amber: #f0c274; --bad: #f87171;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 15px/1.65 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--bg); color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(110,231,168,.25); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Faint blueprint grid behind everything, same as the landing page. */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      linear-gradient(rgba(110,231,168,.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(110,231,168,.022) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+  body::after {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(1100px 520px at 50% -80px, rgba(110,231,168,.055), transparent 70%);
+  }
+
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+
+  header { position: sticky; top: 0; z-index: 10;
+           background: rgba(22,24,29,.82); backdrop-filter: blur(12px);
+           border-bottom: 1px solid var(--line); }
+  header .wrap { display: flex; align-items: center; gap: 8px; height: 54px; }
+  header .logo { display: flex; align-items: center; gap: 8px; color: var(--text);
+                 font-weight: 700; letter-spacing: .06em; }
+  header .logo:hover { text-decoration: none; }
+  header .logo svg { width: 17px; height: 17px; color: var(--accent); }
+  header nav { margin-left: auto; display: flex; gap: 22px; font-size: 13px; }
+  header nav a { color: var(--dim); }
+  header nav a:hover { color: var(--text); text-decoration: none; }
+  header nav a.gh { color: var(--text); }
+
+  main.wrap { padding: 72px 24px 100px; }
+  .kicker { color: var(--accent); font-size: 13px; letter-spacing: .22em; text-transform: uppercase; }
+  h1 { font-size: clamp(28px, 4.5vw, 42px); font-weight: 800; letter-spacing: -.02em; margin-top: 14px; }
+  .lede { color: var(--dim); margin-top: 12px; font: 16px/1.6 var(--sans); }
+
+  .release { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--line); }
+  .release:first-of-type { margin-top: 64px; padding-top: 0; border-top: 0; }
+  .release .meta { display: flex; align-items: baseline; gap: 14px; }
+  .release .ver { color: var(--text); font-weight: 700; font-size: 17px; }
+  .release .ver a { color: inherit; }
+  .release time { color: var(--dimmer); font-size: 13px; }
+  .release ul { list-style: none; margin-top: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .release li { display: flex; align-items: baseline; gap: 12px; }
+  .release li > span { font: 15px/1.6 var(--sans); color: var(--dim); }
+  .release li > span b { color: var(--text); font-weight: 600; }
+  .tag { flex: none; width: 76px; text-align: center; font-size: 10px; font-weight: 600;
+         letter-spacing: .1em; text-transform: uppercase; color: var(--dim);
+         border: 1px solid var(--line); border-radius: 5px; padding: 2px 0;
+         position: relative; top: -2px; }
+  .tag.new { color: var(--accent); border-color: rgba(110,231,168,.35); }
+
+  footer { border-top: 1px solid var(--line); padding: 34px 0 44px;
+           color: var(--dimmer); font-size: 13px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; }
+  footer a { color: var(--dim); }
+  footer .spacer { flex: 1; }
+
+  @media (max-width: 560px) {
+    header nav { gap: 12px; font-size: 12px; }
+    header nav a { white-space: nowrap; }
+    .release li { flex-direction: column; gap: 6px; }
+    .tag { width: auto; padding: 2px 8px; }
+  }
+</style>
+</head>
+<body>
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-cube" viewBox="0 0 18 18"><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="currentColor" opacity=".3" stroke-width="0"/><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><polyline points="12.251 7.1035 9 9 5.75 7.1035" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><line x1="9.0005" y1="12.7817" x2="9" y2="9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
+</svg>
+
+<header>
+  <div class="wrap">
+    <a class="logo" href="/"><svg><use href="#i-cube"/></svg>nurb</a>
+    <nav>
+      <a href="/#demo">try it</a>
+      <a href="/#start">get started</a>
+      <a class="gh" href="https://github.com/Shpigford/nurb">github &nearr;</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="kicker">changelog</div>
+  <h1>What's new</h1>
+  <p class="lede">Every nurb release, newest first. Install once, then <b>nurb update</b> keeps you current.</p>
+
+  <article class="release" id="v0.10.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.10.0">v0.10.0</a></span><time datetime="2026-08-02">August 2, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span><b>Rounded rims.</b> The top of a wall that rises and falls can now be rounded over in one step. Ask for it by name when you want the softer edge; everything else still gets a chamfer by default.</span></li>
+      <li><b class="tag new">new</b><span><b>Screw pockets.</b> A recessed pocket for a screw head can print facing the bed. The hole above it used to begin on thin air, and now two thin throwaway layers carry it, which the screw pushes straight through.</span></li>
+      <li><b class="tag new">new</b><span>A new check warns when a part has a hole rim floating over an open pocket, the failure the overhang rule stays quiet about.</span></li>
+      <li><b class="tag">improved</b><span>Exported STLs are meshed at printing scale, so a large tray is a fraction of the file it used to be, and every export reports its size and triangle count.</span></li>
+      <li><b class="tag">improved</b><span>A part too long for your bed now passes if it fits across the diagonal, which is how you would print it anyway.</span></li>
+      <li><b class="tag">improved</b><span>The viewer says when a part is rebuilding and counts the seconds, and sliders no longer snap back to old values or rebuild on every notch of a drag.</span></li>
+      <li><b class="tag">improved</b><span>A corner axis marker keeps orientation readable while you orbit, and finding pins can be hidden to see the geometry underneath them.</span></li>
+      <li><b class="tag">fixed</b><span>The viewer connects when nurb is served over HTTPS behind a proxy, instead of hanging at connecting.</span></li>
+      <li><b class="tag">fixed</b><span>Starting the viewer falls back to another port instead of refusing to open when one is already running.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.9.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.9.0">v0.9.0</a></span><time datetime="2026-07-31">July 31, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span><b>Diagonal printing.</b> A part that prints better tilted can now be stood on its corner, with a small flat facet cut where it meets the bed. It's offered as a variant with a plain note about the trade-off, never forced, since only you know whether that corner shows.</span></li>
+      <li><b class="tag new">new</b><span>Tall diagonal stances grow break-away fins: thin blades that steady the lean during the print and snap off after.</span></li>
+      <li><b class="tag new">new</b><span>A new floating check fails any region whose first layer would print on thin air, something the overhang check can't see.</span></li>
+      <li><b class="tag">improved</b><span>Hold the pointer over a slider's name to see what that parameter does.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.8.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.8.0">v0.8.0</a></span><time datetime="2026-07-30">July 30, 2026</time></div>
+    <ul>
+      <li><b class="tag">improved</b><span>Sliders are named in your words. Call it a lip when you describe the part and the slider says lip, not something technical.</span></li>
+      <li><b class="tag">improved</b><span>Your AI asks for the permissions it needs once, up front, instead of stopping to ask in the middle of the first build.</span></li>
+      <li><b class="tag">fixed</b><span>Three viewer fixes: the section cut spans the whole part, a stale camera bug is gone, and the checks panel no longer blinks between rebuilds.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.7.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.7.0">v0.7.0</a></span><time datetime="2026-07-29">July 29, 2026</time></div>
+    <ul>
+      <li><b class="tag">fixed</b><span>When your browser can't do 3D, the viewer says so and explains what to try, instead of showing a blank page.</span></li>
+      <li><b class="tag">improved</b><span>nurb notices when your installed skill is older than the tool and says how to bring it current.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.6.1">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.6.1">v0.6.1</a></span><time datetime="2026-07-29">July 29, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span>Exporting an assembly downloads one zip containing each of its parts.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.6.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.6.0">v0.6.0</a></span><time datetime="2026-07-29">July 29, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span><b>Assemblies.</b> Put parts together and check the motion between them, so a lid that would collide with its hinge gets caught before you print it.</span></li>
+      <li><b class="tag new">new</b><span>nurb.dev, with a live demo you can drag, a one-line installer, and <b>nurb update</b> to upgrade everything in one go.</span></li>
+      <li><b class="tag">fixed</b><span>A typed slider value now arrives exactly as typed, Chrome no longer hangs while connecting to the viewer, and the viewer never restores an old camera onto an empty scene.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.5.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.5.0">v0.5.0</a></span><time datetime="2026-07-28">July 28, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span><b>Variants.</b> Named configurations of a part you can flip between in the viewer, each with a link that opens exactly that configuration.</span></li>
+      <li><b class="tag">improved</b><span>Your AI starts the viewer at the beginning of every session and keeps its link in every reply.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.4.1">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.4.1">v0.4.1</a></span><time datetime="2026-07-28">July 28, 2026</time></div>
+    <ul>
+      <li><b class="tag">improved</b><span>A viewer design pass: a cleaner toolbar and clearer icons on the printability checks.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.4.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.4.0">v0.4.0</a></span><time datetime="2026-07-28">July 28, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span>The viewer's update badge upgrades nurb when you click it.</span></li>
+      <li><b class="tag new">new</b><span>A double-clickable launcher that opens the viewer without touching a terminal.</span></li>
+      <li><b class="tag new">new</b><span>Printer profiles can choose which file formats an export produces.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.3.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.3.0">v0.3.0</a></span><time datetime="2026-07-28">July 28, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span>Your AI can now inspect a part the way the print checks see it, with every finding tied to the exact face it's about.</span></li>
+      <li><b class="tag">improved</b><span>When a chamfer won't fit, the error names the real cause and the edges involved, not a cryptic kernel code.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.2.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.2.0">v0.2.0</a></span><time datetime="2026-07-27">July 27, 2026</time></div>
+    <ul>
+      <li><b class="tag">improved</b><span>The viewer shows the finished part, chamfers and all, by default, with a toggle for the raw draft.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.1.1">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.1.1">v0.1.1</a></span><time datetime="2026-07-27">July 27, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span>An installable skill that teaches any AI assistant to design printable parts with nurb.</span></li>
+      <li><b class="tag">improved</b><span>Your AI asks for real measurements before it models a fit, instead of guessing.</span></li>
+      <li><b class="tag new">new</b><span>The viewer shows its version and quietly mentions when a newer one exists.</span></li>
+    </ul>
+  </article>
+
+  <article class="release" id="v0.1.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.1.0">v0.1.0</a></span><time datetime="2026-07-27">July 27, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span><b>The first release.</b> Describe a part in plain words, watch your AI model it live in the browser, drag sliders, get checks against real print physics, and download a file your printer understands.</span></li>
+    </ul>
+  </article>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>&copy; 2026 Ordinary Systems LLC</span>
+    <a href="https://github.com/Shpigford/nurb/blob/main/LICENSE">FSL-1.1-MIT</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/Shpigford/nurb">github</a>
+    <a href="https://x.com/Shpigford">@shpigford</a>
+    <a href="https://github.com/Shpigford/nurb/issues/new">send feedback</a>
+  </div>
+</footer>
+
+</body>
+</html>

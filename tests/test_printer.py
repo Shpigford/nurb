@@ -7,7 +7,7 @@ because the card is applied on top of the machine.
 
 import pytest
 
-from nurb.checks import Context, _apply, from_card, printer, profiles
+from nurb.checks import Context, _apply, from_card, global_file, printer, profiles
 
 
 def project(tmp_path, printer_toml=None, card=None):
@@ -18,6 +18,12 @@ def project(tmp_path, printer_toml=None, card=None):
     if card is not None:
         (tmp_path / "parts" / "thing.md").write_text(card)
     return part
+
+
+def global_config(text):
+    """conftest points XDG_CONFIG_HOME at a fresh directory for every test."""
+    global_file().parent.mkdir(parents=True, exist_ok=True)
+    global_file().write_text(text)
 
 
 def test_every_shipped_profile_is_valid_context_settings():
@@ -75,6 +81,38 @@ def test_the_card_still_wins_for_what_the_part_justified(tmp_path):
 def test_broken_toml_names_the_file(tmp_path):
     project(tmp_path, "profile = \n")
     with pytest.raises(ValueError, match="printer.toml"):
+        printer(tmp_path)
+
+
+# --- the global config -------------------------------------------------------
+
+
+def test_the_global_config_names_the_profile(tmp_path):
+    """A printer is a fact about the workshop, so naming it once covers every project."""
+    project(tmp_path)
+    global_config('profile = "bambu_a1_mini"\n')
+    assert printer(tmp_path).bed == (180.0, 180.0, 180.0)
+
+
+def test_the_projects_profile_beats_the_globals(tmp_path):
+    project(tmp_path, 'profile = "prusa_mk4s"\n')
+    global_config('profile = "bambu_a1_mini"\n')
+    assert printer(tmp_path).bed == (250.0, 210.0, 220.0)
+
+
+def test_a_global_setting_layers_under_the_project(tmp_path):
+    """The global file can override machine facts too, and the project still wins."""
+    project(tmp_path, "min_wall = 1.5\n")
+    global_config("min_wall = 0.8\nbed = [300, 300, 300]\n")
+    ctx = printer(tmp_path)
+    assert ctx.min_wall == 1.5  # the project's
+    assert ctx.bed == (300, 300, 300)  # the global's, unopposed
+
+
+def test_broken_global_toml_names_the_file(tmp_path):
+    project(tmp_path)
+    global_config("profile = \n")
+    with pytest.raises(ValueError, match="config.toml"):
         printer(tmp_path)
 
 

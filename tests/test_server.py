@@ -3,10 +3,14 @@
 import asyncio
 import io
 import json
+import pathlib
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import trimesh
 
+from nurb.builder import BRIDGE_TINT
 from nurb.server import Server
 
 PART = """from nurb import *
@@ -93,6 +97,35 @@ def test_rebuild_names_a_non_numeric_variant_from_its_built_values(tmp_path):
     assert entry["variant"] == "tall"
 
 
+def test_rebuild_tints_ceilings_against_the_cards_build_direction(tmp_path):
+    root = tmp_path
+    (root / "parts").mkdir()
+    part = root / "parts" / "thing.py"
+    part.write_text(
+        """from nurb import *
+
+@part
+def thing():
+    return Box(6, 6, 20) + Pos(0, 0, 12) * Box(30, 30, 4)
+"""
+    )
+    (root / "parts" / "thing.md").write_text(
+        """# thing
+
+```toml
+[part]
+up = [0, 0, -1]
+```
+"""
+    )
+
+    entry = Server(root).rebuild(part)
+    scene = trimesh.load(io.BytesIO(entry["glb"]), file_type="glb")
+    colors = next(iter(scene.geometry.values())).visual.vertex_colors
+
+    assert not np.any(np.all(colors == BRIDGE_TINT, axis=1))
+
+
 def test_failed_build_has_no_active_variant(tmp_path):
     server = project(tmp_path)
     part = tmp_path / "parts" / "thing.py"
@@ -126,6 +159,22 @@ def test_check_judges_a_matching_variant_by_its_own_settings(tmp_path):
     server.rebuild(part)
     rules = [f["rule"] for f in server.check(part)["findings"]]
     assert "min_wall" in rules
+
+
+def test_findings_carry_the_triangles_of_their_face(tmp_path):
+    """A finding arrives with its face as a flat triangle list, so the viewer can paint
+    the guilty face instead of dropping a pin near it. The subtlety guarded here:
+    checks.run cleans the tessellation the rebuild left on the shape, so the check pass
+    has to mesh again before any triangles exist to read."""
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    (tmp_path / "parts" / "thing.md").write_text(CARD)
+    server.rebuild(part)
+    walls = [f for f in server.check(part)["findings"] if f["rule"] == "min_wall"]
+    assert walls, "the base card demands 10mm of a 5mm plate"
+    face = walls[0]["face"]
+    assert face, "the finding lost its face"
+    assert len(face) % 9 == 0, "not whole triangles of three corners"
 
 
 def test_export_builds_at_the_slider_values(tmp_path):
@@ -178,6 +227,71 @@ def sent(server):
 
     server.send = record
     return out
+
+
+def test_sync_and_http_fallback_carry_the_printer_bed(tmp_path):
+    server = project(tmp_path)
+    (tmp_path / "printer.toml").write_text("bed = [180, 120, 180]\n")
+
+    assert server._sync()["bed"] == [180, 120]
+    response = asyncio.run(server.http(None, SimpleNamespace(path="/api/sync")))
+    assert json.loads(response.body)["bed"] == [180, 120]
+
+
+def test_rebuild_broadcast_carries_a_changed_printer_bed(tmp_path):
+    server = project(tmp_path)
+    out = sent(server)
+    (tmp_path / "printer.toml").write_text("bed = [180, 120, 180]\n")
+
+    asyncio.run(server.broadcast(server.state["thing"]))
+
+    assert out[0]["type"] == "rebuilt"
+    assert out[0]["bed"] == [180, 120]
+
+
+def test_global_config_change_queues_every_part(tmp_path, monkeypatch):
+    """The global printer file lives outside both directories normally watched."""
+    from nurb import checks
+    from nurb import server as server_mod
+
+    config = checks.global_file()
+    config.parent.mkdir(parents=True)
+    config.write_text('profile = "bambu_a1_mini"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+    server.loop = SimpleNamespace(call_soon_threadsafe=lambda fn, arg: fn(arg))
+
+    class FakeObserver:
+        def __init__(self):
+            self.scheduled = []
+
+        def schedule(self, handler, path, recursive):
+            self.scheduled.append((handler, path, recursive))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(server_mod, "Observer", FakeObserver)
+    server.watch()
+    watched = next(
+        handler
+        for handler, path, _ in server.observer.scheduled
+        if pathlib.Path(path) == config.parent
+    )
+    watched.on_any_event(
+        SimpleNamespace(
+            is_directory=False,
+            src_path=str(config.parent / "unrelated.py"),
+            dest_path="",
+        )
+    )
+    assert server.queue.empty()
+
+    watched.on_any_event(
+        SimpleNamespace(is_directory=False, src_path=str(config), dest_path="")
+    )
+
+    assert server.queue.get_nowait() == str(tmp_path / "parts" / "thing.py")
 
 
 def test_upgrade_declines_outside_a_uv_tool_install(tmp_path):
@@ -285,6 +399,34 @@ def test_viewer_matches_websocket_security_to_the_page():
     assert "location.protocol === 'https:' ? 'wss' : 'ws'" in viewer
     assert "new WebSocket(`${scheme}://${location.host}/ws`)" in viewer
     assert "new WebSocket(`ws://${location.host}/ws`)" not in viewer
+
+
+def test_viewer_updates_the_bed_outside_the_initial_socket_sync():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    socket = viewer.split("ws.onmessage =", 1)[1]
+    assert socket.index("bedUpdate(msg.bed);") < socket.index("if (msg.type === 'sync')")
+    assert "fetch('/api/sync')" in viewer
+
+
+def test_viewer_centers_printed_geometry_without_assembly_context():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    paint = viewer.split("async function paint", 1)[1].split("// Takes a name", 1)[0]
+    centering = paint.split("const plated =", 1)[1].split("const size =", 1)[0]
+    assert "c.name !== 'context'" in centering
+    assert "mesh.position.set(-at.x, -at.y, -plated.min.z)" in centering
+
+
+def test_section_reaims_after_a_new_parts_camera_is_restored():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    paint = viewer.split("async function paint", 1)[1].split("// Takes a name", 1)[0]
+    assert "function sectionAttach(reaim) {\n  if (reaim) cutSign = 0;" in viewer
+    assert paint.index("restoreCamera(name, box)") < paint.index("sectionAttach(!keepCamera);")
 
 
 # --- the skill staleness nudge ------------------------------------------------

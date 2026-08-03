@@ -4,7 +4,7 @@ A rule that agrees with itself proves nothing. These are all cases where the exp
 finding is obvious from the geometry: a known angle, a known count, a known tip.
 """
 
-from math import tan, radians
+from math import cos, radians, sin, tan
 
 from build123d import Align, Box, Cylinder, Plane, Pos, Rot, extrude, Polygon
 import pytest
@@ -161,11 +161,40 @@ def test_sliver_counts_and_the_baseline_silences_it():
 
 
 def test_build_volume_uses_the_best_orientation():
-    """300 x 10 x 10 does not fit a 256 bed lying down, but it fits standing up."""
+    """260 x 10 x 10 does not fit a 256 bed square-on, but it fits standing up."""
     tall = Box(260, 10, 10)
     assert only(tall, "build_volume", Context(bed=(256, 256, 300))) == [], "stands up"
-    assert only(tall, "build_volume", Context(bed=(256, 256, 256))) != [], "260 > 256"
     assert only(tall, "build_volume", Context(bed=(100, 100, 100)))[0].severity == FAIL
+
+
+def test_build_volume_allows_a_diagonal_footprint():
+    """The box is not the part: a 300mm bar lies on a 256mm bed at 30-odd degrees,
+    and issue #55's 364mm tray sits on a 350mm bed the same way. Past the bed's
+    diagonal, no rotation saves it."""
+    bed = Context(bed=(256, 256, 100))  # too short to stand either bar on end
+    assert only(Box(300, 10, 10), "build_volume", bed) == []
+    assert only(Box(400, 10, 10), "build_volume", bed)[0].severity == FAIL
+
+
+def test_build_volume_finds_a_narrow_rotation_window():
+    """A long part can have less than 0.1 degrees of usable rotation."""
+    angle = radians(36.05)
+    bed = Context(
+        bed=(
+            300 * cos(angle) + 10 * sin(angle) + 0.1,
+            300 * sin(angle) + 10 * cos(angle) + 0.1,
+            100,
+        )
+    )
+    assert only(Box(300, 10, 10), "build_volume", bed) == []
+
+
+def test_build_volume_turns_a_stood_part_on_the_plate():
+    """A stance fixes build-up, not rotation around build-up."""
+    from nurb import stand
+
+    stood = stand(Box(4, 120, 20), tilt=45, facet=2.0, fins=False)
+    assert only(stood, "build_volume", Context(bed=(100, 100, 100))) == []
 
 
 def test_build_volume_keeps_a_stood_parts_facet_on_the_bed():
@@ -339,6 +368,78 @@ def test_concave_cosmetic_ignores_polish_on_an_outside_corner():
 def test_concave_cosmetic_does_not_mistake_a_pocket_for_a_chamfer():
     """A narrow pocket floor is bounded by concave edges too, and is square to them."""
     assert only(Box(20, 20, 20) - Pos(0, 0, 8) * Box(6, 6, 6), "concave_cosmetic") == []
+
+
+# --- hole ceilings -----------------------------------------------------------
+
+
+def counterbored_plate():
+    """A 10mm plate with a naive counterbore, mouth on the bed: a 3.4mm hole over a
+    6.2mm head pocket, the shelf between them laid flat over the open pocket."""
+    plate = Box(30, 30, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    seated = (Align.CENTER, Align.CENTER, Align.MIN)
+    return plate - Cylinder(1.7, 30, align=seated) - Cylinder(3.1, 3, align=seated)
+
+
+def test_naive_counterbore_floats_its_hole_rim():
+    """The overhang rule reads the shelf as a bridge and stays quiet on purpose; what
+    it cannot see is the 3.4mm rim inside the bridge, drawn on air."""
+    found = only(counterbored_plate(), "hole_ceiling")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+    assert found[0].value == pytest.approx(3.4, abs=0.05)
+    assert only(counterbored_plate(), "overhang") == []
+
+
+def test_stepped_counterbore_answers_the_finding():
+    """The same pocket cut with counterbore() leaves nothing for any rule: every
+    ceiling in the stack is a short bridge the existing rules already allow."""
+    from nurb import counterbore
+
+    plate = Box(30, 30, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    stepped = plate - counterbore(hole_dia=3.4, head_dia=6.2, head_depth=3, depth=12)
+    assert len(stepped.solids()) == 1
+    assert run(stepped) == []
+
+
+def test_hole_through_a_bridged_roof_is_the_same_finding():
+    """Not only screw pockets: a vertical hole meeting a channel roof from above puts
+    its rim on the same sagging bridge lines."""
+    shape = Box(40, 40, 20) - Pos(0, 0, 6) * Box(10, 60, 6) - Pos(0, 0, 15) * Cylinder(2, 14)
+    found = only(shape, "hole_ceiling")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+
+
+def test_a_boss_through_a_ceiling_is_not_a_hole():
+    """The inner wire alone cannot tell a hole from a column passing through the
+    ceiling, and a column carries its own rim. The probe above settles it."""
+    seated = (Align.CENTER, Align.CENTER, Align.MIN)
+    shape = (
+        Box(30, 30, 20, align=seated)
+        - Box(20, 20, 10, align=seated)
+        + Cylinder(2, 10, align=seated)
+    )
+    assert only(shape, "hole_ceiling") == []
+
+
+def test_a_hollow_boss_through_a_ceiling_carries_its_rim():
+    """A tube is still support even though probing its bounding-box centre finds
+    the through hole rather than the wall that actually meets the ceiling."""
+    seated = (Align.CENTER, Align.CENTER, Align.MIN)
+    shape = (
+        Cylinder(4, 20, align=seated)
+        + Pos(0, 0, 10) * Cylinder(8, 3, align=seated)
+        - Cylinder(2, 30, align=seated)
+    )
+    assert only(shape, "hole_ceiling") == []
+
+
+def test_a_counterbore_mouth_on_the_bed_is_the_first_layer():
+    """The plate's bottom face is pierced by the pocket too, and warning about the
+    first layer is how a checker gets switched off."""
+    found = only(counterbored_plate(), "hole_ceiling")
+    assert all(f.where[2] > 0 for f in found)
 
 
 # --- wall thickness ----------------------------------------------------------
