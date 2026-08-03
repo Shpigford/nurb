@@ -136,6 +136,10 @@ HEAD = """\
   .chart-lead { color: var(--dim); font-size: .88rem; margin-bottom: .8rem; }
   .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .6rem; }
   .chart svg { display: block; width: 100%; height: auto; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; padding: .55rem .6rem .3rem; border-top: 1px solid var(--line); margin-top: .4rem; font-size: .8rem; color: var(--dim); }
+  .chart-legend span { display: inline-flex; align-items: center; gap: .45rem; }
+  .chart-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .chart-legend b { font-weight: 400; color: var(--text); }
   .chart .dot { transition: r .1s; }
   .chart .dot:hover { r: 8; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0 1.4rem; margin-bottom: .7rem; }
@@ -343,7 +347,6 @@ def _chart(combos):
     parts.append(
         f'<text x="{width - right}" y="{height - 8}" text-anchor="end" font-size="11" fill="var(--dim)">minutes per part &rarr;</text>'
         f'<text x="{left - 42}" y="{top - 10}" font-size="11" fill="var(--dim)">printed right first try</text>'
-        f'<text x="{left + 10}" y="{top + 16}" font-size="11" fill="var(--dimmer)">&#8598; better</text>'
     )
 
     # Effort variants of one model join into a line once more than one is on file.
@@ -392,16 +395,21 @@ def _chart(combos):
             f'{html.escape(p["model"])} <tspan fill="var(--dimmer)">&middot; {html.escape(p["effort"])}</tspan></text>'
         )
 
-    legend_x = left + 10
-    ly = height - bottom - 14
-    for label, color in SUBSCRIPTIONS.values():
-        parts.append(
-            f'<circle cx="{legend_x}" cy="{ly}" r="5" fill="{color}"/>'
-            f'<text x="{legend_x + 12}" y="{ly + 4}" font-size="11" fill="var(--dim)">{html.escape(label)}</text>'
-        )
-        legend_x += 12 + 8 * len(label) + 40
     parts.append("</svg>")
-    return '<div class="chart">' + "".join(parts) + "</div>"
+
+    # The legend lives outside the plot, or its swatches read as data points; the
+    # floor-arrow key lives with it, or the arrow reads as decoration.
+    capped_any = any(p["capped"] for p in points)
+    keys = [
+        f'<span><i style="background:{color}"></i>{html.escape(label)}</span>'
+        for label, color in SUBSCRIPTIONS.values()
+    ]
+    if capped_any:
+        keys.append(
+            "<span><b>&rarr;</b>hit the session time limit, so the real time is longer than shown</span>"
+        )
+    legend = f'<div class="chart-legend">{"".join(keys)}</div>'
+    return '<div class="chart">' + "".join(parts) + legend + "</div>"
 
 
 def _card(key, tasks):
