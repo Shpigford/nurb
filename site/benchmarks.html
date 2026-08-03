@@ -44,8 +44,26 @@
   .job { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; }
   .job b { display: block; }
   .job span { color: var(--dim); font-size: .88rem; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.2rem 1.4rem; margin-bottom: 1rem; }
-  .card .top { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1rem; margin-bottom: .3rem; }
+  .answers { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  @media (max-width: 640px) { .answers { grid-template-columns: 1fr; } }
+  .answer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; border-top: 3px solid var(--line); }
+  .answer .have { font-size: .85rem; color: var(--dim); }
+  .answer .pick { font-size: 1.15rem; font-weight: 700; margin: .15rem 0; }
+  .answer .pick small { color: var(--dim); font-weight: 400; font-size: .8em; }
+  .answer .why { color: var(--dim); font-size: .88rem; }
+  .gap { color: var(--dimmer); font-size: .82rem; margin-top: .8rem; }
+  .chart-lead { color: var(--dim); font-size: .88rem; margin-bottom: .8rem; }
+  .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .6rem; }
+  .chart svg { display: block; width: 100%; height: auto; }
+  .chart .dot { transition: r .1s; }
+  .chart .dot:hover { r: 8; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0 1.4rem; margin-bottom: .7rem; }
+  .card summary { cursor: pointer; list-style: none; padding: 1rem 0; }
+  .card summary::-webkit-details-marker { display: none; }
+  .card summary::after { content: "+"; float: right; color: var(--dimmer); }
+  .card[open] summary::after { content: "\2212"; }
+  .card .body { padding-bottom: 1.2rem; }
+  .card .top { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1rem; }
   .card .top .model { font-size: 1.15rem; font-weight: 700; }
   .card .top .runs { color: var(--dim); font-size: .85rem; }
   .card .top .first { margin-left: auto; font-size: .85rem; color: var(--dim); }
@@ -80,7 +98,26 @@
 </header>
 <main>
 <h1>Which AI designs the best parts?</h1>
-<p class="lead">nurb works with the AI subscription you already have. We give each model the same real part-design jobs and grade the parts by machine: the actual geometry, checked against what was asked and against print physics. No cherry-picking, no vibes. Here is how they did.</p>
+<p class="lead">nurb works with the AI subscription you already have. We give each model the same real part-design jobs and grade the parts by machine: the actual geometry, checked against what was asked and against print physics. No cherry-picking, no vibes. Start from what you subscribe to.</p>
+
+<h2>The short answer</h2>
+<div class="answers">
+<div class="answer" style="border-top-color:#2f9fb5">
+  <div class="have">Have Claude?</div>
+  <div class="pick">run fable <small>at high effort</small></div>
+  <div class="why">9/9 first-try prints &middot; ~7 min/part</div>
+</div>
+<div class="answer" style="border-top-color:#8f75e0">
+  <div class="have">Have ChatGPT (Codex)?</div>
+  <div class="pick">run gpt-5.5 <small>at medium effort</small></div>
+  <div class="why">8/9 first-try prints &middot; ~3 min/part</div>
+</div>
+</div>
+<p class="gap">In a hurry on a Claude plan? No fast Claude option has been benchmarked yet: every Claude row so far ran at its usual effort. Lower-effort rows are next, and the chart below will grow a line per model as they land.</p>
+
+<h2>The tradeoff</h2>
+<p class="chart-lead">Every benchmarked model and effort level, placed by how often its parts print right the first time against how long it takes per part. Up and to the left is better.</p>
+<div class="chart"><svg viewBox="0 0 840 380" role="img" aria-label="First-try prints against minutes per part for every benchmarked model"><line x1="56" y1="334" x2="816" y2="334" stroke="var(--line)" stroke-width="1"/><text x="48" y="338" text-anchor="end" font-size="11" fill="var(--dimmer)">0%</text><line x1="56" y1="257" x2="816" y2="257" stroke="var(--line)" stroke-width="1"/><text x="48" y="261" text-anchor="end" font-size="11" fill="var(--dimmer)">25%</text><line x1="56" y1="180" x2="816" y2="180" stroke="var(--line)" stroke-width="1"/><text x="48" y="184" text-anchor="end" font-size="11" fill="var(--dimmer)">50%</text><line x1="56" y1="103" x2="816" y2="103" stroke="var(--line)" stroke-width="1"/><text x="48" y="107" text-anchor="end" font-size="11" fill="var(--dimmer)">75%</text><line x1="56" y1="26" x2="816" y2="26" stroke="var(--line)" stroke-width="1"/><text x="48" y="30" text-anchor="end" font-size="11" fill="var(--dimmer)">100%</text><line x1="246" y1="26" x2="246" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="246" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">3</text><line x1="436" y1="26" x2="436" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="436" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">6</text><line x1="626" y1="26" x2="626" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="626" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">9</text><line x1="816" y1="26" x2="816" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="816" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">12</text><text x="816" y="372" text-anchor="end" font-size="11" fill="var(--dim)">minutes per part &rarr;</text><text x="14" y="16" font-size="11" fill="var(--dim)">printed right first try</text><text x="66" y="42" font-size="11" fill="var(--dimmer)">&#8598; better</text><circle class="dot" cx="489" cy="26" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>fable (high effort): 9/9 first-try, ~7 min/part</title></circle><text x="477" y="30" text-anchor="end" font-size="12" fill="var(--text)">fable <tspan fill="var(--dimmer)">&middot; high</tspan></text><line x1="645" y1="26" x2="659" y2="26" stroke="#2f9fb5" stroke-width="2"/><path d="M 659 22 L 666 26 L 659 30 Z" fill="#2f9fb5"/><circle class="dot" cx="637" cy="26" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>opus (high effort): 9/9 first-try, ~9+ min/part (hit the time limit on 2)</title></circle><text x="671" y="30" text-anchor="start" font-size="12" fill="var(--text)">opus <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="273" cy="60" r="6" fill="#8f75e0" stroke="var(--panel)" stroke-width="2"><title>gpt-5.5 (medium effort): 8/9 first-try, ~3 min/part</title></circle><text x="285" y="64" text-anchor="start" font-size="12" fill="var(--text)">gpt-5.5 <tspan fill="var(--dimmer)">&middot; medium</tspan></text><line x1="677" y1="129" x2="691" y2="129" stroke="#2f9fb5" stroke-width="2"/><path d="M 691 125 L 698 129 L 691 133 Z" fill="#2f9fb5"/><circle class="dot" cx="669" cy="129" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (high effort): 6/9 first-try, ~10+ min/part (hit the time limit on 3)</title></circle><text x="703" y="133" text-anchor="start" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="521" cy="266" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>haiku (low effort): 2/9 first-try, ~7 min/part</title></circle><text x="533" y="270" text-anchor="start" font-size="12" fill="var(--text)">haiku <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle cx="66" cy="320" r="5" fill="#2f9fb5"/><text x="78" y="324" font-size="11" fill="var(--dim)">Claude</text><circle cx="166" cy="320" r="5" fill="#8f75e0"/><text x="178" y="324" font-size="11" fill="var(--dim)">ChatGPT (Codex)</text></svg></div>
 
 <h2>The jobs</h2>
 <div class="jobs">
@@ -89,62 +126,73 @@
 <div class="job"><b>Handle a missing measurement</b><span>One dimension nobody measured. Does it guess silently, or handle the unknown the honest way?</span></div>
 </div>
 
-<h2>The models</h2>
-<div class="card">
-  <div class="top">
+<h2>The receipts</h2>
+<p class="chart-lead">Per-model detail: the verdict, and every job's score with a tick per attempt. Click a model to open it.</p>
+<details class="card">
+  <summary><div class="top">
     <span class="model">fable <small>(high effort)</small></span>
     <span class="runs">Claude subscription</span>
     <span class="first">first-try prints <b>9/9</b> &middot; ~7 min/part</span>
-  </div>
+  </div></summary>
+  <div class="body">
   <p class="verdict">Flawless so far: every part, every job, right the first time. When a measurement was missing, it did the honest thing unprompted. The premium pick.</p>
   <div class="bars">
     <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
   </div>
-</div>
-<div class="card">
-  <div class="top">
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
     <span class="model">opus <small>(high effort)</small></span>
     <span class="runs">Claude subscription</span>
-    <span class="first">first-try prints <b>9/9</b> &middot; ~9+ min/part (hit the 15 min limit on 2)</span>
-  </div>
+    <span class="first">first-try prints <b>9/9</b> &middot; ~9+ min/part (hit the time limit on 2)</span>
+  </div></summary>
+  <div class="body">
   <p class="verdict">Also flawless, every part on every job, just slower than fable: it twice ran the clock out double-checking a part that was already perfect. If fable is not on your plan, this is the same answer with more patience required.</p>
   <div class="bars">
     <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
   </div>
-</div>
-<div class="card">
-  <div class="top">
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
     <span class="model">gpt-5.5 <small>(medium effort)</small></span>
     <span class="runs">ChatGPT subscription (Codex)</span>
     <span class="first">first-try prints <b>8/9</b> &middot; ~3 min/part</span>
-  </div>
+  </div></summary>
+  <div class="body">
   <p class="verdict">Excellent and fast, and honest about the unmeasured dimension. One design quietly stopped fitting when the cable bundle grew, which is the kind of flaw you find after printing.</p>
   <div class="bars">
     <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:93%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(80.0% - 1px)" title="attempt: 0.800"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">93%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
   </div>
-</div>
-<div class="card">
-  <div class="top">
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
     <span class="model">sonnet <small>(high effort)</small></span>
     <span class="runs">Claude subscription</span>
-    <span class="first">first-try prints <b>6/9</b> &middot; ~10+ min/part (hit the 15 min limit on 3)</span>
-  </div>
+    <span class="first">first-try prints <b>6/9</b> &middot; ~10+ min/part (hit the time limit on 3)</span>
+  </div></summary>
+  <div class="body">
   <p class="verdict">Perfect on instructions and honest about the unmeasured dimension. Its own designs are the gap: elegant cradles that would fail on the printer, with big unsupported overhangs, one wall too thin, one that tips. Check its parts before printing.</p>
   <div class="bars">
     <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i class="mid" style="width:70%"></i><u style="left:calc(70.0% - 1px)" title="attempt: 0.700"></u><u style="left:calc(70.0% - 1px)" title="attempt: 0.700"></u><u style="left:calc(69.2% - 1px)" title="attempt: 0.692"></u></div><div class="pct">70%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
   </div>
-</div>
-<div class="card">
-  <div class="top">
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
     <span class="model">haiku <small>(low effort)</small></span>
     <span class="runs">Claude subscription (budget model)</span>
     <span class="first">first-try prints <b>2/9</b> &middot; ~7 min/part</span>
-  </div>
+  </div></summary>
+  <div class="body">
   <p class="verdict">Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round. And it wrote its guess for the unmeasured dimension down as if it had measured it, the mistake that ruins a print six months later.</p>
   <div class="bars">
     <div class="name">Follow the spec</div><div class="bar"><i class="mid" style="width:67%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(0.0% - 1px)" title="attempt: 0.000"></u></div><div class="pct">67%</div><div class="name">Design from a problem</div><div class="bar"><i class="low" style="width:25%"></i><u style="left:calc(13.3% - 1px)" title="attempt: 0.133"></u><u style="left:calc(13.3% - 1px)" title="attempt: 0.133"></u><u style="left:calc(49.2% - 1px)" title="attempt: 0.492"></u></div><div class="pct">25%</div><div class="name">Handle a missing measurement</div><div class="bar"><i class="mid" style="width:71%"></i><u style="left:calc(90.0% - 1px)" title="attempt: 0.900"></u><u style="left:calc(53.3% - 1px)" title="attempt: 0.533"></u><u style="left:calc(70.0% - 1px)" title="attempt: 0.700"></u></div><div class="pct">71%</div>
   </div>
-</div>
+  </div>
+</details>
 
 <div class="contribute">
   <b>Add your model to this page.</b>

@@ -12,6 +12,7 @@ prints instead of pass@1, minutes instead of tokens.
 
 import argparse
 import html
+import math
 import pathlib
 
 from .report import PASS, rows_from, summarize
@@ -34,6 +35,23 @@ JOBS = {
         "One dimension nobody measured. Does it guess silently, or handle the unknown the honest way?",
     ),
 }
+
+# Subscriptions are the constraint a visitor arrives with, so they partition the
+# page (the answer cards) and color the chart. Chart identity colors are validated
+# for the dark surface and deliberately distinct from the score bars' status
+# colors: green/amber/red mean good/mid/poor everywhere on this page, never "which
+# subscription".
+SUBSCRIPTIONS = {
+    "claude": ("Claude", "#2f9fb5"),
+    "codex": ("ChatGPT (Codex)", "#8f75e0"),
+}
+
+# One line of honest nuance under the answer cards; editorial, updated with the data.
+GAP_NOTE = (
+    "In a hurry on a Claude plan? No fast Claude option has been benchmarked yet: "
+    "every Claude row so far ran at its usual effort. Lower-effort rows are next, "
+    "and the chart below will grow a line per model as they land."
+)
 
 # Editorial layer, keyed by (harness, model, effort). Grounded in the committed rows;
 # update alongside them. Combos without an entry render numbers-only.
@@ -107,8 +125,26 @@ HEAD = """\
   .job { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; }
   .job b { display: block; }
   .job span { color: var(--dim); font-size: .88rem; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.2rem 1.4rem; margin-bottom: 1rem; }
-  .card .top { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1rem; margin-bottom: .3rem; }
+  .answers { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+  @media (max-width: 640px) { .answers { grid-template-columns: 1fr; } }
+  .answer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; border-top: 3px solid var(--line); }
+  .answer .have { font-size: .85rem; color: var(--dim); }
+  .answer .pick { font-size: 1.15rem; font-weight: 700; margin: .15rem 0; }
+  .answer .pick small { color: var(--dim); font-weight: 400; font-size: .8em; }
+  .answer .why { color: var(--dim); font-size: .88rem; }
+  .gap { color: var(--dimmer); font-size: .82rem; margin-top: .8rem; }
+  .chart-lead { color: var(--dim); font-size: .88rem; margin-bottom: .8rem; }
+  .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .6rem; }
+  .chart svg { display: block; width: 100%; height: auto; }
+  .chart .dot { transition: r .1s; }
+  .chart .dot:hover { r: 8; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0 1.4rem; margin-bottom: .7rem; }
+  .card summary { cursor: pointer; list-style: none; padding: 1rem 0; }
+  .card summary::-webkit-details-marker { display: none; }
+  .card summary::after { content: "+"; float: right; color: var(--dimmer); }
+  .card[open] summary::after { content: "\\2212"; }
+  .card .body { padding-bottom: 1.2rem; }
+  .card .top { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1rem; }
   .card .top .model { font-size: 1.15rem; font-weight: 700; }
   .card .top .runs { color: var(--dim); font-size: .85rem; }
   .card .top .first { margin-left: auto; font-size: .85rem; color: var(--dim); }
@@ -143,14 +179,25 @@ HEAD = """\
 </header>
 <main>
 <h1>Which AI designs the best parts?</h1>
-<p class="lead">nurb works with the AI subscription you already have. We give each model the same real part-design jobs and grade the parts by machine: the actual geometry, checked against what was asked and against print physics. No cherry-picking, no vibes. Here is how they did.</p>
+<p class="lead">nurb works with the AI subscription you already have. We give each model the same real part-design jobs and grade the parts by machine: the actual geometry, checked against what was asked and against print physics. No cherry-picking, no vibes. Start from what you subscribe to.</p>
+
+<h2>The short answer</h2>
+<div class="answers">
+{answers}
+</div>
+<p class="gap">{gap_note}</p>
+
+<h2>The tradeoff</h2>
+<p class="chart-lead">Every benchmarked model and effort level, placed by how often its parts print right the first time against how long it takes per part. Up and to the left is better.</p>
+{chart}
 
 <h2>The jobs</h2>
 <div class="jobs">
 {jobs}
 </div>
 
-<h2>The models</h2>
+<h2>The receipts</h2>
+<p class="chart-lead">Per-model detail: the verdict, and every job's score with a tick per attempt. Click a model to open it.</p>
 {cards}
 
 <div class="contribute">
@@ -200,20 +247,167 @@ def _bar(score, scores):
     return f'<div class="bar"><i{tone} style="width:{pct}%"></i>{ticks}</div><div class="pct">{pct}%</div>'
 
 
-def _card(key, tasks):
-    harness, model, effort = key
-    runs_on, verdict = VERDICTS.get(
-        key, (f"{harness} harness", "")
-    )
+def _stats(tasks):
+    """The three numbers a combo is judged by, shared by every layer of the page."""
     total = sum(r["trials"] for r in tasks.values())
     firsts = sum(sum(s >= PASS for s in r["scores"]) for r in tasks.values())
     minutes = sum(r["wall_s"] for r in tasks.values()) / len(tasks) / 60
     capped = sum(r.get("capped", 0) for r in tasks.values())
+    return firsts, total, minutes, capped
+
+
+def _time_note(minutes, capped):
     # A capped trial was killed mid-session, so its duration is a floor: say so
     # instead of averaging kills in as if they were finishes.
-    time_note = f"~{minutes:.0f} min/part"
     if capped:
-        time_note = f"~{minutes:.0f}+ min/part (hit the 15 min limit on {capped})"
+        return f"~{minutes:.0f}+ min/part (hit the time limit on {capped})"
+    return f"~{minutes:.0f} min/part"
+
+
+def _answers(combos):
+    """One card per subscription: the best combo for the plan the visitor already
+    pays for, because the subscription is a constraint, not a tradeoff axis."""
+    best = {}
+    for key, tasks in combos:
+        harness = key[0]
+        firsts, total, minutes, capped = _stats(tasks)
+        rank = (firsts / total if total else 0, -minutes)
+        if harness not in best or rank > best[harness][0]:
+            best[harness] = (rank, key, (firsts, total, minutes, capped))
+    cards = []
+    for harness, (label, color) in SUBSCRIPTIONS.items():
+        if harness not in best:
+            continue
+        _, (h, model, effort), (firsts, total, minutes, capped) = best[harness]
+        cards.append(
+            f'<div class="answer" style="border-top-color:{color}">\n'
+            f'  <div class="have">Have {html.escape(label)}?</div>\n'
+            f'  <div class="pick">run {html.escape(model)} <small>at {html.escape(effort)} effort</small></div>\n'
+            f'  <div class="why">{firsts}/{total} first-try prints &middot; {_time_note(minutes, capped)}</div>\n'
+            f"</div>"
+        )
+    return "\n".join(cards)
+
+
+def _chart(combos):
+    """One inline SVG: first-try rate against minutes per part, a labeled dot per
+    combo, colored by subscription. Effort variants of the same model connect into
+    a line as they land, so the two knobs read as geometry: pick a model's line,
+    slide along it for effort. Capped combos carry a right arrow: their time is a
+    floor, not a measurement."""
+    width, height = 840, 380
+    left, right, top, bottom = 56, 24, 26, 46
+    pw, ph = width - left - right, height - top - bottom
+
+    points = []
+    for (harness, model, effort), tasks in combos:
+        firsts, total, minutes, capped = _stats(tasks)
+        points.append(
+            {
+                "harness": harness,
+                "model": model,
+                "effort": effort,
+                "rate": firsts / total if total else 0.0,
+                "minutes": minutes,
+                "capped": capped,
+                "firsts": firsts,
+                "total": total,
+            }
+        )
+    xmax = max(12.0, max(p["minutes"] for p in points) * 1.2)
+    xmax = math.ceil(xmax / 3) * 3
+
+    def sx(minutes):
+        return left + minutes / xmax * pw
+
+    def sy(rate):
+        return top + (1 - rate) * ph
+
+    parts = [
+        f'<svg viewBox="0 0 {width} {height}" role="img" '
+        f'aria-label="First-try prints against minutes per part for every benchmarked model">'
+    ]
+    for rate in (0.0, 0.25, 0.5, 0.75, 1.0):
+        y = sy(rate)
+        parts.append(
+            f'<line x1="{left}" y1="{y:.0f}" x2="{width - right}" y2="{y:.0f}" stroke="var(--line)" stroke-width="1"/>'
+            f'<text x="{left - 8}" y="{y + 4:.0f}" text-anchor="end" font-size="11" fill="var(--dimmer)">{rate * 100:.0f}%</text>'
+        )
+    tick = 3
+    for m in range(tick, int(xmax) + 1, tick):
+        x = sx(m)
+        parts.append(
+            f'<line x1="{x:.0f}" y1="{top}" x2="{x:.0f}" y2="{height - bottom}" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/>'
+            f'<text x="{x:.0f}" y="{height - bottom + 18}" text-anchor="middle" font-size="11" fill="var(--dimmer)">{m}</text>'
+        )
+    parts.append(
+        f'<text x="{width - right}" y="{height - 8}" text-anchor="end" font-size="11" fill="var(--dim)">minutes per part &rarr;</text>'
+        f'<text x="{left - 42}" y="{top - 10}" font-size="11" fill="var(--dim)">printed right first try</text>'
+        f'<text x="{left + 10}" y="{top + 16}" font-size="11" fill="var(--dimmer)">&#8598; better</text>'
+    )
+
+    # Effort variants of one model join into a line once more than one is on file.
+    by_model = {}
+    for p in points:
+        by_model.setdefault((p["harness"], p["model"]), []).append(p)
+    for (harness, _), group in by_model.items():
+        if len(group) > 1:
+            color = SUBSCRIPTIONS.get(harness, ("", "var(--dim)"))[1]
+            path = " ".join(
+                f"{'M' if i == 0 else 'L'} {sx(p['minutes']):.0f} {sy(p['rate']):.0f}"
+                for i, p in enumerate(sorted(group, key=lambda p: p["minutes"]))
+            )
+            parts.append(
+                f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2" opacity=".35"/>'
+            )
+
+    for p in points:
+        x, y = sx(p["minutes"]), sy(p["rate"])
+        color = SUBSCRIPTIONS.get(p["harness"], ("", "var(--dim)"))[1]
+        # Label side: flip left near the right edge or when a same-height neighbor
+        # sits close to the right; ink color, never the series color.
+        crowd = any(
+            q is not p
+            and abs(sy(q["rate"]) - y) < 16
+            and 0 < sx(q["minutes"]) - x < 170
+            for q in points
+        )
+        flip = crowd or x > width - right - 140
+        # A capped point owns the space to its right (the floor arrow lives there),
+        # so its label starts past the arrowhead.
+        anchor, lx = ("end", x - 12) if flip else ("start", x + (34 if p["capped"] else 12))
+        title = (
+            f"{p['model']} ({p['effort']} effort): {p['firsts']}/{p['total']} first-try, "
+            f"{_time_note(p['minutes'], p['capped'])}"
+        )
+        if p["capped"]:
+            parts.append(
+                f'<line x1="{x + 8:.0f}" y1="{y:.0f}" x2="{x + 22:.0f}" y2="{y:.0f}" stroke="{color}" stroke-width="2"/>'
+                f'<path d="M {x + 22:.0f} {y - 4:.0f} L {x + 29:.0f} {y:.0f} L {x + 22:.0f} {y + 4:.0f} Z" fill="{color}"/>'
+            )
+        parts.append(
+            f'<circle class="dot" cx="{x:.0f}" cy="{y:.0f}" r="6" fill="{color}" stroke="var(--panel)" stroke-width="2">'
+            f"<title>{html.escape(title)}</title></circle>"
+            f'<text x="{lx:.0f}" y="{y + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)">'
+            f'{html.escape(p["model"])} <tspan fill="var(--dimmer)">&middot; {html.escape(p["effort"])}</tspan></text>'
+        )
+
+    legend_x = left + 10
+    ly = height - bottom - 14
+    for label, color in SUBSCRIPTIONS.values():
+        parts.append(
+            f'<circle cx="{legend_x}" cy="{ly}" r="5" fill="{color}"/>'
+            f'<text x="{legend_x + 12}" y="{ly + 4}" font-size="11" fill="var(--dim)">{html.escape(label)}</text>'
+        )
+        legend_x += 12 + 8 * len(label) + 40
+    parts.append("</svg>")
+    return '<div class="chart">' + "".join(parts) + "</div>"
+
+
+def _card(key, tasks):
+    harness, model, effort = key
+    runs_on, verdict = VERDICTS.get(key, (f"{harness} harness", ""))
+    firsts, total, minutes, capped = _stats(tasks)
     bars = []
     for task in JOBS:
         name = html.escape(JOBS[task][0])
@@ -226,16 +420,18 @@ def _card(key, tasks):
         else:
             bars.append(f'<div class="name">{name}</div>{_bar(row["score"], row["scores"])}')
     verdict_html = f'\n  <p class="verdict">{html.escape(verdict)}</p>' if verdict else ""
-    return f"""<div class="card">
-  <div class="top">
+    return f"""<details class="card">
+  <summary><div class="top">
     <span class="model">{html.escape(model)} <small>({html.escape(effort)} effort)</small></span>
     <span class="runs">{html.escape(runs_on)}</span>
-    <span class="first">first-try prints <b>{firsts}/{total}</b> &middot; {time_note}</span>
-  </div>{verdict_html}
+    <span class="first">first-try prints <b>{firsts}/{total}</b> &middot; {_time_note(minutes, capped)}</span>
+  </div></summary>
+  <div class="body">{verdict_html}
   <div class="bars">
     {"".join(bars)}
   </div>
-</div>"""
+  </div>
+</details>"""
 
 
 def render(summary):
@@ -247,6 +443,9 @@ def render(summary):
     cards = "\n".join(_card(key, tasks) for key, tasks in combos)
     page = HEAD  # plain token replacement: the CSS is full of braces str.format would eat
     for token, value in (
+        ("{answers}", _answers(combos)),
+        ("{gap_note}", html.escape(GAP_NOTE)),
+        ("{chart}", _chart(combos)),
         ("{jobs}", jobs),
         ("{cards}", cards),
         ("{trial_count}", str(sum(r["trials"] for r in summary))),
