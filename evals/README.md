@@ -45,6 +45,8 @@ Trials run on your machine like any normal agent session. The live throwaway pro
 
 ## Submitting a row
 
+A submission can be any number of trials, including one: `--trials 1` is a valid, welcome contribution. The leaderboard pools every submitted trial that shares a full benchmark identity (task content revision, harness and version, model, effort), so single runs from different people stack into one row with a growing sample, and each attempt shows as its own tick on the published bars. What keeps pooling honest is submitting everything you ran, not a lucky pick: your `results.jsonl` must be complete for the label you submit (contiguous trial numbers, a transcript for every row, no pruning), and the seeded spot-check below applies regardless of how many trials you sent. If a run went badly, that is data; submit it.
+
 Open a PR that copies your `results/<label>/results.jsonl`, each `<task>/trial_<n>/transcript.txt`, and the auditable candidate source into `submissions/<label>/`. Preserve `project/parts/*.py` plus any project-root or package `.py` files they import; leave cards, meshes, renders, and other generated project files out. Replace machine-specific home paths in transcripts and source with `<home>` or `<workspace>`. `results/` itself is gitignored so a submission is always a deliberate copy, never a bulk commit of local runs.
 
 Then run `uv run python -m nurb_evals.site`: the user-facing page at [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html) is generated into `site/benchmarks.html` from the committed submissions, and a test fails when it goes stale. Verdict sentences on that page live in `src/nurb_evals/site.py` and are editorial; a new row renders numbers-only until a maintainer writes one.
