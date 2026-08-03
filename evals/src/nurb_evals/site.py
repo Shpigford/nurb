@@ -101,7 +101,7 @@ HEAD = """\
   header nav a { color: var(--dim); }
   main { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
   h1 { font-size: 1.7rem; line-height: 1.3; margin-bottom: .8rem; }
-  .lead { color: var(--dim); max-width: 62ch; margin-bottom: 2.5rem; }
+  .lead { color: var(--dim); margin-bottom: 2.5rem; }
   h2 { font-size: 1.05rem; margin: 2.8rem 0 1rem; color: var(--accent); }
   .jobs { display: grid; gap: .7rem; margin-bottom: .4rem; }
   .job { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; }
@@ -113,7 +113,7 @@ HEAD = """\
   .card .top .runs { color: var(--dim); font-size: .85rem; }
   .card .top .first { margin-left: auto; font-size: .85rem; color: var(--dim); }
   .card .top .first b { color: var(--text); }
-  .verdict { color: var(--dim); font-size: .92rem; max-width: 58ch; margin-bottom: .9rem; }
+  .verdict { color: var(--dim); font-size: .92rem; margin-bottom: .9rem; }
   .bars { display: grid; grid-template-columns: max-content 1fr max-content; gap: .35rem .8rem; align-items: center; font-size: .85rem; }
   .bars .name { color: var(--dim); white-space: nowrap; }
   .bar { position: relative; height: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; }
@@ -123,7 +123,7 @@ HEAD = """\
   .bar i.low { background: var(--bad); }
   .pct { text-align: right; min-width: 6.5ch; }
   .pct.na { color: var(--dimmer); }
-  .fine { color: var(--dimmer); font-size: .82rem; margin-top: 1.1rem; max-width: 52ch; }
+  .fine { color: var(--dimmer); font-size: .82rem; margin-top: 1.1rem; }
   .fine:first-of-type { margin-top: 2.4rem; }
   .fine a { color: var(--dim); }
   .contribute { margin-top: 2.4rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.3rem; }
