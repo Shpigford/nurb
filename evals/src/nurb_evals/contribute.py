@@ -287,6 +287,7 @@ def open_pr(run_name, repo):
     if done.returncode != 0:
         return None, f"git commit: {_tail(done)}"
 
+    head = branch
     push = _run(["git", "push", "-u", "origin", branch], repo)
     if push.returncode != 0:
         fork = _run(["gh", "repo", "fork", "--remote", "--remote-name", "fork"], repo)
@@ -295,10 +296,19 @@ def open_pr(run_name, repo):
         push = _run(["git", "push", "-u", "fork", branch], repo)
         if push.returncode != 0:
             return None, f"git push: {_tail(push)}"
+        login = _run(["gh", "api", "user", "-q", ".login"], repo)
+        if login.returncode == 0 and login.stdout.strip():
+            head = f"{login.stdout.strip()}:{branch}"
 
+    # --base and --head make pr create fully non-interactive: without them gh can
+    # decide it has a question to ask, and a question with no terminal is an abort
+    # (a dogfooding run died exactly there, one step from the URL).
     done = _run(
         [
             "gh", "pr", "create",
+            "--repo", "Shpigford/nurb",
+            "--base", "main",
+            "--head", head,
             "--title", f"benchmark run: {run_name}",
             "--body",
             "Automated submission from the contribute wizard: one run, one new "
@@ -320,7 +330,7 @@ def _manual_steps(run_name, repo):
         f"  git commit -m 'benchmark run: {run_name}'\n"
         f"  gh repo fork Shpigford/nurb --remote   # skip if you have push access\n"
         f"  git push -u origin bench-{run_name}\n"
-        f"  gh pr create --title 'benchmark run: {run_name}' --fill\n\n"
+        f"  gh pr create --repo Shpigford/nurb --base main --head bench-{run_name} --title 'benchmark run: {run_name}' --fill\n\n"
         f"Every run counts, including a single one: matching rows pool on the "
         f"leaderboard, and a bad score is data, not an embarrassment."
     )

@@ -124,6 +124,6 @@ def test_open_pr_drives_git_and_gh_end_to_end(tmp_path, monkeypatch):
         "git add evals/submissions/stub-stub-model-low-abc123",
         "git commit -m benchmark run: stub-stub-model-low-abc123",
         "git push -u origin bench-stub-stub-model-low-abc123",
-        "gh pr create --title benchmark run: stub-stub-model-low-abc123",
+        "gh pr create --repo Shpigford/nurb --base main --head bench-stub-stub-model-low-abc123 --title benchmark run: stub-stub-model-low-abc123",
     ):
         assert needle in logged
