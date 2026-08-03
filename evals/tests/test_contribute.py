@@ -48,7 +48,10 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     shutil.copy(real / "models.toml", root / "models.toml")
     os.symlink(real / "tasks" / "cable_clip", root / "tasks" / "cable_clip")
 
+    from nurb_evals import site
+
     monkeypatch.setattr(contribute, "EVALS", root)
+    monkeypatch.setattr(site, "SITE", root / "benchmarks.html")
     monkeypatch.setattr(contribute.shutil, "which", lambda name: "/usr/bin/true")
     monkeypatch.setitem(harnesses.HARNESSES, "stub", Stub(GOOD))
     monkeypatch.setattr(
@@ -79,5 +82,12 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     for staged in sub.rglob("*"):
         if staged.is_file():
             assert str(pathlib.Path.home()) not in staged.read_text(errors="replace")
+    # The wizard regenerates the published page itself, so a PR ships with the
+    # benchmarks.html its rows produce and the stale-page test passes as opened.
+    page = (root / "benchmarks.html").read_text(encoding="utf-8")
+    assert "stub-model" in page
+
     printed = capsys.readouterr().out
-    assert "staged at" in printed and "benchmark row: stub-stub-model-low" in printed
+    assert "Staged in THIS checkout" in printed and str(root) in printed
+    assert "benchmark row: stub-stub-model-low" in printed
+    assert "skip if you have push access" in printed

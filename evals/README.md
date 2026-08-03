@@ -57,7 +57,7 @@ A submission can be any number of trials, including one: `--trials 1` is a valid
 
 Open a PR that copies your `results/<label>/results.jsonl`, each `<task>/trial_<n>/transcript.txt`, and the auditable candidate source into `submissions/<label>/`. Preserve `project/parts/*.py` plus any project-root or package `.py` files they import; leave cards, meshes, renders, and other generated project files out. Replace machine-specific home paths in transcripts and source with `<home>` or `<workspace>`. `results/` itself is gitignored so a submission is always a deliberate copy, never a bulk commit of local runs.
 
-Then run `uv run python -m nurb_evals.site`: the user-facing page at [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html) is generated into `site/benchmarks.html` from the committed submissions, and a test fails when it goes stale. Verdict sentences on that page live in `src/nurb_evals/site.py` and are editorial; a new row renders numbers-only until a maintainer writes one.
+Your PR should also carry the regenerated `site/benchmarks.html`: the page at [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html) is generated from the committed submissions, and a test fails when it goes stale. The wizard regenerates it for you and says so in its closing instructions; on the manual path, run `uv run python -m nurb_evals.site` yourself. Verdict sentences on that page live in `src/nurb_evals/site.py` and are editorial; a new row renders numbers-only until a maintainer writes one.
 
 Rows land on the leaderboard in one of two tiers:
 

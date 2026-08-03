@@ -204,16 +204,34 @@ def main():
     if dirty:
         sys.exit(f"sanitizer missed something in {dirty[0]}; please open an issue instead of a PR")
 
+    # The published page regenerates here, not as a step the contributor has to
+    # remember: the submission ships with the benchmarks.html it produces, so the
+    # stale-page test passes on the PR as opened.
+    from . import site as site_module
+
+    paths = sorted(
+        str(p) for p in (EVALS / "submissions").iterdir() if (p / "results.jsonl").is_file()
+    )
+    site_module.SITE.write_text(
+        site_module.render(site_module.summarize(site_module.rows_from(paths))),
+        encoding="utf-8",
+    )
+
+    # First dogfooding run went wrong two ways this text now prevents: the commit
+    # commands ran in a different nurb checkout than the clone the wizard staged
+    # into, and the fork step failed for someone with push access. Absolute paths,
+    # and both routes.
+    repo = EVALS.parent
     print(
-        f"\nDone. Your submission is staged at evals/submissions/{label}/ with "
-        f"machine-specific paths scrubbed.\n\n"
-        f"To put it on the leaderboard, two steps:\n"
-        f"  1. Fork github.com/Shpigford/nurb and commit that directory.\n"
-        f"  2. Open a PR titled 'benchmark row: {label}'.\n\n"
-        f"Or, if you use the GitHub CLI, from the repo root:\n"
-        f"  gh repo fork Shpigford/nurb --clone=false && git checkout -b bench-{label} && "
-        f"git add evals/submissions && git commit -m 'benchmark row: {label}' && "
-        f"gh pr create --title 'benchmark row: {label}' --fill\n\n"
+        f"\nDone. Staged in THIS checkout ({repo}):\n"
+        f"  {sub}\n"
+        f"  {site_module.SITE}  (the regenerated leaderboard page, commit it too)\n\n"
+        f"To put it on the leaderboard, from {repo}:\n"
+        f"  git checkout -b bench-{label}\n"
+        f"  git add evals/submissions site/benchmarks.html\n"
+        f"  git commit -m 'benchmark row: {label}'\n"
+        f"  gh repo fork Shpigford/nurb --clone=false   # skip if you have push access\n"
+        f"  gh pr create --title 'benchmark row: {label}' --fill\n\n"
         f"Every run counts, including a single one: matching rows pool on the "
         f"leaderboard, and a bad score is data, not an embarrassment."
     )
