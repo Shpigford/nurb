@@ -121,7 +121,8 @@ def test_committed_submission_artifacts_are_complete_and_sanitized():
                 text = artifact.read_text(encoding="utf-8")
                 assert "/Users/" not in text and "/home/" not in text
                 assert "joshpigford" not in text.lower() and "shpigford" not in text.lower()
-    assert rows > 0
+    # rows == 0 is a legal state: the board was reset before first deploy and fills
+    # from community and maintainer runs of the released pipeline.
 
 
 def test_committed_report_rows_match_the_submissions():
@@ -132,7 +133,6 @@ def test_committed_report_rows_match_the_submissions():
     for line in generated.splitlines():
         if line.startswith("|"):
             assert line in committed
-    assert "nurb 0.9.0" in committed
 
 
 def test_site_page_renders_from_the_committed_submissions():
