@@ -9,6 +9,7 @@ paths redirected into a scratch tree so nothing touches the real submissions/.
 import json
 import os
 import pathlib
+import re
 import shutil
 import sys
 
@@ -48,10 +49,7 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     shutil.copy(real / "models.toml", root / "models.toml")
     os.symlink(real / "tasks" / "cable_clip", root / "tasks" / "cable_clip")
 
-    from nurb_evals import site
-
     monkeypatch.setattr(contribute, "EVALS", root)
-    monkeypatch.setattr(site, "SITE", root / "benchmarks.html")
     monkeypatch.setattr(contribute.shutil, "which", lambda name: "/usr/bin/true")
     monkeypatch.setitem(harnesses.HARNESSES, "stub", Stub(GOOD))
     monkeypatch.setattr(
@@ -69,7 +67,11 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     )
     contribute.main()
 
-    sub = root / "submissions" / "stub-stub-model-low"
+    # One directory per run, unique so ten runs (or three at once) never collide.
+    subs = list((root / "submissions").glob("stub-stub-model-low-*"))
+    assert len(subs) == 1
+    sub = subs[0]
+    assert re.fullmatch(r"stub-stub-model-low-[0-9a-f]{6}", sub.name)
     rows = [
         json.loads(line)
         for line in (sub / "results.jsonl").read_text().splitlines()
@@ -83,31 +85,25 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     for staged in sub.rglob("*"):
         if staged.is_file():
             assert str(pathlib.Path.home()) not in staged.read_text(errors="replace")
-    # The wizard regenerates the published page itself, so a PR ships with the
-    # benchmarks.html its rows produce and the stale-page test passes as opened.
-    page = (root / "benchmarks.html").read_text(encoding="utf-8")
-    assert "stub-model" in page
-    assert "stub-model" in (root / "REPORT.md").read_text(encoding="utf-8")
 
     printed = capsys.readouterr().out
     assert "Staged in this checkout" in printed and str(root) in printed
-    assert "benchmark row: stub-stub-model-low" in printed
+    assert f"benchmark run: {sub.name}" in printed
+    assert f"git add evals/submissions/{sub.name}" in printed
     assert "skip if you have push access" in printed
 
 
 def test_open_pr_drives_git_and_gh_end_to_end(tmp_path, monkeypatch):
-    """The wizard owns the submission: branch, commit, push, PR, in its own
-    checkout. Faked git/gh log every invocation; the fake branch check fails so
-    the create-branch path runs, and pr create returns the URL."""
+    """The wizard owns the submission: branch from origin's main, commit only this
+    run's directory, push, PR. Faked git/gh log every invocation and pr create
+    returns the URL."""
     import os
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     log = tmp_path / "log"
     (bin_dir / "git").write_text(
-        '#!/bin/sh\necho "git $@" >> %s\n'
-        'case "$1 $2" in "rev-parse --verify") exit 1;; esac\nexit 0\n' % log,
-        encoding="utf-8",
+        '#!/bin/sh\necho "git $@" >> %s\nexit 0\n' % log, encoding="utf-8"
     )
     (bin_dir / "gh").write_text(
         '#!/bin/sh\necho "gh $@" >> %s\n'
@@ -118,15 +114,16 @@ def test_open_pr_drives_git_and_gh_end_to_end(tmp_path, monkeypatch):
         f.chmod(0o755)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
 
-    url, problem = contribute.open_pr("stub-stub-model-low", tmp_path)
+    url, problem = contribute.open_pr("stub-stub-model-low-abc123", tmp_path)
     assert problem is None
     assert url == "https://github.com/Shpigford/nurb/pull/999"
     logged = log.read_text(encoding="utf-8")
     for needle in (
-        "git checkout -b bench-stub-stub-model-low",
-        "git add evals/submissions evals/REPORT.md site/benchmarks.html",
-        "git commit -m benchmark row: stub-stub-model-low",
-        "git push -u origin bench-stub-stub-model-low",
-        "gh pr create --title benchmark row: stub-stub-model-low",
+        "git fetch origin main",
+        "git checkout -b bench-stub-stub-model-low-abc123 FETCH_HEAD",
+        "git add evals/submissions/stub-stub-model-low-abc123",
+        "git commit -m benchmark run: stub-stub-model-low-abc123",
+        "git push -u origin bench-stub-stub-model-low-abc123",
+        "gh pr create --title benchmark run: stub-stub-model-low-abc123",
     ):
         assert needle in logged

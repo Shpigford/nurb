@@ -30,7 +30,7 @@ The easy way is the wizard, from anywhere (or paste the line to your AI and let 
 curl -fsSL https://nurb.dev/bench.sh | sh
 ```
 
-It detects which agent CLIs you have, offers the models from a menu so you never guess a spelling, runs the trials on your subscription, sanitizes the artifacts, regenerates the report and the page, and then offers to open the pull request itself with the GitHub CLI: branch, commit, push, fork only if you lack push access, PR URL printed. Re-running the same model and effort appends to the same branch and updates the same PR, which is how one contributor's runs pool. Agents and scripts can skip every question with flags: `uv run python -m nurb_evals.contribute --harness claude --model sonnet --effort medium --pr yes`.
+It detects which agent CLIs you have, offers the models from a menu so you never guess a spelling, runs the trials on your subscription, sanitizes the artifacts, and then offers to open the pull request itself with the GitHub CLI: branch, commit, push, fork only if you lack push access, PR URL printed. Every run is its own uniquely named directory, branch, and PR, so run it as many times as you like, even concurrently: more runs mean tighter numbers, and matching rows pool on the leaderboard no matter which PR they arrived in. Agents and scripts can skip every question with flags: `uv run python -m nurb_evals.contribute --harness claude --model sonnet --effort medium --pr yes`.
 
 The manual way needs `uv` and the `claude` or `codex` CLI installed and logged in to your own subscription. Then:
 
@@ -57,7 +57,7 @@ A submission can be any number of trials, including one: `--trials 1` is a valid
 
 Open a PR that copies your `results/<label>/results.jsonl`, each `<task>/trial_<n>/transcript.txt`, and the auditable candidate source into `submissions/<label>/`. Preserve `project/parts/*.py` plus any project-root or package `.py` files they import; leave cards, meshes, renders, and other generated project files out. Replace machine-specific home paths in transcripts and source with `<home>` or `<workspace>`. `results/` itself is gitignored so a submission is always a deliberate copy, never a bulk commit of local runs.
 
-Your PR should also carry the two generated artifacts, `site/benchmarks.html` and `evals/REPORT.md`: both are generated from the committed submissions and a test fails when either goes stale. The wizard regenerates both for you and says so in its closing instructions; on the manual path, run `uv run python -m nurb_evals.site` and `uv run python -m nurb_evals.report --write` yourself. Verdict sentences on the page live in `src/nurb_evals/site.py` and are editorial; a new row renders numbers-only until a maintainer writes one.
+Your PR carries only your run's directory, nothing else: submission PRs are pure additions, which is what lets any number of them, from any number of people or concurrent sessions, merge in any order without a conflict. `evals/REPORT.md` and the page at [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html) are regenerated from the merged submissions when a maintainer publishes the leaderboard, which is also when new runs get their sanity check (the spot-check policy above) and new model combos get their verdict sentences. Your row appearing on the page a few days after your PR merges is that process working, not your submission being lost.
 
 Rows land on the leaderboard in one of two tiers:
 
