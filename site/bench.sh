@@ -27,24 +27,28 @@ main() {
     command -v uv >/dev/null 2>&1 || fail "uv installed but did not land on PATH; open a new terminal and rerun"
   fi
 
-  # Re-running from inside a checkout must never nest another clone inside it:
-  # the first dogfooding run produced nurb-bench/nurb-bench and a submission
-  # staged where no git command could find it.
+  # The wizard needs a repo checkout: tasks and scorer to run, a git tree to
+  # commit the submission into. It must never land in whatever directory the
+  # user happens to be standing in (a dogfooding run left a full replica of the
+  # repo inside a dev checkout); it lives in one fixed hidden place, like any
+  # tool's cache, and re-runs and concurrent sessions all share it. Standing
+  # inside a nurb checkout already? That checkout is used as it is.
   if [ -f "evals/src/nurb_evals/contribute.py" ]; then
     say "[2/3] already inside a nurb checkout; using it as it is"
   elif [ -f "../evals/src/nurb_evals/contribute.py" ]; then
     say "[2/3] already inside a nurb checkout; using it as it is"
     cd ..
   else
-    dir="nurb-bench"
+    dir="${NURB_BENCH_HOME:-$HOME/.nurb/bench}"
     if [ -d "$dir/evals" ]; then
-      say "[2/3] $dir/ already cloned; pulling the latest benchmark"
+      say "[2/3] updating the benchmark checkout at $dir"
       git -C "$dir" pull --ff-only >/dev/null 2>&1 || say "      (pull skipped; using the checkout as it is)"
     else
-      say "[2/3] cloning the benchmark into ./$dir"
+      say "[2/3] cloning the benchmark into $dir"
+      mkdir -p "$(dirname "$dir")"
       git clone --depth 1 https://github.com/Shpigford/nurb "$dir" || fail "clone failed"
     fi
-    cd "$dir" || fail "clone is missing"
+    cd "$dir" || fail "checkout is missing"
   fi
 
   say "[3/3] preparing and starting the wizard"
