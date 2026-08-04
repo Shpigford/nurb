@@ -555,12 +555,37 @@ function App() {
   };
 
   // ?embed hides the viewer's own title and part list; the rail is the one
-  // place parts live in the app.
-  const viewerSrc = activeServer && partsReady
-    ? selectedPart
-      ? `${activeServer.url}/?embed&part=${encodeURIComponent(selectedPart)}`
-      : `${activeServer.url}/?embed`
-    : null;
+  // place parts live in the app. The src is pinned per project: WKWebView
+  // suspends requestAnimationFrame in an iframe that is navigated in place, so
+  // following the selection with the URL freezes the canvas. The iframe loads
+  // once per server and part switches travel by postMessage instead.
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const [frame, setFrame] = useState<{ key: string; src: string } | null>(null);
+  useEffect(() => {
+    if (!activeServer || !partsReady) {
+      setFrame(null);
+      return;
+    }
+    setFrame((prev) =>
+      prev?.key === activeServer.url
+        ? prev
+        : {
+            key: activeServer.url,
+            src: selectedPart
+              ? `${activeServer.url}/?embed&part=${encodeURIComponent(selectedPart)}`
+              : `${activeServer.url}/?embed`,
+          },
+    );
+  }, [activeServer, partsReady, selectedPart]);
+
+  const postPart = useCallback(() => {
+    if (!frame || !selectedPart) return;
+    frameRef.current?.contentWindow?.postMessage(
+      { type: "nurb:part", name: selectedPart },
+      frame.key,
+    );
+  }, [frame, selectedPart]);
+  useEffect(postPart, [postPart]);
 
   if (ready !== true) {
     // The status check settles in well under a second; until then the window
@@ -877,8 +902,17 @@ function App() {
         </section>
       )}
       <main className="viewer">
-        {viewerSrc ? (
-          <iframe className="viewer-frame" src={viewerSrc} title="nurb viewer" />
+        {frame ? (
+          <iframe
+            key={frame.key}
+            ref={frameRef}
+            className="viewer-frame"
+            src={frame.src}
+            title="nurb viewer"
+            // The selection can move while the document is still loading and a
+            // message posted into a loading frame is dropped; repeat it on load.
+            onLoad={postPart}
+          />
         ) : active && opening[active] ? (
           <div className="viewer-status">starting the CAD engine…</div>
         ) : (

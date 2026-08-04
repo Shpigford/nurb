@@ -455,6 +455,21 @@ if (embed) {
   const article = { stl: 'an STL', step: 'a STEP' };
   for (const b of document.querySelectorAll('#download button'))
     b.title = `save ${article[b.dataset.fmt]} into the project's build folder and show it in Finder`;
+  // The shell's rail switches parts by message, never by renavigating this frame:
+  // WKWebView suspends requestAnimationFrame in an iframe that was navigated in
+  // place, which freezes the picture while the rest of the page stays live. A
+  // message runs the same path as a click on the viewer's own part list.
+  window.addEventListener('message', e => {
+    if (e.source !== window.parent || !e.data || e.data.type !== 'nurb:part') return;
+    const name = String(e.data.name);
+    if (name === current) return;
+    want = null; wantVariant = null;
+    const entry = parts.get(name);
+    if (!entry) { want = name; return; }   // still building; sync or rebuilt finishes the switch
+    current = name;
+    if (activeVariant(entry)) applyVariant(name, { params: {} });
+    render(); show(name, { keepCamera: false }); setURL();
+  });
 }
 
 // ---- scene (Z-up, matching CAD) ----
