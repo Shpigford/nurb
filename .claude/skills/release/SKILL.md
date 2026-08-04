@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut a full nurb release, one version across the engine and the desktop app. Bumps the four version strings, opens the release PR, and after the merge runs the desktop build, the update feed, and the changelog. Use when the user says "release", "cut a release", "ship it as X.Y.Z", or "push a release".
+description: Cut a full nurb release, one version across the engine and the desktop app. Bumps the four version strings and writes the changelog into one release PR, riding the current branch when work is in flight, then after the merge runs the desktop build and the update feed. Use when the user says "release", "cut a release", "ship it as X.Y.Z", or "push a release".
 ---
 
 # Releasing nurb
@@ -21,7 +21,7 @@ git fetch origin main
 
 The updater key check matters most: without `~/.tauri/nurb-desktop.key` shipped apps cannot update, and generating a fresh key would strand every existing install. If it is missing, stop and tell the user; never regenerate it.
 
-Release from a branch cut off up-to-date origin/main. A release PR carries the version bumps and nothing else; if the workspace has unrelated changes, those ship in their own PRs first.
+Start from up-to-date origin/main. One PR is the release: if the current branch has work in flight, the bump and changelog ride that branch and its PR becomes the release PR. Only cut a fresh branch when the workspace is clean and the release is just collecting already-merged work.
 
 ## Step 1: Pick the version
 
@@ -32,7 +32,7 @@ gh release list --limit 5
 gh pr list --state merged --base main --limit 50 --json title,mergedAt
 ```
 
-## Step 2: The bump PR
+## Step 2: The release PR
 
 Four version strings move together, and tests enforce every pairing:
 
@@ -48,7 +48,9 @@ The bump also stales `evals/uv.lock`, because evals is its own uv project with n
 cd evals && uv lock && cd ..
 ```
 
-Prove the agreement before pushing: `uv run pytest tests/test_cli.py -q`. Commit with a plain-sentence message, push, and open the PR against main with the release summary as the body (what shipped, in user-visible terms). Then stop and hand the merge to the user.
+Then write the changelog into the same PR: run /changelog for the pending version. Pre-merge there is no tag or GitHub release yet, so it draws from the PRs merged since the last release plus this branch's own changes, dated today.
+
+Prove the agreement before pushing: `uv run pytest tests/test_cli.py -q`. Commit the bump and the changelog together with a plain-sentence message, push, and open the PR against main with the release summary as the body (what shipped, in user-visible terms). Then stop and hand the merge to the user.
 
 ## Step 3: After the merge
 
@@ -62,11 +64,7 @@ A fresh worktree has no `desktop/node_modules`, and the script dies immediately 
 
 About ten minutes: signed build, notarization, stapling, chain verification, upload of `nurb.dmg` plus the updater archive into the `vX.Y.Z` release, and the `desktop-latest` feed refresh. It refuses to double-upload, so re-running after a failure is safe. It needs this Mac; the signing cert and updater key live here by design.
 
-## Step 4: Changelog
-
-Run /changelog. It writes the `vX.Y.Z` entry into `site/changelog.html` from the release's merged PRs, filtered to what a user would notice. Land it as its own small PR.
-
-## Step 5: Verify, then report
+## Step 4: Verify, then report
 
 Three probes, all of which must say X.Y.Z (the DMG check must return a redirect or 200):
 

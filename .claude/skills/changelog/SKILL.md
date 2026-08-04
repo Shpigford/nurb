@@ -20,6 +20,8 @@ gh release list --limit 20
 
 Every tagged release newer than the high-water mark needs an entry. If the user describes a feature in free text instead, write that one entry into the version it shipped in (or the pending version if it hasn't shipped yet) and skip the sweep.
 
+When /release invokes this before the bump PR merges, the newest version has no tag or GitHub release yet. Write its entry anyway: source it from the PRs merged since the last release (`gh pr list --state merged --base main --json title,number,mergedAt`) plus whatever the release branch itself ships, date it today, and keep the tag link, which goes live when the release publishes. The entry lands as part of the release PR, so commit it there instead of leaving it uncommitted.
+
 For each missing version:
 
 ```bash
@@ -63,7 +65,7 @@ Insert the new `<article class="release" id="vX.Y.Z">` at the **top** of `<main>
 </article>
 ```
 
-The date is the release's `publishedAt` date, not today. Never reword or delete an already-published entry; its `id` is a live anchor.
+The date is the release's `publishedAt` date, not today (a pre-merge entry uses today, which becomes the publish date when the PR merges). Never reword or delete an already-published entry; its `id` is a live anchor.
 
 ## Step 5: Verify
 

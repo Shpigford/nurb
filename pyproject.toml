@@ -1,6 +1,6 @@
 [project]
 name = "nurb"
-version = "0.11.0"
+version = "0.12.0"
 description = "Agentic CAD for 3D printing"
 readme = "README.md"
 authors = [
