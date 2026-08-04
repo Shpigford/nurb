@@ -25,6 +25,20 @@ jobs:
       # cut it 3x on a laptop and the runner has four cores.
       - run: uv run pytest -q -n auto
 
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked --dev
+        working-directory: evals
+      - run: uv run pytest -q
+        working-directory: evals
+
   # The rules against the real library, on a machine that is not the one they were
   # calibrated on. --strict is what makes a finding fail the build; the command
   # reports and exits 0 without it, because a warning that blocks work gets switched

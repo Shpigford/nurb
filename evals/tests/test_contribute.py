@@ -1,0 +1,129 @@
+"""The contribution wizard, end to end against the stub harness.
+
+The wizard's promise is that a contributor never types a model spelling, never
+hand-sanitizes a transcript, and ends with a submission-ready directory. The test
+drives the whole flow non-interactively the way an agent would, with the module's
+paths redirected into a scratch tree so nothing touches the real submissions/.
+"""
+
+import json
+import os
+import pathlib
+import re
+import shutil
+import sys
+
+import pytest
+
+from nurb_evals import contribute
+from nurb_evals import harness as harnesses
+from test_runner import GOOD, SEED, Stub
+
+
+def test_catalog_offers_real_ids():
+    book = contribute.catalog()
+    assert {m["id"] for m in book["claude"]} >= {"fable", "opus", "sonnet", "haiku"}
+    for entries in book.values():
+        for entry in entries:
+            assert entry["default_effort"] in entry["efforts"]
+
+
+def test_sanitize_scrubs_longest_first(tmp_path):
+    pairs = contribute.replacements(tmp_path / "project")
+    dirty = f"built at {tmp_path}/project/parts/x.py in {pathlib.Path.home()}"
+    clean = contribute.sanitize(dirty, pairs)
+    assert str(pathlib.Path.home()) not in clean and "<workspace>" in clean
+
+
+def test_next_trial_continues_numbering(tmp_path):
+    (tmp_path / "cable_clip" / "trial_1").mkdir(parents=True)
+    (tmp_path / "cable_clip" / "trial_2").mkdir()
+    assert contribute.next_trial(tmp_path, "cable_clip") == 3
+    assert contribute.next_trial(tmp_path, "leg_cup") == 1
+
+
+def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "evals"
+    (root / "tasks").mkdir(parents=True)
+    real = contribute.EVALS
+    shutil.copy(real / "models.toml", root / "models.toml")
+    os.symlink(real / "tasks" / "cable_clip", root / "tasks" / "cable_clip")
+
+    monkeypatch.setattr(contribute, "EVALS", root)
+    monkeypatch.setattr(contribute.shutil, "which", lambda name: "/usr/bin/true")
+    monkeypatch.setitem(harnesses.HARNESSES, "stub", Stub(GOOD))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "contribute",
+            "--harness", "stub",
+            "--model", "stub-model",
+            "--effort", "low",
+            "--tasks", "cable_clip",
+            "--seed", str(SEED),
+            "--pr", "no",
+        ],
+    )
+    contribute.main()
+
+    # One directory per run, unique so ten runs (or three at once) never collide.
+    subs = list((root / "submissions").glob("stub-stub-model-low-*"))
+    assert len(subs) == 1
+    sub = subs[0]
+    assert re.fullmatch(r"stub-stub-model-low-[0-9a-f]{6}", sub.name)
+    rows = [
+        json.loads(line)
+        for line in (sub / "results.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 1 and rows[0]["score"] == 1.0
+    assert rows[0]["model"] == "stub-model" and rows[0]["effort"] == "low"
+    part = sub / "cable_clip" / "trial_1" / "project" / "parts" / "cable_clip.py"
+    assert part.is_file()
+    assert (sub / "cable_clip" / "trial_1" / "transcript.txt").exists()
+    for staged in sub.rglob("*"):
+        if staged.is_file():
+            assert str(pathlib.Path.home()) not in staged.read_text(errors="replace")
+
+    printed = capsys.readouterr().out
+    assert "Staged in this checkout" in printed and str(root) in printed
+    assert f"benchmark run: {sub.name}" in printed
+    assert f"git add evals/submissions/{sub.name}" in printed
+    assert "skip if you have push access" in printed
+
+
+def test_open_pr_drives_git_and_gh_end_to_end(tmp_path, monkeypatch):
+    """The wizard owns the submission: branch from origin's main, commit only this
+    run's directory, push, PR. Faked git/gh log every invocation and pr create
+    returns the URL."""
+    import os
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    log = tmp_path / "log"
+    (bin_dir / "git").write_text(
+        '#!/bin/sh\necho "git $@" >> %s\nexit 0\n' % log, encoding="utf-8"
+    )
+    (bin_dir / "gh").write_text(
+        '#!/bin/sh\necho "gh $@" >> %s\n'
+        'case "$1 $2" in "pr create") echo "https://github.com/Shpigford/nurb/pull/999";; esac\nexit 0\n' % log,
+        encoding="utf-8",
+    )
+    for f in bin_dir.iterdir():
+        f.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+    url, problem = contribute.open_pr("stub-stub-model-low-abc123", tmp_path)
+    assert problem is None
+    assert url == "https://github.com/Shpigford/nurb/pull/999"
+    logged = log.read_text(encoding="utf-8")
+    for needle in (
+        "git fetch origin main",
+        "git checkout -b bench-stub-stub-model-low-abc123 FETCH_HEAD",
+        "git add evals/submissions/stub-stub-model-low-abc123",
+        "git commit -m benchmark run: stub-stub-model-low-abc123",
+        "git push -u origin bench-stub-stub-model-low-abc123",
+        "gh pr create --repo Shpigford/nurb --base main --head bench-stub-stub-model-low-abc123 --title benchmark run: stub-stub-model-low-abc123",
+    ):
+        assert needle in logged

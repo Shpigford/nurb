@@ -320,14 +320,30 @@ class Server:
             # one slider drag off the variant honestly puts the base rules back.
             ctx = self._context(path, entry["variant"])
             found = checks.run(entry["shape"], ctx)
+            # Each finding carries the triangles of the face it fired on, so the viewer
+            # can paint the face itself instead of dropping a pin near it. Rounded to
+            # 0.01mm, which is display precision, not geometry.
+            from . import probe
+
+            # Resolved only when something fired: most checks in the dev loop come
+            # back clean, and measuring every face to annotate nothing is pure cost.
+            rows = probe.finding_faces(entry["shape"], ctx, found) if found else []
+            if any(row is not None for row in rows):
+                # checks.run cleans the tessellation the rebuild left on the shape,
+                # so the faces have to be meshed again before their triangles exist.
+                # Same tolerance as the GLB, so the glow lies exactly on the mesh.
+                entry["shape"].mesh(self.tolerance)
             entry["findings"] = [
                 {
                     "rule": f.rule,
                     "severity": f.severity,
                     "message": f.message,
                     "where": list(f.where) if f.where else None,
+                    "face": [round(v, 2) for v in builder.face_triangles(row["face"])]
+                    if row is not None
+                    else None,
                 }
-                for f in found
+                for f, row in zip(found, rows)
             ]
         except Exception as exc:
             entry["findings"] = [
@@ -351,6 +367,9 @@ class Server:
             # the project folder open.
             save = "save" in request.path.partition("?")[2].split("&")
             return await self.export(path[len("/export/") :], save=save)
+        if path == "/api/sync":
+            body = json.dumps(self._sync()).encode()
+            return self._resp(200, body, "application/json")
         if path == "/api/parts":
             body = json.dumps([self._wire(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
@@ -513,26 +532,41 @@ class Server:
             out["params"] = [{**p, "family": p["name"] in family} for p in out["params"]]
         return out
 
+    def _bed(self):
+        """The plate the viewer draws, in mm, from the project's printer profile.
+
+        A broken printer.toml must not take the handshake down with it; the checks
+        already report it per part, so the viewer just gets the default bed.
+        """
+        from . import checks
+
+        try:
+            return list(checks.printer(self.root).bed[:2])
+        except Exception:
+            return list(checks.Context().bed[:2])
+
     # ---------- websocket ----------
+
+    def _sync(self):
+        """The project snapshot shared by the socket and its HTTP fallback."""
+        return {
+            "type": "sync",
+            "project": self.root.name,
+            "bed": self._bed(),
+            "version": __version__,
+            "upgradable": _upgrade_command() is not None,
+            "draft": self.draft,
+            # `parts` only contains completed builds. The viewer needs the
+            # source list too, or it cannot tell a slow deep link from a
+            # deleted or misspelled one.
+            "sources": [p.stem for p in builder.find_parts(self.root)],
+            "parts": [self._wire(e) for e in self.state.values()],
+        }
 
     async def ws(self, connection):
         self.clients.add(connection)
         try:
-            payload = json.dumps(
-                {
-                    "type": "sync",
-                    "project": self.root.name,
-                    "version": __version__,
-                    "upgradable": _upgrade_command() is not None,
-                    "draft": self.draft,
-                    # `parts` only contains completed builds. The viewer needs the
-                    # source list too, or it cannot tell a slow deep link from a
-                    # deleted or misspelled one.
-                    "sources": [p.stem for p in builder.find_parts(self.root)],
-                    "parts": [self._wire(e) for e in self.state.values()],
-                }
-            )
-            await connection.send(payload)
+            await connection.send(json.dumps(self._sync()))
             async for raw in connection:
                 await self.command(raw)
         finally:
@@ -653,28 +687,38 @@ class Server:
                 self.clients.discard(client)
 
     async def broadcast(self, entry, kind="rebuilt"):
-        await self.send({"type": kind, **self._wire(entry)})
+        # Printer settings are watched like part sources. Carrying the current bed on
+        # the rebuild is what lets an edit resize an already-open viewer.
+        await self.send({"type": kind, "bed": self._bed(), **self._wire(entry)})
 
     # ---------- watching ----------
 
     def watch(self):
+        from . import checks
+
         server = self
         parts_dir = self.root / "parts"
+        global_config = checks.global_file().resolve()
 
         class Handler(FileSystemEventHandler):
             def on_any_event(self, event):
                 if event.is_directory:
                     return
-                path = pathlib.Path(getattr(event, "dest_path", "") or event.src_path)
+                path = pathlib.Path(
+                    getattr(event, "dest_path", "") or event.src_path
+                ).resolve()
                 # "." skips the atomic-save temp files editors and sed leave behind
                 if path.name.startswith((".", "_")):
                     return
-                # printer.toml changes every part's checks and measurements.toml can
-                # feed any part's geometry, so either rebuilds the project the way
-                # system.py does: they land in the else branch below.
-                if path.suffix not in (".py", ".md") and path.name not in (
-                    "printer.toml",
-                    "measurements.toml",
+                if path != global_config and path.parent not in (parts_dir, server.root):
+                    return
+                # Printer settings change every part's checks, whether they came from
+                # the project or the global config. measurements.toml can feed any
+                # part's geometry, so all three rebuild the whole project below.
+                if (
+                    path != global_config
+                    and path.suffix not in (".py", ".md")
+                    and path.name not in ("printer.toml", "measurements.toml")
                 ):
                     return
                 # A card carries what the part has already justified, so editing one
@@ -699,6 +743,12 @@ class Server:
         self.observer = Observer()
         self.observer.schedule(Handler(), str(parts_dir), recursive=False)
         self.observer.schedule(Handler(), str(self.root), recursive=False)
+        global_dir = global_config.parent
+        if global_dir.is_dir() and global_dir not in {
+            parts_dir.resolve(),
+            self.root.resolve(),
+        }:
+            self.observer.schedule(Handler(), str(global_dir), recursive=False)
         self.observer.daemon = True
         self.observer.start()
 

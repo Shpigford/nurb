@@ -212,6 +212,39 @@ def _triangulate(shape, tolerance, up=(0, 0, 1)):
     return points, faces, colors
 
 
+def face_triangles(face):
+    """One face's triangles, as a flat vertex list ready for a BufferGeometry.
+
+    Read the way `_triangulate` reads, from the triangulation OCCT already cached:
+    every shape this is asked about was tessellated whole on its way to the viewer, so
+    an empty answer means a face OCCT declined, not a missing meshing pass.
+    """
+    from OCP.BRep import BRep_Tool
+    from OCP.TopAbs import TopAbs_Orientation
+    from OCP.TopLoc import TopLoc_Location
+
+    loc = TopLoc_Location()
+    poly = BRep_Tool.Triangulation_s(face.wrapped, loc)
+    if poly is None:
+        return []
+    trsf = loc.Transformation()
+    reverse = face.wrapped.Orientation() == TopAbs_Orientation.TopAbs_REVERSED
+    nodes = []
+    for i in range(1, poly.NbNodes() + 1):
+        node = poly.Node(i).Transformed(trsf)
+        nodes.append((node.X(), node.Y(), node.Z()))
+    out = []
+    triangles = poly.Triangles()
+    for i in range(1, poly.NbTriangles() + 1):
+        tri = triangles.Value(i)
+        a, b, c = tri.Value(1), tri.Value(2), tri.Value(3)
+        if reverse:
+            b, c = c, b
+        for corner in (a, b, c):
+            out.extend(nodes[corner - 1])
+    return out
+
+
 def to_mesh(shape, tolerance=0.1, up=(0, 0, 1)):
     """Tessellate to a triangle mesh.
 

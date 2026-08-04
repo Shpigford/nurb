@@ -12,6 +12,14 @@ curl -fsSL https://nurb.dev/install.sh | sh
 
 One line, installs everything below: uv if you don't have it, nurb, and the skill. Prefer your own package manager? `uv tool install nurb` (or `pip install nurb`) does the first half.
 
+## Which model should you use?
+
+nurb works with whatever AI subscription you already pay for, and they are not equally good at designing parts. We run the popular models through the same real part-design jobs and grade the actual geometry by machine, so you can pick based on what you subscribe to and what you are willing to spend: [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html). The raw rows, transcripts, and grading code live in [evals/](evals/), and adding a row for your model is one line on your own subscription, single runs welcome:
+
+```bash
+curl -fsSL https://nurb.dev/bench.sh | sh
+```
+
 ## Teach your agent
 
 Install the nurb skill once and your agent reaches for nurb on its own whenever you ask for a printable part. The installer above already did this; by hand, [skills.sh](https://www.skills.sh/) detects whatever harnesses you have and installs into each:
@@ -51,15 +59,15 @@ nurb new <name>     create parts/<name>.py and its card
 nurb dev            watch, rebuild, serve the viewer
 nurb build [part]   build once and report size
 nurb check [part]   run the printability rules, --strict for CI
-nurb inspect [part] faces, normals, concave edges, each finding on its face
+nurb inspect [part] faces, normals, concave edges, each finding on its face; --render for stills
 nurb rules          print the design doctrine
 nurb api            the vocabulary a part file gets, with signatures
 nurb skill          print an agent skill file for your AI harness, --sync rewrites installed copies
 nurb update         upgrade nurb, then re-sync the installed skill to match
 nurb card [part]    regenerate a card's AUTO block
-nurb verify [part]  run the doctrine's verification list
-nurb render [part]  write a PNG into build/
-nurb export [part]  write STL and STEP into build/, --formats for GLB
+nurb verify [part]  run the doctrine's verification list; --report bundles it with renders
+nurb render [part]  write a PNG into build/renders/; --section cuts it open
+nurb export [part]  write STL into build/, --formats for STEP or GLB
 nurb extract        find duplication across parts
 nurb launcher       write viewer.command, a double-clickable `nurb dev`
 ```
@@ -81,7 +89,7 @@ projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The same file carries the project's export preference: an `[export]` table with `formats = ["stl"]` drops STEP from every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file carries the export preference too: an `[export]` table with `formats = ["stl", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
 
 ```toml
 [part]
@@ -118,7 +126,8 @@ parts/<name>.md     its card
 system.py           optional: shared constants and geometry
 measurements.toml   optional: real-world dimensions with provenance
 printer.toml        optional: which machine this project prints on
-build/              generated, gitignored
+build/              generated exports, gitignored
+build/renders/      generated PNGs and verification reports
 ```
 
 ## Speed

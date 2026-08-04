@@ -241,7 +241,9 @@ Plus two machine-facing pieces:
   the sentence that earns it, because a count on its own is a magic number. Machine facts
   stay out of it: a bed size belongs to the machine, so it lives in `printer.toml` at the
   project root, which names a shipped profile (`profile = "bambu_a1_mini"`) and can
-  override any check setting machine-wide.
+  override any check setting machine-wide. A printer is really a fact about the workshop,
+  not the project, so `~/.config/nurb/config.toml` takes the same schema and covers every
+  project on the machine; `printer.toml` overrides it where they disagree.
 
 ```toml
 [part]
@@ -301,6 +303,8 @@ depth = measured("shelf_depth")
 
 An unknown name raises, naming what is on file. That failure is the point: it is the
 moment to ask rather than to pick something plausible.
+
+**A published number is a measurement, not a guess.** When the part mates with a manufactured product or a published standard, a VESA mount, a gridfinity bin, a camera thread, the number already exists in a datasheet, and making somebody caliper a hole pattern a standards body fixed is friction wearing rigor's clothes. Research it, record it like any other measurement with `how` naming the source ("VESA MIS-D 100, manufacturer product page"), and ask only for what nobody published, like the opening the finished thing has to fit. Two limits keep this honest: the user's actual object outranks the spec when the two disagree, because clones drift, and a number inferred from a product photo or a listing's marketing copy was never published at all, so it is a guess and gets marked like one.
 
 **When there is nobody to ask**, write the guess down and mark it `provisional = true`.
 The danger was never the guess, it is that a guess and a measurement look identical six
@@ -373,8 +377,9 @@ on an assembled scene reports confident nonsense.
 
 "It built" is not verification. `nurb verify` runs the machine-checkable part of
 this list: one solid per configuration, every count flexed upward, the rules clean,
-and the card agreeing with the geometry. The two it cannot do are the two that need
-you, and they are items 2 and 6.
+and the card agreeing with the geometry. `--report` writes the verdict into
+`build/renders/<part>.verify.md` with the renders that back it beside it, one still
+per finding. The two it cannot do are the two that need you, and they are items 2 and 6.
 
 Before presenting a part:
 
@@ -390,5 +395,7 @@ Before presenting a part:
 5. **Predict a baseline before you look at it.** Working out what the sliver count
    should be from the polish exclusions turns the number into a test of the rule instead
    of something to write down.
-6. **Render it and actually look.** `nurb render <part>` writes a PNG. A part can pass
+6. **Render it and actually look.** `nurb render <part>` writes a PNG, `--section
+   z:4mm` cuts it open where outside views cannot reach, and `nurb inspect --render`
+   stands a camera at every finding with the guilty face painted. A part can pass
    every numeric check and still be visibly wrong.

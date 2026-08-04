@@ -15,3 +15,4 @@ wheels/
 .venv
 
 # Per-worktree dev server state written by the SessionStart hook
+.DS_Store

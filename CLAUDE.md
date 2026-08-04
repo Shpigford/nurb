@@ -44,15 +44,15 @@ nurb new <name>      create parts/<name>.py and its card
 nurb dev             watch, rebuild, serve the viewer on :7373 or the next free port
 nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
-nurb inspect [part]  faces, normals, concave edges, each finding on its face
+nurb inspect [part]  faces, normals, concave edges, each finding on its face, --render for stills of them
 nurb rules           print the design doctrine
 nurb api             the vocabulary a part file gets, with signatures
 nurb skill           print an agent skill file for any AI harness, --sync rewrites installed copies
 nurb update          upgrade nurb, then re-sync the installed skill to match
 nurb card [part]     regenerate a card's AUTO block
-nurb verify [part]   the doctrine's verification list, --strict-ish exit code
-nurb render [part]   write build/<part>.png, needs the render extra
-nurb export [part]   write STL and STEP into build/, --formats for GLB
+nurb verify [part]   the doctrine's verification list, --report bundles it with renders
+nurb render [part]   write build/renders/<part>.png, --section cuts it open, needs the render extra
+nurb export [part]   write STL into build/, --formats for STEP or GLB
 nurb extract         find duplication across sibling parts
 nurb launcher        write viewer.command, a double-clickable `nurb dev`
 ```
@@ -88,6 +88,8 @@ src/nurb/cli.py           command surface
 examples/notch/           the real parts, which are also the calibration set
 tests/test_notch_fit.py   the hanging interface, asserted for every configuration
 tests/                    rules and examples, both cases per rule
+evals/                    the model leaderboard: tasks, scorer, CLI runner. Its own uv
+                          project with its own suite; see evals/README.md
 ```
 
 ## Rules

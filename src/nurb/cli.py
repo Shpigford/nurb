@@ -172,6 +172,15 @@ def cmd_check(args):
             base = checks.printer(root, args.printer)
         except ValueError as exc:
             sys.exit(f"  {exc}")
+    else:
+        # A profile picked up from a file is invisible, and invisible is how two
+        # machines check the same part differently for no stated reason.
+        try:
+            profile, source = checks.profile_choice(root)
+        except ValueError:
+            profile = None  # a broken file gets its real error on the first part
+        if profile:
+            print(f"  printer: {profile} ({source})")
     worst = 0
     for path in _resolve(root, args.part):
         configs = _configs(path, base=base)
@@ -229,24 +238,27 @@ def _collect_exports(paths):
     return found
 
 
-def _project_formats(root):
-    """printer.toml's `[export] formats`, the project's standing preference.
+def _standing_formats(root):
+    """`[export] formats`, from the project's printer.toml, then the global config.
 
     A syntax error is left for checks.printer to report, which every export
     reaches on its way to a Context and which names the file and the line.
     """
     import tomllib
 
-    from .checks import PRINTER_FILE
+    from . import checks
 
-    file = root / PRINTER_FILE
-    if not file.is_file():
-        return None
-    try:
-        block = tomllib.loads(file.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError:
-        return None
-    return block.get("export", {}).get("formats")
+    for file in (root / checks.PRINTER_FILE, checks.global_file()):
+        if not file.is_file():
+            continue
+        try:
+            block = tomllib.loads(file.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError:
+            continue
+        formats = block.get("export", {}).get("formats")
+        if formats:
+            return formats
+    return None
 
 
 def _artifact_size(path):
@@ -260,7 +272,7 @@ def cmd_export(args):
     from . import builder, checks
 
     root = project_root()
-    formats = args.formats or _project_formats(root) or list(DEFAULT_FORMATS)
+    formats = args.formats or _standing_formats(root) or list(DEFAULT_FORMATS)
     configs = _collect_exports(_resolve(root, args.part))
     out = root / "build"
     out.mkdir(exist_ok=True)
@@ -299,6 +311,15 @@ def cmd_export(args):
             if fmt == "stl":
                 note += f", {builder.stl_triangles(target):,} triangles"
             print(f"  {target.relative_to(root)}  {note}")
+        # A file this export did not rewrite still sits in build/ looking current,
+        # and a stale STEP shared as fresh is worse than a missing one.
+        for fmt in (f for f in FORMATS if f not in formats):
+            stale = out / f"{name}.{fmt}"
+            if stale.exists():
+                print(
+                    f"  {stale.relative_to(root)}  not rewritten ({fmt} is not in this "
+                    f"export's formats), delete it or add the format"
+                )
 
 
 # What OCCT says when a chamfer will not land. A part refusing to grow in its own words
@@ -349,6 +370,7 @@ def cmd_verify(args):
 
     root = project_root()
     worst = 0
+    gathered = []  # what --report needs to picture: nothing is rebuilt to write it
     for path in _resolve(root, args.part):
         problems, built = [], []
         configs = _configs(path)
@@ -393,9 +415,81 @@ def cmd_verify(args):
             # seeing rather than skimming past.
             grew = f"flexed {', '.join(counts)}" if counts else "no counts to flex"
             print(f"  {path.stem}: ok, {len(configs)} configuration(s), {grew}")
-    print("  Not covered: fit faces by coordinate, and looking at a render.")
+        if args.report:
+            gathered.append((path, built, {n: o for n, o, _ in configs}, problems))
+    if args.report:
+        _report(root, gathered)
+        print("  Not covered: fit faces by coordinate. The renders are written; looking at them still is.")
+    else:
+        print("  Not covered: fit faces by coordinate, and looking at a render.")
     if worst:
         sys.exit(1)
+
+
+def _report(root, gathered):
+    """Write build/renders/<part>.verify.md: the verdict, and pictures of it.
+
+    One markdown file per part, next to the renders it embeds, so the whole bundle
+    travels as build/ does: an overview still and a mid-part section per configuration,
+    plus one still per finding standing where the finding is. Renders need Playwright;
+    without it the report is written anyway and says what is missing, because the
+    verdict is the point and the pictures are its evidence.
+    """
+    from . import builder, render
+
+    out = _renders(root)
+    out.mkdir(parents=True, exist_ok=True)
+    plans, shots = [], []
+    for path, built, overrides_by, problems in gathered:
+        per = []
+        for name, shape, ctx, found in built:
+            _prune_findings(out, name)
+            overrides = overrides_by.get(name) or None
+            stills = [
+                {"part": path, "file": out / f"{name}.verify.png", "overrides": overrides, "check": True},
+                # marks off: the findings were checked for the overview, and pins with
+                # their material clipped away would float in the emptied half.
+                {"part": path, "file": out / f"{name}.verify.section.png", "cut": "z", "overrides": overrides, "marks": False},
+            ]
+            finds = _finding_shots(out, path, name, overrides, shape, ctx, found)
+            per.append((name, shape, found, finds))
+            shots += stills + finds
+        plans.append((path, per, problems))
+
+    note = None
+    if shots:
+        try:
+            render.snapshots(root, shots)
+        except builder.BuildError as exc:
+            note = str(exc)
+
+    for path, per, problems in plans:
+        lines = [f"# {path.stem}", ""]
+        if note:
+            lines += [f"No renders this time: {note}", ""]
+        if problems:
+            lines.append(f"{len(problems)} problem(s):")
+            lines += [f"- {p}" for p in problems]
+            lines.append("")
+        for name, shape, found, finds in per:
+            info = builder.stats(shape)
+            bbox = " x ".join(str(v) for v in info["bbox"])
+            lines += [f"## {name}", "", f"{bbox} mm, {info['volume']}mm3", ""]
+            pictured = {s["file"].name for s in finds}
+            if found:
+                for i, finding in enumerate(found, 1):
+                    lines.append(f"- {finding}")
+                    pic = f"{name}.finding-{i}.png"
+                    if pic in pictured and not note:
+                        lines.append(f"  ![finding {i}]({pic})")
+            else:
+                lines.append("clean: no findings")
+            if not note:
+                lines += ["", f"![{name}]({name}.verify.png)", "", f"![{name}, cut mid-part]({name}.verify.section.png)"]
+            lines.append("")
+        target = out / f"{path.stem}.verify.md"
+        target.write_text("\n".join(lines), encoding="utf-8")
+        print(f"  {target.relative_to(root)}")
 
 
 def cmd_extract(args):
@@ -436,6 +530,60 @@ def cmd_api(args):
         print(line)
 
 
+# `render`'s iso direction at unit length, for tilting a finding camera toward it.
+ISO = (0.588, -0.630, 0.504)
+
+
+def _renders(root):
+    """Where every camera-made file lands: stills, sections, finding shots, reports.
+
+    build/ itself is the catalog of deliverables, the STL a slicer picks up, and
+    pictures were drowning it. Everything made to be looked at rather than
+    printed lives one level down instead.
+    """
+    return root / "build" / "renders"
+
+
+def _prune_findings(out, name):
+    """A finding still is a claim, and a stale one claims a problem that may be fixed,
+    so each regeneration clears the configuration's set before writing the new one."""
+    if out.is_dir():
+        for old in out.glob(f"{name}.finding-*.png"):
+            old.unlink()
+
+
+def _finding_shots(out, path, name, overrides, shape, ctx, found):
+    """One shot per finding, standing where its face can actually be seen.
+
+    Mostly along the face's own normal, tilted a third toward iso so the picture keeps
+    some depth: a camera dead-on to a flat underside reads as a 2D outline. The tilt
+    collapses when normal and iso oppose, and then the normal alone is right.
+    """
+    from build123d import Vector
+
+    from . import probe
+
+    shots = []
+    rows = probe.finding_faces(shape, ctx, found)
+    for i, (finding, row) in enumerate(zip(found, rows), 1):
+        if row is None or row["normal"] is None:
+            continue
+        d = row["normal"].normalized() + Vector(*ISO) * 0.35
+        if d.length < 1e-3:
+            d = row["normal"]
+        shots.append(
+            {
+                "part": path,
+                "file": out / f"{name}.finding-{i}.png",
+                "view": f"{d.X:.3f},{d.Y:.3f},{d.Z:.3f}",
+                "overrides": overrides or None,
+                "check": True,
+                "label": str(finding),
+            }
+        )
+    return shots
+
+
 def cmd_inspect(args):
     """Measure a built part in the units the rules report it in.
 
@@ -445,6 +593,7 @@ def cmd_inspect(args):
     from . import builder, checks, probe
 
     root = project_root()
+    shots = []
     for path in _resolve(root, args.part):
         for name, overrides, ctx in _configs(path):
             try:
@@ -455,6 +604,26 @@ def cmd_inspect(args):
                 continue
             for line in probe.report(name, shape, ctx, found, limit=args.limit):
                 print(line)
+            if args.render:
+                # Pruned per configuration, not per shot list: a part that just came
+                # back clean still has to lose the stills of the findings it had.
+                _prune_findings(_renders(root), name)
+                shots += _finding_shots(_renders(root), path, name, overrides, shape, ctx, found)
+    if not args.render:
+        return
+    if not shots:
+        print("  nothing to render: no finding sits on a face a camera could be aimed at")
+        return
+    from . import render
+
+    try:
+        written = render.snapshots(root, shots)
+    except builder.BuildError as exc:
+        sys.exit(f"  {exc}")
+    print()
+    for shot, png in zip(shots, written):
+        print(f"  {png.relative_to(root)}")
+        print(f"      {shot['label']}")
 
 
 def skill_targets():
@@ -567,10 +736,11 @@ def cmd_render(args):
         written = render.render(
             root,
             _resolve(root, args.part),
-            root / "build",
+            _renders(root),
             view=args.view,
             size=(args.width, args.height),
             chrome=args.chrome,
+            cut=args.section,
         )
     except builder.BuildError as exc:
         sys.exit(f"  {exc}")
@@ -582,7 +752,7 @@ DEFAULT_PORT = 7373
 
 # GLB is the viewer's format, so it is on request rather than written every time.
 FORMATS = ("stl", "step", "glb")
-DEFAULT_FORMATS = ("stl", "step")
+DEFAULT_FORMATS = ("stl",)
 
 
 def _is_free(port):
@@ -714,6 +884,11 @@ def main(argv=None):
     s = sub.add_parser("inspect", help="measure a built part: faces, normals, concave edges")
     s.add_argument("part", nargs="?")
     s.add_argument("--limit", type=int, default=12, help="how many faces and edges to list")
+    s.add_argument(
+        "--render",
+        action="store_true",
+        help="write build/renders/<part>.finding-<n>.png per finding, camera facing the face it fired on",
+    )
     s.set_defaults(fn=cmd_inspect)
 
     s = sub.add_parser("skill", help="print an agent skill file for your AI harness")
@@ -725,6 +900,11 @@ def main(argv=None):
 
     s = sub.add_parser("verify", help="run the doctrine's verification list")
     s.add_argument("part", nargs="?")
+    s.add_argument(
+        "--report",
+        action="store_true",
+        help="write build/renders/<part>.verify.md, with renders of the part and each finding",
+    )
     s.set_defaults(fn=cmd_verify)
 
     s = sub.add_parser("extract", help="find duplication across parts")
@@ -734,21 +914,26 @@ def main(argv=None):
     s.add_argument("part", nargs="?")
     s.set_defaults(fn=cmd_card)
 
-    s = sub.add_parser("render", help="write a PNG of a part to build/")
+    s = sub.add_parser("render", help="write a PNG of a part to build/renders/")
     s.add_argument("part", nargs="?")
     # Not argparse `choices`: reading them would mean importing the render module, and
     # every heavy import in this file is function-local so `nurb --help` stays instant.
-    s.add_argument("--view", default="iso", help="iso, front, back, left, right, top")
+    s.add_argument("--view", help="iso, front, back, left, right, top (default: iso, or facing the cut)")
     s.add_argument("--width", type=int, default=1200)
     s.add_argument("--height", type=int, default=900)
     s.add_argument("--chrome", action="store_true", help="keep the HUD and findings panel")
+    s.add_argument(
+        "--section",
+        metavar="AXIS[:POS]",
+        help="cut the part open: z is mid-part, z:0.7 a fraction of the span, z:4mm absolute (z measured from the bed)",
+    )
     s.set_defaults(fn=cmd_render)
 
     s = sub.add_parser("export", help="write STL/STEP/GLB to build/")
     s.add_argument("part", nargs="?")
     s.add_argument(
         "--formats", nargs="+", default=None,
-        help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: glb",
+        help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: step, glb",
     )
     s.set_defaults(fn=cmd_export)
 
