@@ -331,11 +331,19 @@ fn test_hook(app: AppHandle) {
 }
 
 /// macOS ships an empty Help submenu, and a chromeless window has nowhere else to
-/// put a link. These two are the only place in the app that reaches the outside
-/// world, alongside the same pair in the about box.
-fn install_help_menu(app: &AppHandle) -> tauri::Result<()> {
+/// put a link. The two Help items are the only place in the app that reaches the
+/// outside world, alongside the same pair in the about box. "Check for Updates…"
+/// sits under About where every Mac app keeps it; the webview owns the update
+/// state, so the click is forwarded there as an event.
+fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, HELP_SUBMENU_ID};
     let menu = Menu::default(app)?;
+    if let Some(appmenu) = menu.items()?.first().and_then(|i| i.as_submenu().cloned()) {
+        appmenu.insert(
+            &MenuItem::with_id(app, "app:check-updates", "Check for Updates…", true, None::<&str>)?,
+            1,
+        )?;
+    }
     if let Some(help) = menu.get(HELP_SUBMENU_ID).and_then(|i| i.as_submenu().cloned()) {
         help.append_items(&[
             &MenuItem::with_id(app, "help:github", "nurb on GitHub", true, None::<&str>)?,
@@ -344,8 +352,13 @@ fn install_help_menu(app: &AppHandle) -> tauri::Result<()> {
     }
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
+        use tauri::Emitter;
         use tauri_plugin_opener::OpenerExt;
         let url = match event.id().as_ref() {
+            "app:check-updates" => {
+                let _ = app.emit("menu:check-updates", ());
+                return;
+            }
             "help:github" => "https://github.com/Shpigford/nurb",
             "help:issue" => "https://github.com/Shpigford/nurb/issues/new",
             _ => return,
@@ -381,7 +394,7 @@ pub fn run() {
             app.manage(Registry::load(&dir));
             app.manage(sessions::SessionStore::load(&dir));
             app.manage(prefs::PrefStore::load(&dir));
-            install_help_menu(app.handle())?;
+            install_menu(app.handle())?;
             #[cfg(debug_assertions)]
             test_hook(app.handle().clone());
             Ok(())
