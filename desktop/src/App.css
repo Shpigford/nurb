@@ -350,6 +350,11 @@ textarea {
   font-weight: 600;
 }
 
+.part-refused {
+  color: var(--amber);
+  font-weight: 600;
+}
+
 .part-busy {
   width: 6px;
   height: 6px;

@@ -12,7 +12,7 @@
   }
   :root {
     --bg: #16181d; --panel: #1d2027; --line: #2b2f38;
-    --text: #e6e8ec; --dim: #868d9b; --accent: #6ee7a8; --bad: #f87171;
+    --text: #e6e8ec; --dim: #868d9b; --accent: #6ee7a8; --bad: #f87171; --warn: #f0c274;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -66,11 +66,14 @@
   .item.var.active .vic { color: var(--accent); }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
   .dot.bad { background: var(--bad); }
+  /* Amber for a refusal: the part declined these values on purpose, nothing broke. */
+  .dot.refused { background: var(--warn); }
   /* An assembly's status light is the cubes icon itself: same slot, same colors.
      The negative margins keep its flex footprint at the dot's 6px, so part and
      assembly names stay in one column. */
   .dot.asm { width: 13px; height: 13px; margin: 0 -3.5px; background: none; border-radius: 0; color: var(--accent); }
   .dot.asm.bad { color: var(--bad); }
+  .dot.asm.refused { color: var(--warn); }
   .dot.busy { animation: pulse .6s ease-in-out infinite; }
   @keyframes pulse { 50% { opacity: .25; } }
   main { position: relative; overflow: hidden; }
@@ -94,6 +97,9 @@
     font-size: 11px; display: none;
     box-shadow: 0 4px 16px rgba(0,0,0,.35); backdrop-filter: blur(10px);
   }
+  /* A refusal wears the checks' warn amber, not the crash red: the part declined
+     these values on purpose and the message says what to change. */
+  #err.refused { background: rgba(42,37,22,.94); border-color: #57481f; color: var(--warn); }
   #tools {
     position: absolute; top: 14px; right: 14px;
     display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
@@ -257,6 +263,11 @@
   .p .k { color: var(--dim); font-size: 11px; cursor: default;
           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .p.dirty .k { color: var(--text); }
+  /* The row a refusal names: the slider that has to move before the part builds.
+     After every .p.dirty rule, because the row that just caused a refusal is usually
+     dirty too, and the refusal is the signal that needs to win. */
+  .p.refused { border-left-color: var(--warn); }
+  .p.refused .k { color: var(--warn); }
   .p .v {
     width: 58px; margin-left: auto; text-align: right; background: none; border: none;
     color: var(--text); font: inherit; font-size: 11px; border-radius: 3px; padding: 1px 3px;
@@ -992,6 +1003,7 @@ async function paint(name, { keepCamera }) {
 
   if (entry.error) {
     err.style.display = 'block';
+    err.classList.toggle('refused', !!entry.refused);
     err.textContent = entry.traceback || entry.error;
     if (mesh) {                              // last good geometry stays, visibly stale
       mesh.traverse(o => {
@@ -1004,9 +1016,11 @@ async function paint(name, { keepCamera }) {
     hud(entry);
     checks(name);
     params(entry);
+    flagRefusal(entry);
     return;
   }
   err.style.display = 'none';
+  flagRefusal(entry);
 
   // Without GL there is no scene to feed, but the geometry is the only thing missing:
   // the hud, checks and params describe the build, not the picture of it.
@@ -1162,12 +1176,22 @@ function checks(name) {
   }
 }
 
+// A refusal (reject() in the part) may name the parameter it is about. The panel
+// survives a failed build, so the row is still there to mark; cleared on any paint
+// whose entry carries no refusal.
+function flagRefusal(e) {
+  for (const row of document.querySelectorAll('.p.refused')) row.classList.remove('refused');
+  if (typeof e.refused !== 'string') return;
+  const row = document.querySelector(`.p[data-name="${CSS.escape(e.refused)}"]`);
+  if (row) row.classList.add('refused');
+}
+
 function hud(e) {
   // With a variant on screen the HUD carries its card note, because the sidebar can
   // say which variant but never why it exists, and the why is the point of it.
   const v = e.error ? null : activeVariant(e);
   document.getElementById('hud').innerHTML = e.error
-    ? `<b>${e.name}</b><br>build failed`
+    ? `<b>${e.name}</b><br>${e.refused ? 'refused these values' : 'build failed'}`
     : `<b>${v ? v.name : e.name}</b>`
       + (v && v.note ? `<br><span class="note">${v.note}</span>` : '')
       + `<br>${e.bbox.join(' &times; ')} mm<br>${e.ms} ms`;
@@ -1542,11 +1566,12 @@ function render() {
     const row = document.createElement('div');
     row.className = 'item' + (e.name === current ? ' active' : '');
     // The joints payload is the marker: only an assembly carries one, even empty.
+    const light = e.error ? (e.refused ? 'refused' : 'bad') : '';
     row.innerHTML = (Array.isArray(e.joints)
-        ? `<svg class="dot asm ${e.error ? 'bad' : ''}"><title>assembly</title><use href="#i-cubes"/></svg>`
-        : `<span class="dot ${e.error ? 'bad' : ''}"></span>`)
+        ? `<svg class="dot asm ${light}"><title>assembly</title><use href="#i-cubes"/></svg>`
+        : `<span class="dot ${light}"></span>`)
       + `<span class="name">${e.name}</span>`
-      + `<span class="ms">${e.error ? 'err' : e.ms + 'ms'}</span>`;
+      + `<span class="ms">${e.error ? (e.refused ? '' : 'err') : e.ms + 'ms'}</span>`;
     row.onclick = () => {
       // A click supersedes a deep link whose part is still waiting to build.
       want = null; wantVariant = null;

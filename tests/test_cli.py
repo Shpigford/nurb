@@ -318,6 +318,49 @@ def test_verify_names_the_counts_it_flexed(tmp_path, monkeypatch, capsys):
     assert "flexed rows" in capsys.readouterr().out
 
 
+def test_verify_accepts_a_designed_refusal_while_flexing_counts(
+    tmp_path, monkeypatch, capsys
+):
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    _finished(
+        tmp_path,
+        "from nurb import *\n\n\n@part\n"
+        "def thing(rows=2):\n"
+        "    if rows > 2:\n"
+        "        reject('only two rows fit', param='rows')\n"
+        "    return Box(10, 10, 5 * rows)\n",
+    )
+    capsys.readouterr()
+
+    cli.cmd_verify(argparse.Namespace(part=None, report=False))
+
+    assert "ok," in capsys.readouterr().out
+
+
+def test_verify_reports_a_bare_value_error_while_flexing_counts(
+    tmp_path, monkeypatch, capsys
+):
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    _finished(
+        tmp_path,
+        "from nurb import *\n\n\n@part\n"
+        "def thing(rows=2):\n"
+        "    if rows > 2:\n"
+        "        raise ValueError('only two rows fit')\n"
+        "    return Box(10, 10, 5 * rows)\n",
+    )
+    capsys.readouterr()
+
+    with pytest.raises(SystemExit):
+        cli.cmd_verify(argparse.Namespace(part=None, report=False))
+
+    assert "rows=3: ValueError: only two rows fit" in capsys.readouterr().out
+
+
 def test_verify_says_so_when_a_part_has_no_counts_to_flex(tmp_path, monkeypatch, capsys):
     import argparse
 

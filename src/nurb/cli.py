@@ -335,7 +335,7 @@ def _flex(path, problems):
     places to be wrong. A part is allowed to refuse, since a pocket row or a grid has to
     fit between the brackets, but it has to refuse in its own words.
     """
-    from . import builder
+    from . import builder, registry
 
     declared = builder.load(path)._nurb.params
     counts = [
@@ -347,10 +347,14 @@ def _flex(path, problems):
         for grown in (declared[name] + 1, declared[name] + 2):
             try:
                 shape, _, _ = builder.build(path, overrides={name: grown}, draft=False)
+            except registry.Rejected:
+                continue  # a guard in the part's own words is a decision, not a fault
             except ValueError as exc:
                 if any(k in str(exc) for k in KERNEL):
                     problems.append(f"{name}={grown} fails in the kernel: {exc}")
-                continue  # a guard in the part's own words is a decision, not a fault
+                else:
+                    problems.append(f"{name}={grown}: ValueError: {exc}")
+                continue
             except Exception as exc:
                 problems.append(f"{name}={grown}: {type(exc).__name__}: {exc}")
                 continue

@@ -24,7 +24,13 @@ type Project = {
 type Server = { url: string; port: number };
 // `assembly` and `uses` are the placed-parts pair: an assembly is not one printable
 // solid, and the rail says so rather than letting it pass as another part.
-type Part = { name: string; error: string | null; assembly: boolean; uses: string[] };
+type Part = {
+  name: string;
+  error: string | null;
+  refused: boolean;
+  assembly: boolean;
+  uses: string[];
+};
 type PartState = { path: string; parts: Part[] };
 type ChatInfo = {
   id: string;
@@ -269,7 +275,7 @@ function App() {
         setPartState({
           path: active,
           parts: entries
-            .map(({ name, error, assembly, uses }) => ({ name, error, assembly, uses }))
+            .map(({ name, error, refused, assembly, uses }) => ({ name, error, refused, assembly, uses }))
             .sort((a, b) => a.name.localeCompare(b.name)),
         });
       } catch {
@@ -449,7 +455,7 @@ function App() {
     for (let attempt = 0; ; attempt++) {
       const entries = await invoke<Part[]>("list_parts", { path });
       const listed = entries
-        .map(({ name, error, assembly, uses }) => ({ name, error, assembly, uses }))
+        .map(({ name, error, refused, assembly, uses }) => ({ name, error, refused, assembly, uses }))
         .sort((a, b) => a.name.localeCompare(b.name));
       if (settled(listed) || attempt >= 19) {
         setPartState({ path, parts: listed });
@@ -634,7 +640,12 @@ function App() {
                           <span className="part-busy" title="the agent is working on this part" />
                         )}
                         {part.error && (
-                          <span className="part-error" title={part.error}>
+                          // A refusal is the part declining a configuration, not
+                          // breaking, so it wears amber like the viewer's own mark.
+                          <span
+                            className={part.refused ? "part-refused" : "part-error"}
+                            title={part.error}
+                          >
                             !
                           </span>
                         )}

@@ -21,7 +21,7 @@ from .holes import counterbore  # noqa: E402
 from .measurements import measured  # noqa: E402
 from .orient import stand  # noqa: E402
 from .polish import chamfer, polish  # noqa: E402  -- must win, see below
-from .registry import part  # noqa: E402  -- must win over any build123d name
+from .registry import part, reject  # noqa: E402  -- must win over any build123d name
 
 # `polish` is here because the doctrine prescribes the algorithm and every project
 # would otherwise write it: chamfer is all or nothing, so one edge that cannot land
@@ -41,6 +41,11 @@ from .registry import part  # noqa: E402  -- must win over any build123d name
 # `counterbore` is here because the naive alternative is two cylinders that build,
 # check as an ordinary bridge, and print a screw seat on sagging air: the stepped
 # bridging stack is fixed print-farm practice, not a judgement, so it is generated.
+# `reject` is here because a part that knows a configuration cannot work (a hole
+# narrower than the tool it holds) has to be able to say so, and the alternative is a
+# bare ValueError that the viewer can only present as a crash. A refusal through
+# `reject` keeps its message and the parameter it names, and is shown as a limit of
+# the design.
 # `chamfer` deliberately shadows build123d's. Same behaviour, same exception type;
 # what it adds is the doctrine's rule on the way out of a failure, because the kernel's
 # own advice is "try a smaller length value(s)" and following it is how a part ends up
@@ -51,6 +56,7 @@ from .registry import part  # noqa: E402  -- must win over any build123d name
 __all__ = [
     *getattr(_b3d, "__all__", [n for n in dir(_b3d) if not n.startswith("_")]),
     "part",
+    "reject",
     "is_convex",
     "concave_edges",
     "measured",

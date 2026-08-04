@@ -19,7 +19,7 @@ from websockets.asyncio.server import serve
 from websockets.http11 import Response
 from websockets.datastructures import Headers
 
-from . import __version__, builder
+from . import __version__, builder, registry
 
 VIEWER = pathlib.Path(__file__).parent / "viewer.html"
 VENDOR = (pathlib.Path(__file__).parent / "vendor").resolve()
@@ -217,6 +217,7 @@ class Server:
 
     def rebuild(self, path):
         name = pathlib.Path(path).stem
+        previous = self.state.get(name) or {}
         entry = {
             "name": name,
             "token": secrets.token_hex(4),
@@ -245,6 +246,20 @@ class Server:
                 entry["joints"] = wire(scene)
                 # What the stl button downloads instead of the merged scene.
                 entry["uses"] = sorted(pathlib.Path(u).stem for u in scene.uses)
+        except registry.Rejected as exc:
+            # The part refusing this configuration via reject(). Not a crash, so no
+            # traceback: the message and the parameter it names are the whole story,
+            # and the viewer presents them as a limit of the design.
+            entry["glb"] = None
+            entry["shape"] = None
+            entry["error"] = str(exc)
+            entry["refused"] = exc.param or True
+            # Unlike a crash, a refusal is recoverable from the parameter panel. The
+            # builder carries the attempted values; the previous build covers a rare
+            # refusal during module loading, before a function signature was found.
+            entry["params"] = (
+                exc.params if exc.params is not None else previous.get("params", [])
+            )
         except Exception as exc:
             entry["glb"] = None
             entry["shape"] = None

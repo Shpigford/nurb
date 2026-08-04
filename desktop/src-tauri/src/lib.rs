@@ -261,6 +261,12 @@ fn part_views(project: &std::path::Path, body: &str) -> Result<serde_json::Value
                     .and_then(|entry| entry.get("error"))
                     .cloned()
                     .unwrap_or(serde_json::Value::Null);
+                // A refusal (reject() in the part) sets error too, but it is the part
+                // declining a configuration, not breaking; the rail marks it amber
+                // rather than with the crash red.
+                let refused = entry
+                    .and_then(|entry| entry.get("refused"))
+                    .is_some_and(|value| !value.is_null());
                 // The joints payload is the marker the viewer already uses: only an
                 // assembly carries one, even empty. A source that has not built yet
                 // reads as a part and corrects itself on the next poll.
@@ -269,7 +275,7 @@ fn part_views(project: &std::path::Path, body: &str) -> Result<serde_json::Value
                     .and_then(|entry| entry.get("uses"))
                     .cloned()
                     .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
-                serde_json::json!({ "name": name, "error": error, "assembly": assembly, "uses": uses })
+                serde_json::json!({ "name": name, "error": error, "refused": refused, "assembly": assembly, "uses": uses })
             })
             .collect(),
     ))
@@ -455,9 +461,12 @@ mod tests {
         std::fs::write(parts.join("rig.py"), "").unwrap();
         std::fs::write(parts.join("_helper.py"), "").unwrap();
 
+        std::fs::write(parts.join("held.py"), "").unwrap();
+
         let views = part_views(
             &root,
             r#"[{"name":"broken","error":"trace"},{"name":"gone","error":null},
+                {"name":"held","error":"hole too small","refused":"hole"},
                 {"name":"rig","error":null,"joints":[],"uses":["alpha"]}]"#,
         )
         .unwrap();
@@ -465,9 +474,10 @@ mod tests {
         assert_eq!(
             views,
             serde_json::json!([
-                { "name": "alpha", "error": null, "assembly": false, "uses": [] },
-                { "name": "broken", "error": "trace", "assembly": false, "uses": [] },
-                { "name": "rig", "error": null, "assembly": true, "uses": ["alpha"] }
+                { "name": "alpha", "error": null, "refused": false, "assembly": false, "uses": [] },
+                { "name": "broken", "error": "trace", "refused": false, "assembly": false, "uses": [] },
+                { "name": "held", "error": "hole too small", "refused": true, "assembly": false, "uses": [] },
+                { "name": "rig", "error": null, "refused": false, "assembly": true, "uses": ["alpha"] }
             ])
         );
         std::fs::remove_dir_all(root).unwrap();

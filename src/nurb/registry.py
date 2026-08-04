@@ -54,6 +54,32 @@ def param_docs(fn, params):
     return docs
 
 
+class Rejected(Exception):
+    """A part refusing a configuration, raised by `reject`.
+
+    Its own type, subclassing nothing that gets caught by accident, so the server
+    and the CLI can tell a designed refusal from a part that actually broke.
+    """
+
+    def __init__(self, message, param=None):
+        super().__init__(message)
+        self.param = param
+        # Filled by the builder before this crosses the server boundary. Keeping the
+        # attempted values lets a fresh viewer render the controls needed to recover.
+        self.params = None
+
+
+def reject(message, param=None):
+    """Refuse to build a configuration the part knows cannot work.
+
+    For guards on parameter values: a holder whose hole is narrower than the tool
+    it holds should refuse, not build. Say what is wrong and what value fixes it,
+    and pass `param` naming the offending parameter so the viewer can mark its
+    slider. A refusal is shown as a limit of the design, never as a crash.
+    """
+    raise Rejected(message, param)
+
+
 def part(fn):
     """Mark a function as a part.
 

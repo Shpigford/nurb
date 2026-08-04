@@ -40,6 +40,8 @@ suggests.
 Return one solid. A function that returns two loose bodies still reports a plausible
 bounding box and still exports, so nothing downstream catches it.
 
+**When a configuration cannot work, refuse it with `reject`, never a bare raise.** A holder whose hole is narrower than the tool it holds should not build, and `reject("drill_hole_width 14 is under the 14.27mm pin vise plus print shrink: raise it above 14.77", param="drill_hole_width")` is how a part says so. The message states what is wrong and what value fixes it; `param` names the offending parameter so the viewer marks its slider. The viewer presents a refusal as a limit of the design, in amber with the last good geometry still on screen, where a bare `ValueError` arrives as a red traceback that reads as the part being broken. Guard only what would print wrong or not work at all; taste stays a slider.
+
 ## Printability
 
 - **Minimum wall 2 to 3mm**, except where fit geometry says otherwise. Fit-critical

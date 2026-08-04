@@ -8,6 +8,8 @@ import time
 import numpy as np
 import trimesh
 
+from .registry import Rejected
+
 
 class BuildError(Exception):
     pass
@@ -125,12 +127,6 @@ def build(path, overrides=None, draft=False):
     if defn.accepts_draft:
         call["draft"] = draft
 
-    started = time.perf_counter()
-    shape = fn(**call)
-    elapsed = (time.perf_counter() - started) * 1000
-    if shape is None:
-        raise BuildError(f"{defn.name}() returned None")
-
     params = [
         {
             "name": name,
@@ -141,6 +137,19 @@ def build(path, overrides=None, draft=False):
         }
         for name, default in defn.params.items()
     ]
+
+    started = time.perf_counter()
+    try:
+        shape = fn(**call)
+    except Rejected as exc:
+        # A refused build still needs to describe the attempted values: they are the
+        # controls the viewer offers to get back into the part's valid range.
+        exc.params = params
+        raise
+    elapsed = (time.perf_counter() - started) * 1000
+    if shape is None:
+        raise BuildError(f"{defn.name}() returned None")
+
     return shape, params, elapsed
 
 

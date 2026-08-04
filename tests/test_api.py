@@ -24,6 +24,7 @@ def test_the_documented_vocabulary_is_the_exported_one():
     and the assembly four."""
     assert set(api.own_names()) == {
         "part",
+        "reject",
         "polish",
         "crown",
         "is_convex",

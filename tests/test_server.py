@@ -139,6 +139,72 @@ def test_failed_build_has_no_active_variant(tmp_path):
     assert entry["variant"] is None
 
 
+REJECTING_PART = """from nurb import *
+
+@part
+def thing(hole=14.0):
+    if hole <= 14.77:
+        reject("hole must clear the 14.27mm tool: raise it above 14.77", param="hole")
+    return Box(hole + 5, 20.0, 10.0)
+"""
+
+
+def test_rebuild_reports_a_refusal_without_a_traceback(tmp_path):
+    """reject() is the part declining a configuration, not the part breaking, so the
+    entry carries the message and the parameter it names and no traceback at all."""
+    (tmp_path / "parts").mkdir()
+    server = Server(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    part.write_text(REJECTING_PART)
+
+    entry = server.rebuild(part)
+
+    assert entry["error"] == "hole must clear the 14.27mm tool: raise it above 14.77"
+    assert entry["refused"] == "hole"
+    assert "traceback" not in entry
+    # A refusal at a slider value has to be draggable back out of, so the wire
+    # payload keeps both the refusal and the attempted parameter values, including
+    # when there has never been a successful build to seed the viewer's panel.
+    wired = server._wire(entry)
+    assert wired["refused"] == "hole"
+    assert wired["params"] == [
+        {
+            "name": "hole",
+            "default": 14.0,
+            "value": 14.0,
+            "kind": "float",
+            "doc": None,
+            "family": False,
+        }
+    ]
+
+
+def test_rebuild_marks_an_unattributed_refusal(tmp_path):
+    """reject() without param still travels as a refusal; there is just no slider
+    for the viewer to mark."""
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    part.write_text(REJECTING_PART.replace(', param="hole"', ""))
+
+    entry = server.rebuild(part)
+
+    assert entry["refused"] is True
+    assert "traceback" not in entry
+
+
+def test_viewer_presents_a_refusal_as_a_limit_not_a_crash():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    # The message box turns amber, the named slider gets marked, and the sidebar
+    # light says held-on-purpose rather than broken.
+    assert "err.classList.toggle('refused', !!entry.refused)" in viewer
+    assert "#err.refused" in viewer
+    assert "function flagRefusal(e)" in viewer
+    assert ".p.refused" in viewer
+    assert "e.refused ? 'refused' : 'bad'" in viewer
+
+
 def test_check_judges_a_matching_variant_by_its_own_settings(tmp_path):
     """Sliders sitting exactly on a card variant get that variant's settings, and one
     step off puts the base part's rules back."""
