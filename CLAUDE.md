@@ -62,7 +62,7 @@ nurb launcher        write viewer.command, a double-clickable `nurb dev`
 A project is any directory containing `parts/`. There is no init step, and there
 never should be.
 
-A release is a version bump merged to main: `uv version X.Y.Z`, plus the matching `version:` line in `src/nurb/skill.md` and `skills/nurb/SKILL.md` (a test enforces they agree). The publish workflow does the rest: PyPI upload, tag, GitHub release.
+A release is a version bump merged to main: `uv version X.Y.Z`, plus the matching `version:` line in `src/nurb/skill.md` and `skills/nurb/SKILL.md`, plus the matching `version` in `desktop/src-tauri/tauri.conf.json` (tests enforce all three agree). The publish workflow does the PyPI upload, tag, and GitHub release; `desktop/scripts/release.sh` then builds the desktop app into that same release, so the engine and the app always ship together under one version. The `/release` skill runs the whole ceremony end to end, changelog included.
 
 ## Layout
 

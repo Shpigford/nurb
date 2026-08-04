@@ -25,6 +25,15 @@ VIEWER = pathlib.Path(__file__).parent / "viewer.html"
 VENDOR = (pathlib.Path(__file__).parent / "vendor").resolve()
 
 
+def _export_name(label):
+    """A catalog label made safe for a download header and build/ filename."""
+    safe = "".join(
+        c if c.isascii() and (c.isalnum() or c in "._-") else "_"
+        for c in str(label)
+    )
+    return safe.strip("._") or "part"
+
+
 def _newer(current, latest):
     """Is `latest` a later X.Y.Z than `current`? Anything unparseable is not newer."""
     try:
@@ -338,7 +347,10 @@ class Server:
         if path == "/":
             return self._resp(200, VIEWER.read_bytes(), "text/html; charset=utf-8")
         if path.startswith("/export/"):
-            return await self.export(path[len("/export/") :])
+            # ?save is the desktop shell, which has no browser download but does have
+            # the project folder open.
+            save = "save" in request.path.partition("?")[2].split("&")
+            return await self.export(path[len("/export/") :], save=save)
         if path == "/api/parts":
             body = json.dumps([self._wire(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
@@ -382,20 +394,37 @@ class Server:
     # `nurb dev` plus this route, not a second modelling stack.
     EXPORTS = {"stl": "model/stl", "step": "application/step"}
 
-    async def export(self, filename):
+    async def export(self, filename, save=False):
         name, _, fmt = filename.rpartition(".")
         if fmt not in self.EXPORTS or name not in self.state:
             return self._resp(404, b"not found", "text/plain")
+        # A variant is a catalog entry, so its file carries the catalog name: sliders
+        # sitting on hook_utility export hook_utility.stl, not hook_scissors.stl.
+        label = self.state[name].get("variant") or name
         try:
             async with self.building:
-                body, attach, mime = await asyncio.to_thread(self._export, name, fmt)
+                body, attach, mime = await asyncio.to_thread(self._export, name, fmt, label)
         except Exception as exc:
             message = f"{type(exc).__name__}: {exc}"
             return self._resp(500, message.encode(), "text/plain")
+        if save:
+            # Into build/, beside what `nurb export` writes, and the path comes back so
+            # a shell can show the file where it landed.
+            out = (self.root / "build").resolve()
+            out.mkdir(exist_ok=True)
+            target = (out / attach).resolve()
+            if target.parent != out:
+                return self._resp(500, b"unsafe export filename", "text/plain")
+            target.write_bytes(body)
+            body = json.dumps({"path": str(target)}).encode()
+            return self._resp(200, body, "application/json")
         return self._resp(200, body, mime, attach=attach)
 
-    def _export(self, name, fmt):
+    def _export(self, name, fmt, label=None):
         """Build at the values the sliders hold and export that, as (body, filename, mime).
+
+        `label` is what the file is called when it is not just the part's own name,
+        which is how a variant's export carries the catalog name instead.
 
         Always the polished build, whatever the viewer is showing: draft is a preview
         economy, and a file somebody downloads is on its way to a slicer. An assembly
@@ -429,7 +458,7 @@ class Server:
             raise builder.BuildError(f"{name} is no longer on disk")
         body, scene = solid(path, name)
         if scene is None:
-            return body, f"{name}.{fmt}", self.EXPORTS[fmt]
+            return body, f"{_export_name(label or name)}.{fmt}", self.EXPORTS[fmt]
         queue = sorted(pathlib.Path(u) for u in scene.uses)
         if not queue:
             raise builder.BuildError(f"{name} places no parts; nothing to print")
@@ -445,8 +474,8 @@ class Server:
                 if nested is not None:  # an assembly placing an assembly
                     queue += sorted(pathlib.Path(u) for u in nested.uses)
                     continue
-                bundle.writestr(f"{placed.stem}.{fmt}", body)
-        return buf.getvalue(), f"{name}-{fmt}.zip", "application/zip"
+                bundle.writestr(f"{_export_name(placed.stem)}.{fmt}", body)
+        return buf.getvalue(), f"{_export_name(name)}-{fmt}.zip", "application/zip"
 
     @staticmethod
     def _meta(entry):
@@ -496,6 +525,10 @@ class Server:
                     "version": __version__,
                     "upgradable": _upgrade_command() is not None,
                     "draft": self.draft,
+                    # `parts` only contains completed builds. The viewer needs the
+                    # source list too, or it cannot tell a slow deep link from a
+                    # deleted or misspelled one.
+                    "sources": [p.stem for p in builder.find_parts(self.root)],
                     "parts": [self._wire(e) for e in self.state.values()],
                 }
             )
@@ -706,10 +739,14 @@ class Server:
                     # part that is gone from disk but still in the list is one you can
                     # select, drag sliders on, and export, none of which exist.
                     name = pathlib.Path(path).stem
-                    if self.state.pop(name, None) is not None:
-                        self.overrides.pop(name, None)
+                    existed = self.state.pop(name, None) is not None
+                    self.overrides.pop(name, None)
+                    if existed:
                         print(f"  {name}: gone", flush=True)
-                        await self.send({"type": "gone", "name": name})
+                    # Also notify for a source deleted before its first build. A
+                    # deep link may be waiting for that name even though state has
+                    # never held a completed entry for it.
+                    await self.send({"type": "gone", "name": name})
                     continue
                 async with self.building:
                     entry = await asyncio.to_thread(self.rebuild, path)

@@ -1,0 +1,649 @@
+//! First-launch provisioning: the bundled uv sidecar installs a managed
+//! Python, syncs the bundled hash-pinned lock, and installs the bundled nurb
+//! wheel into a venv under app data; a downloaded Node LTS plus `npm ci`
+//! from the bundled adapter lock gives chat a runtime. Everything
+//! streams phase events to the setup screen, and every component is checked
+//! and redone independently so an app update or a half-finished install
+//! repairs itself instead of wedging.
+
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Write};
+use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use sha2::{Digest, Sha256};
+use tauri::ipc::Channel;
+use tauri::Manager;
+
+use crate::agents;
+use crate::env::{uv_sidecar, Launcher, Paths, NODE_VERSION};
+
+const PYTHON_VERSION: &str = "3.13";
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+static PROBE_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Published SHASUMS256 entries for the pinned Node tarballs.
+const NODE_SHA256: &[(&str, &str)] = &[
+    (
+        "aarch64",
+        "3f1cf157479c1480352083105e13faf9d008ede98e7e157746b6df940d197b94",
+    ),
+    (
+        "x86_64",
+        "d35e95230f46f6f0751df497c56622c6735e05d5e1fb1630996a005b9d328fe4",
+    ),
+];
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum ProvisionEvent {
+    /// A phase began; the frontend owns the copy per stage id.
+    Stage { stage: &'static str },
+    /// One line of tool output, for the setup screen's ticker.
+    Detail { line: String },
+}
+
+/// What a finished install looked like. Compared per component: changed wheel
+/// or lock contents redo the Python side, a new Node or adapter lock redoes
+/// the chat side, and neither touches the other.
+#[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
+struct Stamp {
+    lock: String,
+    wheel: String,
+    node: String,
+    adapters: Vec<String>,
+    adapter_lock: String,
+}
+
+pub struct Provisioner {
+    /// Single flight: React StrictMode double-invokes the setup effect, and
+    /// the second call must wait out the first, then see a healthy install.
+    run: Mutex<()>,
+    pgid: Mutex<Option<i32>>,
+    shutting_down: AtomicBool,
+}
+
+impl Provisioner {
+    pub fn new() -> Self {
+        Self {
+            run: Mutex::new(()),
+            pgid: Mutex::new(None),
+            shutting_down: AtomicBool::new(false),
+        }
+    }
+
+    pub fn shutdown(&self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+        if let Some(pgid) = *self.pgid.lock().unwrap() {
+            unsafe {
+                libc::killpg(pgid, libc::SIGTERM);
+            }
+        }
+    }
+}
+
+struct Resources {
+    wheel: PathBuf,
+    wheel_hash: String,
+    lock: PathBuf,
+    lock_hash: String,
+    adapter_package: PathBuf,
+    adapter_lock: PathBuf,
+    adapter_lock_hash: String,
+}
+
+fn file_hash(path: &std::path::Path, what: &str) -> Result<String, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("bundled {what} missing at {}: {e}", path.display()))?;
+    Ok(format!("{:x}", Sha256::digest(&bytes)))
+}
+
+fn resources(app: &tauri::AppHandle) -> Result<Resources, String> {
+    let dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("no resource dir: {e}"))?
+        .join("resources");
+    let lock = dir.join("requirements.lock");
+    let lock_hash = file_hash(&lock, "lock")?;
+    let adapter_package = dir.join("adapter-package.json");
+    let adapter_lock = dir.join("adapter-package-lock.json");
+    let adapter_lock_hash = file_hash(&adapter_lock, "adapter lock")?;
+    let wheel = std::fs::read_dir(&dir)
+        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("nurb-") && name.ends_with(".whl"))
+        })
+        .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))?;
+    let wheel_hash = file_hash(&wheel, "wheel")?;
+    Ok(Resources {
+        wheel,
+        wheel_hash,
+        lock,
+        lock_hash,
+        adapter_package,
+        adapter_lock,
+        adapter_lock_hash,
+    })
+}
+
+fn read_stamp(paths: &Paths) -> Stamp {
+    std::fs::read(paths.stamp())
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+fn write_stamp(paths: &Paths, stamp: &Stamp) -> Result<(), String> {
+    let json = serde_json::to_vec_pretty(stamp).map_err(|e| e.to_string())?;
+    std::fs::write(paths.stamp(), json).map_err(|e| format!("could not record install: {e}"))
+}
+
+/// A venv that matches the bundled wheel and lock, and whose interpreter
+/// actually imports nurb: a stamp alone lies after a half-finished install.
+fn parts_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
+    stamp.lock == res.lock_hash
+        && stamp.wheel == res.wheel_hash
+        && Command::new(paths.venv_python())
+            .args(["-c", "import nurb"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+}
+
+fn chat_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
+    if stamp.node != NODE_VERSION
+        || stamp.adapters != adapter_pins()
+        || stamp.adapter_lock != res.adapter_lock_hash
+    {
+        return false;
+    }
+
+    let mut node = Command::new(paths.node_bin());
+    node.arg("--version");
+    if !probe_version(node, paths.data(), NODE_VERSION, HEALTH_TIMEOUT) {
+        return false;
+    }
+
+    // Only the adapter-hosted agents; the native CLIs are not provisioned.
+    agents::ALL.iter().all(|kind| {
+        let Some(adapter_pin) = kind.adapter() else {
+            return true;
+        };
+        let script = paths.adapter_script(*kind);
+        if !script.is_file() {
+            return false;
+        }
+        let mut adapter = Command::new(paths.node_bin());
+        adapter.arg(script).arg("--version");
+        let version = adapter_pin.rsplit_once('@').unwrap().1;
+        probe_version(adapter, paths.data(), version, HEALTH_TIMEOUT)
+    })
+}
+
+/// Run a tiny version command without trusting that a corrupt executable will
+/// return. Output goes to a file, not a pipe that a noisy or forked process can
+/// hold open forever; the last token is the version emitted by both adapters.
+fn probe_version(
+    mut command: Command,
+    output_dir: &std::path::Path,
+    expected: &str,
+    timeout: Duration,
+) -> bool {
+    let output_path = output_dir.join(format!(
+        ".health-{}-{}",
+        std::process::id(),
+        PROBE_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let Ok(output) = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&output_path)
+    else {
+        return false;
+    };
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(output))
+        .stderr(Stdio::null())
+        .process_group(0);
+    let Ok(mut child) = command.spawn() else {
+        let _ = std::fs::remove_file(output_path);
+        return false;
+    };
+    let pgid = child.id() as i32;
+    let deadline = Instant::now() + timeout;
+    let success = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Ok(None) | Err(_) => {
+                unsafe {
+                    libc::killpg(pgid, libc::SIGKILL);
+                }
+                let _ = child.wait();
+                break false;
+            }
+        }
+    };
+    let matches = success
+        && std::fs::read_to_string(&output_path)
+            .ok()
+            .and_then(|text| text.split_whitespace().last().map(str::to_string))
+            .is_some_and(|version| version == expected);
+    let _ = std::fs::remove_file(output_path);
+    matches
+}
+
+fn adapter_pins() -> Vec<String> {
+    agents::ALL
+        .iter()
+        .filter_map(|kind| kind.adapter().map(String::from))
+        .collect()
+}
+
+/// The wheel filename is the one place the bundled nurb version is written
+/// down (`nurb-0.10.0-py3-none-any.whl`); the stamp only stores hashes.
+fn wheel_version(name: &str) -> Option<&str> {
+    name.strip_prefix("nurb-")?
+        .strip_suffix(".whl")?
+        .split('-')
+        .next()
+}
+
+/// The OCCT version behind the pinned OCP wheels: `cadquery-ocp-novtk==7.9.3.1.1`
+/// in the lock means OCCT 7.9.3, which the notices screen turns into a pointer
+/// at the exact sources.
+fn occt_version(lock: &str) -> Option<String> {
+    let pin = lock
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("cadquery-ocp"))?;
+    let version = pin.split("==").nth(1)?.split_whitespace().next()?;
+    let parts: Vec<&str> = version.split('.').take(3).collect();
+    (parts.len() == 3).then(|| parts.join("."))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutInfo {
+    pub app_version: String,
+    pub nurb_version: String,
+    pub occt_version: Option<String>,
+}
+
+#[tauri::command]
+pub fn about_info(app: tauri::AppHandle) -> Result<AboutInfo, String> {
+    let app_version = app.package_info().version.to_string();
+    let dir = app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("no resource dir: {e}"))?
+        .join("resources");
+    let nurb_version = std::fs::read_dir(&dir)
+        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .find_map(|name| wheel_version(&name).map(str::to_string))
+        .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))?;
+    let occt_version = std::fs::read_to_string(dir.join("requirements.lock"))
+        .ok()
+        .and_then(|lock| occt_version(&lock));
+    Ok(AboutInfo {
+        app_version,
+        nurb_version,
+        occt_version,
+    })
+}
+
+#[tauri::command]
+pub async fn provision_status(app: tauri::AppHandle) -> Result<bool, String> {
+    let launcher = app.state::<Launcher>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(paths) = launcher.paths() else {
+            return Ok(true);
+        };
+        let res = resources(&app)?;
+        let stamp = read_stamp(paths);
+        Ok(parts_ok(paths, &res, &stamp) && chat_ok(paths, &res, &stamp))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn provision(
+    app: tauri::AppHandle,
+    on_event: Channel<ProvisionEvent>,
+) -> Result<(), String> {
+    let launcher = app.state::<Launcher>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(paths) = launcher.paths() else {
+            return Ok(());
+        };
+        run(&app, paths, &on_event)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn run(
+    app: &tauri::AppHandle,
+    paths: &Paths,
+    channel: &Channel<ProvisionEvent>,
+) -> Result<(), String> {
+    let provisioner = app.state::<Provisioner>();
+    let _guard = provisioner.run.lock().unwrap();
+    let res = resources(app)?;
+    std::fs::create_dir_all(paths.data()).map_err(|e| format!("could not create app data: {e}"))?;
+    let mut stamp = read_stamp(paths);
+    if !parts_ok(paths, &res, &stamp) {
+        provision_parts(&provisioner, paths, &res, channel)?;
+        stamp.lock = res.lock_hash.clone();
+        stamp.wheel = res.wheel_hash.clone();
+        write_stamp(paths, &stamp)?;
+    }
+    if !chat_ok(paths, &res, &stamp) {
+        provision_chat(&provisioner, paths, &res, channel)?;
+        stamp.node = NODE_VERSION.into();
+        stamp.adapters = adapter_pins();
+        stamp.adapter_lock = res.adapter_lock_hash.clone();
+        write_stamp(paths, &stamp)?;
+    }
+    Ok(())
+}
+
+/// uv, contained: managed Python installs, the cache, and all discovery kept
+/// inside app data (cwd included, so uv never finds a stray pyproject).
+fn uv(paths: &Paths) -> Result<Command, String> {
+    let mut command = Command::new(uv_sidecar()?);
+    command
+        .env("UV_PYTHON_INSTALL_DIR", paths.python_dir())
+        .env("UV_CACHE_DIR", paths.uv_cache())
+        .env("UV_NO_CONFIG", "1")
+        .env("UV_NO_PROGRESS", "1")
+        .current_dir(paths.data());
+    Ok(command)
+}
+
+fn provision_parts(
+    provisioner: &Provisioner,
+    paths: &Paths,
+    res: &Resources,
+    channel: &Channel<ProvisionEvent>,
+) -> Result<(), String> {
+    stage(channel, "python");
+    let mut install = uv(paths)?;
+    install.args(["python", "install", PYTHON_VERSION]);
+    run_step(provisioner, channel, install, "the Python download")?;
+
+    // Always rebuilt from scratch: a stale or half-installed venv repairs by
+    // deletion, never by patching.
+    if paths.venv().exists() {
+        std::fs::remove_dir_all(paths.venv())
+            .map_err(|e| format!("could not clear the old environment: {e}"))?;
+    }
+    let mut venv = uv(paths)?;
+    venv.arg("venv")
+        .arg(paths.venv())
+        .args(["--python", PYTHON_VERSION, "--managed-python"]);
+    run_step(provisioner, channel, venv, "the environment setup")?;
+
+    stage(channel, "deps");
+    let mut sync = uv(paths)?;
+    sync.args(["pip", "sync", "--python"])
+        .arg(paths.venv_python())
+        .arg(&res.lock);
+    run_step(provisioner, channel, sync, "the CAD engine download")?;
+
+    let mut wheel = uv(paths)?;
+    wheel
+        .args(["pip", "install", "--no-deps", "--python"])
+        .arg(paths.venv_python())
+        .arg(&res.wheel);
+    run_step(provisioner, channel, wheel, "the nurb install")?;
+
+    stage(channel, "warmup");
+    let mut warmup = Command::new(paths.venv_python());
+    // The first OCCT import is the slow one; do it here, never on the first
+    // project open.
+    warmup.args(["-c", "import build123d, nurb"]);
+    run_step(provisioner, channel, warmup, "the CAD engine warmup")?;
+    // Same tradeoff as the npm cache below: ~480 MB that only speeds up a
+    // reinstall, on a machine that just proved it can download the wheels.
+    let _ = std::fs::remove_dir_all(paths.uv_cache());
+    Ok(())
+}
+
+fn provision_chat(
+    provisioner: &Provisioner,
+    paths: &Paths,
+    res: &Resources,
+    channel: &Channel<ProvisionEvent>,
+) -> Result<(), String> {
+    stage(channel, "chat");
+    let (arch, sha) = NODE_SHA256
+        .iter()
+        .find(|(arch, _)| *arch == std::env::consts::ARCH)
+        .ok_or_else(|| format!("unsupported architecture: {}", std::env::consts::ARCH))?;
+    let arch = if *arch == "aarch64" { "arm64" } else { "x64" };
+    let tarball_name = format!("node-{NODE_VERSION}-darwin-{arch}.tar.xz");
+    let tarball = paths.data().join(&tarball_name);
+    let mut download = Command::new("/usr/bin/curl");
+    download
+        .args(["-fSL", "--retry", "3", "-o"])
+        .arg(&tarball)
+        .arg(format!(
+            "https://nodejs.org/dist/{NODE_VERSION}/{tarball_name}"
+        ));
+    run_step(provisioner, channel, download, "the chat runtime download")?;
+    let bytes =
+        std::fs::read(&tarball).map_err(|e| format!("could not read {tarball_name}: {e}"))?;
+    if format!("{:x}", Sha256::digest(&bytes)) != *sha {
+        let _ = std::fs::remove_file(&tarball);
+        return Err("the chat runtime download did not match its checksum".into());
+    }
+    if paths.node_dir().exists() {
+        std::fs::remove_dir_all(paths.node_dir())
+            .map_err(|e| format!("could not clear the old runtime: {e}"))?;
+    }
+    std::fs::create_dir_all(paths.node_dir()).map_err(|e| e.to_string())?;
+    let mut extract = Command::new("/usr/bin/tar");
+    extract
+        .arg("-xJf")
+        .arg(&tarball)
+        .arg("-C")
+        .arg(paths.node_dir())
+        .args(["--strip-components", "1"]);
+    run_step(provisioner, channel, extract, "the chat runtime unpack")?;
+    let _ = std::fs::remove_file(&tarball);
+
+    if paths.adapters().exists() {
+        std::fs::remove_dir_all(paths.adapters())
+            .map_err(|e| format!("could not clear the old agents: {e}"))?;
+    }
+    std::fs::create_dir_all(paths.adapters())
+        .map_err(|e| format!("could not create the agent environment: {e}"))?;
+    std::fs::copy(&res.adapter_package, paths.adapters().join("package.json"))
+        .map_err(|e| format!("could not stage the agent manifest: {e}"))?;
+    std::fs::copy(
+        &res.adapter_lock,
+        paths.adapters().join("package-lock.json"),
+    )
+    .map_err(|e| format!("could not stage the agent lock: {e}"))?;
+
+    let mut install = Command::new(paths.node_bin());
+    install
+        .arg(paths.npm_cli())
+        .args(["ci", "--no-fund", "--no-audit"])
+        .arg("--cache")
+        .arg(paths.adapters().join("npm-cache"))
+        .current_dir(paths.adapters());
+    run_step(provisioner, channel, install, "the agent install")?;
+    // The npm cache is ~250 MB that only helps a reinstall, and adapter pins
+    // change with app updates, not day to day.
+    let _ = std::fs::remove_dir_all(paths.adapters().join("npm-cache"));
+    Ok(())
+}
+
+fn stage(channel: &Channel<ProvisionEvent>, stage: &'static str) {
+    let _ = channel.send(ProvisionEvent::Stage { stage });
+}
+
+/// Spawns one provisioning child in its own process group (killed on app
+/// exit like every other child), streaming its output lines to the setup
+/// screen and keeping a short tail for the error message.
+fn run_step(
+    provisioner: &Provisioner,
+    channel: &Channel<ProvisionEvent>,
+    mut command: Command,
+    what: &str,
+) -> Result<(), String> {
+    if provisioner.shutting_down.load(Ordering::SeqCst) {
+        return Err("app is shutting down".into());
+    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .process_group(0);
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("could not start {what}: {e}"))?;
+    let pgid = child.id() as i32;
+    *provisioner.pgid.lock().unwrap() = Some(pgid);
+    // A shutdown can land between the check above and the spawn; now that the
+    // pgid is published, re-check so that window cannot leak the child.
+    if provisioner.shutting_down.load(Ordering::SeqCst) {
+        unsafe {
+            libc::killpg(pgid, libc::SIGTERM);
+        }
+    }
+    let tail = Arc::new(Mutex::new(VecDeque::<String>::new()));
+    let readers = [
+        child.stdout.take().map(|out| {
+            stream_lines(
+                Box::new(out) as Box<dyn std::io::Read + Send>,
+                channel.clone(),
+                tail.clone(),
+            )
+        }),
+        child.stderr.take().map(|err| {
+            stream_lines(
+                Box::new(err) as Box<dyn std::io::Read + Send>,
+                channel.clone(),
+                tail.clone(),
+            )
+        }),
+    ];
+    let status = child.wait();
+    *provisioner.pgid.lock().unwrap() = None;
+    for reader in readers.into_iter().flatten() {
+        let _ = reader.join();
+    }
+    let status = status.map_err(|e| format!("{what} failed: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else if provisioner.shutting_down.load(Ordering::SeqCst) {
+        Err("app is shutting down".into())
+    } else {
+        let lines: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
+        Err(format!("{what} failed: {}", lines.join(" / ")))
+    }
+}
+
+fn stream_lines(
+    reader: Box<dyn std::io::Read + Send>,
+    channel: Channel<ProvisionEvent>,
+    tail: Arc<Mutex<VecDeque<String>>>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        for line in BufReader::new(reader).lines() {
+            let Ok(line) = line else { break };
+            // Not eprintln!, which panics on a broken stderr pipe.
+            let _ = writeln!(std::io::stderr(), "[provision] {line}");
+            if line.trim().is_empty() {
+                continue;
+            }
+            let mut tail = tail.lock().unwrap();
+            if tail.len() >= 4 {
+                tail.pop_front();
+            }
+            tail.push_back(line.clone());
+            drop(tail);
+            let _ = channel.send(ProvisionEvent::Detail { line });
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+    use std::time::Duration;
+
+    use super::{file_hash, occt_version, probe_version, wheel_version};
+
+    #[test]
+    fn wheel_filename_yields_the_bundled_version() {
+        assert_eq!(
+            wheel_version("nurb-0.10.0-py3-none-any.whl"),
+            Some("0.10.0")
+        );
+        assert_eq!(wheel_version("requirements.lock"), None);
+        assert_eq!(wheel_version("nurb-0.10.0.tar.gz"), None);
+    }
+
+    #[test]
+    fn occt_version_comes_from_the_ocp_pin() {
+        let lock = "build123d==0.10.0 \\\n    --hash=sha256:aa\ncadquery-ocp-novtk==7.9.3.1.1 \\\n    --hash=sha256:bb\n";
+        assert_eq!(occt_version(lock), Some("7.9.3".into()));
+        assert_eq!(occt_version("trimesh==4.0.0"), None);
+    }
+
+    #[test]
+    fn resource_hash_changes_with_same_named_wheel_contents() {
+        let dir = std::env::temp_dir().join(format!("nurb-wheel-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wheel = dir.join("nurb-0.10.0-py3-none-any.whl");
+        std::fs::write(&wheel, b"first build").unwrap();
+        let first = file_hash(&wheel, "wheel").unwrap();
+        std::fs::write(&wheel, b"changed build").unwrap();
+        let second = file_hash(&wheel, "wheel").unwrap();
+
+        assert_ne!(first, second);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn health_probe_requires_the_expected_version_and_cannot_hang() {
+        let dir = std::env::temp_dir();
+        let mut good = Command::new("/bin/sh");
+        good.args(["-c", "printf 'adapter 1.2.3\\n'"]);
+        assert!(probe_version(good, &dir, "1.2.3", Duration::from_secs(1)));
+
+        let mut wrong = Command::new("/bin/sh");
+        wrong.args(["-c", "printf '9.9.9\\n'"]);
+        assert!(!probe_version(wrong, &dir, "1.2.3", Duration::from_secs(1)));
+
+        let mut hung = Command::new("/bin/sh");
+        hung.args(["-c", "sleep 5"]);
+        assert!(!probe_version(
+            hung,
+            &dir,
+            "1.2.3",
+            Duration::from_millis(50)
+        ));
+    }
+}

@@ -1,0 +1,1512 @@
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url(/vendor/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf) format("truetype");
+  font-weight: 100 800;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* The same palette as nurb.dev and the viewer, so the embedded viewer iframe
+   and the shell around it read as one surface. */
+:root {
+  --bg: #16181d;
+  --panel: #1d2027;
+  --panel2: #191c22;
+  --line: #2b2f38;
+  --hover: #232630;
+  --active: #2c313b;
+  --text: #e6e8ec;
+  --dim: #868d9b;
+  --dimmer: #565d6b;
+  --accent: #6ee7a8;
+  --amber: #f0c274;
+  --bad: #f87171;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font: 13px/1.5 var(--mono);
+  color: var(--text);
+  background-color: var(--bg);
+}
+
+::selection {
+  background: rgba(110, 231, 168, 0.25);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* This is an app, not a document. Dragging across the rail or the toolbar should
+   move the pointer, not smear a selection over every label it passes. Only the
+   conversation, the license texts, and editable fields opt back in. */
+body {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.chat-transcript,
+.about-body pre,
+input,
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 220px minmax(280px, 1fr) minmax(0, 2.2fr);
+  height: 100vh;
+}
+
+.rail {
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* The window titlebar is an overlay: this empty strip hosts the traffic
+   lights and doubles as the drag region. The brand lives in the dock icon
+   and the setup screen, not the chrome. */
+.rail-title {
+  flex: none;
+  height: 36px;
+  margin: 0 -12px;
+}
+
+.rail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--dimmer);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+
+.rail-button {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.rail-button:hover {
+  color: var(--text);
+  background: var(--active);
+}
+
+.name-form {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.name-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: none;
+}
+
+.name-input:focus {
+  border-color: rgba(110, 231, 168, 0.45);
+}
+
+.projects {
+  flex: 1;
+  min-height: 0;
+}
+
+.row-icon {
+  flex: none;
+  color: var(--dimmer);
+}
+
+/* Three cubes carry less ink per stroke than one, so the assembly mark is drawn a
+   step brighter and a pixel larger to read at the same weight as a part's. The
+   negative margins hold its footprint at 12px, keeping every name in one column.
+   Above the selected rule, which is the same specificity and has to win. */
+.part-row.assembly .row-icon {
+  color: var(--dim);
+  margin: 0 -0.5px;
+}
+
+.part-row.selected .row-icon {
+  color: var(--accent);
+}
+
+.project-row.active .row-icon {
+  color: var(--dim);
+}
+
+.project-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.project-row:hover {
+  background: var(--hover);
+}
+
+.project-row.active {
+  background: var(--active);
+}
+
+.project-row.missing {
+  color: var(--dimmer);
+  cursor: default;
+}
+
+.project-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag {
+  color: var(--dimmer);
+  font-size: 11px;
+}
+
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+.context-menu {
+  position: fixed;
+  min-width: 170px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.context-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.context-item:hover {
+  background: var(--hover);
+}
+
+.context-item.danger {
+  color: var(--bad);
+}
+
+.context-hint {
+  font-size: 10px;
+  color: var(--dimmer);
+}
+
+/* Above the hint and in the warning colour: what the delete breaks outranks the
+   reassurance that the files are recoverable. */
+.context-warn {
+  font-size: 10px;
+  color: var(--amber);
+  text-align: left;
+}
+
+.parts {
+  list-style: none;
+  margin: 2px 0 8px;
+  padding: 0 0 0 12px;
+}
+
+.part-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border-left: 2px solid transparent;
+  border-radius: 0 5px 5px 0;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.part-row:hover {
+  background: var(--hover);
+}
+
+/* A placement, shown under whichever end of it is selected. Indented past the part
+   rows' icon column so it reads as belonging to the row above rather than as another
+   part, and clickable, so the rail walks a placement in both directions. */
+.part-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 9px;
+  padding: 2px 7px 2px 9px;
+  /* A guide rule, because indentation alone left these reading as ordinary part
+     rows one notch over. Consecutive links draw one continuous line down the group. */
+  border-left: 1px solid var(--line);
+  border-radius: 0 5px 5px 0;
+  font-size: 11px;
+  color: var(--dimmer);
+  cursor: pointer;
+}
+
+.part-link:hover {
+  background: var(--hover);
+  color: var(--dim);
+}
+
+.part-add {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 3px 7px;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0 5px 5px 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--dimmer);
+  cursor: pointer;
+  text-align: left;
+}
+
+.part-add:hover {
+  background: var(--hover);
+  color: var(--dim);
+}
+
+/* The accent left edge is the viewer's own "this one is live" mark. */
+.part-row.selected {
+  color: var(--text);
+  background: var(--active);
+  border-left-color: var(--accent);
+}
+
+.part-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.part-error {
+  color: var(--bad);
+  font-weight: 600;
+}
+
+.part-busy {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  flex: none;
+  animation: part-busy-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes part-busy-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.rail-add {
+  margin-top: 8px;
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.rail-add:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.agents {
+  margin-top: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.agent-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px;
+  border-left: 2px solid transparent;
+  border-radius: 0 6px 6px 0;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.agent-row:hover {
+  background: var(--hover);
+}
+
+/* The agent new conversations use. Same idiom as a selected part row, because
+   it answers the same question: which one is live right now. */
+.agent-row.selected {
+  color: var(--text);
+  background: var(--active);
+  border-left-color: var(--accent);
+}
+
+.agent-check {
+  flex: none;
+  color: var(--accent);
+}
+
+/* Faded rather than hidden, so the names stay on one column. Opacity, not
+   visibility, per this app's rule about keeping things in the AX tree. */
+.agent-check.hidden {
+  opacity: 0;
+}
+
+.agent-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-state {
+  color: var(--dimmer);
+  font-size: 11px;
+}
+
+.agent-more {
+  margin-top: 4px;
+  padding: 3px 7px;
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  color: var(--dimmer);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.agent-more:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.agent-signin {
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(110, 231, 168, 0.35);
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.agent-signin:hover:not(:disabled) {
+  background: rgba(110, 231, 168, 0.1);
+}
+
+.agent-signin:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.rail-error {
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--bad);
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  border-radius: 6px;
+  overflow-wrap: break-word;
+}
+
+.chat {
+  background: var(--panel2);
+  border-right: 1px solid var(--line);
+  padding: 0 14px 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Compound selector: .chat sets display:flex above, and at equal specificity
+   the later rule wins. */
+.chat.chat-hidden {
+  display: none;
+}
+
+.chat-header {
+  flex: none;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 -14px 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--dimmer);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.chat-header-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-header-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Switching agents starts a new conversation, so it belongs up here beside
+   "start fresh" rather than in the composer, where model and effort apply to
+   the conversation already running. */
+.chat-switcher {
+  position: relative;
+  flex: none;
+}
+
+.chat-switcher-button {
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  margin-left: -2px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.chat-switcher-button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--active);
+}
+
+.chat-switcher-button:disabled {
+  cursor: default;
+}
+
+.chat-switcher-away {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+}
+
+.chat-switcher-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 21;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.chat-switcher-item {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.chat-switcher-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.chat-switcher-item.current {
+  color: var(--text);
+  background: var(--active);
+}
+
+.chat-switcher-note {
+  margin: 4px 4px 2px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--dimmer);
+}
+
+.chat-fresh {
+  background: none;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--dimmer);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  padding: 2px 5px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex: none;
+}
+
+.chat-fresh:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--active);
+}
+
+.chat-fresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The transcript reaches the column edge so its scrollbar rides the border,
+   with padding keeping the bar off the text. */
+.chat-transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-right: -14px;
+  padding-right: 12px;
+  padding-bottom: 10px;
+}
+
+.chat-empty,
+.chat-status {
+  color: var(--dim);
+  font: 13px/1.55 var(--sans);
+}
+
+.chat-status {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dimmer);
+}
+
+/* Prose is sans, like nurb.dev's chat demo; chrome stays mono. */
+.chat-user {
+  align-self: flex-end;
+  max-width: 90%;
+  padding: 7px 10px;
+  color: var(--text);
+  background: rgba(110, 231, 168, 0.1);
+  border: 1px solid rgba(110, 231, 168, 0.28);
+  border-radius: 10px 10px 4px 10px;
+  font: 13px/1.55 var(--sans);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.chat-user-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chat-user-file {
+  font-size: 11px;
+  color: var(--dim);
+  border: 1px solid rgba(110, 231, 168, 0.28);
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+
+/* Agent prose arrives as markdown; Markdown.tsx supplies the structure, so
+   no pre-wrap here or every source newline would double up. */
+.chat-agent {
+  font: 13px/1.55 var(--sans);
+  overflow-wrap: break-word;
+}
+
+.chat-agent > * {
+  margin: 0;
+}
+
+.chat-agent > * + * {
+  margin-top: 8px;
+}
+
+.chat-agent .md-heading {
+  font-weight: 600;
+}
+
+.chat-agent ul,
+.chat-agent ol {
+  padding-left: 20px;
+}
+
+.chat-agent li + li {
+  margin-top: 3px;
+}
+
+.chat-agent code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.chat-agent pre {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font: 12px/1.5 var(--mono);
+}
+
+.chat-agent pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.chat-working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.chat-working-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: chat-working-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes chat-working-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.chat-thought {
+  font-size: 11px;
+  color: var(--dimmer);
+}
+
+.chat-thought summary {
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+
+.chat-thought summary:hover {
+  color: var(--dim);
+}
+
+.chat-thought div {
+  margin-top: 4px;
+  color: var(--dim);
+  font: 12px/1.5 var(--sans);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.chat-tool {
+  padding: 5px 9px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+/* A card with details is a <details>; the row layout lives on whichever
+   element holds the title and status. */
+.chat-tool:not(.expandable),
+.chat-tool summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.chat-tool summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.chat-tool summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-tool summary::before {
+  content: "▸";
+  flex: none;
+  font-size: 10px;
+  color: var(--dimmer);
+}
+
+.chat-tool.expandable[open] summary::before {
+  content: "▾";
+}
+
+.chat-tool summary:hover .chat-tool-title {
+  color: var(--text);
+}
+
+.chat-tool-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.chat-tool-detail pre {
+  margin: 0;
+  font: 11px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.chat-tool-input {
+  color: var(--dimmer);
+}
+
+.chat-tool-output {
+  color: var(--dim);
+}
+
+.chat-tool-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+.chat-tool-status {
+  color: var(--amber);
+  flex: none;
+}
+
+.chat-tool.pending .chat-tool-status {
+  color: var(--dimmer);
+}
+
+.chat-tool.completed .chat-tool-status {
+  color: var(--accent);
+}
+
+.chat-tool.failed .chat-tool-status {
+  color: var(--bad);
+}
+
+.chat-plan {
+  margin: 0;
+  padding: 6px 9px 6px 26px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--dim);
+}
+
+.chat-plan li::marker {
+  color: var(--dimmer);
+}
+
+.chat-plan li.in_progress {
+  color: var(--text);
+}
+
+.chat-plan li.completed {
+  color: var(--dimmer);
+  text-decoration: line-through;
+}
+
+.chat-note {
+  font-size: 11px;
+  color: var(--bad);
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  padding: 6px 9px;
+  border-radius: 6px;
+  overflow-wrap: break-word;
+}
+
+.chat-auth {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--amber);
+  background: rgba(240, 194, 116, 0.08);
+  border: 1px solid rgba(240, 194, 116, 0.25);
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.chat-auth-button {
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: 1px solid rgba(240, 194, 116, 0.4);
+  background: none;
+  color: var(--amber);
+  cursor: pointer;
+}
+
+.chat-auth-button:hover:not(:disabled) {
+  background: rgba(240, 194, 116, 0.12);
+}
+
+.chat-auth-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.chat-permission {
+  padding: 8px 10px;
+  background: rgba(240, 194, 116, 0.06);
+  border: 1px solid rgba(240, 194, 116, 0.3);
+  border-radius: 8px;
+}
+
+.chat-permission-title {
+  font-size: 12px;
+  margin-bottom: 8px;
+  overflow-wrap: break-word;
+}
+
+.chat-permission-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-permission-button {
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.chat-permission-button:hover {
+  color: var(--text);
+  background: var(--active);
+}
+
+.chat-permission-button.allow_once,
+.chat-permission-button.allow_always {
+  border-color: rgba(110, 231, 168, 0.35);
+  color: var(--accent);
+}
+
+.chat-permission-button.allow_once:hover,
+.chat-permission-button.allow_always:hover {
+  background: rgba(110, 231, 168, 0.1);
+  color: var(--accent);
+}
+
+/* One container in the Claude/ChatGPT composer shape: chips, then the bare
+   textarea, then a control row, all inside the same bordered box. */
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  padding: 8px 8px 6px;
+}
+
+.chat-composer:focus-within {
+  border-color: rgba(110, 231, 168, 0.45);
+}
+
+/* An OS file drag is anywhere over the window; the dashed box says where it
+   will land. */
+.chat-composer.dropping {
+  border-style: dashed;
+  border-color: rgba(110, 231, 168, 0.65);
+}
+
+.chat-composer-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.chat-attach {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  border: none;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.chat-attach:hover {
+  color: var(--text);
+  background: var(--active);
+}
+
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chat-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  font-size: 11px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  background: var(--panel);
+}
+
+.chat-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-attachment-remove {
+  font: inherit;
+  border: none;
+  background: none;
+  color: var(--dimmer);
+  cursor: pointer;
+  padding: 0;
+}
+
+.chat-attachment-remove:hover {
+  color: var(--text);
+}
+
+.chat-input {
+  min-width: 0;
+  resize: none;
+  font: 13px/1.5 var(--sans);
+  color: var(--text);
+  background: none;
+  border: none;
+  padding: 2px 3px;
+  outline: none;
+}
+
+.chat-input::placeholder {
+  color: var(--dimmer);
+}
+
+/* The model picker sits between the paperclip and send, quiet until wanted. */
+.chat-config {
+  position: relative;
+  margin-right: auto;
+  margin-left: 4px;
+}
+
+.chat-config-button {
+  font: inherit;
+  font-size: 11px;
+  color: var(--dim);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 6px;
+  cursor: pointer;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-config-button:hover {
+  color: var(--text);
+  background: var(--active);
+}
+
+.chat-config-away {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+}
+
+.chat-config-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 2;
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+}
+
+.chat-config-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+.chat-config-row select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
+.chat-config-row select:disabled {
+  color: var(--dimmer);
+}
+
+.chat-config-note {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--dimmer);
+}
+
+.chat-send {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 7px;
+  border: none;
+  background: var(--accent);
+  color: #10281b;
+  cursor: pointer;
+  flex: none;
+}
+
+.chat-send:hover {
+  background: #85f0b8;
+}
+
+/* The same slot flips to "stop" while a turn runs; amber, not alarming. */
+.chat-send.chat-stop {
+  background: none;
+  border: 1px solid rgba(240, 194, 116, 0.4);
+  color: var(--amber);
+}
+
+.chat-send.chat-stop:hover {
+  background: rgba(240, 194, 116, 0.12);
+}
+
+.placeholder {
+  margin: auto;
+  color: var(--dimmer);
+  font-size: 12px;
+}
+
+.viewer {
+  min-width: 0;
+  display: flex;
+  background: var(--bg);
+}
+
+.viewer-frame {
+  flex: 1;
+  border: none;
+  width: 100%;
+  height: 100%;
+}
+
+.viewer-status {
+  margin: auto;
+  color: var(--dim);
+  font-size: 13px;
+  max-width: 40ch;
+  text-align: center;
+  white-space: pre-wrap;
+}
+
+.setup {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.setup-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  max-width: 46ch;
+  text-align: center;
+}
+
+.setup-logo {
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+
+.setup-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.setup-stage {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.setup-bar {
+  width: 280px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.setup-bar-fill {
+  width: 40%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: setup-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes setup-slide {
+  0% {
+    margin-left: -40%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+
+.setup-detail {
+  color: var(--dimmer);
+  font-size: 11px;
+  min-height: 16px;
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.setup-note {
+  color: var(--dim);
+  font: 13px/1.6 var(--sans);
+}
+
+.setup-error {
+  color: var(--bad);
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-width: 46ch;
+}
+
+.setup-retry {
+  border: 1px solid rgba(110, 231, 168, 0.35);
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.setup-retry:hover {
+  background: rgba(110, 231, 168, 0.1);
+}
+
+/* ---- rail footer: version, update, about ---- */
+
+.rail-foot {
+  margin-top: auto;
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.rail-version {
+  background: none;
+  border: none;
+  color: var(--dimmer);
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+
+.rail-version:hover {
+  color: var(--dim);
+}
+
+.rail-update {
+  border: 1px solid rgba(110, 231, 168, 0.35);
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.rail-update:hover:not(:disabled) {
+  background: rgba(110, 231, 168, 0.1);
+}
+
+.rail-update:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---- about and third-party notices ---- */
+
+.about {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: rgba(10, 11, 14, 0.7);
+  display: grid;
+  place-items: center;
+}
+
+.about-card {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  width: min(560px, calc(100vw - 80px));
+  max-height: min(640px, calc(100vh - 80px));
+  overflow-y: auto;
+  padding: 24px 28px;
+}
+
+.about-close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.about-close:hover {
+  color: var(--text);
+  background: var(--active);
+}
+
+.about-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.about-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.about-versions {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.about-body {
+  font: 13px/1.6 var(--sans);
+  color: var(--text);
+}
+
+.about-body h3 {
+  font: 11px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dimmer);
+  margin: 18px 0 6px;
+}
+
+.about-links {
+  display: flex;
+  gap: 16px;
+  font: 12px var(--mono);
+  margin-bottom: 12px;
+}
+
+.about-body a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.about-body a:hover {
+  text-decoration: underline;
+}
+
+.about-body details {
+  margin: 8px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.about-body summary {
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.about-body pre {
+  font: 11px/1.5 var(--mono);
+  color: var(--dim);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+/* ---- the "need another agent?" help ---- */
+
+.about-card.agents-help {
+  width: min(440px, calc(100vw - 80px));
+}
+
+.agents-help .about-title {
+  margin-bottom: 10px;
+}
+
+.agents-help-agent p {
+  margin-bottom: 4px;
+}
+
+/* An installer command to paste, not a license to skim: box it and keep the
+   text bright enough to read as the point of the modal. */
+.agents-help-agent pre {
+  font: 12px/1.5 var(--mono);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 14px;
+}

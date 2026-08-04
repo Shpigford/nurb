@@ -79,12 +79,12 @@ def test_asking_for_a_busy_port_is_an_error_not_a_suggestion():
 # --- day one ------------------------------------------------------------------
 
 
-def _new(tmp_path, name="thing"):
+def _new(tmp_path, name="thing", root=None):
     import argparse, os
     was = os.getcwd()
     os.chdir(tmp_path)
     try:
-        cli.cmd_new(argparse.Namespace(name=name))
+        cli.cmd_new(argparse.Namespace(name=name, root=root))
     finally:
         os.chdir(was)
 
@@ -97,14 +97,58 @@ def test_a_fresh_project_gets_a_pointer_at_the_doctrine(tmp_path, capsys):
     assert shim.is_file()
     assert "nurb rules" in shim.read_text(encoding="utf-8")
     assert "nurb check" in shim.read_text(encoding="utf-8")
-    assert "AGENTS.md" in capsys.readouterr().out  # it says what it wrote
+    # Claude Code does not read AGENTS.md, so fresh multi-agent projects also
+    # carry its native pointer without duplicating the doctrine.
+    assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
+    output = capsys.readouterr().out
+    assert "AGENTS.md" in output  # it says what it wrote
+    assert "CLAUDE.md" in output
 
 
 def test_a_second_part_does_not_mention_the_shim_again(tmp_path, capsys):
     _new(tmp_path, "one")
     capsys.readouterr()
     _new(tmp_path, "two")
-    assert "AGENTS.md" not in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "AGENTS.md" not in output
+    assert "CLAUDE.md" not in output
+
+
+def test_an_old_generated_agents_shim_gets_a_claude_pointer(tmp_path):
+    from nurb import __file__ as pkg
+
+    current = (pathlib.Path(pkg).parent / "agents.md").read_text(encoding="utf-8")
+    shim = current.replace(
+        "**Run `nurb rules` before you design.**",
+        "**Run `nurb rules` before modelling.**",
+    )
+    assert shim != current
+    (tmp_path / "AGENTS.md").write_text(shim, encoding="utf-8")
+
+    _new(tmp_path)
+
+    assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "@AGENTS.md\n"
+
+
+def test_a_custom_agents_file_does_not_grow_a_claude_pointer(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("# my harness\n", encoding="utf-8")
+
+    _new(tmp_path)
+
+    assert not (tmp_path / "CLAUDE.md").exists()
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "# my harness\n"
+
+
+def test_an_explicit_root_never_seeds_an_ancestor_project(tmp_path):
+    parent = tmp_path / "existing"
+    child = parent / "new-project"
+    (parent / "parts").mkdir(parents=True)
+    child.mkdir()
+
+    _new(child, "widget", root=child)
+
+    assert (child / "parts" / "widget.py").is_file()
+    assert not (parent / "parts" / "widget.py").exists()
 
 
 def test_a_harness_file_of_the_user_s_own_is_never_touched(tmp_path, capsys):
@@ -350,6 +394,20 @@ def test_skill_frontmatter_version_is_the_package_version():
     frontmatter = shipped.split("---\n")[1].splitlines()
     assert "metadata:" in frontmatter
     assert f'  version: "{version}"' in frontmatter
+
+
+def test_desktop_app_version_is_the_package_version():
+    """The desktop app and the engine release together as one version: the DMG a
+    user downloads and the wheel it provisions carry the same number, and the
+    updater feed advertises engine releases. A pyproject bump without the matching
+    tauri.conf.json bump must go red here rather than ship a mismatched pair."""
+    import json
+    import tomllib
+
+    repo = pathlib.Path(__file__).parents[1]
+    version = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    conf = json.loads((repo / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+    assert conf["version"] == version
 
 
 def test_skill_sync_rewrites_a_stale_copy_and_writes_the_shared_one_once(tmp_path, monkeypatch, capsys):

@@ -1,0 +1,1074 @@
+//! The chat column's ACP client: one agent adapter process per chat session
+//! (Claude Code or Codex, see agents.rs), spoken to over stdio JSON-RPC,
+//! streaming updates to the webview through a Tauri ipc channel.
+
+mod events;
+mod policy;
+
+use std::collections::HashMap;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use agent_client_protocol::schema::v1::ErrorCode;
+use agent_client_protocol::schema::v1::{
+    CancelNotification, ContentBlock, ImageContent, InitializeRequest, ListSessionsRequest,
+    LoadSessionRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
+    SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions, SessionId,
+    SessionNotification, SetSessionConfigOptionRequest, TextContent,
+};
+use agent_client_protocol::schema::ProtocolVersion;
+use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ByteStreams, Client, ConnectionTo};
+use tauri::ipc::Channel;
+use tokio::sync::oneshot;
+
+use crate::agents::AgentKind;
+use crate::prefs::{ConfigChoice, ConfigRow, PrefStore};
+pub(crate) use events::ChatEvent;
+use events::{forward, permission_choice, permission_title, wire_string};
+
+type Pending = Arc<Mutex<HashMap<u32, oneshot::Sender<RequestPermissionOutcome>>>>;
+
+pub struct Chats {
+    sessions: Mutex<HashMap<String, ChatSession>>,
+}
+
+struct ChatSession {
+    conn: ConnectionTo<Agent>,
+    session: SessionId,
+    project: PathBuf,
+    agent: AgentKind,
+    pending: Pending,
+    channel: Channel<ChatEvent>,
+    /// The model and effort this session is actually running on, as the agent
+    /// last reported them.
+    config: Mutex<Vec<ConfigRow>>,
+    pgid: i32,
+    /// Dropped (with the whole entry) to end the connection task, which kills
+    /// the adapter's process group.
+    _close: oneshot::Sender<()>,
+}
+
+impl Chats {
+    pub fn new() -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Synchronous kill of every adapter, for app exit where the async
+    /// teardown may never get to run.
+    pub fn shutdown(&self) {
+        let sessions = std::mem::take(&mut *self.sessions.lock().unwrap());
+        for session in sessions.values() {
+            unsafe {
+                libc::killpg(session.pgid, libc::SIGTERM);
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn start_chat(
+    app: tauri::AppHandle,
+    path: String,
+    agent: String,
+    on_event: Channel<ChatEvent>,
+    resume: Option<String>,
+) -> Result<String, String> {
+    let kind = AgentKind::parse(&agent)?;
+    let project = PathBuf::from(&path);
+    if !project.is_dir() {
+        return Err(format!("project folder missing: {}", project.display()));
+    }
+    let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+    let (ready_tx, ready_rx) = oneshot::channel();
+    let (close_tx, close_rx) = oneshot::channel();
+    tauri::async_runtime::spawn(run_chat(
+        app.clone(),
+        project.clone(),
+        kind,
+        resume,
+        on_event.clone(),
+        pending.clone(),
+        ready_tx,
+        close_tx,
+        close_rx,
+    ));
+    ready_rx
+        .await
+        .map_err(|_| format!("{} exited before it was ready", kind.label()))?
+        .map_err(|error| friendly(kind, error))
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionEntry {
+    id: String,
+    title: Option<String>,
+    updated_at: Option<String>,
+    part: Option<String>,
+    agent: &'static str,
+}
+
+/// The chat history for one project's rail: per agent, a short-lived adapter
+/// answers `session/list` and dies. Not polled; the rail refreshes itself
+/// from live chat events. One agent failing (Codex errors -32000 here when
+/// signed out; Claude's is a local read that works signed out) must not hide
+/// the other's history, so failures degrade to an empty list.
+#[tauri::command]
+pub async fn list_sessions(
+    app: tauri::AppHandle,
+    path: String,
+) -> Result<Vec<SessionEntry>, String> {
+    use tauri::Manager;
+    let project = PathBuf::from(&path);
+    let launcher = app.state::<crate::env::Launcher>().inner().clone();
+    // Every agent in parallel, skipping the native CLIs that are not on this
+    // machine: spawning those just to watch them fail is noise, where the
+    // adapters (always present once provisioned) fail informatively.
+    let checks: Vec<_> = crate::agents::ALL
+        .into_iter()
+        .filter(|kind| kind.native_command().is_none() || launcher.adapter_available(*kind))
+        .map(|kind| {
+            let launcher = launcher.clone();
+            let project = project.clone();
+            (
+                kind,
+                tauri::async_runtime::spawn(async move {
+                    agent_sessions(&launcher, kind, project).await
+                }),
+            )
+        })
+        .collect();
+    let mut sessions = Vec::new();
+    let mut configured = false;
+    for (kind, check) in checks {
+        let listed = check
+            .await
+            .unwrap_or_else(|error| Err(format!("session list task died: {error}")));
+        match listed {
+            Ok((list, config)) => {
+                configured |= !config.is_empty();
+                app.state::<PrefStore>().cache(kind.id(), config);
+                sessions.extend(list.into_iter().map(|session| (kind, session)))
+            }
+            Err(error) => {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[acp:{}] session list unavailable: {error}",
+                    kind.id()
+                );
+            }
+        }
+    }
+    // Chat columns mount before this returns, so tell the ones already on
+    // screen that their picker has lists now.
+    if configured {
+        use tauri::Emitter;
+        let _ = app.emit("agent-config", ());
+    }
+    // Newest first; ISO 8601 sorts lexicographically, absent timestamps sink.
+    sessions.sort_by(|a, b| b.1.updated_at.cmp(&a.1.updated_at));
+    let store = app.state::<crate::sessions::SessionStore>();
+    Ok(sessions
+        .into_iter()
+        .map(|(kind, session)| {
+            let id = wire_string(&session.session_id);
+            let part = store.part_of(&id, &project);
+            SessionEntry {
+                id,
+                title: session.title,
+                updated_at: session.updated_at,
+                part,
+                agent: kind.id(),
+            }
+        })
+        .collect())
+}
+
+/// One agent's sessions for one project, plus the lists its model picker
+/// draws. Pagination first: codex-acp can answer a cwd-filtered page as empty
+/// while `nextCursor` still points at more, so an empty page never means done,
+/// only an absent cursor does.
+async fn agent_sessions(
+    launcher: &crate::env::Launcher,
+    kind: AgentKind,
+    project: PathBuf,
+) -> Result<(Vec<agent_client_protocol::schema::v1::SessionInfo>, Vec<ConfigRow>), String> {
+    let (program, args) = launcher.adapter(kind);
+    let mut config = AcpAgentConfig::new(program).args(args);
+    if let Some(path) = launcher.adapter_path() {
+        config = config.env("PATH", path);
+    }
+    let agent = AcpAgent::new(config);
+    let (stdin, stdout, stderr, child) = agent
+        .spawn_process()
+        .map_err(|error| friendly(kind, error))?;
+    let pgid = child.id() as i32;
+    drain_stderr(kind, stderr);
+    let listed = tokio::time::timeout(
+        Duration::from_secs(60),
+        Client
+            .builder()
+            .on_receive_notification(
+                async move |_: SessionNotification, _cx| Ok(()),
+                agent_client_protocol::on_receive_notification!(),
+            )
+            .connect_with(
+                ByteStreams::new(stdin, stdout),
+                move |cx: ConnectionTo<Agent>| async move {
+                    let init = cx
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
+                    // Only a session knows what models the agent offers, and a
+                    // part's chat has no session until its first message. This
+                    // adapter is already up and paying for its own startup, and
+                    // a session that is never prompted writes no transcript, so
+                    // asking here is what lets the very first chat of a fresh
+                    // install open with a working picker. Failure (a signed-out
+                    // Codex answers -32000) just means no picker.
+                    let config = cx
+                        .send_request(NewSessionRequest::new(project.clone()))
+                        .block_task()
+                        .await
+                        .map(|session| rows(&session.config_options.unwrap_or_default()))
+                        .unwrap_or_default();
+                    if init.agent_capabilities.session_capabilities.list.is_none() {
+                        return Ok((Vec::new(), config));
+                    }
+                    let mut sessions = Vec::new();
+                    let mut cursor: Option<String> = None;
+                    for _ in 0..20 {
+                        let mut request = ListSessionsRequest::new().cwd(project.clone());
+                        request.cursor = cursor;
+                        let response = cx.send_request(request).block_task().await?;
+                        sessions.extend(response.sessions);
+                        cursor = response.next_cursor;
+                        if cursor.is_none() {
+                            break;
+                        }
+                    }
+                    Ok((sessions, config))
+                },
+            ),
+    )
+    .await;
+    reap(pgid, child).await;
+    listed
+        .map_err(|_| "timed out listing conversations".to_string())?
+        .map_err(|error| friendly(kind, error))
+}
+
+#[tauri::command]
+pub async fn send_prompt(
+    app: tauri::AppHandle,
+    session_id: String,
+    text: String,
+    part: Option<String>,
+    attachments: Vec<String>,
+) -> Result<String, String> {
+    use tauri::Manager;
+    let (conn, session, project, kind) = {
+        let sessions = app.state::<Chats>();
+        let sessions = sessions.sessions.lock().unwrap();
+        let chat = sessions.get(&session_id).ok_or("chat is not running")?;
+        (
+            chat.conn.clone(),
+            chat.session.clone(),
+            chat.project.clone(),
+            chat.agent,
+        )
+    };
+    // Remember which part was on screen for this session, so reopening it
+    // later can restore the viewer.
+    app.state::<crate::sessions::SessionStore>().record(
+        &session_id,
+        kind.id(),
+        &project,
+        part.clone(),
+    );
+    // Each chat column belongs to one part, and that identity travels with
+    // every turn, so "make the lip taller" lands on the right part. The
+    // server's real address matters too: without it the agent probes with
+    // lsof and can find another project's server (seen live: it told the
+    // user the wrong port). The audience line shapes the replies: the app's
+    // users are hobbyists, and phrasing like "parts/lid.py:5" in an answer
+    // is the file system leaking into a product that promises not to have
+    // one.
+    let project_name = project
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| project.display().to_string());
+    let server = app
+        .state::<crate::supervisor::Supervisor>()
+        .port(&project)
+        .map(|port| {
+            format!(
+                " This project's nurb dev server is already running at http://127.0.0.1:{port} and its viewer is on screen beside this chat; never start another one."
+            )
+        })
+        .unwrap_or_default();
+    let selected = part
+        .as_ref()
+        .map(|part| format!(" This conversation is about the part \"{part}\", which is on screen beside the chat."))
+        .unwrap_or_default();
+    let context = format!(
+        "Context: nurb project \"{project_name}\".{selected}{server} \
+        The user is a 3D-printing hobbyist, not a programmer, and the app hides all files and code: \
+        in your replies, talk about the part, its features, and its dimensions in plain language, and \
+        never mention file names, paths, line numbers, code, or Python. The viewer is built into this \
+        app and already shows the part, so never mention server addresses, ports, or URLs, and never \
+        tell the user to open one."
+    );
+    // User text first: the agent's session store titles a conversation from
+    // its first user text, and that should be the user's words, not the
+    // context block (seen live: the rail titled a chat "Context: nurb…").
+    let mut blocks = Vec::new();
+    if !text.trim().is_empty() {
+        blocks.push(ContentBlock::Text(TextContent::new(text)));
+    }
+    for path in &attachments {
+        blocks.push(attachment_block(std::path::Path::new(path))?);
+    }
+    blocks.push(ContentBlock::Text(TextContent::new(context)));
+    let response = conn
+        .send_request(PromptRequest::new(session, blocks))
+        .block_task()
+        .await;
+    // A dialog still open when its turn resolves belongs to no turn now: the
+    // UI clears it on its side, so answer it cancelled here too rather than
+    // leaving the oneshot pending for the life of the session.
+    {
+        let sessions = app.state::<Chats>();
+        let sessions = sessions.sessions.lock().unwrap();
+        if let Some(chat) = sessions.get(&session_id) {
+            let pending = std::mem::take(&mut *chat.pending.lock().unwrap());
+            for (id, reply) in pending {
+                let _ = reply.send(RequestPermissionOutcome::Cancelled);
+                let _ = chat.channel.send(ChatEvent::PermissionResolved { id });
+            }
+        }
+    }
+    Ok(wire_string(
+        &response.map_err(|error| friendly(kind, error))?.stop_reason,
+    ))
+}
+
+/// Photos and sketches travel embedded, because that is what the prompt's
+/// image capability carries; anything else (a mesh, a PDF) becomes a link the
+/// agent reads from disk itself.
+fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("not a file: {}", path.display()))?;
+    let mime = match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("gif") => Some("image/gif"),
+        Some("webp") => Some("image/webp"),
+        _ => None,
+    };
+    let Some(mime) = mime else {
+        return Ok(ContentBlock::ResourceLink(ResourceLink::new(
+            name,
+            format!("file://{}", path.display()),
+        )));
+    };
+    let data = std::fs::read(path).map_err(|e| format!("cannot read {name}: {e}"))?;
+    if data.len() > 10 * 1024 * 1024 {
+        return Err(format!("{name} is too large to attach (over 10MB)"));
+    }
+    use base64::Engine;
+    Ok(ContentBlock::Image(ImageContent::new(
+        base64::engine::general_purpose::STANDARD.encode(data),
+        mime,
+    )))
+}
+
+#[tauri::command]
+pub fn cancel_turn(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
+    use tauri::Manager;
+    let sessions = app.state::<Chats>();
+    let sessions = sessions.sessions.lock().unwrap();
+    let chat = sessions.get(&session_id).ok_or("chat is not running")?;
+    // Any permission dialog still open belongs to the cancelled turn: answer
+    // it cancelled and tell the UI to drop it.
+    let pending = std::mem::take(&mut *chat.pending.lock().unwrap());
+    for (id, reply) in pending {
+        let _ = reply.send(RequestPermissionOutcome::Cancelled);
+        let _ = chat.channel.send(ChatEvent::PermissionResolved { id });
+    }
+    chat.conn
+        .send_notification(CancelNotification::new(chat.session.clone()))
+        .map_err(|e| e.message)
+}
+
+#[tauri::command]
+pub fn respond_permission(
+    app: tauri::AppHandle,
+    session_id: String,
+    request_id: u32,
+    option_id: String,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let sessions = app.state::<Chats>();
+    let sessions = sessions.sessions.lock().unwrap();
+    let chat = sessions.get(&session_id).ok_or("chat is not running")?;
+    let reply = chat
+        .pending
+        .lock()
+        .unwrap()
+        .remove(&request_id)
+        .ok_or("that permission request is no longer open")?;
+    let _ = reply.send(RequestPermissionOutcome::Selected(
+        SelectedPermissionOutcome::new(option_id),
+    ));
+    Ok(())
+}
+
+/// ACP's config options, narrowed to the two the picker draws and put in the
+/// order they are applied. Matched on category rather than option id, because
+/// the ids differ per agent (Claude's `effort` is Codex's `reasoning_effort`).
+/// Anything that is not a select is dropped rather than half-rendered.
+fn rows(options: &[SessionConfigOption]) -> Vec<ConfigRow> {
+    crate::prefs::SHOWN
+        .iter()
+        .filter_map(|category| {
+            let option = options
+                .iter()
+                .find(|o| o.category.as_ref().is_some_and(|c| wire_string(c) == *category))?;
+            let SessionConfigKind::Select(select) = &option.kind else {
+                return None;
+            };
+            let choices = match &select.options {
+                SessionConfigSelectOptions::Ungrouped(list) => list.clone(),
+                SessionConfigSelectOptions::Grouped(groups) => {
+                    groups.iter().flat_map(|g| g.options.clone()).collect()
+                }
+                // The enum is non_exhaustive; a shape we cannot draw is no list.
+                _ => Vec::new(),
+            };
+            Some(ConfigRow {
+                id: wire_string(&option.id),
+                category: (*category).to_string(),
+                name: option.name.clone(),
+                value: wire_string(&select.current_value),
+                options: choices
+                    .into_iter()
+                    .map(|choice| ConfigChoice {
+                        value: wire_string(&choice.value),
+                        name: choice.name,
+                        description: choice.description,
+                    })
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+/// Put the user's remembered picks onto a session the moment it exists, before
+/// the first prompt can go out on the wrong model. A pick the agent no longer
+/// offers (a model dropped from an account's allowlist) is skipped, leaving the
+/// agent's own default in place.
+async fn apply_choices(
+    cx: &ConnectionTo<Agent>,
+    session: &SessionId,
+    mut current: Vec<ConfigRow>,
+    chosen: Vec<(String, String)>,
+) -> Vec<ConfigRow> {
+    for (category, value) in chosen {
+        // The pick is stored by category; this session's own id for it comes
+        // from the list the agent just handed us.
+        let Some(id) = current
+            .iter()
+            .find(|row| {
+                row.category == category
+                    && row.value != value
+                    && row.options.iter().any(|choice| choice.value == value)
+            })
+            .map(|row| row.id.clone())
+        else {
+            continue;
+        };
+        match cx
+            .send_request(SetSessionConfigOptionRequest::new(
+                session.clone(),
+                id.clone(),
+                value.as_str(),
+            ))
+            .block_task()
+            .await
+        {
+            // Setting the model rebuilds the effort list, so each answer
+            // replaces the whole set rather than patching one row.
+            Ok(response) => current = rows(&response.config_options),
+            Err(error) => {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[chat-config] could not set {id}={value}: {}",
+                    error.message
+                );
+            }
+        }
+    }
+    current
+}
+
+/// What the picker draws. A part's chat has no adapter until its first message,
+/// so with no session running this answers from the remembered lists.
+#[tauri::command]
+pub fn chat_config(
+    app: tauri::AppHandle,
+    agent: String,
+    session_id: Option<String>,
+) -> Result<Vec<ConfigRow>, String> {
+    use tauri::Manager;
+    let kind = AgentKind::parse(&agent)?;
+    if let Some(id) = session_id {
+        let sessions = app.state::<Chats>();
+        let sessions = sessions.sessions.lock().unwrap();
+        if let Some(chat) = sessions.get(&id) {
+            return Ok(chat.config.lock().unwrap().clone());
+        }
+    }
+    Ok(app.state::<PrefStore>().rows(kind.id()))
+}
+
+/// Remember a pick and, when a session is running, move it there now. The
+/// choice is stored either way, so it still lands on the next session if this
+/// chat has not started one yet. Addressed by category, since that is the key
+/// the picker and the store share; the agent's own option id comes from the
+/// live session's list.
+#[tauri::command]
+pub async fn set_chat_config(
+    app: tauri::AppHandle,
+    agent: String,
+    session_id: Option<String>,
+    category: String,
+    value: String,
+) -> Result<Vec<ConfigRow>, String> {
+    use tauri::Manager;
+    let kind = AgentKind::parse(&agent)?;
+    app.state::<PrefStore>()
+        .remember(kind.id(), &category, &value);
+    let live = session_id.and_then(|id| {
+        let sessions = app.state::<Chats>();
+        let sessions = sessions.sessions.lock().unwrap();
+        sessions.get(&id).and_then(|chat| {
+            let config_id = chat
+                .config
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|row| row.category == category)
+                .map(|row| row.id.clone())?;
+            Some((id.clone(), chat.conn.clone(), chat.session.clone(), config_id))
+        })
+    });
+    let Some((id, conn, session, config_id)) = live else {
+        return Ok(app.state::<PrefStore>().rows(kind.id()));
+    };
+    let response = conn
+        .send_request(SetSessionConfigOptionRequest::new(
+            session,
+            config_id,
+            value.as_str(),
+        ))
+        .block_task()
+        .await
+        .map_err(|error| friendly(kind, error))?;
+    let updated = rows(&response.config_options);
+    app.state::<PrefStore>().cache(kind.id(), updated.clone());
+    let sessions = app.state::<Chats>();
+    let sessions = sessions.sessions.lock().unwrap();
+    if let Some(chat) = sessions.get(&id) {
+        *chat.config.lock().unwrap() = updated.clone();
+    }
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn close_chat(app: tauri::AppHandle, session_id: String) {
+    use tauri::Manager;
+    // Dropping the entry drops the close sender; the connection task sees it,
+    // returns, and kills the adapter's process group.
+    app.state::<Chats>()
+        .sessions
+        .lock()
+        .unwrap()
+        .remove(&session_id);
+}
+
+type Ready = Result<String, agent_client_protocol::Error>;
+
+/// Owns one adapter process and its connection, start to grave.
+#[allow(clippy::too_many_arguments)]
+async fn run_chat(
+    app: tauri::AppHandle,
+    project: PathBuf,
+    kind: AgentKind,
+    resume: Option<String>,
+    channel: Channel<ChatEvent>,
+    pending: Pending,
+    ready_tx: oneshot::Sender<Ready>,
+    close_tx: oneshot::Sender<()>,
+    close_rx: oneshot::Receiver<()>,
+) {
+    use tauri::Manager;
+    let launcher = app.state::<crate::env::Launcher>();
+    let (program, args) = launcher.adapter(kind);
+    let mut config = AcpAgentConfig::new(program).args(args);
+    if let Some(path) = launcher.adapter_path() {
+        config = config.env("PATH", path);
+    }
+    let agent = AcpAgent::new(config);
+    let (stdin, stdout, stderr, child) = match agent.spawn_process() {
+        Ok(spawned) => spawned,
+        Err(error) => {
+            let _ = ready_tx.send(Err(error));
+            return;
+        }
+    };
+    let pgid = child.id() as i32;
+    drain_stderr(kind, stderr);
+
+    let counter = AtomicU32::new(1);
+    // True only while a session/load replay streams; the dispatch loop runs
+    // notification handlers to completion before routing the load response,
+    // so flipping it around the request brackets exactly the replay.
+    let replaying = Arc::new(AtomicBool::new(false));
+    let notify_replaying = Arc::clone(&replaying);
+    let notify_channel = channel.clone();
+    let ask_channel = channel.clone();
+    let ask_pending = pending.clone();
+    let ask_project = project.clone();
+    let live_session = Arc::new(Mutex::new(None));
+    let connected_session = Arc::clone(&live_session);
+    let chat_app = app.clone();
+    let chat_project = project.clone();
+    let chat_pending = pending.clone();
+    let chat_channel = channel.clone();
+    let mut ready_tx = Some(ready_tx);
+    let mut close_tx = Some(close_tx);
+
+    let result = Client
+        .builder()
+        .on_receive_notification(
+            async move |notification: SessionNotification, _cx| {
+                forward(
+                    &notify_channel,
+                    notification.update,
+                    notify_replaying.load(Ordering::Relaxed),
+                );
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |request: RequestPermissionRequest, responder, cx| {
+                // The app answers for the user inside the project (see
+                // policy.rs); only escalations reach a dialog.
+                if let Some(option) = policy::auto_allow(&ask_project, &request) {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[acp:{}] auto-allowed: {}",
+                        kind.id(),
+                        request.tool_call.fields.title.as_deref().unwrap_or("(untitled)")
+                    );
+                    return responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option)),
+                    ));
+                }
+                // What the policy saw, for tuning it against real requests.
+                let fields = &request.tool_call.fields;
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[acp:policy] dialog: kind={:?} locations={} raw_keys={:?}",
+                    fields.kind,
+                    fields.locations.as_ref().map_or(0, |l| l.len()),
+                    fields
+                        .raw_input
+                        .as_ref()
+                        .and_then(|v| v.as_object())
+                        .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default()
+                );
+                let id = counter.fetch_add(1, Ordering::Relaxed);
+                let (reply_tx, reply_rx) = oneshot::channel();
+                ask_pending.lock().unwrap().insert(id, reply_tx);
+                let ask = ChatEvent::PermissionRequest {
+                    id,
+                    title: permission_title(kind.label(), &request),
+                    options: request.options.iter().map(permission_choice).collect(),
+                };
+                events::mirror(&ask);
+                let _ = ask_channel.send(ask);
+                let done_pending = ask_pending.clone();
+                // The dispatch loop must never wait on the UI, so the answer
+                // is awaited on a spawned task and responded from there.
+                // If the spawn fails the connection is already gone and there
+                // is nobody left to answer.
+                let _ = cx.spawn(async move {
+                    let outcome = reply_rx
+                        .await
+                        .unwrap_or(RequestPermissionOutcome::Cancelled);
+                    done_pending.lock().unwrap().remove(&id);
+                    responder.respond(RequestPermissionResponse::new(outcome))
+                });
+                Ok(())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(
+            ByteStreams::new(stdin, stdout),
+            move |cx: ConnectionTo<Agent>| {
+                let ready_tx = ready_tx.take().expect("main_fn runs once");
+                let close_tx = close_tx.take().expect("main_fn runs once");
+                let connected_session = Arc::clone(&connected_session);
+                let load_replaying = Arc::clone(&replaying);
+                let resume = resume.clone();
+                let chat_app = chat_app.clone();
+                let chat_project = chat_project.clone();
+                let chat_pending = chat_pending.clone();
+                let chat_channel = chat_channel.clone();
+                async move {
+                    let session = async {
+                        let init = cx
+                            .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                            .block_task()
+                            .await?;
+                        if let Some(id) = resume {
+                            // Restore chain: session/load replays the whole
+                            // transcript through the notification handler
+                            // before its response resolves. If the agent
+                            // cannot load (or errors), fall through to a new
+                            // session with an honest note; session/resume is
+                            // deliberately skipped, since without a local
+                            // transcript cache it restores context but shows
+                            // the user an empty conversation.
+                            let restored = if init.agent_capabilities.load_session {
+                                let requested = SessionId::new(id.clone());
+                                load_replaying.store(true, Ordering::Relaxed);
+                                let loaded = cx
+                                    .send_request(LoadSessionRequest::new(
+                                        requested.clone(),
+                                        project.clone(),
+                                    ))
+                                    .block_task()
+                                    .await;
+                                load_replaying.store(false, Ordering::Relaxed);
+                                loaded.map(|loaded| {
+                                    (requested, loaded.config_options.unwrap_or_default())
+                                })
+                            } else {
+                                Err(agent_client_protocol::Error::method_not_found())
+                            };
+                            match restored {
+                                Ok(session) => {
+                                    let _ = writeln!(
+                                        std::io::stderr(),
+                                        "[chat-session] restore path: session/load ok ({id})"
+                                    );
+                                    return Ok(session);
+                                }
+                                Err(error) => {
+                                    let _ = writeln!(
+                                        std::io::stderr(),
+                                        "[chat-session] restore path: session/load failed ({}), starting fresh ({id})",
+                                        error.message
+                                    );
+                                    let note = ChatEvent::Note {
+                                        text: "Couldn't restore this conversation, so this is a fresh one."
+                                            .into(),
+                                    };
+                                    events::mirror(&note);
+                                    let _ = chat_channel.send(note);
+                                }
+                            }
+                        }
+                        cx.send_request(NewSessionRequest::new(project))
+                            .block_task()
+                            .await
+                            .map(|new_session| {
+                                (
+                                    new_session.session_id,
+                                    new_session.config_options.unwrap_or_default(),
+                                )
+                            })
+                    }
+                    .await;
+                    let session_id = match session {
+                        Ok((session, options)) => {
+                            // Before ready_tx: the picker's choice has to be on
+                            // the session by the time the first prompt can go
+                            // out, or the opening turn runs on the wrong model.
+                            let config = apply_choices(
+                                &cx,
+                                &session,
+                                rows(&options),
+                                chat_app.state::<PrefStore>().chosen(kind.id()),
+                            )
+                            .await;
+                            chat_app
+                                .state::<PrefStore>()
+                                .cache(kind.id(), config.clone());
+                            let id = wire_string(&session);
+                            *connected_session.lock().unwrap() = Some(id.clone());
+                            chat_app.state::<Chats>().sessions.lock().unwrap().insert(
+                                id.clone(),
+                                ChatSession {
+                                    conn: cx.clone(),
+                                    session,
+                                    project: chat_project,
+                                    agent: kind,
+                                    pending: chat_pending,
+                                    channel: chat_channel,
+                                    config: Mutex::new(config),
+                                    pgid,
+                                    _close: close_tx,
+                                },
+                            );
+                            if ready_tx.send(Ok(id.clone())).is_err() {
+                                chat_app
+                                    .state::<Chats>()
+                                    .sessions
+                                    .lock()
+                                    .unwrap()
+                                    .remove(&id);
+                                return Ok(None);
+                            }
+                            id
+                        }
+                        Err(error) => {
+                            let _ = ready_tx.send(Err(error));
+                            return Ok(None);
+                        }
+                    };
+                    tokio::select! {
+                        // Ok or Err both mean the app closed this chat on purpose.
+                        _ = close_rx => Ok(None),
+                        // The adapter died underneath a live session.
+                        _ = cx.incoming_closed() => Ok(Some(session_id)),
+                    }
+                }
+            },
+        )
+        .await;
+
+    // Whichever way the connection ended, take the process tree with it.
+    reap(pgid, child).await;
+
+    if let Err(error) = &result {
+        let _ = writeln!(
+            std::io::stderr(),
+            "[acp:{}] connection failed: {error:?}",
+            kind.id()
+        );
+    }
+    let live_session = live_session.lock().unwrap().clone();
+    if let Some(session_id) = session_to_remove(&result, &live_session) {
+        app.state::<Chats>()
+            .sessions
+            .lock()
+            .unwrap()
+            .remove(&session_id);
+        let error = ChatEvent::SessionError {
+            message: format!(
+                "{} stopped unexpectedly. Send a message to start a fresh chat.",
+                kind.label()
+            ),
+        };
+        events::mirror(&error);
+        let _ = channel.send(error);
+    }
+}
+
+/// Clean UI closes return `Ok(None)`. Every other end state must identify the
+/// session to evict, including transport errors that cannot return it normally.
+pub(crate) fn session_to_remove(
+    result: &Result<Option<String>, agent_client_protocol::Error>,
+    live_session: &Option<String>,
+) -> Option<String> {
+    match result {
+        Ok(session) => session.clone(),
+        Err(_) => live_session.clone(),
+    }
+}
+
+/// SIGTERM the adapter's process group and reap the child, escalating to
+/// SIGKILL if it lingers.
+async fn reap(pgid: i32, mut child: async_process::Child) {
+    unsafe {
+        libc::killpg(pgid, libc::SIGTERM);
+    }
+    if tokio::time::timeout(Duration::from_secs(5), child.status())
+        .await
+        .is_err()
+    {
+        unsafe {
+            libc::killpg(pgid, libc::SIGKILL);
+        }
+        let _ = child.status().await;
+    }
+}
+
+/// Adapter stderr is diagnostics; forward it, non-panicking (a broken stderr
+/// after the dev harness dies must not kill anything).
+fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
+    tauri::async_runtime::spawn(async move {
+        use futures_lite::io::{AsyncBufReadExt, BufReader};
+        use futures_lite::stream::StreamExt;
+        let mut lines = BufReader::new(stderr).lines();
+        while let Some(Ok(line)) = lines.next().await {
+            let _ = writeln!(std::io::stderr(), "[acp:{}] {line}", kind.id());
+        }
+    });
+}
+
+/// -32000 is ACP's auth-required code, so it means signed out for every
+/// agent; they just raise it at different moments (Claude on session/prompt,
+/// Codex as early as session/new or session/list). The `auth_required:`
+/// prefix is the frontend's marker.
+fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
+    if error.code == ErrorCode::AuthRequired {
+        format!(
+            "auth_required: {} is not signed in on this Mac",
+            kind.label()
+        )
+    } else {
+        format!("{} error: {}", kind.label(), error.message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{attachment_block, rows};
+    use agent_client_protocol::schema::v1::{ContentBlock, SessionConfigOption};
+
+    /// What claude-agent-acp 0.64.2 actually answers session/new with, captured
+    /// off the wire. Mode, fast, and agent ride along and must not reach the
+    /// picker.
+    const CLAUDE: &str = r#"[
+      {"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"default",
+       "options":[{"value":"default","name":"Default"},{"value":"plan","name":"Plan"}]},
+      {"id":"model","name":"Model","category":"model","type":"select","currentValue":"opus[1m]",
+       "options":[{"value":"default","name":"Default (recommended)"},
+                  {"value":"opus[1m]","name":"Opus (1M context)"},
+                  {"value":"sonnet","name":"Sonnet"}]},
+      {"id":"effort","name":"Effort","category":"thought_level","type":"select","currentValue":"xhigh",
+       "options":[{"value":"default","name":"Default"},{"value":"low","name":"Low"},
+                  {"value":"xhigh","name":"Xhigh"}]},
+      {"id":"fast","name":"Fast mode","category":"model_config","type":"boolean","currentValue":false},
+      {"id":"agent","name":"Agent","type":"select","currentValue":"default",
+       "options":[{"value":"default","name":"Default"}]}
+    ]"#;
+
+    /// codex-acp 1.1.9's answer, also captured off the wire. It names effort
+    /// `reasoning_effort` and adds a collaboration mode; only the shared
+    /// categories may reach the picker.
+    const CODEX: &str = r#"[
+      {"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"agent",
+       "options":[{"value":"read-only","name":"Read-only"},{"value":"agent","name":"Agent"}]},
+      {"id":"collaboration_mode","name":"Collaboration mode","category":"collaboration_mode",
+       "type":"select","currentValue":"default",
+       "options":[{"value":"default","name":"Default"},{"value":"plan","name":"Plan"}]},
+      {"id":"model","name":"Model","category":"model","type":"select","currentValue":"gpt-5.6-sol",
+       "options":[{"value":"gpt-5.6-sol","name":"GPT-5.6-Sol"},{"value":"gpt-5.5","name":"GPT-5.5"}]},
+      {"id":"reasoning_effort","name":"Reasoning effort","category":"thought_level","type":"select",
+       "currentValue":"low",
+       "options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]},
+      {"id":"fast-mode","name":"Fast mode","category":"model_config","type":"select","currentValue":"off",
+       "options":[{"value":"off","name":"Off"},{"value":"on","name":"On"}]}
+    ]"#;
+
+    #[test]
+    fn the_picker_gets_model_then_effort_and_nothing_else() {
+        let options: Vec<SessionConfigOption> = serde_json::from_str(CLAUDE).unwrap();
+        let rows = rows(&options);
+
+        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, ["model", "effort"]);
+        assert_eq!(rows[0].value, "opus[1m]");
+        // Names, not wire ids: the button reads "Opus (1M context) · Xhigh".
+        assert_eq!(rows[0].options[1].name, "Opus (1M context)");
+        assert_eq!(rows[1].value, "xhigh");
+        assert_eq!(rows[1].options.len(), 3);
+    }
+
+    /// The bug this replaced: matching on option id showed Codex nothing,
+    /// because its effort option is called `reasoning_effort`.
+    #[test]
+    fn codex_gets_a_picker_too_under_its_own_option_names() {
+        let options: Vec<SessionConfigOption> = serde_json::from_str(CODEX).unwrap();
+        let rows = rows(&options);
+
+        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, ["model", "reasoning_effort"]);
+        let categories: Vec<&str> = rows.iter().map(|row| row.category.as_str()).collect();
+        assert_eq!(categories, ["model", "thought_level"]);
+        assert_eq!(rows[1].name, "Reasoning effort");
+        // Codex's fast mode is a select, not a boolean, so category is the only
+        // thing keeping it out.
+        assert!(!rows.iter().any(|row| row.id == "fast-mode"));
+    }
+
+    #[test]
+    fn an_agent_that_offers_no_config_yields_no_picker() {
+        assert!(rows(&[]).is_empty());
+    }
+
+    fn scratch(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("nurb-attach-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn images_embed_and_everything_else_links() {
+        let png = scratch("photo.PNG", b"fake image bytes");
+        match attachment_block(&png).unwrap() {
+            ContentBlock::Image(image) => {
+                assert_eq!(image.mime_type, "image/png");
+                use base64::Engine;
+                assert_eq!(
+                    base64::engine::general_purpose::STANDARD
+                        .decode(image.data)
+                        .unwrap(),
+                    b"fake image bytes"
+                );
+            }
+            other => panic!("expected an image block, got {other:?}"),
+        }
+
+        let step = scratch("bracket.step", b"ISO-10303");
+        match attachment_block(&step).unwrap() {
+            ContentBlock::ResourceLink(link) => {
+                assert_eq!(link.name, "bracket.step");
+                assert!(link.uri.starts_with("file://"));
+                assert!(link.uri.ends_with("/bracket.step"));
+            }
+            other => panic!("expected a resource link, got {other:?}"),
+        }
+
+        let missing = std::path::Path::new("/nowhere/gone.png");
+        assert!(attachment_block(missing).unwrap_err().contains("gone.png"));
+
+        let huge = scratch("huge.png", &vec![0u8; 10 * 1024 * 1024 + 1]);
+        assert!(attachment_block(&huge)
+            .unwrap_err()
+            .contains("too large"));
+    }
+}

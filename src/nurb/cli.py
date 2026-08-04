@@ -41,11 +41,6 @@ def project_root(start=None):
     return here
 
 
-# Harness files an agent reads without being told to. The first one that already
-# exists is left alone and gets a nudge instead, since it is the user's file.
-HARNESS = ("AGENTS.md", "CLAUDE.md")
-
-
 def _seed_agents(root):
     """Put a pointer to `nurb rules` where an agent will find it on day one.
 
@@ -54,28 +49,48 @@ def _seed_agents(root):
     all. A fresh project is two files that look like an ordinary build123d script, so an
     agent reads them as one, writes generic geometry, and never learns the tool exists.
 
-    This is not an init step. It is the command you were already running, it is skipped
-    when the project has a harness file of its own, and `nurb new` prints everything it
-    writes either way.
+    This is not an init step. It is the command you were already running, it respects
+    harness files of the user's own, and `nurb new` prints everything it writes either
+    way.
     """
     from . import __file__ as pkg
 
     shim = (pathlib.Path(pkg).parent / "agents.md").read_text(encoding="utf-8")
-    for name in HARNESS:
-        here = root / name
-        if not here.is_file():
-            continue
-        # The one this command wrote on a previous run is not news.
-        if here.read_text(encoding="utf-8") == shim:
-            return None, None
-        return None, name
-    target = root / HARNESS[0]
-    target.write_text(shim, encoding="utf-8")
-    return target, None
+    agents = root / "AGENTS.md"
+    claude = root / "CLAUDE.md"
+    if agents.is_file():
+        # Heal projects seeded before Claude's native pointer was added, but
+        # never make a second harness file alongside one the user wrote.
+        existing = agents.read_text(encoding="utf-8")
+        generated = existing == shim or (
+            existing.startswith("# nurb\n")
+            and "`nurb rules`" in existing
+            and "If `nurb` is not on PATH:" in existing
+        )
+        if generated:
+            if not claude.is_file():
+                claude.write_text("@AGENTS.md\n", encoding="utf-8")
+                return [claude], None
+            return [], None
+        return [], agents.name
+    if claude.is_file():
+        return [], claude.name
+    agents.write_text(shim, encoding="utf-8")
+    # Claude Code deliberately does not discover AGENTS.md. Import the shared
+    # doctrine from its native file instead of maintaining a second copy.
+    claude.write_text("@AGENTS.md\n", encoding="utf-8")
+    return [agents, claude], None
 
 
 def cmd_new(args):
-    root = project_root()
+    # The desktop app creates projects under one shared directory, which may itself
+    # already be a nurb project. Its explicit root keeps this seed inside the new
+    # child instead of letting project_root() walk upward into an existing parts/.
+    root = (
+        pathlib.Path(args.root).resolve()
+        if getattr(args, "root", None)
+        else project_root()
+    )
     parts = root / "parts"
     # The first part is the project's birth, the only moment the launcher appears
     # on its own. Deleting it is a decision, so it is never written back over one.
@@ -91,8 +106,7 @@ def cmd_new(args):
     if born:
         written.append(_write_launcher(root))
     seeded, already = _seed_agents(root)
-    if seeded:
-        written.append(seeded)
+    written.extend(seeded)
     for path in written:
         print(f"  {path.relative_to(root)}")
     if already:
@@ -666,6 +680,7 @@ def main(argv=None):
 
     s = sub.add_parser("new", help="create a part")
     s.add_argument("name")
+    s.add_argument("--root", help=argparse.SUPPRESS)
     s.set_defaults(fn=cmd_new)
 
     s = sub.add_parser("dev", help="watch parts and serve the viewer")

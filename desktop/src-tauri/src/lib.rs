@@ -1,0 +1,487 @@
+mod acp;
+mod agents;
+mod env;
+mod prefs;
+mod provision;
+mod registry;
+mod sessions;
+mod supervisor;
+
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use registry::{ProjectView, Registry};
+use supervisor::Supervisor;
+use tauri::{AppHandle, Manager, RunEvent, State};
+
+#[derive(serde::Serialize)]
+struct ServerInfo {
+    url: String,
+    port: u16,
+}
+
+#[tauri::command]
+fn list_projects(registry: State<Registry>) -> Vec<ProjectView> {
+    registry.list()
+}
+
+/// A first-part name `nurb new` will accept: it derives the Python module and
+/// function from this, so it has to survive becoming an identifier.
+fn seed_part_name(project: &str) -> String {
+    let slug: String = project
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_whitespace() { '-' } else { c })
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .collect();
+    let module = slug.replace('-', "_");
+    let keyword = [
+        "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
+        "elif", "else", "except", "finally", "for", "from", "global", "if", "import", "in", "is",
+        "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with",
+        "yield",
+    ]
+    .contains(&module.as_str());
+    match slug.chars().next() {
+        Some(c) if c.is_ascii_alphabetic() && !keyword => slug,
+        Some(_) => format!("part-{slug}"),
+        None => "part".into(),
+    }
+}
+
+#[tauri::command]
+async fn create_project(app: AppHandle, name: String) -> Result<String, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() || name.contains('/') || name.starts_with('.') {
+        return Err("project names cannot be empty or contain slashes".into());
+    }
+    let base = app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("no Documents folder: {e}"))?
+        .join("nurb");
+    let dir = base.join(&name);
+    if dir.exists() {
+        return Err(format!(
+            "{} already exists. Use \"add existing\" to bring it in.",
+            dir.display()
+        ));
+    }
+    let part = seed_part_name(&name);
+    let module = part.replace('-', "_");
+    let launcher = app.state::<env::Launcher>().inner().clone();
+    let created = tauri::async_runtime::spawn_blocking(move || -> Result<PathBuf, String> {
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+        // Seed the project with a first part named after it; nurb new also
+        // writes the card and AGENTS.md.
+        let seeded = seed(&launcher, &dir, &part);
+        if seeded.is_err() {
+            // The folder did not exist before this call, so a failed seed
+            // must not leave a husk behind that blocks retrying the name.
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        seeded.map(|_| dir)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let registry = app.state::<Registry>();
+    registry.upsert(&name, &created, Some(module));
+    Ok(created.to_string_lossy().into_owned())
+}
+
+fn seed(launcher: &env::Launcher, dir: &std::path::Path, part: &str) -> Result<(), String> {
+    let output = launcher
+        .nurb()
+        .args(["new", "--root"])
+        .arg(dir)
+        .arg(part)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| format!("could not run nurb new: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "nurb new failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    // Keep the subprocess contract honest if its explicit-root behavior changes.
+    if !dir.join("parts").is_dir() {
+        return Err(format!("nurb new did not create {}/parts", dir.display()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn add_project(app: AppHandle, path: String) -> Result<String, String> {
+    let dir = PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|e| format!("cannot read that folder: {e}"))?;
+    if !dir.join("parts").is_dir() {
+        return Err("that folder has no parts/ directory, so it is not a nurb project".into());
+    }
+    let name = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or("cannot use the filesystem root as a project")?;
+    app.state::<Registry>().upsert(&name, &dir, None);
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn remove_project(app: AppHandle, path: String) {
+    let dir = PathBuf::from(&path);
+    app.state::<Registry>().remove(&dir);
+    // Removing an open project also stops its server; the files stay put.
+    tauri::async_runtime::spawn_blocking(move || app.state::<Supervisor>().close(&dir));
+}
+
+#[tauri::command]
+fn select_part(registry: State<Registry>, path: String, part: Option<String>) {
+    registry.select_part(&PathBuf::from(path), part);
+}
+
+#[tauri::command]
+fn select_part_chat(
+    sessions: State<sessions::SessionStore>,
+    path: String,
+    part: String,
+    session_id: Option<String>,
+) {
+    sessions.select_part_chat(&PathBuf::from(path), &part, session_id);
+}
+
+#[tauri::command]
+async fn open_project(app: AppHandle, path: String) -> Result<ServerInfo, String> {
+    // The registry's stored path is the key everywhere (supervisor map, close,
+    // list_parts, touch). Canonicalizing only here would split the keys the
+    // moment a symlink is involved, so it is deliberately not done.
+    let project = PathBuf::from(&path);
+    if !project.is_dir() {
+        return Err(format!("project folder missing: {}", project.display()));
+    }
+    // Supervisor::open blocks until the server is ready, so keep it off the
+    // async runtime's core threads.
+    let opened = project.clone();
+    let handle = app.clone();
+    let port =
+        tauri::async_runtime::spawn_blocking(move || handle.state::<Supervisor>().open(&opened))
+            .await
+            .map_err(|e| e.to_string())??;
+    app.state::<Registry>().touch(&project);
+    Ok(ServerInfo {
+        url: format!("http://127.0.0.1:{port}"),
+        port,
+    })
+}
+
+/// Delete a part by moving its source and card to the Trash, so a mistake is
+/// recoverable. Derived files under build/ stay; they are regenerated anyway.
+#[tauri::command]
+async fn delete_part(path: String, part: String) -> Result<(), String> {
+    let module = part.replace('-', "_");
+    let parts = PathBuf::from(&path).join("parts");
+    let py = parts.join(format!("{module}.py"));
+    if !py.is_file() {
+        return Err(format!("no part named {part} in {}", parts.display()));
+    }
+    let mut targets = vec![py];
+    let md = parts.join(format!("{module}.md"));
+    if md.is_file() {
+        targets.push(md);
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        trash::delete_all(&targets).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Create a new part in an existing project via `nurb new`. Returns the part
+/// name as list_parts will report it (the module stem, hyphens folded).
+#[tauri::command]
+async fn create_part(app: AppHandle, path: String, name: String) -> Result<String, String> {
+    let part = seed_part_name(name.trim());
+    let dir = PathBuf::from(&path);
+    if !dir.join("parts").is_dir() {
+        return Err(format!("no parts/ directory in {}", dir.display()));
+    }
+    let launcher = app.state::<env::Launcher>().inner().clone();
+    let spawned = part.clone();
+    tauri::async_runtime::spawn_blocking(move || seed(&launcher, &dir, &spawned))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(part.replace('-', "_"))
+}
+
+#[tauri::command]
+async fn list_parts(app: AppHandle, path: String) -> Result<serde_json::Value, String> {
+    let project = PathBuf::from(path);
+    let port = app
+        .state::<Supervisor>()
+        .port(&project)
+        .ok_or("project is not open")?;
+    let body = tauri::async_runtime::spawn_blocking(move || http_get(port, "/api/parts"))
+        .await
+        .map_err(|e| e.to_string())??;
+    part_views(&project, &body)
+}
+
+/// The server response only contains builds that have finished. The rail is a
+/// source-file index, so merge build errors onto every source instead of hiding
+/// slow parts during startup.
+fn part_views(project: &std::path::Path, body: &str) -> Result<serde_json::Value, String> {
+    let built: Vec<serde_json::Value> =
+        serde_json::from_str(body).map_err(|e| format!("bad /api/parts response: {e}"))?;
+    let mut names = Vec::new();
+    let entries = std::fs::read_dir(project.join("parts"))
+        .map_err(|e| format!("cannot read {}/parts: {e}", project.display()))?;
+    for entry in entries {
+        let path = entry
+            .map_err(|e| format!("cannot read part entry: {e}"))?
+            .path();
+        let Some(file) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if path.extension().and_then(|ext| ext.to_str()) == Some("py") && !file.starts_with('_') {
+            names.push(path.file_stem().unwrap().to_string_lossy().into_owned());
+        }
+    }
+    names.sort();
+    Ok(serde_json::Value::Array(
+        names
+            .into_iter()
+            .map(|name| {
+                let entry = built
+                    .iter()
+                    .find(|entry| entry.get("name").and_then(|value| value.as_str()) == Some(&name));
+                let error = entry
+                    .and_then(|entry| entry.get("error"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                // The joints payload is the marker the viewer already uses: only an
+                // assembly carries one, even empty. A source that has not built yet
+                // reads as a part and corrects itself on the next poll.
+                let assembly = entry.is_some_and(|entry| entry.get("joints").is_some());
+                let uses = entry
+                    .and_then(|entry| entry.get("uses"))
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+                serde_json::json!({ "name": name, "error": error, "assembly": assembly, "uses": uses })
+            })
+            .collect(),
+    ))
+}
+
+/// A minimal loopback GET. The nurb server always answers with Content-Length
+/// and Connection: close, so read-to-end is the whole protocol.
+fn http_get(port: u16, path: &str) -> Result<String, String> {
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5))
+        .map_err(|e| format!("connect to nurb dev: {e}"))?;
+    stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+    )
+    .map_err(|e| format!("request: {e}"))?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|e| format!("response: {e}"))?;
+    let (head, body) = response
+        .split_once("\r\n\r\n")
+        .ok_or("malformed response from nurb dev")?;
+    let status = head.lines().next().unwrap_or_default();
+    if !status.contains(" 200 ") {
+        return Err(format!("nurb dev answered: {status}"));
+    }
+    Ok(body.to_string())
+}
+
+/// Dev-build test hook: this machine's UI automation cannot type into a
+/// WKWebView (AX rejects value writes on its text areas), so debug builds
+/// accept composer text on a loopback socket and forward it to the webview.
+/// Never compiled into release builds.
+#[cfg(debug_assertions)]
+fn test_hook(app: AppHandle) {
+    use std::io::Read;
+    std::thread::spawn(move || {
+        let Ok(listener) = std::net::TcpListener::bind(("127.0.0.1", 7399)) else {
+            return;
+        };
+        for stream in listener.incoming().flatten() {
+            let mut text = String::new();
+            let mut stream = stream;
+            if stream.read_to_string(&mut text).is_ok() && !text.is_empty() {
+                use tauri::Emitter;
+                // "create:<name>" drives project creation; anything else is
+                // composer text. AX presses buttons fine but cannot write
+                // into WKWebView text fields, hence both.
+                let _ = match text.strip_prefix("create:") {
+                    Some(name) => app.emit("test-create", name.to_string()),
+                    None => app.emit("test-type", text),
+                };
+            }
+        }
+    });
+}
+
+/// macOS ships an empty Help submenu, and a chromeless window has nowhere else to
+/// put a link. These two are the only place in the app that reaches the outside
+/// world, alongside the same pair in the about box.
+fn install_help_menu(app: &AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, HELP_SUBMENU_ID};
+    let menu = Menu::default(app)?;
+    if let Some(help) = menu.get(HELP_SUBMENU_ID).and_then(|i| i.as_submenu().cloned()) {
+        help.append_items(&[
+            &MenuItem::with_id(app, "help:github", "nurb on GitHub", true, None::<&str>)?,
+            &MenuItem::with_id(app, "help:issue", "Report an Issue", true, None::<&str>)?,
+        ])?;
+    }
+    app.set_menu(menu)?;
+    app.on_menu_event(|app, event| {
+        use tauri_plugin_opener::OpenerExt;
+        let url = match event.id().as_ref() {
+            "help:github" => "https://github.com/Shpigford/nurb",
+            "help:issue" => "https://github.com/Shpigford/nurb/issues/new",
+            _ => return,
+        };
+        let _ = app.opener().open_url(url, None::<&str>);
+    });
+    Ok(())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
+        .manage(acp::Chats::new())
+        .manage(agents::Logins::new())
+        .manage(provision::Provisioner::new())
+        .setup(|app| {
+            let dir = app.path().app_data_dir()?;
+            // Debug-only override so tests can point the whole app (registry,
+            // sessions, provisioned env) at a scratch directory while HOME
+            // stays real. Never compiled into release builds.
+            #[cfg(debug_assertions)]
+            let dir = std::env::var_os("NURB_DESKTOP_DATA")
+                .map(PathBuf::from)
+                .unwrap_or(dir);
+            std::fs::create_dir_all(&dir)?;
+            let launcher = env::Launcher::resolve(dir.clone());
+            app.manage(Supervisor::new(launcher.clone()));
+            app.manage(launcher);
+            app.manage(Registry::load(&dir));
+            app.manage(sessions::SessionStore::load(&dir));
+            app.manage(prefs::PrefStore::load(&dir));
+            install_help_menu(app.handle())?;
+            #[cfg(debug_assertions)]
+            test_hook(app.handle().clone());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            list_projects,
+            create_project,
+            add_project,
+            remove_project,
+            select_part,
+            select_part_chat,
+            open_project,
+            create_part,
+            delete_part,
+            list_parts,
+            acp::start_chat,
+            acp::list_sessions,
+            acp::send_prompt,
+            acp::cancel_turn,
+            acp::respond_permission,
+            acp::chat_config,
+            acp::set_chat_config,
+            acp::close_chat,
+            agents::agent_statuses,
+            agents::agent_login,
+            provision::provision_status,
+            provision::provision,
+            provision::about_info
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                app.state::<Supervisor>().shutdown();
+                app.state::<acp::Chats>().shutdown();
+                app.state::<agents::Logins>().shutdown();
+                app.state::<provision::Provisioner>().shutdown();
+            }
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{part_views, seed_part_name};
+
+    #[test]
+    fn seed_part_names_survive_becoming_identifiers() {
+        assert_eq!(seed_part_name("test-shelf"), "test-shelf");
+        assert_eq!(seed_part_name("My Shelf 2.0"), "my-shelf-20");
+        assert_eq!(seed_part_name("2020 bracket"), "part-2020-bracket");
+        assert_eq!(seed_part_name("class"), "part-class");
+        assert_eq!(seed_part_name("_widget"), "part-_widget");
+        assert_eq!(seed_part_name("émile"), "mile");
+        assert_eq!(seed_part_name("支架"), "part");
+    }
+
+    #[test]
+    fn part_views_include_sources_that_are_still_building() {
+        let root = std::env::temp_dir().join(format!(
+            "nurb-part-views-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let parts = root.join("parts");
+        std::fs::create_dir_all(&parts).unwrap();
+        std::fs::write(parts.join("alpha.py"), "").unwrap();
+        std::fs::write(parts.join("broken.py"), "").unwrap();
+        std::fs::write(parts.join("rig.py"), "").unwrap();
+        std::fs::write(parts.join("_helper.py"), "").unwrap();
+
+        let views = part_views(
+            &root,
+            r#"[{"name":"broken","error":"trace"},{"name":"gone","error":null},
+                {"name":"rig","error":null,"joints":[],"uses":["alpha"]}]"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            views,
+            serde_json::json!([
+                { "name": "alpha", "error": null, "assembly": false, "uses": [] },
+                { "name": "broken", "error": "trace", "assembly": false, "uses": [] },
+                { "name": "rig", "error": null, "assembly": true, "uses": ["alpha"] }
+            ])
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn transport_errors_still_evict_the_live_chat_session() {
+        let failed = Err(agent_client_protocol::Error::internal_error());
+        let live = Some("session-1".to_string());
+
+        assert_eq!(
+            super::acp::session_to_remove(&failed, &live).as_deref(),
+            Some("session-1")
+        );
+        assert_eq!(super::acp::session_to_remove(&Ok(None), &live), None);
+    }
+}

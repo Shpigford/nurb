@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "nurb",
+  "version": "0.10.0",
+  "identifier": "dev.nurb.desktop",
+  "build": {
+    "beforeDevCommand": "npm run stage && npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run stage && npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "nurb",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 18, "y": 22 },
+        "backgroundColor": "#16181d",
+        "width": 1360,
+        "height": 860,
+        "minWidth": 900,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "connect-src": "ipc: http://ipc.localhost",
+        "frame-src": "'self' http://127.0.0.1:* http://localhost:*"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQyOTYyNkI5RTg3NkFFRDQKUldUVXJuYm91U2FXUWdNWGQvT1VwY2FQb3lhclFzWDZTRzhRa3k3NXRJaThJbVEzbWNmOVowbEQK",
+      "endpoints": [
+        "https://github.com/Shpigford/nurb/releases/download/desktop-latest/latest.json"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "createUpdaterArtifacts": true,
+    "externalBin": ["binaries/uv"],
+    "resources": ["resources/*"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

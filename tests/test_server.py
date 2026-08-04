@@ -3,6 +3,7 @@
 import asyncio
 import io
 import json
+import pathlib
 
 import numpy as np
 import pytest
@@ -176,6 +177,46 @@ def test_export_writes_step_too(tmp_path):
     assert resp.body.startswith(b"ISO-10303-21")
 
 
+def test_export_names_a_variants_file_after_the_variant(tmp_path):
+    """A variant is a catalog entry, so the file it exports carries the catalog name."""
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    (tmp_path / "parts" / "thing.md").write_text(CARD)
+    server.overrides["thing"] = {"width": 15.0}
+    server.rebuild(part)
+    resp = asyncio.run(server.export("thing.stl"))
+    assert resp.headers["Content-Disposition"] == 'attachment; filename="slim.stl"'
+    assert json.loads(asyncio.run(server.export("thing.stl", save=True)).body) == {
+        "path": str(tmp_path / "build" / "slim.stl")
+    }
+
+
+def test_export_can_save_into_build_and_report_the_path(tmp_path):
+    """What the desktop shell asks for: a webview ignores an <a download>, so the file
+    lands in build/ and the shell gets a path to reveal in Finder."""
+    resp = asyncio.run(project(tmp_path).export("thing.stl", save=True))
+    assert resp.status_code == 200
+    saved = tmp_path / "build" / "thing.stl"
+    assert json.loads(resp.body) == {"path": str(saved)}
+    mesh = trimesh.load(io.BytesIO(saved.read_bytes()), file_type="stl")
+    assert mesh.extents == pytest.approx([40.0, 30.0, 5.0])
+
+
+def test_export_confines_a_variant_filename_to_build(tmp_path):
+    server = project(tmp_path)
+    escaped = tmp_path.parent / "escaped"
+    server.state["thing"]["variant"] = str(escaped)
+
+    resp = asyncio.run(server.export("thing.stl", save=True))
+
+    saved = pathlib.Path(json.loads(resp.body)["path"])
+    assert resp.status_code == 200
+    assert saved.parent == tmp_path / "build"
+    assert saved.name == f"{str(escaped).replace('/', '_').strip('._')}.stl"
+    assert saved.is_file()
+    assert not escaped.exists()
+
+
 def test_export_refuses_what_it_cannot_serve(tmp_path):
     server = project(tmp_path)
     assert asyncio.run(server.export("missing.stl")).status_code == 404
@@ -318,13 +359,73 @@ def test_viewer_matches_websocket_security_to_the_page():
     assert "new WebSocket(`ws://${location.host}/ws`)" not in viewer
 
 
+def test_viewer_keeps_a_deep_link_pending_until_that_part_builds():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    assert "if (want && !msg.sources.includes(want))" in viewer
+    assert "const part = current || want;" in viewer
+    assert "if (!current && !want && msg.parts.length)" in viewer
+    # A temporary HTTP fallback selection must not defeat the requested part
+    # when the websocket reconnects or its slow build eventually lands.
+    assert "if (want && parts.has(want)) current = want" in viewer
+    assert "if (msg.name === want)" in viewer
+    assert "want = null; wantVariant = null;" in viewer
+    # Picking a variant is an explicit part selection too; a delayed deep-link
+    # build must not take the canvas back afterward.
+    assert "vr.onclick = () => {\n        want = null; wantVariant = null;" in viewer
+
+
+def test_viewer_frames_the_first_geometry_a_page_paints():
+    """A deep link's build lands as a `rebuilt`, which keeps the camera. On the
+    page's first paint there is no camera to keep, and keeping the one at the
+    origin painted a blank canvas over good geometry until the user reframed."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    assert "const keep = keepCamera && framed === name;" in viewer
+    assert "} else if (!keep) {" in viewer
+    assert "sectionAttach(!keep);" in viewer
+    # Only a paint that actually framed a mesh may claim one: a failed build
+    # returns early, so fixing the part frames it instead of keeping the origin.
+    assert "framed = name;\n  lastSize = size;" in viewer
+
+
+def test_sync_distinguishes_unbuilt_sources_from_unknown_deep_links(tmp_path):
+    from nurb import server as server_mod
+
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "waiting.py").write_text(PART, encoding="utf-8")
+    server = server_mod.Server(tmp_path)
+
+    class Connection:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, payload):
+            self.sent.append(json.loads(payload))
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    connection = Connection()
+    asyncio.run(server.ws(connection))
+
+    assert connection.sent[0]["sources"] == ["waiting"]
+    assert connection.sent[0]["parts"] == []
+
+
 def test_section_reaims_after_a_new_parts_camera_is_restored():
     from nurb import server as server_mod
 
     viewer = server_mod.VIEWER.read_text(encoding="utf-8")
     paint = viewer.split("async function paint", 1)[1].split("// Takes a name", 1)[0]
     assert "function sectionAttach(reaim) {\n  if (reaim) cutSign = 0;" in viewer
-    assert paint.index("restoreCamera(name, box)") < paint.index("sectionAttach(!keepCamera);")
+    assert paint.index("restoreCamera(name, box)") < paint.index("sectionAttach(!keep);")
 
 
 # --- the skill staleness nudge ------------------------------------------------

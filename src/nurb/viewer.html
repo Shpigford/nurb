@@ -24,7 +24,12 @@
        `overflow: hidden` then clips it and there is nothing to scroll, because the
        panel inside was never made smaller than the viewport in the first place. */
     grid-template-rows: minmax(0, 1fr);
+    /* Every label here is chrome. Dragging is how you orbit and how you scrub a
+       slider, so a drag that starts on a label must never select it. The upgrade
+       command opts back in below, since that one exists to be copied. */
+    user-select: none; -webkit-user-select: none;
   }
+  input { user-select: text; -webkit-user-select: text; }
   aside { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; }
   aside h1 { font-size: 13px; font-weight: 600; padding: 14px 16px;
              border-bottom: 1px solid var(--line); letter-spacing: .08em;
@@ -225,6 +230,7 @@
     display: flex; align-items: center; padding: 10px 0 6px;
     font-size: 11px; font-weight: 600; color: var(--dim); letter-spacing: .04em;
   }
+  #params h2 .hic { width: 11px; height: 11px; margin-right: 6px; flex: none; }
   #params h2 a { margin-left: auto; color: var(--dim); cursor: pointer; text-decoration: none;
                  display: none; align-items: center; gap: 4px; }
   #params h2 a svg { width: 11px; height: 11px; }
@@ -291,6 +297,29 @@
      Findings and sizes are text, and the CLI already prints them better than a PNG. */
   body.bare { grid-template-columns: 1fr; }
   body.bare aside, body.bare #hud, body.bare #checks, body.bare #tools { display: none; }
+  /* ?embed drops what a host shell already shows (its own rail lists the parts),
+     keeping the sliders, checks and tools that have no other home. The panel moves
+     to the far right so the geometry sits beside the host's chat column, where the
+     design conversation happens. */
+  body.embed h1, body.embed #list { display: none; }
+  body.embed { grid-template-columns: 1fr 220px; }
+  body.embed main { grid-column: 1; grid-row: 1; }
+  body.embed aside { grid-column: 2; grid-row: 1; border-right: none; border-left: 1px solid var(--line); }
+  /* With #list hidden, #params is the panel's first visible block; its separator
+     border would read as stray window chrome at the very top of the sidebar. */
+  body.embed #params { border-top: none; }
+  /* The whole footer is the shell's job when embedded: it prints the same version in
+     its rail, and a webview has no window.open, so the links were dead clicks. They
+     live in the Help menu and the about box now. */
+  body.embed #foot { display: none; }
+  /* Embedded in the desktop app, the top strip of the pane doubles as window
+     chrome: mousedowns here are forwarded so the shell can drag the window.
+     Same z as #tools/#checks but earlier in the DOM, so the buttons stay
+     clickable where they overlap. */
+  #dragstrip { display: none; }
+  body.embed #dragstrip { display: block; position: absolute; top: 0; left: 0; right: 0;
+                          height: 44px; z-index: 1; }
+  body.embed #emptycmd { display: none; }
   /* Nothing to reframe or cut through yet, and this is the first screen a new project
      shows. */
   body.noparts #tools { display: none; }
@@ -335,6 +364,7 @@
   </div>
 </div>
 <main>
+  <div id="dragstrip"></div>
   <div id="empty">
     <div>
       <svg><use href="#i-cube"/></svg>
@@ -390,18 +420,39 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const parts = new Map();
-let current = null, mesh = null, lastSize = null;
+// `framed` is the part the camera is currently pointed at, which is not `current`: a
+// part becomes current the moment it is selected and only gets a camera once its
+// geometry lands. Nothing is framed until the first mesh paints.
+let current = null, mesh = null, lastSize = null, framed = null;
 
 // A headless render drives this same page, so the scene an agent sees is the scene a
 // human sees. ?view= also means "frame it deterministically", ignoring the saved camera.
 const q = new URLSearchParams(location.search);
-const want = q.get('part'), view = q.get('view'), bare = q.has('bare');
+let want = q.get('part');
+const view = q.get('view'), bare = q.has('bare'), embed = q.has('embed');
 let wantVariant = q.get('variant');   // consumed by the first sync, then the URL just mirrors
 const VIEWS = {
   iso: [0.7, -0.75, 0.6], front: [0, -1, 0], back: [0, 1, 0],
   left: [-1, 0, 0], right: [1, 0, 0], top: [0, 0, 1],
 };
 if (bare) document.body.classList.add('bare');
+if (embed) {
+  document.body.classList.add('embed');
+  // The desktop shell owns the window; it listens for this and starts the
+  // native drag. The strip over the canvas and the parameters heading are the
+  // pane's only safe grab areas (everything else orbits, slides, or clicks).
+  const forward = e => { if (e.button === 0) window.parent.postMessage('nurb:drag', '*'); };
+  document.getElementById('dragstrip').addEventListener('mousedown', forward);
+  document.getElementById('params').addEventListener('mousedown', e => {
+    if (e.target.closest('h2') && !e.target.closest('a')) forward(e);
+  });
+  // A webview has no downloads folder and no download UI, so the button saves into
+  // the project instead. Said before the click, because "download" would promise a
+  // file the shell never produces.
+  const article = { stl: 'an STL', step: 'a STEP' };
+  for (const b of document.querySelectorAll('#download button'))
+    b.title = `save ${article[b.dataset.fmt]} into the project's build folder and show it in Finder`;
+}
 
 // ---- scene (Z-up, matching CAD) ----
 const main = document.querySelector('main');
@@ -659,20 +710,24 @@ for (const b of document.querySelectorAll('#download button')) {
     const fmt = b.dataset.fmt, lab = b.querySelector('span'), was = lab.textContent;
     b.disabled = true; lab.textContent = 'building';
     try {
-      const r = await fetch(`/export/${current}.${fmt}`);
+      // Embedded, the file goes to disk server-side and the shell reveals it: a
+      // webview ignores an <a download>, so a blob there is a button that does
+      // nothing. In a browser the blob is the download.
+      const r = await fetch(`/export/${current}.${fmt}${embed ? '?save' : ''}`);
       if (!r.ok) throw new Error(await r.text());
-      const url = URL.createObjectURL(await r.blob());
-      // A variant is a catalog entry, so its file carries the catalog name: sliders
-      // sitting on hook_utility download hook_utility.stl, not hook_scissors.stl.
-      // An assembly comes back as one zip of its placed parts, named by the server;
-      // one download, because a second file dies silently on the browser's
-      // multiple-download permission.
-      const zip = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+\.zip)"/);
-      const v = activeVariant(parts.get(current));
-      const a = Object.assign(document.createElement('a'),
-                              { href: url, download: zip ? zip[1] : `${v ? v.name : current}.${fmt}` });
-      a.click();
-      URL.revokeObjectURL(url);
+      if (embed) {
+        window.parent.postMessage({ type: 'nurb:saved', path: (await r.json()).path }, '*');
+      } else {
+        const url = URL.createObjectURL(await r.blob());
+        // The server names the file, variant and all. An assembly comes back as one
+        // zip of its placed parts; one download, because a second file dies silently
+        // on the browser's multiple-download permission.
+        const named = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
+        const a = Object.assign(document.createElement('a'),
+                                { href: url, download: named ? named[1] : `${current}.${fmt}` });
+        a.click();
+        URL.revokeObjectURL(url);
+      }
     } catch (e) {
       const note = document.getElementById('note');
       if (note) { note.classList.add('bad'); note.textContent = `export failed: ${e.message}`; }
@@ -913,10 +968,17 @@ async function paint(name, { keepCamera }) {
   // Only reframe when the part changed scale enough that the camera is lost.
   const jumped = lastSize && (size / lastSize > 3 || lastSize / size > 3);
   const reframe = document.getElementById('reframe');
+  // A rebuild keeps the camera, but only when this page has already aimed one at this
+  // part. The first geometry a page paints can arrive as a rebuild rather than in the
+  // sync: the server queues a project's worth of builds behind its bind, so a deep link
+  // outruns its own part's first build, and a part whose first build failed lands the
+  // same way once it is fixed. There is no camera to keep in either case, so keeping it
+  // leaves the camera at the origin and paints a blank canvas over a perfectly good mesh.
+  const keep = keepCamera && framed === name;
   if (view) {
     frame(box, view);                       // asked for a named view: no saved camera
     reframe.style.display = 'none';
-  } else if (!keepCamera) {
+  } else if (!keep) {
     // A restored camera is a guess about stale state, so keep the escape hatch visible.
     const restored = restoreCamera(name, box);
     if (!restored) frame(box);
@@ -930,7 +992,8 @@ async function paint(name, { keepCamera }) {
   reframe.onclick = () => { frame(box); reframe.style.display = 'none'; };
   // The cut side comes from the camera, so attach only after this part's saved camera
   // has been restored (or its default frame chosen), never from the part just removed.
-  sectionAttach(!keepCamera);
+  sectionAttach(!keep);
+  framed = name;
   lastSize = size;
   hud(parts.get(name) || entry);
   checks(name);
@@ -1007,7 +1070,7 @@ function hud(e) {
   for (const b of document.querySelectorAll('#download button')) {
     b.disabled = asm && !placed.length;
     b.title = !asm ? b.dataset.title
-      : placed.length ? `downloads the placed parts, zipped: ${placed.join(', ')}`
+      : placed.length ? `${embed ? 'saves' : 'downloads'} the placed parts, zipped: ${placed.join(', ')}`
       : 'this assembly places no parts; nothing to print';
   }
 }
@@ -1073,8 +1136,11 @@ function markDirty() {
   }
   const write = document.getElementById('write');
   if (write && current) {
-    write.textContent = `write ${changed.length} default${changed.length === 1 ? '' : 's'} `
-      + `to ${current}.py`;
+    // Embedded in the app the audience is hobbyists, and the Python file is
+    // an implementation detail they should never have to think about.
+    write.textContent = document.body.classList.contains('embed')
+      ? 'save changes'
+      : `write ${changed.length} default${changed.length === 1 ? '' : 's'} to ${current}.py`;
   }
 }
 
@@ -1133,7 +1199,7 @@ function params(e) {
   box.classList.toggle('empty', !rows.length);
   if (!rows.length) { box.innerHTML = ''; document.body.classList.remove('dirty'); return; }
 
-  box.innerHTML = '<h2>parameters<span class="spin"></span><a id="resetall" title="reset every parameter">'
+  box.innerHTML = '<h2><svg class="hic"><use href="#i-variant"/></svg>parameters<span class="spin"></span><a id="resetall" title="reset every parameter">'
     + '<svg><use href="#i-reset"/></svg>reset</a></h2>';
   // Split, not filtered: a family constant stays reachable, it just stops competing for
   // attention with the dimensions this part actually owns.
@@ -1348,8 +1414,10 @@ function applyVariant(name, v) {
 function setURL(vname) {
   if (bare || view) return;
   const u = new URL(location);
-  if (current) u.searchParams.set('part', current); else u.searchParams.delete('part');
-  const v = vname || (current && activeVariant(parts.get(current))?.name);
+  const part = current || want;
+  if (part) u.searchParams.set('part', part); else u.searchParams.delete('part');
+  const v = vname || (current && activeVariant(parts.get(current))?.name)
+    || (!current && want && wantVariant);
   if (v) u.searchParams.set('variant', v); else u.searchParams.delete('variant');
   if (u.href !== location.href) history.replaceState(null, '', u);
 }
@@ -1371,6 +1439,8 @@ function render() {
       + `<span class="name">${e.name}</span>`
       + `<span class="ms">${e.error ? 'err' : e.ms + 'ms'}</span>`;
     row.onclick = () => {
+      // A click supersedes a deep link whose part is still waiting to build.
+      want = null; wantVariant = null;
       current = e.name;
       // The part row is the defaults configuration. With a variant active it is also
       // the only way back: a variant that flips a bool has no slider to drag home.
@@ -1387,6 +1457,7 @@ function render() {
       const how = Object.entries(v.params).map(([k, val]) => `${k} = ${val}`).join('\n');
       vr.title = v.note ? `${v.note}\n\n${how}` : how;
       vr.onclick = () => {
+        want = null; wantVariant = null;
         if (current !== e.name) { current = e.name; show(e.name, { keepCamera: false }); }
         applyVariant(e.name, v);
         render();
@@ -1470,7 +1541,9 @@ function newerVersion(a, b) {
 
 async function checkUpdate(installed) {
   versionBadge(installed, null);
-  if (bare) return;
+  // The desktop app updates itself; its embedded viewer never nudges toward
+  // a Python-side upgrade it cannot perform.
+  if (bare || embed) return;
   const cached = JSON.parse(localStorage.getItem('nurb-latest') || 'null');
   if (cached && Date.now() - cached.at < 86400e3) return versionBadge(installed, cached.version);
   try {
@@ -1538,8 +1611,11 @@ function connect() {
       checkUpdate(msg.version);
       parts.clear();
       msg.parts.forEach(p => parts.set(p.name, p));
-      if (!current && parts.has(want)) current = want;
-      if (!current && msg.parts.length) current = msg.parts[0].name;
+      if (want && !msg.sources.includes(want)) { want = null; wantVariant = null; }
+      // A fallback render may have filled `current` while the socket was down.
+      // The still-pending deep link outranks that temporary choice.
+      if (want && parts.has(want)) current = want;
+      if (!current && !want && msg.parts.length) current = msg.parts[0].name;
       // ?variant= is an ask, so it loads that variant's overrides once. Once, because
       // a reconnect sync must not snap back what the user has since dragged away.
       let linked = null;
@@ -1547,33 +1623,44 @@ function connect() {
         linked = (parts.get(current).variants || []).find(v => v.name === wantVariant);
         if (linked) applyVariant(current, linked);
       }
-      wantVariant = null;
+      if (current === want) { want = null; wantVariant = null; }
       render();
       if (current) show(current, { keepCamera: false });
       setURL(linked && linked.name);
     }
     if (msg.type === 'rebuilt') {
       parts.set(msg.name, msg);
+      let linked = null;
+      if (msg.name === want) {
+        current = want;
+        linked = wantVariant && (msg.variants || []).find(v => v.name === wantVariant);
+        if (linked) applyVariant(current, linked);
+        want = null; wantVariant = null;
+      }
       // The first part in an empty project arrives here, not in a sync, so without
       // this `nurb new` in a running `nurb dev` fills the list and leaves the canvas
       // showing "no parts yet".
-      if (!current) current = msg.name;
+      if (!current && !want) current = msg.name;
       render();
       flash(msg.name);
       // Unconditionally, and by name: a rebuild the user walked away from still has to
       // release the slot it was holding.
       settled(msg.name);
-      if (msg.name === current) { show(msg.name, { keepCamera: true }); setURL(); }
+      if (msg.name === current) { show(msg.name, { keepCamera: true }); setURL(linked && linked.name); }
     }
     // Checks arrive after the geometry, so this only repaints the panel.
     // Deleted or renamed away. Without this it stays in the list, selectable, with
     // sliders that rebuild a file that is not there.
     if (msg.type === 'gone') {
       parts.delete(msg.name);
+      if (want === msg.name) { want = null; wantVariant = null; }
       if (current === msg.name) {
         current = parts.size ? parts.keys().next().value : null;
         if (current) show(current, { keepCamera: false });
         else { document.getElementById('empty').style.display = 'grid'; }
+      } else if (!current && !want && parts.size) {
+        current = parts.keys().next().value;
+        show(current, { keepCamera: false });
       }
       render();
       setURL();
