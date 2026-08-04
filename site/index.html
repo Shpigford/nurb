@@ -97,6 +97,12 @@
                 font: inherit; font-size: 12px; padding: 2px 4px; border-radius: 5px; }
   .cmd button:hover { color: var(--accent); }
   .cta .alt { color: var(--dim); font-size: 13px; }
+  .dl { display: inline-flex; align-items: center; gap: 10px;
+        background: var(--accent); color: #12271c; font-weight: 700; font-size: 15px;
+        padding: 13px 26px; border-radius: 9px; }
+  .dl:hover { text-decoration: none; filter: brightness(1.07); }
+  .dl svg { width: 14px; height: 14px; }
+  .cta .or { color: var(--dimmer); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
 
   /* ---- sections ---- */
   /* section.wrap, not section: the .wrap padding would out-specify a bare element
@@ -266,7 +272,8 @@
   #start li .body { min-width: 0; flex: 1; }
   #start li p { color: var(--dim); font: 14px/1.55 var(--sans); margin-top: 8px; }
   #start li p b { color: var(--text); font-weight: 600; }
-  #start .cmd { margin-top: 2px; max-width: 100%; overflow-x: auto; }
+  #start .cmd { margin-top: 10px; max-width: 100%; overflow-x: auto; }
+  #start .dl { font-size: 14px; padding: 10px 20px; margin: 4px 0 6px; }
   #start .say { color: var(--text); font-size: 14px; }
   #start .say::before { content: "> "; color: var(--accent); }
 
@@ -350,8 +357,10 @@
   <div class="dimline"><i>&#9666;</i><b>no CAD software &middot; no tutorials &middot; no failed prints</b><i>&#9656;</i></div>
   <p class="sub">nurb gives the AI you already talk to real CAD skills. Say what you need, <b>watch it take shape live</b>, hit print.</p>
   <div class="cta">
+    <a class="dl" href="https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg"><svg><use href="#i-download"/></svg>Download for Mac</a>
+    <span class="alt">free &middot; open source &middot; Apple silicon &middot; runs on your computer</span>
+    <span class="or">or in the terminal</span>
     <span class="cmd"><span class="d">$</span><span>curl -fsSL https://nurb.dev/install.sh | sh</span><button data-copy="curl -fsSL https://nurb.dev/install.sh | sh" title="copy">copy</button></span>
-    <span class="alt">free &middot; open source &middot; runs on your computer</span>
   </div>
 </section>
 
@@ -464,14 +473,16 @@
 <section id="start" class="wrap">
   <div class="reveal">
     <div class="sec-label"><b>// 05</b> &nbsp;get started</div>
-    <h2>One copy-paste and a sentence.</h2>
-    <p class="lede">Works with Claude Code, Cursor, Codex, Copilot, and friends.</p>
+    <h2>One download and a sentence.</h2>
+    <p class="lede">The Mac app is the whole thing in one window. The command line works with Claude Code, Cursor, Codex, Copilot, and friends.</p>
   </div>
   <ol class="reveal">
     <li>
       <div class="body">
+        <a class="dl" href="https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg"><svg><use href="#i-download"/></svg>Download nurb for Mac</a>
+        <p>Your projects, your AI, and the live viewer side by side. It sets everything up the first time you open it and updates itself. Apple silicon Macs.</p>
+        <p>Rather work in the terminal? One paste installs nurb and teaches your AI how printable parts are designed:</p>
         <span class="cmd"><span class="d">$</span>curl -fsSL https://nurb.dev/install.sh | sh<button data-copy="curl -fsSL https://nurb.dev/install.sh | sh" title="copy">copy</button></span>
-        <p>Paste into Terminal. Installs nurb and teaches your AI how printable parts are designed. Prefer your own package manager? <code>uv tool install nurb</code> then <code>npx skills add shpigford/nurb</code> does the same two things.</p>
       </div>
     </li>
     <li>
