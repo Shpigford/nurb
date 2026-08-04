@@ -42,6 +42,12 @@ uv version X.Y.Z
 
 then the `version:` frontmatter line in `src/nurb/skill.md` and `skills/nurb/SKILL.md`, then `version` in `desktop/src-tauri/tauri.conf.json`.
 
+The bump also stales `evals/uv.lock`, because evals is its own uv project with nurb as an editable path dependency and CI syncs it with `--locked`. Relock it and commit the one-line change with the bump:
+
+```bash
+cd evals && uv lock && cd ..
+```
+
 Prove the agreement before pushing: `uv run pytest tests/test_cli.py -q`. Commit with a plain-sentence message, push, and open the PR against main with the release summary as the body (what shipped, in user-visible terms). Then stop and hand the merge to the user.
 
 ## Step 3: After the merge
@@ -51,6 +57,8 @@ publish.yml reacts to the merge on its own: PyPI upload, tag `vX.Y.Z`, GitHub re
 ```bash
 cd desktop && scripts/release.sh
 ```
+
+A fresh worktree has no `desktop/node_modules`, and the script dies immediately with `tauri: command not found`. Run `npm ci` in `desktop/` first if it is missing.
 
 About ten minutes: signed build, notarization, stapling, chain verification, upload of `nurb.dmg` plus the updater archive into the `vX.Y.Z` release, and the `desktop-latest` feed refresh. It refuses to double-upload, so re-running after a failure is safe. It needs this Mac; the signing cert and updater key live here by design.
 
@@ -64,7 +72,7 @@ Three probes, all of which must say X.Y.Z (the DMG check must return a redirect 
 
 ```bash
 curl -sfI https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg | head -1
-curl -sf https://github.com/Shpigford/nurb/releases/download/desktop-latest/latest.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"
+curl -sfL https://github.com/Shpigford/nurb/releases/download/desktop-latest/latest.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"
 curl -sf https://pypi.org/pypi/nurb/json | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])"
 ```
 
