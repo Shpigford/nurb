@@ -4,6 +4,7 @@
 
 mod events;
 mod policy;
+mod sandbox;
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -200,6 +201,7 @@ async fn agent_sessions(
     project: PathBuf,
 ) -> Result<(Vec<agent_client_protocol::schema::v1::SessionInfo>, Vec<ConfigRow>), String> {
     let (program, args) = launcher.adapter(kind);
+    let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -628,6 +630,7 @@ async fn run_chat(
     use tauri::Manager;
     let launcher = app.state::<crate::env::Launcher>();
     let (program, args) = launcher.adapter(kind);
+    let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -652,7 +655,6 @@ async fn run_chat(
     let notify_channel = channel.clone();
     let ask_channel = channel.clone();
     let ask_pending = pending.clone();
-    let ask_project = project.clone();
     let live_session = Arc::new(Mutex::new(None));
     let connected_session = Arc::clone(&live_session);
     let chat_app = app.clone();
@@ -677,9 +679,10 @@ async fn run_chat(
         )
         .on_receive_request(
             async move |request: RequestPermissionRequest, responder, cx| {
-                // The app answers for the user inside the project (see
-                // policy.rs); only escalations reach a dialog.
-                if let Some(option) = policy::auto_allow(&ask_project, &request) {
+                // The app answers yes for the user; the OS sandbox the
+                // adapter runs under is the guard (see sandbox.rs). Only a
+                // request offering no allow-once option reaches a dialog.
+                if let Some(option) = policy::auto_allow(&request) {
                     let _ = writeln!(
                         std::io::stderr(),
                         "[acp:{}] auto-allowed: {}",

@@ -95,6 +95,17 @@ impl Launcher {
         }
     }
 
+    /// The directory the engine writes while it works, granted to the agent
+    /// sandbox: the provisioned app-data dir on user machines, the repo
+    /// checkout in dev builds (where `uv run --project` and npx put venvs
+    /// and caches).
+    pub fn engine_root(&self) -> PathBuf {
+        match self {
+            Self::Checkout { repo } => repo.clone(),
+            Self::Provisioned { paths } => paths.data().clone(),
+        }
+    }
+
     /// Whether this agent's ACP process can be spawned at all.
     pub fn adapter_available(&self, kind: AgentKind) -> bool {
         if kind.native_command().is_some() {
