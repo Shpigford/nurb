@@ -308,6 +308,12 @@ moment to ask rather than to pick something plausible.
 
 **A published number is a measurement, not a guess.** When the part mates with a manufactured product or a published standard, a VESA mount, a gridfinity bin, a camera thread, the number already exists in a datasheet, and making somebody caliper a hole pattern a standards body fixed is friction wearing rigor's clothes. Research it, record it like any other measurement with `how` naming the source ("VESA MIS-D 100, manufacturer product page"), and ask only for what nobody published, like the opening the finished thing has to fit. Two limits keep this honest: the user's actual object outranks the spec when the two disagree, because clones drift, and a number inferred from a product photo or a listing's marketing copy was never published at all, so it is a guess and gets marked like one.
 
+**A photo is a shape, never a dimension.** It can identify the standard, that the siding is dutch lap, that the rail is 2020 extrusion, and the published profile carries the numbers from there. Pixels carry no millimetres, so a dimension read off a photo is a guess and gets marked like one.
+
+**A phone scan is reference geometry, not metrology.** Its error changes with the phone, capture mode, surface and technique, so no universal millimetre threshold makes it a caliper. `nurb scan` reads the mesh in mm, states the units it used, and slices profile polylines to sketch against. Record what it gave with `how` naming the file and the slice, and keep every scan-derived fit `provisional` until a coupon proves it against the real object.
+
+**A fit coupon turns a loose measurement into a tight one.** Before printing a part modelled against a scan or a photo, print the mating surface alone: a thin strip carrying just the profile, minutes of filament. Held against the real object it shows every gap the numbers hid, the parameters get corrected, and only then does the full part print. A coupon that fits is what takes the provisional flag off.
+
 **When there is nobody to ask**, write the guess down and mark it `provisional = true`.
 The danger was never the guess, it is that a guess and a measurement look identical six
 months later. `how` is still required, because "eyeballed against a broom" tells the

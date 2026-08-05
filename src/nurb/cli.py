@@ -630,6 +630,31 @@ def cmd_inspect(args):
         print(f"      {shot['label']}")
 
 
+def cmd_scan(args):
+    """Measure a phone-scanned mesh, so a part can be modelled against a real object.
+
+    Takes a file rather than a part name, and needs no project: the scan arrives
+    before the part exists, and reading it is how the part's numbers get found.
+    """
+    from . import scan
+
+    try:
+        mesh, unit, source = scan.load(args.file, units=args.units)
+    except ValueError as exc:
+        sys.exit(f"  {exc}")
+    for line in scan.report(pathlib.Path(args.file).name, mesh, unit, source):
+        print(line)
+    if not args.section:
+        return
+    try:
+        cut = scan.section(mesh, args.section, tolerance=args.tolerance)
+    except ValueError as exc:
+        sys.exit(f"  {exc}")
+    print()
+    for line in scan.section_report(cut):
+        print(line)
+
+
 def skill_targets():
     """The two paths nurb's install flow writes the skill to.
 
@@ -894,6 +919,26 @@ def main(argv=None):
         help="write build/renders/<part>.finding-<n>.png per finding, camera facing the face it fired on",
     )
     s.set_defaults(fn=cmd_inspect)
+
+    s = sub.add_parser(
+        "scan", help="measure a phone-scanned mesh (STL/OBJ/GLB or triangulated PLY), in mm"
+    )
+    s.add_argument("file", help="the mesh a scan app exported")
+    s.add_argument(
+        "--units",
+        choices=("mm", "cm", "m", "in"),
+        help="the file's units. default: declared by the format, otherwise guessed from size",
+    )
+    s.add_argument(
+        "--section",
+        metavar="AXIS[:POS]",
+        help="slice a profile polyline: z is mid-mesh, z:0.7 a fraction of the span, z:40mm a coordinate in the scan's own frame",
+    )
+    s.add_argument(
+        "--tolerance", type=float, default=0.2,
+        help="simplify the profile to this many mm (default 0.2)",
+    )
+    s.set_defaults(fn=cmd_scan)
 
     s = sub.add_parser("skill", help="print an agent skill file for your AI harness")
     s.add_argument("--sync", action="store_true", help="rewrite installed copies from this package instead of printing")
