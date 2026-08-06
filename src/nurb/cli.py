@@ -631,7 +631,7 @@ def cmd_inspect(args):
 
 
 def cmd_scan(args):
-    """Measure a phone-scanned mesh, so a part can be modelled against a real object.
+    """Measure a mesh, so a part can be modelled against something that already exists.
 
     Takes a file rather than a part name, and needs no project: the scan arrives
     before the part exists, and reading it is how the part's numbers get found.
@@ -642,7 +642,7 @@ def cmd_scan(args):
         mesh, unit, source = scan.load(args.file, units=args.units)
     except ValueError as exc:
         sys.exit(f"  {exc}")
-    for line in scan.report(pathlib.Path(args.file).name, mesh, unit, source):
+    for line in scan.report(args.file, mesh, unit, source):
         print(line)
     if not args.section:
         return
@@ -921,9 +921,9 @@ def main(argv=None):
     s.set_defaults(fn=cmd_inspect)
 
     s = sub.add_parser(
-        "scan", help="measure a phone-scanned mesh (STL/OBJ/GLB or triangulated PLY), in mm"
+        "scan", help="measure a mesh in mm, a phone scan or a downloaded model (STL/OBJ/GLB or triangulated PLY)"
     )
-    s.add_argument("file", help="the mesh a scan app exported")
+    s.add_argument("file", help="the mesh: a scan app export, or a model downloaded to measure")
     s.add_argument(
         "--units",
         choices=("mm", "cm", "m", "in"),
@@ -932,7 +932,7 @@ def main(argv=None):
     s.add_argument(
         "--section",
         metavar="AXIS[:POS]",
-        help="slice a profile polyline: z is mid-mesh, z:0.7 a fraction of the span, z:40mm a coordinate in the scan's own frame",
+        help="slice a profile polyline: z is mid-mesh, z:0.7 a fraction of the span, z:40mm a coordinate in the mesh's own frame",
     )
     s.add_argument(
         "--tolerance", type=float, default=0.2,

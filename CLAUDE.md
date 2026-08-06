@@ -45,7 +45,7 @@ nurb dev             watch, rebuild, serve the viewer on :7373 or the next free 
 nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
 nurb inspect [part]  faces, normals, concave edges, each finding on its face, --render for stills of them
-nurb scan <file>     measure a phone-scanned mesh (STL/OBJ/GLB or triangulated PLY) in mm, --section for a profile polyline
+nurb scan <file>     measure a mesh in mm, a phone scan or a downloaded model (STL/OBJ/GLB or triangulated PLY), --section for a profile polyline
 nurb rules           print the design doctrine
 nurb api             the vocabulary a part file gets, with signatures
 nurb skill           print an agent skill file for any AI harness, --sync rewrites installed copies
@@ -78,6 +78,7 @@ src/nurb/api.py           the vocabulary, derived from __all__ so it cannot drif
 src/nurb/printers.toml    shipped printer profiles, named by a project's printer.toml
 src/nurb/card.py          the card's AUTO block
 src/nurb/extract.py       duplication across sibling parts, up to alpha-equivalence
+src/nurb/mesh.py          import_stl(), the flat-faced meshes that can be a solid
 src/nurb/measurements.py  measured(), and the refusal to guess
 src/nurb/edit.py          writes slider values back into a part's keyword defaults
 src/nurb/render.py        headless PNG, the only module that wants a browser

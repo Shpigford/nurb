@@ -1,15 +1,22 @@
-"""What a phone scan measured, so a part can be modelled against a real object.
+"""What a mesh measured, so a part can be modelled against something that exists.
 
-A photo names a shape but carries no millimetres. A ten-second phone scan
-(Scaniverse, Polycam, and their kind) carries rough reference geometry, exported
-as STL, OBJ, GLB, or a triangulated PLY, and this module is how an agent reads one:
-overall size in mm with the file's units made explicit, and a cross-section sliced
-into a polyline short enough to sketch against.
+A photo names a shape but carries no millimetres. A mesh carries them, and two kinds
+arrive: a ten-second phone scan (Scaniverse, Polycam, and their kind), and a file
+downloaded off a model site. This module reads either the same way, because they are
+the same question at this stage: overall size in mm with the file's units made
+explicit, and a cross-section sliced into a polyline short enough to sketch against.
 
-The units question is the dangerous one. Scan apps export metres and slicers
-export millimetres, and a mesh 0.3 units across does not say which it is. Guessing
-wrong is a part a thousand times off that still builds, so the guess is stated in
-the report and overridable rather than silent.
+Where they differ is what the numbers are worth, and that is not visible in the
+geometry. A phone scan is reference geometry and its fits stay provisional until a
+coupon proves them; a download is exact to the micron. Nothing in the mesh says which
+one it is, so this module never guesses. The 3DBenchy, a designed model, scores like a
+capture on every statistic worth computing. Provenance is something the user said and
+the agent knows, so the judgement lives in the skill, and this reports facts.
+
+The units question is the dangerous one. Scan apps export metres and slicers export
+millimetres, and a mesh 0.3 units across does not say which it is. Guessing wrong is a
+part a thousand times off that still builds, so the guess is stated in the report and
+overridable rather than silent.
 """
 
 import pathlib
@@ -56,6 +63,14 @@ def load(path, units=None):
     path = pathlib.Path(path)
     if not path.is_file():
         raise ValueError(f"no file at {path}")
+    if path.suffix.lower() == ".3mf":
+        # As common as STL on the model sites, and trimesh reads it only with networkx
+        # installed. "No module named 'networkx'" is not something a user can act on,
+        # and a dependency is not worth one format the slicer already converts.
+        raise ValueError(
+            f"{path.name} is a 3MF, which nurb does not read. Open it in your slicer "
+            f"and export the plate as STL, then run this on that file"
+        )
     try:
         mesh = trimesh.load(str(path), force="mesh")
     except Exception as exc:
@@ -90,24 +105,65 @@ def load(path, units=None):
     return mesh, unit, source
 
 
-def report(name, mesh, unit, source):
+def report(path, mesh, unit, source):
+    path = pathlib.Path(path)
     # .4g, not .1f: a mis-unit mesh read as mm can be 0.04mm across, and a size
     # line that rounds that to 0.0 states a falsehood right where units go wrong.
     size = " x ".join(f"{v:.4g}" for v in mesh.extents)
     surface = "watertight" if mesh.is_watertight else "open surface"
-    lines = [f"  {name}  {len(mesh.faces):,} triangles, {surface}, {size} mm"]
+    lines = [f"  {path.name}  {len(mesh.faces):,} triangles, {surface}, {size} mm"]
     if source == "guess":
         span = float(mesh.extents.max()) / UNITS[unit]
+        # No longer says "which is what phone scan apps export": that is why the
+        # threshold exists, but stating it as the file's origin reads as a verdict on
+        # provenance, and a downloaded part is exact however this line is worded.
         lines.append(
-            f"      read as {LONG[unit]}: the file spans {span:.3g} units, and under "
-            f"{METRES_BELOW:.0f} means metres, which is what phone scan apps export. "
+            f"      read as {LONG[unit]}: the file spans {span:.3g} units, and only a "
+            f"mesh under {METRES_BELOW:.0f} units across is read as metres. "
             f"Wrong? --units says so"
         )
     elif source == "file":
         lines.append(f"      read as {LONG[unit]} (declared by the file format)")
     else:
         lines.append(f"      read as {LONG[unit]} (--units)")
+    lines.append(f"      {_solid_line(path, mesh, unit, source)}")
     return lines
+
+
+def _solid_line(path, mesh, unit, source):
+    """Whether this mesh can be a part's solid, answered before the agent tries it.
+
+    The one question a mesh report has to settle, because the alternative is an agent
+    guessing at `import_stl` and finding out through a refusal. Flat faces are counted
+    only in the case that can import, where they are what the part would be made of;
+    counting them on a 226,000-triangle download would take a third of a second to
+    report a number nobody can act on.
+
+    The call it prints carries `units` whenever this report only got the size right
+    because someone passed it, because the same file imported without that argument is
+    a part off by a factor of ten or a thousand that still builds.
+    """
+    from . import mesh as mesh_module
+
+    problem = mesh_module.refusal(path.suffix, mesh)
+    if problem:
+        return (
+            f"no solid from this one: it is {problem}. "
+            f"Rebuild it from these measurements"
+        )
+    solid, problem = mesh_module.conversion(path)
+    if problem:
+        return (
+            f"no solid from this one: it is {problem}. "
+            f"Rebuild it from these measurements"
+        )
+    argument = f", units={unit!r}" if source == "argument" else ""
+    call = f"import_stl({str(path)!r}{argument})"
+    flats = len(solid.faces())
+    return (
+        f"{call} returns this as a solid: {flats} flat "
+        f"{'face' if flats == 1 else 'faces'}. Any curve in it comes back as facets"
+    )
 
 
 def section(mesh, spec, tolerance=0.2):

@@ -6,11 +6,21 @@ themselves; a hand-written list would be a second copy of the vocabulary and wou
 stale exactly when someone adds to the first one.
 """
 
+import inspect
+
 import build123d
 import pytest
 
 import nurb
 from nurb import api
+
+
+@pytest.fixture
+def box_stl(tmp_path):
+    """A box, because the shadowed `import_stl` takes flat-faced meshes and only those."""
+    target = tmp_path / "box.stl"
+    build123d.export_stl(build123d.Box(10, 10, 10), str(target))
+    return str(target)
 
 
 def test_own_names_are_whatever_init_adds_to_build123d():
@@ -43,7 +53,7 @@ def test_shadowed_names_are_found_by_identity_not_by_a_list():
     """A part file calls this believing it is build123d's, and it is not."""
     import build123d
 
-    assert set(api.shadowed_names()) == {"chamfer"}
+    assert set(api.shadowed_names()) == {"chamfer", "import_stl"}
     for name in api.shadowed_names():
         assert getattr(nurb, name) is not getattr(build123d, name)
 
@@ -53,6 +63,20 @@ def test_shadowed_api_preserves_the_build123d_signature():
     import inspect
 
     assert inspect.signature(nurb.chamfer) == inspect.signature(build123d.chamfer)
+
+
+def test_import_stl_is_the_shadow_that_deliberately_differs(box_stl):
+    """`chamfer` shadows for the error text; this one shadows to change the answer.
+
+    build123d's returns a `Face`, a sheet of triangles with no volume, and subtracting
+    from one segfaults. Preserving that signature would mean preserving the trap, so
+    the summary `nurb api` prints has to carry the difference instead.
+    """
+    assert build123d.import_stl(box_stl).volume == 0.0
+    assert nurb.import_stl(box_stl).volume > 0.0
+    signature = f"import_stl{inspect.signature(nurb.import_stl)}"
+    summary = dict(api.entries()[1])[signature]
+    assert "solid" in summary and "nurb scan" in summary
 
 
 def test_every_entry_carries_a_signature_and_a_sentence():

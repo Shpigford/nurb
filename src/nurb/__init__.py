@@ -19,6 +19,7 @@ from .checks import concave_edges, is_convex  # noqa: E402
 from .crown import crown  # noqa: E402
 from .holes import counterbore  # noqa: E402
 from .measurements import measured  # noqa: E402
+from .mesh import import_stl  # noqa: E402  -- must win, see below
 from .orient import stand  # noqa: E402
 from .polish import chamfer, polish  # noqa: E402  -- must win, see below
 from .registry import part, reject  # noqa: E402  -- must win over any build123d name
@@ -53,6 +54,12 @@ from .registry import part, reject  # noqa: E402  -- must win over any build123d
 # part stops building, so it is the one message worth owning. `fillet` is deliberately
 # not wrapped: build123d's fillet error already names `max_fillet()` and a smaller
 # radius really is the fix there, so the chamfer rule would be wrong half the time.
+# `import_stl` shadows build123d's for a blunter reason: build123d's returns a `Face`,
+# a sheet of triangles with no inside, and subtracting from one segfaults instead of
+# raising. A part builds inside the `nurb dev` process, so the whole watcher dies
+# without printing anything. It is also the first name a model tries when a downloaded
+# file lands in a project. This one returns a real solid for the flat-faced meshes that
+# survive the trip, and refuses the rest pointing at `nurb scan`.
 __all__ = [
     *getattr(_b3d, "__all__", [n for n in dir(_b3d) if not n.startswith("_")]),
     "part",

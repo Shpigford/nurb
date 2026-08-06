@@ -111,7 +111,7 @@ def report():
             lines.append(f"      {summary}")
     if shadowed:
         lines += _section(
-            "  And it replaces these build123d names with its own, same behaviour:", shadowed
+            "  And it replaces these build123d names with its own. Read the summary:", shadowed
         )
     if borrowed:
         lines += _section("  From build123d, because the doctrine mandates it:", borrowed)
