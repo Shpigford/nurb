@@ -1,6 +1,7 @@
 """Configuration-set validation happens before artifact writes."""
 
 import pathlib
+import re
 
 import pytest
 
@@ -663,7 +664,15 @@ def test_diff_catches_a_chamfer_that_stopped_landing(tmp_path, monkeypatch, caps
     part.write_text(RIBBED.replace("gap=8.0", "gap=3.2"))
     cli.cmd_diff(argparse.Namespace(part=None))
     out = capsys.readouterr().out
-    assert "faces: 44 -> 41" in out
+    # Not pinned to the counts themselves. How many chamfers a failing batch takes down
+    # with it is OCCT's call, and it answers differently on macOS and on Linux: the same
+    # part is 44 faces on one and something else on the other. What has to hold is that
+    # faces fell and that nothing else in the line would have raised a hand.
+    faces = re.search(r"faces: (\d+) -> (\d+)", out)
+    assert faces, out
+    assert int(faces[2]) < int(faces[1])
+    volume = re.search(r"volume: [\d.]+ -> [\d.]+ mm3, ([-+][\d.]+)%", out)
+    assert volume and abs(float(volume[1])) < 1.0, "volume barely moves, which is the point"
     assert "nurb card" in out, "the way to accept the new numbers is worth saying"
 
 
