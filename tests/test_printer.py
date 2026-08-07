@@ -7,7 +7,15 @@ because the card is applied on top of the machine.
 
 import pytest
 
-from nurb.checks import Context, _apply, from_card, global_file, printer, profiles
+from nurb.checks import (
+    Context,
+    _apply,
+    choose_profile,
+    from_card,
+    global_file,
+    printer,
+    profiles,
+)
 
 
 def project(tmp_path, printer_toml=None, card=None):
@@ -125,3 +133,51 @@ def test_a_typo_in_a_setting_is_an_error_not_a_shrug(tmp_path):
     project(tmp_path, "bedd = [1, 2, 3]\n")
     with pytest.raises(ValueError, match="bedd"):
         printer(tmp_path)
+
+
+# --- choosing the machine from the viewer -------------------------------------
+# The picker behind a print estimate writes the same `profile` line every command
+# already reads, so naming the machine once in the app also settles the bed the rules
+# check against. A printer.toml is usually hand-written, so only that line is touched.
+
+
+def test_choosing_a_printer_writes_the_line_every_command_reads(tmp_path):
+    project(tmp_path)
+    written = choose_profile(tmp_path, "bambu_a1_mini")
+    assert written == tmp_path / "printer.toml"
+    assert written.read_text() == 'profile = "bambu_a1_mini"\n'
+    assert printer(tmp_path).bed == (180.0, 180.0, 180.0)
+
+
+def test_choosing_again_replaces_the_line_instead_of_adding_one(tmp_path):
+    project(tmp_path, '# the machine, not the parts\nprofile = "bambu_a1_mini"\n')
+    choose_profile(tmp_path, "prusa_mk4s")
+    assert (tmp_path / "printer.toml").read_text() == (
+        '# the machine, not the parts\nprofile = "prusa_mk4s"\n'
+    )
+
+
+def test_a_chosen_printer_lands_above_the_tables_not_inside_the_last_one(tmp_path):
+    """Appended, `profile` would become a key of whatever table happens to be last,
+    which parses as export.profile and leaves the machine still unnamed."""
+    project(tmp_path, '# a hand-written note\nbed = [200.0, 200.0, 200.0]\n\n[export]\nformats = ["stl"]\n')
+    choose_profile(tmp_path, "bambu_x1c")
+    text = (tmp_path / "printer.toml").read_text()
+    assert text.index("profile") < text.index("[export]")
+    assert "a hand-written note" in text
+    assert printer(tmp_path).bed == (200.0, 200.0, 200.0)  # the file still wins
+
+
+def test_a_printer_nurb_does_not_ship_is_refused_before_it_is_written(tmp_path):
+    project(tmp_path)
+    with pytest.raises(ValueError, match="no printer profile"):
+        choose_profile(tmp_path, "voron_2_4")
+    assert not (tmp_path / "printer.toml").exists()
+
+
+def test_the_h2_series_is_shipped_because_it_is_what_bambu_sells_now(tmp_path):
+    """The gap this filled: a current flagship missing from the list makes every print
+    estimate on it dead-end at the picker."""
+    have = profiles()
+    assert have["bambu_h2c"]["slicer"] == "Bambu Lab H2C"
+    assert {"bambu_h2c", "bambu_h2d", "bambu_h2s"} <= set(have)

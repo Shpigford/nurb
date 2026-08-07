@@ -29,6 +29,23 @@ slicer = "Bambu Lab A1"
 bed = [180.0, 180.0, 180.0]
 slicer = "Bambu Lab A1 mini"
 
+# The H2 series carries a caveat no single number holds: a dual-nozzle job loses X,
+# because both nozzles have to reach every point. These are the single-material
+# figures, which is what a one-piece printed part is, taken from the slicer's own
+# machine profile rather than the spec sheet so they agree with what will actually
+# slice. Subtract 50mm of X before trusting one for a two-material plate.
+[bambu_h2c]
+bed = [330.0, 320.0, 325.0]
+slicer = "Bambu Lab H2C"
+
+[bambu_h2d]
+bed = [350.0, 320.0, 325.0]
+slicer = "Bambu Lab H2D"
+
+[bambu_h2s]
+bed = [340.0, 320.0, 340.0]
+slicer = "Bambu Lab H2S"
+
 [prusa_mk4s]
 bed = [250.0, 210.0, 220.0]
 slicer = "Prusa MK4S"

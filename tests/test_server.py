@@ -4,6 +4,8 @@ import asyncio
 import io
 import json
 import pathlib
+import threading
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -650,3 +652,329 @@ def test_skill_nudge_stays_quiet_with_nothing_installed(tmp_path, monkeypatch, c
     monkeypatch.setenv("HOME", str(tmp_path))
     server_mod._skill_nudge()
     assert capsys.readouterr().out == ""
+
+
+# --- what the print costs -----------------------------------------------------
+# The route the viewer's "print time" button calls. Nothing in CI has a slicer, so
+# the two answers exercised here are the ones that come back without running one:
+# the question that gets a picker, and the shape identity that decides how long an
+# answer is allowed to stay on screen.
+
+
+def test_slice_asks_which_printer_rather_than_refusing(tmp_path, monkeypatch):
+    """A machine that was never chosen is a question, and the viewer needs the list
+    to ask it with. Reporting `no printer chosen` and stopping is the dead end this
+    whole surface exists to avoid."""
+    from nurb import checks
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty"))
+    said = json.loads(asyncio.run(project(tmp_path).slice("thing")).body)
+    assert said["kind"] == "choose"
+    assert "error" not in said
+    assert said["profiles"] == sorted(checks.profiles())
+
+
+def test_choosing_a_printer_replies_only_to_the_viewer_that_asked(tmp_path):
+    """Another open viewer must not treat this acknowledgement as its own request and
+    immediately slice whichever part it happens to show."""
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+
+    class Client:
+        def __init__(self):
+            self.messages = []
+
+        async def send(self, raw):
+            self.messages.append(json.loads(raw))
+
+    asking, other = Client(), Client()
+    server.clients = {asking, other}
+    asyncio.run(
+        server.command(
+            json.dumps({"type": "printer", "profile": "bambu_a1_mini"}),
+            asking,
+        )
+    )
+
+    assert asking.messages == [
+        {"type": "printer", "profile": "bambu_a1_mini", "bed": [180.0, 180.0]}
+    ]
+    assert other.messages == []
+
+
+def test_slice_says_what_is_missing_before_it_needs_a_printer(tmp_path, monkeypatch):
+    """No slicer outranks no printer: naming a machine would not help."""
+    from nurb import slicing
+
+    monkeypatch.setattr(slicing, "app", lambda *a, **k: None)
+    said = json.loads(asyncio.run(project(tmp_path).slice("thing")).body)
+    assert said["kind"] == "slicer"
+    assert "OrcaSlicer" in said["error"]
+    # No machine list, because no choice on it would help: nothing here can be picked
+    # into existence, and the viewer keys its calm no-retry state off exactly this.
+    assert "profiles" not in said
+
+
+def test_a_machine_the_slicer_does_not_carry_offers_the_others(tmp_path, monkeypatch):
+    """A fault the user can act on. `nurb slice` prints the neighbouring machines and
+    stops; the viewer has to be able to offer them, or the row is a wall with a button
+    on it that fails identically every time."""
+    from nurb import checks, slicing
+
+    monkeypatch.setattr(slicing, "app", lambda *a, **k: "/Applications/OrcaSlicer")
+    monkeypatch.setattr(slicing, "vendors", lambda exe: pathlib.Path(tmp_path))
+    monkeypatch.setattr(
+        slicing, "machine", lambda *a, **k: (_ for _ in ()).throw(slicing.Unavailable("no H2C here"))
+    )
+    (tmp_path / "printer.toml").write_text('profile = "bambu_a1_mini"\n')
+
+    said = json.loads(asyncio.run(project(tmp_path).slice("thing")).body)
+
+    assert said["kind"] == "profile"
+    assert said["error"] == "no H2C here"
+    assert said["profiles"] == sorted(checks.profiles())
+
+
+def test_a_model_the_slicer_refuses_does_not_offer_a_printer_picker(tmp_path, monkeypatch):
+    """Once machine and presets resolved, a refusal belongs to this model or slicer
+    run. Changing the printer is not the generic repair for it."""
+    from nurb import slicing
+
+    server = project(tmp_path)
+    (tmp_path / "printer.toml").write_text('profile = "bambu_a1_mini"\n')
+    monkeypatch.setattr(slicing, "app", lambda *a, **k: "/Applications/BambuStudio")
+    monkeypatch.setattr(slicing, "vendors", lambda exe: tmp_path)
+    monkeypatch.setattr(slicing, "machine", lambda *a, **k: tmp_path / "machine.json")
+    monkeypatch.setattr(
+        slicing,
+        "profiles_for",
+        lambda *a, **k: (tmp_path / "process.json", tmp_path / "filament.json"),
+    )
+
+    async def refused(*args):
+        raise slicing.Unavailable("the slicer refused this model: exit code 156")
+
+    monkeypatch.setattr(server, "_sliced", refused)
+
+    said = json.loads(asyncio.run(server.slice("thing")).body)
+
+    assert said == {
+        "kind": "slice",
+        "error": "the slicer refused this model: exit code 156",
+    }
+
+
+def test_the_viewer_keeps_a_missing_slicer_out_of_the_fault_colour():
+    """Nothing is broken and nothing the user does in this window fixes it, so the row
+    stays calm, names the two apps, and points at the file button instead of offering a
+    retry that fails identically."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    branch = viewer[viewer.index("if (ask.kind === 'slicer') {") :]
+    branch = branch[: branch.index("return")] + branch[branch.index("return") : branch.index("\n  }")]
+    assert '"ask line"' in branch  # calm, not the fault colour
+    assert "stl still works" in branch
+    assert "class=\"go\"" not in branch  # no retry that cannot succeed
+
+
+def test_slice_refuses_a_part_it_does_not_have(tmp_path):
+    assert asyncio.run(project(tmp_path).slice("missing")).status_code == 404
+
+
+def test_slice_route_requires_the_socket_token(tmp_path, monkeypatch):
+    """A page on another origin can GET localhost, but it cannot learn and attach the
+    secret the viewer receives through its origin-checked websocket."""
+    server = project(tmp_path)
+    called = []
+
+    async def sliced(name):
+        called.append(name)
+        return server._json(200, {"name": name})
+
+    monkeypatch.setattr(server, "slice", sliced)
+    denied = asyncio.run(
+        server.http(None, SimpleNamespace(path="/api/slice/thing", headers={}))
+    )
+    allowed = asyncio.run(
+        server.http(
+            None,
+            SimpleNamespace(
+                path="/api/slice/thing",
+                headers={"X-Nurb-Token": server.http_token},
+            ),
+        )
+    )
+
+    assert denied.status_code == 403
+    assert allowed.status_code == 200
+    assert called == ["thing"]
+    assert "request_token" not in server._sync()
+    assert server._sync(include_token=True)["request_token"] == server.http_token
+    viewer = pathlib.Path(__file__).parents[1] / "src" / "nurb" / "viewer.html"
+    assert "'X-Nurb-Token': requestToken" in viewer.read_text(encoding="utf-8")
+
+
+def test_identical_geometry_keeps_its_shape_id(tmp_path):
+    """The rule an estimate hangs on. A rebuild that changed nothing, which is what a
+    printer.toml edit causes, must not read as a new shape, or the answer the user
+    just paid a slicer for deletes itself."""
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    first = server.state["thing"]["shape_id"]
+    assert first == server.rebuild(part)["shape_id"]
+
+    server.overrides["thing"] = {"width": 15.0}
+    assert server.rebuild(part)["shape_id"] != first
+
+
+def test_an_assembly_estimate_keeps_repeated_instances_and_their_overrides(
+    tmp_path, monkeypatch
+):
+    """A bill of materials counts physical instances, not unique source files, and a
+    configured use must not silently rebuild from the leaf's defaults."""
+    from nurb import slicing
+
+    (tmp_path / "parts").mkdir()
+    thing = tmp_path / "parts" / "thing.py"
+    thing.write_text(PART)
+    inner = tmp_path / "parts" / "inner.py"
+    inner.write_text(
+        """from nurb import *
+
+@assembly
+def inner():
+    return use("thing", width=12.0), Pos(50, 0, 0) * use("thing", width=12.0)
+"""
+    )
+    rig = tmp_path / "parts" / "rig.py"
+    rig.write_text(
+        """from nurb import *
+
+@assembly
+def rig():
+    return use("inner"), Pos(100, 0, 0) * use("thing", width=20.0)
+"""
+    )
+    server = Server(tmp_path)
+    server.rebuild(thing)
+    server.rebuild(inner)
+    server.rebuild(rig)
+    server.overrides["thing"] = {"width": 99.0}  # irrelevant to the assembly's uses
+
+    printable = [(path.stem, overrides) for path, overrides in server._printable("rig")]
+    assert printable == [
+        ("thing", {"width": 12.0}),
+        ("thing", {"width": 12.0}),
+        ("thing", {"width": 20.0}),
+    ]
+
+    built = []
+    monkeypatch.setattr(
+        server,
+        "_solid",
+        lambda path, overrides, target: built.append((path.stem, overrides)) or target,
+    )
+    monkeypatch.setattr(
+        slicing,
+        "run",
+        lambda model, target, *args: ((100, 2.0), target),
+    )
+
+    totals = asyncio.run(server._sliced("rig", "machine", "process", "filament", "exe"))
+
+    assert totals == (300, 6.0, 3)
+    assert built == [("thing", {"width": 12.0}), ("thing", {"width": 20.0})]
+
+
+def test_an_assembly_that_places_nothing_has_nothing_to_print(tmp_path):
+    from nurb.assembly import Scene
+
+    server = project(tmp_path)
+    server.state["rig"] = {
+        "name": "rig",
+        "shape": SimpleNamespace(_nurb_scene=Scene()),
+        "joints": [],
+        "uses": [],
+    }
+    with pytest.raises(Exception, match="nothing to print"):
+        server._printable("rig")
+
+
+def test_concurrent_estimates_do_not_run_the_slicer_together(tmp_path, monkeypatch):
+    """Two viewer tabs can ask for the same part together; their slicers must not share
+    and delete the adapter's per-target staging files."""
+    from nurb import slicing
+
+    server = project(tmp_path)
+    active = high_water = 0
+    guard = threading.Lock()
+
+    monkeypatch.setattr(server, "_solid", lambda path, overrides, target: target)
+
+    def run(model, target, *args):
+        nonlocal active, high_water
+        with guard:
+            active += 1
+            high_water = max(high_water, active)
+        time.sleep(0.03)
+        with guard:
+            active -= 1
+        return (10, 1.0), target
+
+    monkeypatch.setattr(slicing, "run", run)
+
+    async def both():
+        args = ("thing", "machine", "process", "filament", "exe")
+        return await asyncio.gather(server._sliced(*args), server._sliced(*args))
+
+    assert asyncio.run(both()) == [(10, 1.0, 1), (10, 1.0, 1)]
+    assert high_water == 1
+
+
+def test_the_viewer_carries_a_print_estimate_and_never_a_stale_one():
+    """The surface itself. A command with no control in the viewer does not exist for
+    the person who downloaded the app, and an estimate that outlived its geometry is
+    worse than none, so the card and the shape check are both pinned here."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    assert 'id="print"' in viewer
+    assert "/api/slice/" in viewer
+    # Shown only while the part on screen still hashes to what was sliced.
+    assert "said.shape_id === e.shape_id" in viewer
+    # The unnamed machine gets a picker, not a sentence about a file.
+    assert 'id="printerpick"' in viewer
+    assert "type: 'printer', profile: event.target.value" in viewer
+
+
+def test_the_print_estimate_is_its_own_row_and_not_a_sixth_toolbar_button():
+    """Where it lives is the feature, and two earlier cuts got it wrong. A sixth button
+    in the pill ran the toolbar into the checks panel at the width the desktop app
+    gives the viewer, and putting the answer in the bottom-left readout meant the user
+    who pressed the button never saw it arrive."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    tools = viewer[viewer.index('<div id="tools">') : viewer.index('<div id="hud">')]
+    pill = tools[tools.index('<div class="pill">') : tools.index("</div>")]
+    # In the toolbar column, beside the pill, never inside it.
+    assert '<div id="print"></div>' in tools
+    assert "print" not in pill
+    # The click and the number it produces are the same element.
+    assert "printbox.onclick" in viewer
+    assert "printbox.innerHTML" in viewer
+    # And the answer is not smuggled back into the corner readout.
+    hud = viewer[viewer.index("function hud(e) {") : viewer.index("// ---- parameters ----")]
+    assert "printed" not in hud
+
+
+def test_the_print_row_cannot_reach_the_checks_panel():
+    """Both are overlays anchored to opposite top corners, and this row grows leftward.
+    With only the viewport to stop it, it slid under the checks card on a narrow viewer.
+    The two widths have to leave no room to meet."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    assert "max-width: 46%" in viewer  # checks
+    assert "max-width: 54%" in viewer  # the print row

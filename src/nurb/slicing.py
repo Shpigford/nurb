@@ -9,7 +9,7 @@ So this module is deliberately thin. It finds the slicer, picks the profile that
 matches the machine the project already named in `printer.toml`, and hands over the
 STL. What it wants back is the pair of numbers that change a design decision while
 there is still time to change it: how long the print takes, and how much filament it
-eats. A wall that goes from 2 to 3mm is a shrug in the viewer and forty minutes on
+weighs. A wall that goes from 2 to 3mm is a shrug in the viewer and forty minutes on
 the plate, and finding that out after the part is on the bed is finding out too late.
 
 Local only. No account, no network call, no printer credentials: this runs the
@@ -17,6 +17,7 @@ slicer that is already on the machine and reads the files it wrote.
 """
 
 import json
+import math
 import os
 import pathlib
 import re
@@ -246,8 +247,8 @@ def profiles_for(machine_path, layer="0.20", filament="PLA"):
 def run(model, target, machine_path, process, filament, exe=None, plate=PLATE):
     """Slice one model to `target`, and return what the slicer predicted.
 
-    Returns ((seconds, filament_mm), path). Either number can be None: a slicer that
-    changes how it reports is a reason to say less, never a reason to make one up.
+    Returns ((seconds, grams), path). Either number can be None: a slicer that changes
+    how it reports is a reason to say less, never a reason to make one up.
 
     The slicer names its own output after the plate, so it gets a scratch directory and
     the gcode is moved to the name the rest of build/ uses. A part is `thing.stl` and
@@ -356,16 +357,23 @@ def _why(done, out_dir):
 
 TIME = re.compile(r"total estimated time: ([^;\n]+)")
 LENGTH = re.compile(r"total filament length \[mm\] ?: ?([\d.]+)")
+WEIGHT = re.compile(r"total filament weight \[g\] ?: ?([\d.]+)")
+DENSITY = re.compile(r"filament_density[ =:]+([\d.]+)")
+DIAMETER = re.compile(r"filament_diameter[ =:]+([\d.]+)")
 
 
 def _predicted(out_dir):
-    """Time in seconds and filament in mm, from whichever of the two files carries it.
+    """Time in seconds and filament in grams, from whichever of the two files carries it.
 
-    The structured file is authoritative on time and silent on filament length, and the
-    gcode header carries both, so they are read in that order rather than one being
-    trusted for everything. The header's weight line reads 0 on a stock profile whose
-    density never resolved, so it is not read at all: a wrong gram figure is worse than
-    no gram figure, because only one of them gets checked.
+    Grams because that is the unit a spool is sold in and the only one anyone thinks in;
+    nobody has ever decided anything from a length of filament.
+
+    The structured file is authoritative on time and silent on filament, and the gcode
+    header carries both, so they are read in that order rather than one being trusted
+    for everything. The weight line reads 0 on a stock profile whose density never
+    resolved, and a wrong gram figure is worse than none because only one of them gets
+    checked, so a zero falls through to the arithmetic: length, diameter and density are
+    three separate header keys, and a cylinder of filament is the whole calculation.
     """
     seconds = None
     plates = _readable(out_dir / "result.json").get("sliced_plates") or []
@@ -380,8 +388,20 @@ def _predicted(out_dir):
     if seconds is None:
         said = TIME.search(head)
         seconds = _clock(said[1]) if said else None
-    length = LENGTH.search(head)
-    return seconds, float(length[1]) if length else None
+    return seconds, _grams(head)
+
+
+def _grams(head):
+    """What the plate weighs, from the header's own figure or from its parts."""
+    said = WEIGHT.search(head)
+    if said and float(said[1]) > 0:
+        return float(said[1])
+    length, density, diameter = (r.search(head) for r in (LENGTH, DENSITY, DIAMETER))
+    if not (length and density and diameter):
+        return None
+    radius = float(diameter[1]) / 2
+    volume = float(length[1]) * math.pi * radius * radius  # mm3
+    return volume / 1000 * float(density[1])
 
 
 def _tail(gcode, size=8192):
@@ -406,6 +426,17 @@ def _clock(said):
             return None
         total += int(value) * units[unit]
     return total or None
+
+
+def weighed(grams):
+    """A weight against a 1kg spool, which is the only filament measure anyone holds.
+
+    Whole grams past 10, because a tenth of a gram is noise next to a slicer's own
+    error, and one decimal below it so a fit coupon does not round to nothing.
+    """
+    if not grams:
+        return "unknown"
+    return f"{grams:.0f}g" if grams >= 10 else f"{grams:.1f}g"
 
 
 def spoken(seconds):

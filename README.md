@@ -71,7 +71,8 @@ nurb skill          print an agent skill file for your AI harness, --sync rewrit
 nurb update         upgrade nurb, then re-sync the installed skill to match
 nurb card [part]    regenerate a card's AUTO block
 nurb diff [part]    what moved since the card was written: size, volume, faces, verdict
-nurb slice [part]   print time and filament, from the slicer you already have
+nurb slice [part]   print time and grams of filament, from the slicer you already have
+                    (the viewer's print time row is the same answer, on the part you are looking at)
 nurb verify [part]  run the doctrine's verification list; --report bundles it with renders
 nurb render [part]  write a PNG into build/renders/; --section cuts it open
 nurb export [part]  write STL into build/, --formats for STEP or GLB
@@ -99,7 +100,7 @@ projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file carries the export preference too: an `[export]` table with `formats = ["stl", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The viewer's print time row will also ask you for it the first time you use it, and write the answer here. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file carries the export preference too: an `[export]` table with `formats = ["stl", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
 
 ```toml
 [part]

@@ -103,12 +103,19 @@ evals/                    the model leaderboard: tasks, scorer, CLI runner. Its 
 
 The part-design workflow (start `nurb dev` first thing, end every reply with the viewer URL, model while the user watches) belongs to the shipped skill (`src/nurb/agents.md`, mirrored into `skills/nurb/SKILL.md`) and applies in a user's parts project, never in this repo. Here you are building the tool. When verifying viewer or server changes, run `nurb dev` against `examples/notch` in the background and share the URL for that; `?part=<name>&variant=<name>` deep-links to the exact configuration you want looked at.
 
+### Every feature gets a surface in the app
+
+The desktop app is the primary entry point, and it is what to optimize for. A capability that exists only as a CLI subcommand does not exist for the person who downloaded the app: they will never type it, never read `--help`, and never learn it is there. "The agent can run it when asked" is not a surface either, because it requires the user to already know the feature exists in order to ask for it.
+
+So a feature is not done when the command works. It is done when someone looking at their part can see it and use it without being told. Ship the command and the surface in the same change, and if the surface is genuinely wrong for the feature, say why out loud rather than deferring it.
+
+Nearly always that surface belongs in `src/nurb/viewer.html`, not in `desktop/src`. The app embeds the viewer in an iframe, so one control there reaches both the app and `nurb dev` in a browser. React shell work is for what only the shell can do: the window, the rail, projects, chat, updates. Anything about the part itself goes in the viewer.
+
+Two things a surface owes the user that a command does not. It must not dead-end: when a feature needs something the project has not chosen yet, offer the choice in place rather than printing what the user should have configured. And a result that outlived its geometry is worse than no result, so anything cached from a build clears when that part rebuilds.
+
 ### Command names stay boring
 
-The primary user is a language model. An agent that has never seen this tool can
-guess `build`, `check`, `export`. It cannot guess a themed alias. Every clever name
-is an indirection that degrades in a fresh context. The brand can be distinctive;
-the interface cannot.
+The CLI's user is a language model, while the app's user is a person; both surfaces are real and neither substitutes for the other. An agent that has never seen this tool can guess `build`, `check`, `export`. It cannot guess a themed alias. Every clever name is an indirection that degrades in a fresh context. The brand can be distinctive; the interface cannot.
 
 ### Never port Fusion scaffolding
 

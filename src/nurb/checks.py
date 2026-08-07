@@ -926,6 +926,40 @@ def profiles():
     return tomllib.loads(PRINTERS.read_text(encoding="utf-8"))
 
 
+def choose_profile(root, name):
+    """Name this project's machine in its printer.toml, and say where it landed.
+
+    The viewer asks for this when a print estimate needs a machine and the project
+    has never named one: a picker beats printing what the user should have written,
+    and the choice belongs on disk where every other command reads it from.
+
+    Only the `profile` line is touched. A printer.toml is often hand-written with
+    comments explaining a bed size, so this rewrites an existing line in place and
+    otherwise inserts one above the first table, never appending, which would put a
+    top-level key inside whatever table happens to be last.
+    """
+    import re
+
+    have = profiles()
+    if name not in have:
+        raise ValueError(f"no printer profile called {name!r}. have: {', '.join(sorted(have))}")
+    target = pathlib.Path(root) / PRINTER_FILE
+    line = f'profile = "{name}"'
+    text = target.read_text(encoding="utf-8") if target.is_file() else ""
+    found = re.search(r"(?m)^[ \t]*profile[ \t]*=.*$", text)
+    if found:
+        text = text[: found.start()] + line + text[found.end() :]
+    elif not text.strip():
+        text = line + "\n"
+    else:
+        table = re.search(r"(?m)^[ \t]*\[", text)
+        at = table.start() if table else len(text)
+        head, tail = text[:at].rstrip("\n"), text[at:]
+        text = f"{head}\n\n{line}\n" + (f"\n{tail}" if tail else "")
+    target.write_text(text, encoding="utf-8")
+    return target
+
+
 # Keys a shipped profile carries that are facts about the machine rather than settings
 # a rule reads. Named once because `_apply` deliberately refuses a key the Context does
 # not have, which is what catches a typo, and an exclusion spelled in two places is how

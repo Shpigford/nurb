@@ -6,6 +6,7 @@ One port serves both the viewer and the websocket.
 
 import asyncio
 import collections
+import hashlib
 import json
 import pathlib
 import secrets
@@ -190,6 +191,15 @@ class Server:
         # makes no thread-safety promises, and a download landing mid-rebuild is the
         # ordinary way two builds would otherwise overlap.
         self.building = asyncio.Lock()
+        # The adapter stages by output name and the slicers carry process-global
+        # caches. One request at a time prevents two tabs from deleting or renaming
+        # each other's files.
+        self.slice_lock = asyncio.Lock()
+        # The websocket HTTP shim only accepts GET. A secret header still makes the
+        # state-changing slice route same-origin in practice: the viewer learns it
+        # through the origin-checked socket, while another site cannot set it without
+        # a CORS preflight this server doesn't accept.
+        self.http_token = secrets.token_urlsafe(24)
 
     @property
     def origins(self):
@@ -236,6 +246,12 @@ class Server:
                 # A bad card is reported by the check pass; it must not hide geometry.
                 up = (0, 0, 1)
             entry["glb"] = builder.to_glb(shape, self.tolerance, up=up)
+            # What this build is, as opposed to that it happened. The tessellation is
+            # deterministic, so identical geometry hashes identically, and a rebuild
+            # that changed nothing (a printer.toml edit, a touched file) keeps its id.
+            # The viewer needs that to tell a moved slider from a rebuild that only
+            # re-ran the checks, because a print estimate outlives one and not the other.
+            entry["shape_id"] = hashlib.blake2b(entry["glb"], digest_size=8).hexdigest()
             entry["ms"] = round(ms, 1)
             entry["error"] = None
             entry["shape"] = shape  # kept for the check pass, never serialized
@@ -388,6 +404,11 @@ class Server:
             # the project folder open.
             save = "save" in request.path.partition("?")[2].split("&")
             return await self.export(path[len("/export/") :], save=save)
+        if path.startswith("/api/slice/"):
+            token = request.headers.get("X-Nurb-Token")
+            if not token or not secrets.compare_digest(token, self.http_token):
+                return self._resp(403, b"forbidden", "text/plain")
+            return await self.slice(path[len("/api/slice/") :])
         if path == "/api/sync":
             body = json.dumps(self._sync()).encode()
             return self._resp(200, body, "application/json")
@@ -517,6 +538,173 @@ class Server:
                 bundle.writestr(f"{_export_name(placed.stem)}.{fmt}", body)
         return buf.getvalue(), f"{_export_name(name)}-{fmt}.zip", "application/zip"
 
+    # ---------- what the print costs ----------
+    # The two numbers a slicer knows and nothing upstream of it does. They belong on
+    # screen next to the part rather than in a terminal, because the moment they change
+    # a decision is while the sliders are still under someone's hand: a wall going from
+    # 2 to 3mm is a shrug in the viewer and forty minutes on the plate.
+    #
+    # Anything other than a number here is a UI state and not a crash, so it comes back
+    # as 200 with a `kind` the viewer can act on. `choose` is the common one and is the
+    # reason `profiles` rides along: the answer to a machine nobody has named yet is a
+    # picker, not a sentence about a file the user has never opened.
+
+    # What a print estimate assumes when nobody has said otherwise. Named here rather
+    # than spelled again in the viewer, so the card cannot drift from what was sliced.
+    LAYER, MATERIAL = "0.20", "PLA"
+
+    async def slice(self, name):
+        from . import checks, slicing
+
+        if name not in self.state:
+            return self._json(404, {"error": "no such part"})
+        exe = slicing.app()
+        if exe is None:
+            # Not a fault and not the user's mistake: nurb reads these two numbers out of
+            # a slicer rather than re-deriving them, so without one there is no answer to
+            # give. Says which apps and stops, because no retry fixes this and the viewer
+            # cannot install anything.
+            return self._json(200, {
+                "kind": "slicer",
+                "error": "no slicer found. print time comes out of "
+                         f"{' or '.join(slicing.SLICERS)}, both free.",
+            })
+        try:
+            wanted, profile = checks.slicer_name(self.root)
+        except ValueError as exc:
+            return self._json(200, {"kind": "printer", "error": str(exc), "profiles": self._machines()})
+        if not wanted:
+            # Never chosen, which is a question rather than a fault: `choose` is the
+            # kind that gets a plain prompt and a picker instead of a red line.
+            return self._json(200, {"kind": "choose", "profiles": self._machines()})
+        vendors = slicing.vendors(exe)
+        if vendors is None:
+            # This one is a fault: the app is here and its own profiles are not, which
+            # is a broken install rather than a missing one.
+            return self._json(200, {
+                "kind": "profile",
+                "error": f"found {slicing.label(exe)} but not its profile bundle",
+            })
+        # Read before the slice, not after: an answer is only about the shape it was
+        # measured from, and if that shape moves while the slicer runs, the viewer has
+        # to be able to see that the two no longer match.
+        shape_id = (self.state.get(name) or {}).get("shape_id")
+        try:
+            machine = slicing.machine(vendors, wanted)
+            process, filament = slicing.profiles_for(machine, self.LAYER, self.MATERIAL)
+        except slicing.Unavailable as exc:
+            # The machines ride along: this fault is "your slicer does not carry that
+            # one", and the thing that fixes it is choosing a different machine, not
+            # pressing the same button again.
+            return self._json(
+                200, {"kind": "profile", "error": str(exc), "profiles": self._machines()}
+            )
+        try:
+            totals = await self._sliced(name, machine, process, filament, exe)
+        except slicing.Unavailable as exc:
+            # The profile resolved and the slicer rejected this model. A printer
+            # picker cannot fix malformed geometry or a failed slicer process.
+            return self._json(200, {"kind": "slice", "error": str(exc)})
+        except Exception as exc:
+            return self._json(200, {"kind": "build", "error": f"{type(exc).__name__}: {exc}"})
+        seconds, grams, plates = totals
+        return self._json(200, {
+            "seconds": seconds,
+            "spoken": slicing.spoken(seconds),
+            "weight": slicing.weighed(grams),
+            "grams": grams,
+            "plates": plates,
+            "shape_id": shape_id,
+            # The machine alone on the row, because with two printers in the workshop
+            # that is the one word that changes how the number reads. The layer height,
+            # the filament and the full preset names are the hover: worth having next
+            # to a prediction, not worth a line that pushes the row into a second one.
+            "profile": profile,
+            "settings": f"{profile} / {process.stem} / {filament.stem} / {slicing.PLATE}",
+        })
+
+    async def _sliced(self, name, machine, process, filament, exe):
+        """(seconds, grams, plates) for a part, or for everything an assembly places.
+
+        An assembly is a weld and not one printable solid, so it costs what its parts
+        cost. Each distinct configuration is sliced once; repeated identical instances
+        reuse that prediction but still contribute separately to the totals.
+
+        The OCCT lock covers the build and the STL write only. A slicer is a separate
+        process with no opinion about our kernel, and holding the lock across it would
+        stall every rebuild for the seconds it takes.
+        """
+        from . import slicing
+
+        async with self.slice_lock:
+            out = (self.root / "build").resolve()
+            out.mkdir(exist_ok=True)
+            seconds, grams, plates = 0, 0, 0
+            sliced, names = {}, collections.Counter()
+            for path, overrides in self._printable(name):
+                key = (str(path), tuple(sorted(overrides.items())))
+                if key not in sliced:
+                    names[path.stem] += 1
+                    suffix = "" if names[path.stem] == 1 else f"-{names[path.stem]}"
+                    label = f"{path.stem}{suffix}"
+                    async with self.building:
+                        model = await asyncio.to_thread(
+                            self._solid, path, overrides, out / f"{label}.stl"
+                        )
+                    sliced[key], _ = await asyncio.to_thread(
+                        slicing.run,
+                        model,
+                        out / f"{label}.gcode",
+                        machine,
+                        process,
+                        filament,
+                        exe,
+                    )
+                took, weighs = sliced[key]
+                # One unreadable number makes that number unknown for the whole answer
+                # rather than a total that silently counts fewer parts than it names.
+                seconds = None if seconds is None or took is None else seconds + took
+                grams = None if grams is None or weighs is None else grams + weighs
+                plates += 1
+            return seconds, grams, plates
+
+    def _printable(self, name):
+        """The (path, overrides) instances a print estimate covers."""
+        entry = self.state.get(name) or {}
+        scene = getattr(entry.get("shape"), "_nurb_scene", None)
+        if scene is None:
+            path = next((p for p in builder.find_parts(self.root) if p.stem == name), None)
+            if path is None:
+                raise builder.BuildError(f"{name} is no longer on disk")
+            return [(path, dict(self.overrides.get(name) or {}))]
+        out = [
+            (pathlib.Path(instance.path), dict(instance.overrides))
+            for instance in scene.instances
+        ]
+        if not out:
+            raise builder.BuildError(f"{name} places no parts; nothing to print")
+        return out
+
+    @staticmethod
+    def _solid(path, overrides, target):
+        """The polished build at the exact values the estimate names, written as STL."""
+        if not path.is_file():
+            raise builder.BuildError(f"{path.stem} is no longer on disk")
+        built, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+        builder.write_stl(built, target)
+        return target
+
+    @staticmethod
+    def _machines():
+        """Every shipped profile, for the picker an unnamed machine gets."""
+        from . import checks
+
+        return sorted(checks.profiles())
+
+    @classmethod
+    def _json(cls, status, payload):
+        return cls._resp(status, json.dumps(payload).encode(), "application/json")
+
     @staticmethod
     def _meta(entry):
         return {k: v for k, v in entry.items() if k not in ("glb", "shape")}
@@ -568,9 +756,9 @@ class Server:
 
     # ---------- websocket ----------
 
-    def _sync(self):
+    def _sync(self, include_token=False):
         """The project snapshot shared by the socket and its HTTP fallback."""
-        return {
+        payload = {
             "type": "sync",
             "project": self.root.name,
             "bed": self._bed(),
@@ -583,17 +771,22 @@ class Server:
             "sources": [p.stem for p in builder.find_parts(self.root)],
             "parts": [self._wire(e) for e in self.state.values()],
         }
+        if include_token:
+            # HTTP fallback is intentionally read-only. Only the origin-checked socket
+            # receives the capability for routes that launch tools or write artifacts.
+            payload["request_token"] = self.http_token
+        return payload
 
     async def ws(self, connection):
         self.clients.add(connection)
         try:
-            await connection.send(json.dumps(self._sync()))
+            await connection.send(json.dumps(self._sync(include_token=True)))
             async for raw in connection:
-                await self.command(raw)
+                await self.command(raw, connection)
         finally:
             self.clients.discard(connection)
 
-    async def command(self, raw):
+    async def command(self, raw, client=None):
         """A message from the viewer: move the sliders, write them to the file, or
         flip draft mode."""
         # No queue means no watcher and no rebuild loop, which is the server `nurb
@@ -617,6 +810,27 @@ class Server:
 
         if msg.get("type") == "upgrade":
             await self.upgrade()
+            return
+
+        if msg.get("type") == "printer":
+            # The picker behind a print estimate that has no machine to slice for.
+            # It writes the same `profile` line every other command reads, so naming
+            # the machine once in the viewer also settles the bed the checks use.
+            from . import checks
+
+            try:
+                target = checks.choose_profile(self.root, msg.get("profile"))
+            except (ValueError, OSError) as exc:
+                await self.reply(client, {"type": "printer", "error": str(exc)})
+                return
+            print(f"  printer: {msg['profile']}, written to {target.name}", flush=True)
+            # Bed size is a check setting, so every part's verdict can move with it.
+            for part in builder.find_parts(self.root):
+                self.queue.put_nowait(str(part))
+            await self.reply(
+                client,
+                {"type": "printer", "profile": msg["profile"], "bed": self._bed()},
+            )
             return
 
         name = msg.get("name")
@@ -706,6 +920,16 @@ class Server:
                 await client.send(text)
             except Exception:
                 self.clients.discard(client)
+
+    async def reply(self, client, payload):
+        """Send a command acknowledgement only to the socket that issued it."""
+        if client is None:  # direct command calls in tests and non-socket adapters
+            await self.send(payload)
+            return
+        try:
+            await client.send(json.dumps(payload))
+        except Exception:
+            self.clients.discard(client)
 
     async def broadcast(self, entry, kind="rebuilt"):
         # Printer settings are watched like part sources. Carrying the current bed on

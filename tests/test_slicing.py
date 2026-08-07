@@ -268,7 +268,7 @@ def test_run_hands_the_slicer_complete_profiles(tmp_path, monkeypatch):
         assert command[command.index("--curr-bed-type") + 1] == "Textured PEI Plate"
         out = pathlib.Path(command[command.index("--outputdir") + 1])
         (out / "plate_1.gcode").write_text(
-            "; total estimated time: 12m\n; total filament length [mm] : 500\n"
+            "; total estimated time: 12m\n; total filament weight [g] : 1.5\n"
         )
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -283,7 +283,7 @@ def test_run_hands_the_slicer_complete_profiles(tmp_path, monkeypatch):
         filament,
         exe=tmp_path / "slicer",
     )
-    assert predicted == (720, 500)
+    assert predicted == (720, 1.5)
     assert target.is_file()
 
 
@@ -314,21 +314,24 @@ def test_a_failed_slice_removes_the_previous_gcode(tmp_path, monkeypatch):
 
 def test_time_comes_from_the_structured_file(tmp_path):
     (tmp_path / "result.json").write_text(json.dumps({"sliced_plates": [{"total_predication": 1668.9}]}))
-    (tmp_path / "plate_1.gcode").write_text("; total filament length [mm] : 1016.96\n")
-    seconds, length = slicing._predicted(tmp_path)
+    (tmp_path / "plate_1.gcode").write_text(
+        "; total filament length [mm] : 1016.96\n; total filament weight [g] : 3.08\n"
+    )
+    seconds, grams = slicing._predicted(tmp_path)
     assert seconds == pytest.approx(1668.9)
-    assert length == pytest.approx(1016.96)
+    assert grams == pytest.approx(3.08)
 
 
 def test_the_gcode_footer_answers_when_the_structured_file_does_not(tmp_path):
     """The totals are written as a footer, so reading only the head would miss them."""
     body = "G1 X1 Y1\n" * 4000
     (tmp_path / "plate_1.gcode").write_text(
-        f"; generated\n{body}; total estimated time: 1h 4m 12s\n; total filament length [mm] : 900.5\n"
+        f"; generated\n{body}; total estimated time: 1h 4m 12s\n"
+        "; total filament length [mm] : 900.5\n; total filament weight [g] : 2.73\n"
     )
-    seconds, length = slicing._predicted(tmp_path)
+    seconds, grams = slicing._predicted(tmp_path)
     assert seconds == 3852
-    assert length == pytest.approx(900.5)
+    assert grams == pytest.approx(2.73)
 
 
 def test_a_number_that_is_not_there_stays_none(tmp_path):
@@ -404,3 +407,43 @@ def test_a_print_over_a_day_keeps_its_days():
 def test_a_unit_this_parser_does_not_know_answers_nothing():
     """The module's rule: a slicer reporting differently says less, never invents."""
     assert slicing._clock("2w 3h") is None
+
+
+# --- what it weighs ------------------------------------------------------------
+# Grams, because a spool is a kilogram and a length of filament is a number nobody has
+# ever decided anything from. The weight line is the slicer's own answer where it has
+# one; the arithmetic exists for the profile whose density never resolved and wrote 0,
+# which used to be the whole reason this reported millimetres instead.
+
+
+def test_a_zero_weight_falls_through_to_the_arithmetic(tmp_path):
+    (tmp_path / "plate_1.gcode").write_text(
+        "; total filament weight [g] : 0\n"
+        "; total filament length [mm] : 47949.45\n"
+        "; filament_density: 1.26\n; filament_diameter: 1.75\n"
+    )
+    assert slicing._predicted(tmp_path)[1] == pytest.approx(145.32, abs=0.01)
+
+
+def test_the_computed_weight_agrees_with_the_slicers_own(tmp_path):
+    """Same header, both routes: a cylinder of filament is the whole calculation, so
+    the fallback cannot quietly disagree with the figure it stands in for."""
+    parts = (
+        "; total filament length [mm] : 47949.45\n"
+        "; filament_density: 1.26\n; filament_diameter: 1.75\n"
+    )
+    (tmp_path / "plate_1.gcode").write_text(parts + "; total filament weight [g] : 145.32\n")
+    theirs = slicing._predicted(tmp_path)[1]
+    (tmp_path / "plate_1.gcode").write_text(parts)
+    assert slicing._predicted(tmp_path)[1] == pytest.approx(theirs, abs=0.01)
+
+
+def test_a_header_with_nothing_to_weigh_says_nothing(tmp_path):
+    (tmp_path / "plate_1.gcode").write_text("; total estimated time: 12m\n")
+    assert slicing._predicted(tmp_path)[1] is None
+
+
+def test_a_weight_reads_against_a_spool_not_a_micrometer():
+    assert slicing.weighed(145.32) == "145g"
+    assert slicing.weighed(2.34) == "2.3g"  # a fit coupon must not round to nothing
+    assert slicing.weighed(None) == "unknown"

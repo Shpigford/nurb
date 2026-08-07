@@ -778,8 +778,8 @@ def cmd_slice(args):
     """Hand the part to the slicer the user already has, and say what it predicts.
 
     The two numbers a slicer knows and nothing upstream of it does are how long the
-    print takes and how much filament it eats, and both are design feedback while the
-    design can still change. Everything else about slicing stays where it belongs.
+    print takes and what it weighs, and both are design feedback while the design can
+    still change. Everything else about slicing stays where it belongs.
     """
     from . import builder, checks, slicing
 
@@ -847,15 +847,14 @@ def cmd_slice(args):
         try:
             machine = slicing.machine(vendors, wanted, args.nozzle or slicing.NOZZLE)
             process, filament = slicing.profiles_for(machine, args.layer, args.filament)
-            (seconds, length), gcode = slicing.run(
+            (seconds, grams), gcode = slicing.run(
                 model, gcode_target, machine, process, filament, exe, plate=args.plate
             )
         except slicing.Unavailable as exc:
             print(f"  {name}: {exc}")
             worst = 1
             continue
-        used = f"{length / 1000:.1f}m of filament" if length else "filament unknown"
-        print(f"  {name}: {slicing.spoken(seconds)}, {used}")
+        print(f"  {name}: {slicing.spoken(seconds)}, {slicing.weighed(grams)} of filament")
         print(f"      {profile} / {process.stem} / {filament.stem} / {args.plate}")
         print(f"      {gcode.relative_to(root)}")
     if worst:

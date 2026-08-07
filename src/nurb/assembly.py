@@ -86,6 +86,15 @@ class Scene:
     statics: list = field(default_factory=list)  # placed parts that do not move
     obstacles: list = field(default_factory=list)  # context geometry, never printed
     uses: tuple = ()  # the part files use() built, so a watcher can rebuild dependents
+    instances: tuple = ()  # each printable use(), including repeats and its overrides
+
+
+@dataclass(frozen=True)
+class PrintInstance:
+    """One physical part an assembly places, before the assembly moved it."""
+
+    path: str
+    overrides: tuple = ()
 
 
 NODE = "joint{}"  # the GLB node for scene.hinges[i]; the exporter and the payload both speak it
@@ -120,6 +129,7 @@ class _Recorder:
     hinges: dict = field(default_factory=dict)  # id(solid) -> Hinge
     obstacles: dict = field(default_factory=dict)  # id(solid) -> name
     uses: set = field(default_factory=set)  # resolved paths use() has built
+    instances: list = field(default_factory=list)  # flattened printable bill of materials
 
 
 _active = []  # the recorder for the @assembly call currently executing, if any
@@ -188,6 +198,14 @@ def use(name, **overrides):
             del _built[k]
     shape = copy.copy(_built[key])
     shape.label = name
+    nested = getattr(shape, "_nurb_scene", None)
+    if nested is None:
+        rec.instances.append(PrintInstance(str(path), tuple(sorted(overrides.items()))))
+    else:
+        # A nested assembly is not itself printable. Its leaf instances already carry
+        # the exact overrides used while building it, so flatten those without losing
+        # repeated parts or rebuilding from defaults later.
+        rec.instances.extend(nested.instances)
     return shape
 
 
@@ -279,7 +297,10 @@ def assembly(fn):
                     f"hinge({h.name!r}) was declared but the hinged solid was not "
                     f"returned. Return what hinge() returned, not what went in."
                 )
-        scene = Scene(uses=tuple(sorted(rec.uses)))
+        scene = Scene(
+            uses=tuple(sorted(rec.uses)),
+            instances=tuple(rec.instances),
+        )
         for s in solids:
             if id(s) in rec.hinges:
                 scene.hinges.append(rec.hinges[id(s)])

@@ -84,7 +84,7 @@ textarea {
   padding: 0 12px 12px;
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 /* The window titlebar is an overlay: this empty strip hosts the traffic
@@ -148,9 +148,12 @@ textarea {
   border-color: rgba(110, 231, 168, 0.45);
 }
 
+/* The one flexible row of the rail: a long parts list scrolls here, so the
+   agents block and the footer stay pinned instead of being painted over. */
 .projects {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
 }
 
 .row-icon {
