@@ -238,3 +238,83 @@ def test_the_real_cards_are_current():
         _, shape, ctx, found = built[0]
         want = card.render(card.facts(shape, ctx, found, variants=built[1:]))
         assert want in part.with_suffix(".md").read_text(), f"{part.stem}: run nurb card"
+
+
+# --- what changed since the card was written ---------------------------------
+
+
+def block(lines):
+    """A card carrying exactly these AUTO lines."""
+    return card.render(lines)
+
+
+def test_a_card_with_no_block_has_nothing_recorded(tmp_path):
+    part = write(tmp_path, "# thing\n\nJust prose.\n")
+    assert card.recorded(part) is None
+
+
+def test_recorded_reads_back_what_facts_wrote(tmp_path):
+    lines = ["Size: 60.00 x 30.00 x 6.00 mm, 10800.0 mm3, 1 solid, 6 faces", "Checks: clean"]
+    (tmp_path / "thing.md").write_text(f"# thing\n\n{block(lines)}\n", encoding="utf-8")
+    assert card.recorded(tmp_path / "thing.py") == lines
+
+
+def test_an_unchanged_part_reports_nothing():
+    lines = ["Size: 60.00 x 30.00 x 6.00 mm, 10800.0 mm3, 1 solid, 6 faces", "Checks: clean"]
+    assert card.compare(lines, lines) == []
+
+
+def test_a_lost_chamfer_shows_up_as_faces():
+    """The case the command exists for: a part that still builds, still checks clean,
+    still looks right, and quietly has three fewer faces than it did."""
+    was = ["Size: 60.00 x 30.00 x 14.00 mm, 11694.8 mm3, 1 solid, 44 faces", "Checks: clean"]
+    now = ["Size: 60.00 x 30.00 x 14.00 mm, 11674.9 mm3, 1 solid, 41 faces", "Checks: clean"]
+    assert card.compare(was, now) == ["volume: 11694.8 -> 11674.9 mm3, -0.2%", "faces: 44 -> 41"]
+
+
+def test_a_dimension_carries_its_delta():
+    was = ["Size: 60.00 x 30.00 x 6.00 mm, 10800.0 mm3, 1 solid, 6 faces"]
+    now = ["Size: 60.00 x 30.00 x 8.00 mm, 14400.0 mm3, 1 solid, 6 faces"]
+    assert card.compare(was, now)[0] == "z: 6.00 -> 8.00 mm (+2.00)"
+
+
+def test_a_new_verdict_is_reported_in_its_own_words():
+    was = ["Size: 1.00 x 1.00 x 1.00 mm, 1.0 mm3, 1 solid, 6 faces", "Checks: clean"]
+    now = [was[0], "Checks: 1 finding: 1 fail (min_wall)"]
+    assert card.compare(was, now) == ["Checks: clean -> 1 finding: 1 fail (min_wall)"]
+
+
+def test_a_line_that_appears_or_vanishes_says_which():
+    size = "Size: 1.00 x 1.00 x 1.00 mm, 1.0 mm3, 1 solid, 6 faces"
+    assert card.compare([size], [size, "Slivers: 4 under 1.0mm2"]) == ["gained Slivers: 4 under 1.0mm2"]
+    assert card.compare([size, "Slivers: 4 under 1.0mm2"], [size]) == ["lost Slivers: 4 under 1.0mm2"]
+
+
+def test_a_size_line_this_parser_cannot_read_still_reports_the_change():
+    """An older card, or a format that moved on. Say the whole line rather than nothing."""
+    changes = card.compare(["Size: who knows"], ["Size: 1.00 x 1.00 x 1.00 mm, 1.0 mm3, 1 solid, 6 faces"])
+    assert len(changes) == 1 and "->" in changes[0]
+
+
+def test_a_variant_is_measured_too_and_says_which_one():
+    """A variant is a shipped configuration, so a chamfer it loses matters as much."""
+    size = "Size: 1.00 x 1.00 x 1.00 mm, 1.0 mm3, 1 solid, 6 faces"
+    was = [size, "Variant wide: 155.00 x 30.00 x 20.00 mm, 37000.0 mm3, 1 solid, 12 faces, 0 under 1.0mm2, clean"]
+    now = [size, "Variant wide: 155.00 x 30.00 x 20.00 mm, 37000.0 mm3, 1 solid, 9 faces, 0 under 1.0mm2, clean"]
+    assert card.compare(was, now) == ["wide faces: 12 -> 9"]
+
+
+def test_a_variant_that_went_red_is_not_dropped():
+    """The verdict sits past the numbers `_moved` names, so it needs reporting too."""
+    size = "Size: 1.00 x 1.00 x 1.00 mm, 1.0 mm3, 1 solid, 6 faces"
+    was = [size, "Variant wide: 10.00 x 10.00 x 10.00 mm, 1000.0 mm3, 1 solid, 6 faces, 0 under 1.0mm2, clean"]
+    now = [size, "Variant wide: 10.00 x 10.00 x 10.00 mm, 1000.0 mm3, 1 solid, 6 faces, 0 under 1.0mm2, 1 finding: 1 fail (solids)"]
+    assert card.compare(was, now) == ["wide clean -> 1 finding: 1 fail (solids)"]
+
+
+def test_the_default_verdict_still_reads_as_its_own_line():
+    """`Checks:` carries no measurements, so it falls to the plain branch."""
+    size = "Size: 1.00 x 1.00 x 1.00 mm, 1.0 mm3, 1 solid, 6 faces"
+    assert card.compare([size, "Checks: clean"], [size, "Checks: 1 finding: 1 warn (sliver)"]) == [
+        "Checks: clean -> 1 finding: 1 warn (sliver)"
+    ]

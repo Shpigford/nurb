@@ -4,32 +4,43 @@
 # in printer.toml, never per card. What a part has justified (its min_wall, its
 # accepted slivers) stays on its card next to the sentence explaining why.
 #
-# Every key must be a field of checks.Context. Sizes are manufacturer-published
-# build volumes in mm, X x Y x Z.
+# Every key must be a field of checks.Context, with one exception: `slicer` is what
+# this machine is called in a slicer's own vendor bundle, which `nurb slice` needs and
+# no rule does. It lives here so a machine is described in one place. Sizes are
+# manufacturer-published build volumes in mm, X x Y x Z.
 
 [bambu_x1c]
 bed = [256.0, 256.0, 256.0]
+slicer = "Bambu Lab X1 Carbon"
 
 [bambu_p1s]
 bed = [256.0, 256.0, 256.0]
+slicer = "Bambu Lab P1S"
 
 [bambu_p1p]
 bed = [256.0, 256.0, 256.0]
+slicer = "Bambu Lab P1P"
 
 [bambu_a1]
 bed = [256.0, 256.0, 256.0]
+slicer = "Bambu Lab A1"
 
 [bambu_a1_mini]
 bed = [180.0, 180.0, 180.0]
+slicer = "Bambu Lab A1 mini"
 
 [prusa_mk4s]
 bed = [250.0, 210.0, 220.0]
+slicer = "Prusa MK4S"
 
 [prusa_mini]
 bed = [180.0, 180.0, 180.0]
+slicer = "Prusa MINI"
 
 [prusa_xl]
 bed = [360.0, 360.0, 360.0]
+slicer = "Prusa XL"
 
 [ender_3_v3]
 bed = [220.0, 220.0, 250.0]
+slicer = "Creality Ender-3 V3"

@@ -51,6 +51,8 @@ nurb api             the vocabulary a part file gets, with signatures
 nurb skill           print an agent skill file for any AI harness, --sync rewrites installed copies
 nurb update          upgrade nurb, then re-sync the installed skill to match
 nurb card [part]     regenerate a card's AUTO block
+nurb diff [part]     what moved since the card was written: size, volume, faces, verdict
+nurb slice [part]    print time and filament, via an installed OrcaSlicer or BambuStudio
 nurb verify [part]   the doctrine's verification list, --report bundles it with renders
 nurb render [part]   write build/renders/<part>.png, --section cuts it open, needs the render extra
 nurb export [part]   write STL into build/, --formats for STEP or GLB
@@ -82,6 +84,7 @@ src/nurb/mesh.py          import_stl(), the flat-faced meshes that can be a soli
 src/nurb/measurements.py  measured(), and the refusal to guess
 src/nurb/edit.py          writes slider values back into a part's keyword defaults
 src/nurb/render.py        headless PNG, the only module that wants a browser
+src/nurb/slicing.py       the handoff to an installed slicer, and the two numbers back
 src/nurb/doctrine.md      the doctrine itself, shipped in the package
 src/nurb/server.py        watcher, rebuild, HTTP + websocket on one port
 src/nurb/viewer.html      three.js viewer, Z-up, camera persistence, sliders, section

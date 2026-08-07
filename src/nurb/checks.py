@@ -16,14 +16,67 @@ from build123d import Axis, CenterOf, GeomType, Vector
 FAIL = "fail"  # this will not print, or will not work
 WARN = "warn"  # this needs attention, most often support
 
+# What each rule is called to somebody who owns a printer rather than to whoever wrote
+# the rule. A rule's name is an identifier: it is stable, it is what the CLI prints, and
+# it is what an agent matches on, so it never changes. But the person reading the viewer
+# came here to get a part printed, and `concave_cosmetic` tells them nothing they can
+# act on. Both are true at once, which is why this is a translation and not a rename.
+# Kept short because the panel gives them a fixed column: a label that wraps puts two
+# ragged lines next to a message that is already wrapping. LABEL_WIDTH is what fits.
+LABEL_WIDTH = 14
+LABELS = {
+    # Covers both of this rule's states, which is why it is not "loose pieces": the
+    # same rule fires on a part that came apart and on one that built nothing at all.
+    "solids": "not one piece",
+    "overhang": "steep slope",
+    "floating": "starts on air",
+    "hole_ceiling": "hole on air",
+    "min_wall": "thin wall",
+    "sliver": "tiny detail",
+    "concave_cosmetic": "inside corner",
+    "bed_bevel": "poor bed grip",
+    "stability": "tips over",
+    "projection_ratio": "long reach",
+    "build_volume": "too big",
+}
+
+
+def label(rule):
+    """What to call a rule on screen. Falls back to the identifier, which is honest:
+    a rule with no label is a gap to fill, not a reason to show nothing."""
+    return LABELS.get(rule, rule)
+
 
 @dataclass(frozen=True)
 class Finding:
+    """What a rule found, said twice.
+
+    `message` is written for whoever is going to fix it: exact, dense, and in the
+    vocabulary of the doctrine, because an agent reads it and then edits geometry.
+    `plain` is the same fact for whoever is looking at the part, who came here to print
+    something and has never needed the word "facet".
+
+    Two strings rather than one because the audiences want opposite things. "1.4mm strip
+    sitting in a concave junction over 42.4mm2" is the right sentence for the reader who
+    is about to move that face, and the wrong one for the reader deciding whether to
+    press print. Where a message is already plain, `plain` stays None and both get it.
+    """
+
     rule: str
     severity: str
     message: str
     value: float | None = None
     where: tuple | None = None
+    plain: str | None = None
+
+    @property
+    def label(self):
+        return label(self.rule)
+
+    @property
+    def said(self):
+        """The sentence to show a person."""
+        return self.plain or self.message
 
     def __str__(self):
         spot = f"  at ({self.where[0]:.1f}, {self.where[1]:.1f}, {self.where[2]:.1f})" if self.where else ""
@@ -79,6 +132,12 @@ def run(shape, ctx=None, only=None):
         if only and name not in only:
             continue
         found.extend(fn(shape, ctx))
+    # A part in pieces gets judged on whichever piece the kernel listed first, so the
+    # rest of the report is true of a fragment and misleading about the part. The
+    # `solids` docstring has the whole argument; this is where it takes effect.
+    apart = [f for f in found if f.rule == "solids"]
+    if apart:
+        return apart
     return sorted(found, key=lambda f: (f.severity != FAIL, f.rule))
 
 
@@ -146,6 +205,46 @@ def concave_edges(shape):
 # --- rules -------------------------------------------------------------------
 
 
+@rule("solids")
+def solids(shape, ctx):
+    """A part that came apart, or never came together.
+
+    The doctrine's first line about printability is to return one solid, and until now
+    nothing enforced it: two loose bodies report a plausible bounding box, export
+    happily, and reach the plate as two pieces nobody asked for. The near miss is worse
+    than the obvious one. A shelf that only touches its post along a tangent line reads
+    as joined in the viewer from every angle, and the kernel quietly keeps it as two.
+
+    What makes this the one rule that silences the others is that every rule after it
+    reads `shape.solids()[0]`. On a part in pieces they all describe whichever fragment
+    the kernel happened to list first, so the report fills with overhangs and floating
+    tips that are true of that fragment and beside the point. One finding that names the
+    real fault beats five that describe its symptoms.
+
+    The strays are reported smallest last and located, because the gap is at the join
+    and the join is what has to move.
+    """
+    bodies = shape.solids()
+    if len(bodies) == 1:
+        return []
+    if not bodies:
+        return [Finding("solids", FAIL, "builds no solid at all, so there is nothing to print", value=0)]
+    ordered = sorted(bodies, key=lambda s: -s.volume)
+    main, stray = ordered[0], ordered[-1]
+    return [
+        Finding(
+            "solids",
+            FAIL,
+            f"{len(bodies)} separate pieces, not one part: {main.volume:.0f}mm3 "
+            f"and {len(ordered) - 1} more down to {stray.volume:.0f}mm3",
+            plain=f"this came out as {len(bodies)} separate pieces instead of one. "
+            "Whatever should join them is touching at a point, or missing",
+            value=len(bodies),
+            where=tuple(round(v, 2) for v in stray.center()),
+        )
+    ]
+
+
 @rule("sliver")
 def sliver(shape, ctx):
     """Faces too small to print as anything but a smear.
@@ -165,6 +264,8 @@ def sliver(shape, ctx):
             "sliver",
             WARN,
             f"{len(small)} faces under {ctx.sliver_area}mm2, {allowed} accounted for",
+            plain=f"{len(small) - allowed} detail{'' if len(small) - allowed == 1 else 's'} "
+            "too small to print cleanly, coming out as smears rather than shapes",
             value=round(worst.area, 3),
             where=tuple(round(v, 2) for v in worst.center()),
         )
@@ -554,6 +655,8 @@ def overhang(shape, ctx):
                     WARN,
                     f"{crossing:.0f}mm bridge over {face.area:.1f}mm2, "
                     f"past the {ctx.bridge_limit:.0f}mm this printer spans",
+                    plain=f"a {crossing:.0f}mm gap to cross in mid-air; this printer "
+                    f"holds a span up to {ctx.bridge_limit:.0f}mm",
                     value=round(crossing, 1),
                     where=tuple(round(v, 2) for v in face.center()),
                 )
@@ -565,6 +668,8 @@ def overhang(shape, ctx):
                     FAIL,
                     f"{worst:.0f}deg unsupported over {face.area:.1f}mm2, "
                     f"limit {ctx.overhang_limit:.0f}deg",
+                    plain=f"an underside leaning {worst:.0f} degrees out. Past "
+                    f"{ctx.overhang_limit:.0f} it droops as it prints",
                     value=round(worst, 1),
                     where=tuple(round(v, 2) for v in face.center()),
                 )
@@ -718,6 +823,8 @@ def hole_ceiling(shape, ctx):
                     WARN,
                     f"a {width:.1f}mm hole rim would print on air over the opening "
                     f"below; stepped bridging layers are the fix",
+                    plain=f"the top of a {width:.1f}mm hole starts in mid-air, with the "
+                    "pocket open underneath it",
                     value=round(width, 1),
                     where=tuple(round(v, 2) for v in centre),
                 )
@@ -745,6 +852,8 @@ def stability(shape, ctx):
                     WARN,
                     f"stands {top - bed:.0f}mm tall on a {stance:.1f}mm facet, "
                     "more than adhesion holds; a support fin is the fix",
+                    plain=f"{top - bed:.0f}mm tall balanced on a {stance:.1f}mm strip. "
+                    "It will come off the plate mid-print",
                     value=round((top - bed) / stance, 1),
                 )
             ]
@@ -760,6 +869,8 @@ def stability(shape, ctx):
                     "stability",
                     WARN,
                     "center of mass falls outside the footprint, it will tip",
+                    plain="top-heavy: its weight sits outside what it stands on, "
+                    "so it tips over",
                     where=tuple(round(v, 2) for v in com),
                 )
             ]
@@ -815,6 +926,35 @@ def profiles():
     return tomllib.loads(PRINTERS.read_text(encoding="utf-8"))
 
 
+# Keys a shipped profile carries that are facts about the machine rather than settings
+# a rule reads. Named once because `_apply` deliberately refuses a key the Context does
+# not have, which is what catches a typo, and an exclusion spelled in two places is how
+# that protection quietly stops covering one of them.
+NOT_SETTINGS = ("slicer",)
+
+
+def machine_only(block):
+    """A profile with the non-setting facts removed, ready for `_apply`."""
+    return {k: v for k, v in block.items() if k not in NOT_SETTINGS}
+
+
+def slicer_name(root, name=None):
+    """What a slicer calls this project's machine, and the nurb profile it came from.
+
+    Separate from `printer` because a Context is check settings and this is neither a
+    setting nor a check; it is the one fact about the machine that only `nurb slice`
+    needs. (None, None) when no profile is chosen, which is a question to ask rather
+    than a default to invent: slicing the wrong machine's bed is worse than not slicing.
+    """
+    name = name or profile_choice(root)[0]
+    if not name:
+        return None, None
+    have = profiles()
+    if name not in have:
+        raise ValueError(f"no printer profile called {name!r}. have: {', '.join(sorted(have))}")
+    return have[name].get("slicer"), name
+
+
 def _project_root(part_path):
     """The project a part belongs to, by the same rule the builder uses."""
     path = pathlib.Path(part_path).resolve()
@@ -841,7 +981,7 @@ def printer(root, name=None):
             raise ValueError(
                 f"no printer profile called {name!r}. have: {', '.join(sorted(have))}"
             )
-        _apply(ctx, {"printer": have[name]}, f"profile {name!r}")
+        _apply(ctx, {"printer": machine_only(have[name])}, f"profile {name!r}")
     # profile is resolved above; export is a workflow preference cmd_export reads
     for settings_block, where in ((home, str(global_file())), (block, PRINTER_FILE)):
         facts = {k: v for k, v in settings_block.items() if k not in ("profile", "export")}
@@ -972,6 +1112,8 @@ def projection_ratio(shape, ctx):
             WARN,
             f"reaches {reach:.0f}mm on a {height:.0f}mm back, ratio {ratio:.2f}. "
             f"past {ctx.projection_limit:.1f} the fix is a taller back, not more gusset",
+            plain=f"sticks out {reach:.0f}mm from a mount only {height:.0f}mm tall. "
+            "That leverage sags under load, or snaps",
             value=round(ratio, 2),
         )
     ]
@@ -1022,6 +1164,8 @@ def bed_bevel(shape, ctx):
                         WARN,
                         f"{degrees(asin(min(1.0, tilt))):.0f}deg face meets the build "
                         f"plate over {face.area:.1f}mm2, which is polish on the first layer",
+                        plain=f"a chamfer along {face.area:.0f}mm2 of the bottom edge, "
+                        "where it costs the first layer its grip on the plate",
                         value=round(face.area, 2),
                         where=tuple(round(v, 2) for v in face.center()),
                     )
@@ -1097,6 +1241,8 @@ def concave_cosmetic(shape, ctx):
                     WARN,
                     f"{width:.1f}mm strip sitting in a concave junction over "
                     f"{face.area:.1f}mm2, which is polish where a structural chamfer belongs",
+                    plain=f"a {width:.1f}mm cosmetic chamfer tucked into an inside "
+                    "corner, where it thins the joint instead of tidying an edge",
                     value=round(width, 2),
                     where=tuple(round(v, 2) for v in face.center()),
                 )

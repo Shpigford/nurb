@@ -63,6 +63,30 @@ bounding box and still exports, so nothing downstream catches it.
   structural or corbel, has to read as one system.
 - **Elephant's foot is a slicer setting**, not a CAD problem. Do not model around it.
 
+### Fasteners
+
+**A published standard is not a guess.** Measurements says never improvise a dimension, and a screw is the one place that rule gets misread: nobody has to measure an M3 cap screw, because ISO fixed its head at 5.5mm across in every box you will ever open. Take these from the table and spend the question you saved on something the table cannot answer.
+
+| Thread | Clearance hole, close | medium | Cap head dia | Cap head height | Nut across flats | across corners | Nut thickness |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| M2 | 2.2 | 2.4 | 3.8 | 2.0 | 4.0 | 4.4 | 1.6 |
+| M2.5 | 2.7 | 2.9 | 4.5 | 2.5 | 5.0 | 5.5 | 2.0 |
+| M3 | 3.2 | 3.4 | 5.5 | 3.0 | 5.5 | 6.1 | 2.4 |
+| M4 | 4.3 | 4.5 | 7.0 | 4.0 | 7.0 | 7.7 | 3.2 |
+| M5 | 5.3 | 5.5 | 8.5 | 5.0 | 8.0 | 8.8 | 4.7 |
+| M6 | 6.4 | 6.6 | 10.0 | 6.0 | 10.0 | 11.1 | 5.2 |
+| M8 | 8.4 | 9.0 | 13.0 | 8.0 | 13.0 | 14.4 | 6.8 |
+
+Clearance is ISO 273, cap head is ISO 4762 socket head, nut is ISO 4032 hex. In mm. Across corners is the one a round pocket has to clear, and it is the number people reach for the wrong column of: an M3 nut is 5.5 across the flats and will not go into a 5.5 hole.
+
+**Reach for the medium column.** A printed hole comes out under its modelled size, by a few tenths that vary with the machine, the material and how fast the perimeter was laid, so the close column is a fit you have to earn with a coupon rather than one you can assume. Medium already carries that much slack, which is why it is the default here and close is the exception a fit coupon has justified.
+
+**Give a screw head its pocket through `counterbore`, never a plain wider hole.** Head diameter plus about 0.4, head height plus a layer, and the pocket faces the bed with the shaft rising out of it: that is the shape the table above is sized for, and it is the shape `counterbore` cuts.
+
+**A nut pocket is a hex prism, and `counterbore` cannot cut one.** It cuts a cylinder, so the pocket is modelled by hand: `extrude(RegularPolygon(across_corners / 2, 6), thickness + 0.2)` sized on the across-corners column, or a round pocket at across-corners plus 0.2 if the nut is free to spin. A hex takes about 0.2 of slack across the flats, and rotating the prism so a flat rather than a point faces up prints a cleaner socket. It floats its own ceiling exactly the way a screw head does and earns the same `hole_ceiling` finding, so the two sacrificial bridge layers still apply; that trick is the part of `counterbore` worth copying, and the cylinder is not.
+
+**Heat-set inserts are the exception that proves the rule.** Their boss diameter is set by the insert a particular vendor ships and not by any standard, the same nominal thread differs by half a millimetre between brands, and the number that matters is the one on the bag in the user's drawer. Ask, or measure one, and record it with `measured()`.
+
 ## Print orientation
 
 Parts print the way they are modelled, +z up, and for most parts that is the end of it. Orientation becomes a decision in exactly two situations: an overhang a corbel cannot carry without disfiguring the part, and a load that wraps a corner, where no flat orientation keeps every member strong.

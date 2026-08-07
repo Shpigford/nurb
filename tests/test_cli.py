@@ -251,11 +251,15 @@ def test_verify_report_pictures_each_finding(tmp_path, monkeypatch, capsys):
     text = (renders / "thing.verify.md").read_text(encoding="utf-8")
     assert "![finding 1](thing.finding-1.png)" in text
     names = {s["file"].name for s in taken}
-    assert {"thing.verify.png", "thing.verify.section.png", "thing.finding-1.png"} <= names
+    assert {"thing.verify.png", "thing.verify.back.png", "thing.verify.section.png", "thing.finding-1.png"} <= names
     finding = next(s for s in taken if s["file"].name == "thing.finding-1.png")
     assert finding["check"], "the still would carry no marks without the check pass"
     assert finding["view"] not in ("iso", None), "the camera never moved to the face"
     assert not stale.exists(), "the stale still kept claiming a finding that is gone"
+    # The two overviews stand at opposite corners, so no face is unseen in both.
+    back = next(s for s in taken if s["file"].name == "thing.verify.back.png")
+    assert [float(v) for v in back["view"].split(",")] == [pytest.approx(-v) for v in cli.ISO]
+    assert "![thing, from the opposite corner](thing.verify.back.png)" in text
 
 
 def test_verify_says_what_it_cannot_check(tmp_path, monkeypatch, capsys):
@@ -602,3 +606,117 @@ def test_skill_sync_with_nothing_installed_points_at_the_installer(tmp_path, mon
     monkeypatch.setenv("HOME", str(tmp_path))
     cli.main(["skill", "--sync"])
     assert "npx skills add shpigford/nurb" in capsys.readouterr().out
+
+
+# --- diff --------------------------------------------------------------------
+
+RIBBED = """\
+from nurb import *
+
+
+@part
+def thing(gap=8.0, draft=False):
+    body = Box(60.0, 30.0, 6.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    for x in (-gap / 2, gap / 2):
+        body += Pos(x, 0, 6.0) * Box(2.0, 30.0, 8.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    if draft:
+        return body
+    bed = body.bounding_box().min.Z
+    keep = body.edges().filter_by(lambda e: e.bounding_box().min.Z > bed)
+    return polish(body, keep, 1.0)
+"""
+
+
+def test_diff_wants_a_card_first(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    cli.cmd_diff(argparse.Namespace(part=None))
+    assert "nothing recorded yet" in capsys.readouterr().out
+
+
+def test_diff_is_quiet_when_nothing_moved(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    _finished(tmp_path)
+    cli.cmd_diff(argparse.Namespace(part=None))
+    out = capsys.readouterr().out
+    assert "unchanged since its card" in out
+    assert "nurb card" not in out, "nothing to write back, so nothing to suggest"
+
+
+def test_diff_catches_a_chamfer_that_stopped_landing(tmp_path, monkeypatch, capsys):
+    """The whole reason the command exists.
+
+    Closing the gap between two ribs leaves their chamfers no room, so `polish` drops
+    them. The part still builds, the volume moves two tenths of a percent, and no check
+    goes red: the face count is the only place it shows.
+    """
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    part = _finished(tmp_path, source=RIBBED)
+    part.write_text(RIBBED.replace("gap=8.0", "gap=3.2"))
+    cli.cmd_diff(argparse.Namespace(part=None))
+    out = capsys.readouterr().out
+    assert "faces: 44 -> 41" in out
+    assert "nurb card" in out, "the way to accept the new numbers is worth saying"
+
+
+# --- slice -------------------------------------------------------------------
+
+
+def test_a_profile_failure_removes_the_previous_gcode(tmp_path, monkeypatch):
+    import argparse
+
+    from nurb import slicing
+
+    monkeypatch.chdir(tmp_path)
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    build = tmp_path / "build"
+    build.mkdir()
+    stale = build / "thing.gcode"
+    stale.write_text("yesterday's print")
+    monkeypatch.setattr(slicing, "app", lambda: tmp_path / "BambuStudio")
+    monkeypatch.setattr(slicing, "vendors", lambda exe: tmp_path / "profiles")
+    monkeypatch.setattr(
+        slicing,
+        "machine",
+        lambda *args: (_ for _ in ()).throw(slicing.Unavailable("no matching nozzle")),
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.cmd_slice(
+            argparse.Namespace(
+                part="thing",
+                printer="bambu_a1_mini",
+                nozzle=None,
+                layer="0.20",
+                filament="PLA",
+                plate="Textured PEI Plate",
+            )
+        )
+    assert exc.value.code == 1
+    assert not stale.exists()
+
+
+def test_a_missing_slicer_removes_the_previous_gcode(tmp_path, monkeypatch):
+    from nurb import slicing
+
+    monkeypatch.chdir(tmp_path)
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    build = tmp_path / "build"
+    build.mkdir()
+    stale = build / "thing.gcode"
+    stale.write_text("yesterday's print")
+    monkeypatch.setattr(slicing, "app", lambda: None)
+    with pytest.raises(SystemExit):
+        cli.main(["slice", "thing", "--printer", "bambu_a1_mini"])
+    assert not stale.exists()

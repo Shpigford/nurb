@@ -70,6 +70,8 @@ nurb api            the vocabulary a part file gets, with signatures
 nurb skill          print an agent skill file for your AI harness, --sync rewrites installed copies
 nurb update         upgrade nurb, then re-sync the installed skill to match
 nurb card [part]    regenerate a card's AUTO block
+nurb diff [part]    what moved since the card was written: size, volume, faces, verdict
+nurb slice [part]   print time and filament, from the slicer you already have
 nurb verify [part]  run the doctrine's verification list; --report bundles it with renders
 nurb render [part]  write a PNG into build/renders/; --section cuts it open
 nurb export [part]  write STL into build/, --formats for STEP or GLB
@@ -84,7 +86,10 @@ A project is any directory with a `parts/` folder. No init step. The first `nurb
 The agent cannot see, so `nurb check` is its eyes. Rules run against the exact solid, not a mesh, and findings come back as text with coordinates:
 
 ```
+solids            more than one body, or none: a part that came apart
 overhang          downward faces past 45 degrees, bridges told from cantilevers
+floating          a region whose first layer would be laid on air
+hole_ceiling      a blind hole's flat ceiling, the counterbore case
 min_wall          thinnest section, ray cast corrected by an inscribed sphere
 sliver            faces too small to print as anything but a smear
 concave_cosmetic  polish laid into an inside corner

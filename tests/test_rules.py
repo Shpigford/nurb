@@ -16,6 +16,45 @@ def only(shape, rule, ctx=None):
     return [f for f in run(shape, ctx, only={rule}) for _ in [1] if f.rule == rule]
 
 
+# --- solids ------------------------------------------------------------------
+
+
+def test_one_body_is_one_part():
+    assert only(Box(20, 20, 20), "solids") == []
+
+
+def test_two_loose_bodies_are_not_a_part():
+    """Two boxes with clear air between them. Nothing joins them, so nothing does."""
+    shape = Box(20, 20, 10) + Pos(40, 0, 0) * Box(20, 20, 10)
+    found = only(shape, "solids")
+    assert len(found) == 1
+    assert found[0].severity == FAIL
+    assert found[0].value == 2
+
+
+def test_tangent_contact_is_still_two_pieces():
+    """A shelf touching its post along one line reads as joined and is not.
+
+    This is the case the rule exists for: from every angle in the viewer the part looks
+    whole, and the kernel has kept it as two bodies the whole time.
+    """
+    post = Cylinder(8, 40, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    shelf = Pos(8 + 15, 0, 20) * Box(30, 20, 4, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    assert only(post + shelf, "solids")
+
+
+def test_a_part_in_pieces_silences_the_other_rules():
+    """One finding that names the fault, not five describing its symptoms.
+
+    The tangent shelf reports floating tips and a 90 degree overhang as well, all true
+    of one fragment and all beside the point until the join exists.
+    """
+    post = Cylinder(8, 40, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    shelf = Pos(8 + 15, 0, 20) * Box(30, 20, 4, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    found = run(post + shelf)
+    assert [f.rule for f in found] == ["solids"]
+
+
 # --- overhang ----------------------------------------------------------------
 
 
@@ -495,3 +534,112 @@ def test_min_wall_does_not_measure_across_a_chamfer_corner():
 
     shape = chamfer(Box(20, 20, 20).edges().filter_by(Axis.Z), 1)
     assert only(shape, "min_wall", Context(min_wall=2.0)) == []
+
+
+def test_a_part_that_builds_nothing_still_tessellates():
+    """The `solids` rule has words for an empty part, and the dev loop has to reach them.
+
+    A part whose last cut removed everything tessellates to zero triangles, and asking
+    trimesh for normals over that raises out of numpy. The rule's message never got
+    seen: the viewer showed an IndexError from inside the mesher instead.
+    """
+    from nurb import builder
+
+    empty = Box(10, 10, 10) - Box(20, 20, 20)
+    assert only(empty, "solids")[0].value == 0
+    assert len(builder.to_mesh(empty, 0.02).faces) == 0
+    assert builder.to_glb(empty, 0.02), "an empty scene is still a GLB the viewer can load"
+
+
+# --- what a finding is called on screen ----------------------------------------
+
+
+def test_every_rule_has_a_label():
+    """A rule with no label shows its identifier to somebody who owns a printer.
+
+    This is the guard the site's "eight rules" headline needed and did not have: the
+    moment a check ships without its plain-English name, this fails rather than the
+    vocabulary leaking into the viewer.
+    """
+    from nurb.checks import LABELS, LABEL_WIDTH, RULES
+
+    assert set(RULES) == set(LABELS), "every rule needs a label, and every label a rule"
+    for rule, said in LABELS.items():
+        assert said.islower(), f"{rule}: labels read as prose, not as headings"
+        assert "_" not in said, f"{rule}: {said!r} is still an identifier"
+        # The panel gives the label a fixed column; over this it wraps into two
+        # ragged lines beside a message that is already wrapping.
+        assert len(said) <= LABEL_WIDTH, f"{rule}: {said!r} will wrap in the panel"
+
+
+def test_a_finding_carries_both_names():
+    """The label is for whoever is looking; the rule is for whoever is fixing."""
+    from nurb.checks import FAIL, Finding, label
+
+    f = Finding("concave_cosmetic", FAIL, "x")
+    assert f.label == "inside corner"
+    assert f.rule == "concave_cosmetic", "the identifier never changes: the CLI prints it"
+    assert "concave_cosmetic" in str(f), "and the CLI line still carries it"
+    assert label("not_a_rule") == "not_a_rule", "an unlabelled rule shows itself, not nothing"
+
+
+DOCTRINE_WORDS = (
+    "polish", "facet", "concave", "gusset", "adhesion", "footprint", "center of mass",
+    "bridging layers", "accounted for", "unsupported over", "b-rep", "chamfer band",
+)
+
+
+def user_facing_strings():
+    """Every label, and the literal text of every `plain=` a rule passes.
+
+    Read out of the source rather than provoked out of geometry: a fixture-driven
+    version only covers the rules whose shape somebody remembered to build, and the
+    rules most likely to speak the doctrine are the fiddly ones nobody fixtures.
+    """
+    import ast
+    import pathlib
+
+    from nurb import checks
+
+    said = [(rule, text) for rule, text in checks.LABELS.items()]
+    source = pathlib.Path(checks.__file__).read_text(encoding="utf-8")
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "plain":
+                continue
+            parts = kw.value.values if isinstance(kw.value, ast.JoinedStr) else [kw.value]
+            literal = " ".join(
+                p.value for p in parts if isinstance(p, ast.Constant) and isinstance(p.value, str)
+            )
+            said.append((f"line {node.lineno}", literal))
+    return said
+
+
+def test_nothing_a_person_reads_speaks_the_doctrine():
+    """The label and the plain sentence are the whole user-facing surface. Neither may
+    use a word that only means something to whoever wrote the rule."""
+    said = user_facing_strings()
+    assert len(said) > len(__import__("nurb").checks.LABELS), "no plain= strings were found"
+    for where, text in said:
+        for word in DOCTRINE_WORDS:
+            assert word not in text.lower(), f"{where}: user-facing text says {word!r}"
+
+
+def test_the_agent_still_gets_the_exact_sentence():
+    """The plain twin is additive: the CLI line and `message` never soften."""
+    from nurb.checks import Context, run
+
+    shape = Box(30, 30, 0.5)
+    found = [f for f in run(shape, Context()) if f.rule == "min_wall"]
+    assert found and "lays down reliably" in found[0].message
+
+
+def test_a_message_that_is_already_plain_needs_no_twin():
+    """`plain` is None where the message is fine, and `said` falls through to it."""
+    from nurb.checks import FAIL, Finding
+
+    f = Finding("floating", FAIL, "a region's first layer sits on air")
+    assert f.plain is None
+    assert f.said == f.message

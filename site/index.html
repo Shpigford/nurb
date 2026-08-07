@@ -212,7 +212,7 @@
   #checks .ic { flex: none; width: 12px; height: 12px; margin-top: 2.5px; }
   #checks .fail .ic { color: var(--bad); }
   #checks .warn .ic { color: var(--amber); }
-  #checks .rule { flex: none; color: var(--dim); width: 78px; }
+  #checks .rule { flex: none; color: var(--dim); width: 104px; }
   #checks .ok { color: var(--accent); display: flex; align-items: center; gap: 7px; }
   #hint { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 1;
           color: var(--dim); font-size: 11px; background: rgba(29,32,39,.85);
@@ -332,7 +332,6 @@
     <nav>
       <a href="#demo">try it</a>
       <a href="#how">how it works</a>
-      <a href="#checks-sec">checks</a>
       <a href="#start">get started</a>
       <a href="benchmarks.html">benchmarks</a>
       <a href="/changelog">changelog</a>
@@ -445,7 +444,7 @@
       <div class="pane mini-checks">
         <div class="f pass"><svg class="ic"><use href="#i-ok"/></svg><span><b>walls</b> thick enough everywhere</span></div>
         <div class="f pass"><svg class="ic"><use href="#i-ok"/></svg><span><b>bed grip</b> plenty of plate contact</span></div>
-        <div class="f warn"><svg class="ic"><use href="#i-warn"/></svg><span><b>overhang</b> bore shoulder at 52&deg;, stretch the taper</span></div>
+        <div class="f warn"><svg class="ic"><use href="#i-warn"/></svg><span><b>steep slope</b> bore shoulder at 52&deg;, stretch the taper</span></div>
       </div>
       <div class="cap"><b>Failures get caught</b> before your printer finds them.</div>
     </div>
@@ -455,24 +454,82 @@
 <section id="checks-sec" class="wrap">
   <div class="reveal">
     <div class="sec-label"><b>// 04</b> &nbsp;the safety net</div>
-    <h2>Eight rules between you and a failed print.</h2>
-    <p class="lede">Calibrated on parts that really printed, and they know which printer you own.</p>
+    <h2>Nine hours of printing. Checked before it starts.</h2>
+    <p class="lede">Calibrated on parts that really printed, and it knows which printer you own.</p>
   </div>
   <div class="rules reveal">
-    <div class="rule-card"><b>overhang</b><span>slopes too steep to print</span></div>
-    <div class="rule-card"><b>min_wall</b><span>the thinnest spot in the part</span></div>
-    <div class="rule-card"><b>sliver</b><span>details too small to print</span></div>
-    <div class="rule-card"><b>concave_cosmetic</b><span>finish work in inside corners</span></div>
-    <div class="rule-card"><b>bed_bevel</b><span>edges that lose grip on the plate</span></div>
-    <div class="rule-card"><b>stability</b><span>parts that will tip over</span></div>
-    <div class="rule-card"><b>projection_ratio</b><span>juts that sag or snap</span></div>
-    <div class="rule-card"><b>build_volume</b><span>does it even fit your printer</span></div>
+    <div class="rule-card"><b>steep slopes</b><span>overhangs that sag or peel away as they print</span></div>
+    <div class="rule-card"><b>thin walls</b><span>sections finer than your nozzle can lay down</span></div>
+    <div class="rule-card"><b>tiny details</b><span>features that smear instead of printing</span></div>
+    <div class="rule-card"><b>mid-air starts</b><span>material with nothing underneath to land on</span></div>
+    <div class="rule-card"><b>top-heavy shapes</b><span>tall parts that tip over before they finish</span></div>
+    <div class="rule-card"><b>long reaches</b><span>juts that sag under their own weight, or snap in use</span></div>
+    <div class="rule-card"><b>loose pieces</b><span>a part that quietly came apart into two</span></div>
+    <div class="rule-card"><b>the wrong size</b><span>too big for the machine you actually own</span></div>
+  </div>
+</section>
+
+<section id="scan" class="wrap">
+  <div class="reveal">
+    <div class="sec-label"><b>// 05</b> &nbsp;the real world</div>
+    <h2>Point your phone at it.</h2>
+    <p class="lede">Some shapes don't come from numbers. Sweep the thing for ten seconds and your part gets built against its real contour.</p>
+  </div>
+  <div class="steps reveal">
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i>the chat</div>
+      <div class="pane chat">
+        <div class="bub you">I can't measure this, it's all curves</div>
+        <div class="bub ai">Scan it with your phone instead. Ten seconds, then drop the file here.</div>
+      </div>
+      <div class="cap"><b>It offers.</b> You never have to know this was possible.</div>
+    </div>
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i>your phone</div>
+      <div class="pane feed">
+        <div class="row"><span class="dot"></span>free scanning app</div>
+        <div class="row">sweep the siding &middot; 10 s</div>
+        <div class="row">export the file</div>
+      </div>
+      <div class="cap"><b>Sweep it.</b> No special hardware, no turntable, no rig.</div>
+    </div>
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i>your browser</div>
+      <div class="pane feed">
+        <div class="row"><span class="dot"></span>300 &times; 250 mm</div>
+        <div class="row">5 mm step between courses</div>
+        <div class="row">bracket hugs the profile</div>
+      </div>
+      <div class="cap"><b>It reads the shape.</b> In millimeters, then builds to it.</div>
+    </div>
+  </div>
+</section>
+
+<section id="together" class="wrap">
+  <div class="reveal">
+    <div class="sec-label"><b>// 06</b> &nbsp;more than one part</div>
+    <h2>It opens the lid before your printer does.</h2>
+    <p class="lede">A door can build clean, check clean, print beautifully, and still not open. Parts that work together get tested together.</p>
+  </div>
+  <div class="cols reveal">
+    <div class="chat">
+      <div class="bub you">a box for the shelf, with a lid that flips up</div>
+      <div class="bub ai">Both parts are modelled. Swinging the hinge, it <b>jams at 84&deg;</b> on the shelf above.</div>
+      <div class="bub you">can it clear?</div>
+      <div class="bub ai">Moved the pivot forward 3 mm. It now opens to <b>110&deg;</b> and stops there on purpose, so the lid rests instead of falling back.</div>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>tested as a set</b><span>Parts that mate get built and checked together, not one at a time.</span></div>
+      <div class="fact"><b>the whole swing</b><span>It runs the hinge through its full travel and names the angle where it hits.</span></div>
+      <div class="fact"><b>the wall counts</b><span>Describe the shelf or the machine it mounts to and that gets included.</span></div>
+      <div class="fact"><b>drag it open</b><span>The joint angle is a slider. Move it and the whole assembly moves.</span></div>
+    </div>
   </div>
 </section>
 
 <section id="start" class="wrap">
   <div class="reveal">
-    <div class="sec-label"><b>// 05</b> &nbsp;get started</div>
+    <div class="sec-label"><b>// 07</b> &nbsp;get started</div>
     <h2>One download and a sentence.</h2>
     <p class="lede">The Mac app is the whole thing in one window. The command line works with Claude Code, Cursor, Codex, Copilot, and friends.</p>
   </div>
@@ -642,11 +699,11 @@ function frame(box) {
 function findings(p) {
   const out = [];
   if (p.wall < 1.6) out.push({
-    sev: p.wall < 1.2 ? 'fail' : 'warn', rule: 'min_wall',
+    sev: p.wall < 1.2 ? 'fail' : 'warn', rule: 'thin wall',
     msg: `${p.wall.toFixed(1)}mm walls on a part you push and twist; floor is 1.6mm`,
   });
   if (p.chamfer > p.wall * 0.45 + 1e-9) out.push({
-    sev: 'warn', rule: 'polish',
+    sev: 'warn', rule: 'inside corner',
     msg: `chamfer ${p.chamfer.toFixed(2)} needs 2× its size of face; clamped to ${effChamfer(p).toFixed(2)}`,
   });
   // The radial step the bore crosses over the taper's height, as an angle from
@@ -655,12 +712,12 @@ function findings(p) {
   const drop = (p.vac_end - p.tool_end) / 2 + p.wall;
   const deg = Math.atan2(Math.abs(drop), p.taper) * 180 / Math.PI;
   if (deg > 45) out.push({
-    sev: deg > 55 ? 'fail' : 'warn', rule: 'overhang',
+    sev: deg > 55 ? 'fail' : 'warn', rule: 'steep slope',
     msg: `the bore's shoulder overhangs at ${deg.toFixed(0)}° printed cuff-down; stretch the taper`,
   });
   const len = 2 * p.cuff + p.taper;
   if (len > 3.5 * p.tool_end) out.push({
-    sev: 'warn', rule: 'projection_ratio',
+    sev: 'warn', rule: 'long reach',
     msg: `${len.toFixed(0)}mm of adapter levering on a Ø${p.tool_end.toFixed(0)} port`,
   });
   return out;

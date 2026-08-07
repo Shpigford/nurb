@@ -27,12 +27,17 @@ def global_config(text):
 
 
 def test_every_shipped_profile_is_valid_context_settings():
+    """Every key is a check setting except the few that are facts about the machine."""
+    from nurb.checks import NOT_SETTINGS, machine_only
+
     have = profiles()
     assert have, "no shipped profiles"
     for name, block in have.items():
-        ctx = _apply(Context(), {"printer": block}, name)  # raises on a bad key
+        ctx = _apply(Context(), {"printer": machine_only(block)}, name)  # raises on a bad key
         assert len(ctx.bed) == 3, name
         assert all(v > 0 for v in ctx.bed), name
+        # The exclusions are for keys that exist, not a licence to write anything.
+        assert set(block) - set(NOT_SETTINGS), name
 
 
 def test_no_printer_file_means_the_defaults(tmp_path):

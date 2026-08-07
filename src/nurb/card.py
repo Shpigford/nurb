@@ -15,6 +15,7 @@ the source.
 """
 
 import pathlib
+import re
 
 from . import checks
 
@@ -133,6 +134,111 @@ def thin(text):
         body = after.split("\n## ", 1)[0]
         if not body.strip():
             out.append(heading)
+    return out
+
+
+# --- what changed since the card was written ---------------------------------
+
+# The Size line's own grammar, parsed back. It lives here rather than in a reader
+# somewhere else because a format and the thing that reads it drift the moment they
+# stop being visible to each other, and `facts` writes this line four lines up.
+# Unanchored, and searched rather than matched, because a variant line opens with the
+# variant's name and then says exactly the same thing. A variant is a shipped
+# configuration, so a chamfer it quietly loses matters as much as one the defaults do.
+SIZE = re.compile(
+    r"(?P<x>[\d.]+) x (?P<y>[\d.]+) x (?P<z>[\d.]+) mm, "
+    r"(?P<volume>[\d.]+) mm3, (?P<solids>\d+) solids?, (?P<faces>\d+) faces"
+)
+
+
+def recorded(part_path):
+    """The AUTO block a card is carrying, as lines. None when it has no block yet."""
+    card = pathlib.Path(part_path).with_suffix(".md")
+    if not card.is_file():
+        return None
+    text = card.read_text(encoding="utf-8")
+    if MARK not in text or CLOSE not in text:
+        return None
+    block = text.split(MARK, 1)[1].split(CLOSE, 1)[0]
+    return [line for line in block.splitlines()[1:] if line.strip()]
+
+
+def _keyed(lines):
+    """Lines by their leading label, which is what makes two blocks comparable."""
+    return {line.split(":", 1)[0]: line for line in lines if ":" in line}
+
+
+def _moved(was, now):
+    """A measured line's numbers, named, where they differ. Empty if it did not move."""
+    before, after = SIZE.search(was), SIZE.search(now)
+    if not before or not after:
+        return None  # an older card, or a line this parser no longer recognises
+    out = []
+    for field in ("x", "y", "z", "volume", "faces", "solids"):
+        a, b = float(before[field]), float(after[field])
+        if abs(a - b) < 0.005:
+            continue
+        if field in ("faces", "solids"):
+            out.append(f"{field}: {a:.0f} -> {b:.0f}")
+        elif field == "volume":
+            pct = f", {(b - a) / a * 100:+.1f}%" if a else ""
+            out.append(f"volume: {a:.1f} -> {b:.1f} mm3{pct}")
+        else:
+            out.append(f"{field}: {a:.2f} -> {b:.2f} mm ({b - a:+.2f})")
+    # Whatever the line carries past the measurements: a variant's sliver count, then
+    # its verdict. Named fields alone would drop a variant that went red, and reporting
+    # the tail whole would print the unchanged half of it on both sides of the arrow.
+    for a, b in zip(_tail(was[before.end() :]), _tail(now[after.end() :])):
+        if a == b:
+            continue
+        out.append(f"{a} -> {b}" if a and b else f"gained {b}" if b else f"lost {a}")
+    return out
+
+
+# The sliver clause, which is the only part of a tail that is not the verdict. The
+# verdict carries commas of its own, so splitting on them would take it apart.
+SLIVERS = re.compile(r"^(\d+ under [\d.]+mm2), ")
+
+
+def _tail(rest):
+    """What follows the measurements, as (slivers, verdict). Either can be empty."""
+    rest = rest.strip(" ,")
+    said = SLIVERS.match(rest)
+    return (said[1], rest[said.end() :]) if said else ("", rest)
+
+
+def compare(was, now):
+    """What moved between two AUTO blocks, in reading order.
+
+    The card is where a part's measurements were last written down, so it is already
+    the baseline an edit should be read against: no second state file, nothing to
+    remember to snapshot first, and a comparison that stays meaningful across a commit
+    because the card is committed with the part.
+
+    The face count is the line that earns this. Losing a chamfer to a parameter change
+    is silent everywhere else, since the part still builds, still checks clean and still
+    looks right from the angle you were watching, and the only trace is four faces that
+    stopped existing.
+    """
+    old, new = _keyed(was), _keyed(now)
+    out = []
+    for label in dict.fromkeys([*old, *new]):
+        before, after = old.get(label), new.get(label)
+        if before == after:
+            continue
+        if before is None:
+            out.append(f"gained {after}")
+            continue
+        if after is None:
+            out.append(f"lost {before}")
+            continue
+        moved = _moved(before, after)
+        if moved is None:
+            out.append(f"{label}: {before.split(': ', 1)[-1]} -> {after.split(': ', 1)[-1]}")
+        else:
+            # The defaults answer as themselves; a variant says which one moved.
+            where = "" if label == "Size" else f"{label.split(' ', 1)[-1]} "
+            out.extend(f"{where}{line}" for line in moved)
     return out
 
 

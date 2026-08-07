@@ -351,8 +351,13 @@ class Server:
             entry["findings"] = [
                 {
                     "rule": f.rule,
+                    # Both, because they answer different questions: the label is for
+                    # whoever is looking at the part, the rule for whoever is fixing it.
+                    "label": f.label,
                     "severity": f.severity,
-                    "message": f.message,
+                    # `said` is the plain twin where a rule has one, the message where
+                    # it does not. The viewer never needs the doctrine's vocabulary.
+                    "message": f.said,
                     "where": list(f.where) if f.where else None,
                     "face": [round(v, 2) for v in builder.face_triangles(row["face"])]
                     if row is not None
@@ -364,6 +369,7 @@ class Server:
             entry["findings"] = [
                 {
                     "rule": "check",
+                    "label": "the check itself failed",
                     "severity": "fail",
                     "message": f"{type(exc).__name__}: {exc}",
                     "where": None,

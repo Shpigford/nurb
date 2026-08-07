@@ -264,12 +264,17 @@ def to_mesh(shape, tolerance=0.1, up=(0, 0, 1)):
     """
     points, faces, colors = _triangulate(shape, tolerance, up)
     mesh = trimesh.Trimesh(
-        vertices=np.array(points, dtype=np.float64),
-        faces=np.array(faces, dtype=np.int64),
-        vertex_colors=np.array(colors, dtype=np.uint8),
+        vertices=np.array(points, dtype=np.float64).reshape(-1, 3),
+        faces=np.array(faces, dtype=np.int64).reshape(-1, 3),
+        vertex_colors=np.array(colors, dtype=np.uint8).reshape(-1, 4),
         process=False,
     )
-    mesh.vertex_normals  # populate before export, or the GLB ships without normals
+    # A part whose last cut removed everything tessellates to nothing, and asking
+    # trimesh for normals over zero triangles raises out of numpy rather than
+    # returning an empty answer. The `solids` rule has words for this part; a
+    # dev-loop traceback from inside the mesher is not those words.
+    if len(mesh.faces):
+        mesh.vertex_normals  # populate before export, or the GLB ships without normals
     return mesh
 
 

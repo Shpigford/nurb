@@ -1044,7 +1044,23 @@ async function paint(name, { keepCamera }) {
   const gltf = await loader.loadAsync(`/glb/${name}.glb?v=${entry.token}`);
   const found = [];
   gltf.scene.traverse(o => { if (o.isMesh) found.push(o); });
-  if (!found.length) return;
+  if (!found.length) {
+    // A part whose last cut removed everything builds fine and tessellates to no
+    // nodes at all. This used to return bare, which left the previous part's mesh on
+    // screen under this part's name and painted no hud, no panel and no sliders: a
+    // blank canvas and a green dot, which reads as success. The `solids` rule has
+    // words for this exact part, so clear the scene and let it say them.
+    if (mesh) {
+      scene.remove(mesh);
+      mesh.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+      mesh = null;
+    }
+    sectionAttach(true);
+    hud(entry);
+    checks(name);
+    params(entry);
+    return;
+  }
 
   if (mesh) { scene.remove(mesh); mesh.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); }
   // Always a group, even for one blob: a part is a group of one, an assembly is a
@@ -1167,10 +1183,13 @@ function checks(name) {
     return;
   }
   // The icon is the severity tag: shape and color both carry it, the title spells it out.
+  // The name shown is the label, not the rule: whoever is looking at this came to get a
+  // part printed, and `concave_cosmetic` is the vocabulary of whoever wrote the check.
+  // The rule is still one hover away, because that is the word to type at the CLI.
   const rows = found.map(f =>
-    `<div class="f ${f.severity}" title="${f.severity}">`
+    `<div class="f ${f.severity}" title="${f.severity}: ${f.rule}">`
     + `<svg class="ic"><use href="#i-${f.severity === 'fail' ? 'fail' : 'warn'}"/></svg>`
-    + `<span class="rule">${f.rule}</span><span>${f.message}</span></div>`).join('');
+    + `<span class="rule">${f.label || f.rule}</span><span>${f.message}</span></div>`).join('');
   box.innerHTML = `<h2>checks <span class="n">${found.length}</span></h2>${rows}`;
   const shift = mesh ? mesh.position : new THREE.Vector3();
   for (const f of found) {

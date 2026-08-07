@@ -386,8 +386,7 @@ def cmd_verify(args):
             except Exception as exc:
                 problems.append(f"{name}: {type(exc).__name__}: {exc}")
                 continue
-            if len(shape.solids()) != 1:
-                problems.append(f"{name} is {len(shape.solids())} solids, not one")
+            # The count is the `solids` rule's job now, and it says more than a count.
             found = checks.run(shape, ctx)
             for finding in found:
                 problems.append(f"{name}: {finding}")
@@ -451,6 +450,12 @@ def _report(root, gathered):
             overrides = overrides_by.get(name) or None
             stills = [
                 {"part": path, "file": out / f"{name}.verify.png", "overrides": overrides, "check": True},
+                # The opposing iso, so the report is not a claim about the half of the
+                # part that happened to face the camera. One iso leaves the back, the
+                # far side and the underside unseen, and a finding pins only the faces
+                # that fired, so an unflagged fault there is pictured nowhere at all.
+                # Two opposed corners cover every face between them by construction.
+                {"part": path, "file": out / f"{name}.verify.back.png", "view": _opposed(ISO), "overrides": overrides, "check": True},
                 # marks off: the findings were checked for the overview, and pins with
                 # their material clipped away would float in the emptied half.
                 {"part": path, "file": out / f"{name}.verify.section.png", "cut": "z", "overrides": overrides, "marks": False},
@@ -489,7 +494,14 @@ def _report(root, gathered):
             else:
                 lines.append("clean: no findings")
             if not note:
-                lines += ["", f"![{name}]({name}.verify.png)", "", f"![{name}, cut mid-part]({name}.verify.section.png)"]
+                lines += [
+                    "",
+                    f"![{name}]({name}.verify.png)",
+                    "",
+                    f"![{name}, from the opposite corner]({name}.verify.back.png)",
+                    "",
+                    f"![{name}, cut mid-part]({name}.verify.section.png)",
+                ]
             lines.append("")
         target = out / f"{path.stem}.verify.md"
         target.write_text("\n".join(lines), encoding="utf-8")
@@ -536,6 +548,11 @@ def cmd_api(args):
 
 # `render`'s iso direction at unit length, for tilting a finding camera toward it.
 ISO = (0.588, -0.630, 0.504)
+
+
+def _opposed(direction):
+    """The camera standing at the opposite corner, as `render`'s x,y,z view string."""
+    return ",".join(f"{-v:.3f}" for v in direction)
 
 
 def _renders(root):
@@ -757,6 +774,135 @@ def cmd_card(args):
             print(f"      empty section: {heading}")
 
 
+def cmd_slice(args):
+    """Hand the part to the slicer the user already has, and say what it predicts.
+
+    The two numbers a slicer knows and nothing upstream of it does are how long the
+    print takes and how much filament it eats, and both are design feedback while the
+    design can still change. Everything else about slicing stays where it belongs.
+    """
+    from . import builder, checks, slicing
+
+    root = project_root()
+    out = root / "build"
+    configs = _collect_exports(_resolve(root, args.part))
+    # The command itself is the freshness boundary. Clear every expected G-code before
+    # preflight too, so a missing slicer or printer cannot leave an older build current.
+    for _, name, _, _ in configs:
+        (out / f"{name}.gcode").unlink(missing_ok=True)
+    worst = 0
+    exe = slicing.app()
+    if exe is None:
+        sys.exit(
+            f"  no slicer found. `nurb slice` drives one you already have installed:\n"
+            f"  {' or '.join(slicing.SLICERS)}, in /Applications, on PATH, or through Flatpak.\n"
+            f"  `nurb export` writes the STL if you would rather open it yourself."
+        )
+    try:
+        wanted, profile = checks.slicer_name(root, args.printer)
+    except ValueError as exc:
+        sys.exit(f"  {exc}")
+    if not wanted:
+        sys.exit(
+            "  no printer chosen, and a slice is meaningless without one.\n"
+            "  Name the machine once in printer.toml (`profile = \"bambu_a1_mini\"`),\n"
+            f"  in ~/.config/nurb/config.toml for every project, or pass --printer.\n"
+            f"  have: {', '.join(sorted(checks.profiles()))}"
+        )
+    vendors = slicing.vendors(exe)
+    if vendors is None:
+        sys.exit(
+            f"  found {slicing.label(exe)} but not its profile bundle, "
+            "so there is nothing to slice against"
+        )
+
+    # No ctx: a slice is the machine's profile and the geometry, and the per-part check
+    # settings a card carries say nothing a slicer would read.
+    queue = [entry[:3] for entry in configs]
+    while queue:
+        path, name, overrides = queue.pop(0)
+        gcode_target = out / f"{name}.gcode"
+        # Clear it before the build, profile lookup, or assembly branch: any of those
+        # can fail or skip, and yesterday's printable file must not survive as current.
+        gcode_target.unlink(missing_ok=True)
+        shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+        scene = getattr(shape, "_nurb_scene", None)
+        if scene is not None:
+            # The same rule `nurb export` follows: a welded scene is not a thing to
+            # print, so in a project sweep an assembly steps aside and its parts slice
+            # as themselves, while naming one explicitly slices what it places rather
+            # than exiting 0 having done nothing.
+            if not args.part:
+                print(f"  {name}: assembly, skipped (its parts slice as themselves)")
+                continue
+            placed = sorted(pathlib.Path(u) for u in scene.uses)
+            if not placed:
+                sys.exit(f"  {name} is an assembly that places no parts; nothing to slice")
+            print(f"  {name}: slicing the {len(placed)} part(s) it places")
+            queue = [(p, p.stem, None) for p in placed] + queue
+            continue
+        out.mkdir(exist_ok=True)
+        model = out / f"{name}.stl"
+        builder.write_stl(shape, model)
+        try:
+            machine = slicing.machine(vendors, wanted, args.nozzle or slicing.NOZZLE)
+            process, filament = slicing.profiles_for(machine, args.layer, args.filament)
+            (seconds, length), gcode = slicing.run(
+                model, gcode_target, machine, process, filament, exe, plate=args.plate
+            )
+        except slicing.Unavailable as exc:
+            print(f"  {name}: {exc}")
+            worst = 1
+            continue
+        used = f"{length / 1000:.1f}m of filament" if length else "filament unknown"
+        print(f"  {name}: {slicing.spoken(seconds)}, {used}")
+        print(f"      {profile} / {process.stem} / {filament.stem} / {args.plate}")
+        print(f"      {gcode.relative_to(root)}")
+    if worst:
+        sys.exit(worst)
+
+
+def cmd_diff(args):
+    """What this part became, against what its card says it was.
+
+    The question an edit leaves behind is whether it moved what you aimed at and
+    nothing else, and neither the viewer nor the rules answer it: a chamfer that
+    stopped landing takes four faces with it and leaves a part that still builds,
+    still checks clean, and still looks right from wherever the camera was.
+    """
+    from . import builder, card, checks
+
+    root = project_root()
+    drifted = False
+    for path in _resolve(root, args.part):
+        was = card.recorded(path)
+        if was is None:
+            print(f"  {path.stem}: nothing recorded yet, run `nurb card`")
+            continue
+        configs = _configs(path)
+        if not configs:
+            continue
+        try:
+            built = []
+            for name, overrides, ctx in configs:
+                shape, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+                built.append((name, shape, ctx, checks.run(shape, ctx)))
+        except Exception as exc:
+            print(f"  {path.stem}: {type(exc).__name__}: {exc}")
+            continue
+        _, shape, ctx, found = built[0]
+        changes = card.compare(was, card.facts(shape, ctx, found, variants=built[1:]))
+        if not changes:
+            print(f"  {path.stem}: unchanged since its card")
+            continue
+        drifted = True
+        print(f"  {path.stem}: {len(changes)} change(s) since its card")
+        for line in changes:
+            print(f"      {line}")
+    if drifted:
+        print("  `nurb card` writes these back once they are the numbers you meant.")
+
+
 def cmd_render(args):
     from . import builder, render
 
@@ -962,6 +1108,20 @@ def main(argv=None):
     s = sub.add_parser("card", help="regenerate a part card's AUTO block")
     s.add_argument("part", nargs="?")
     s.set_defaults(fn=cmd_card)
+
+    s = sub.add_parser("diff", help="what changed since the card was written")
+    s.add_argument("part", nargs="?")
+    s.set_defaults(fn=cmd_diff)
+
+    s = sub.add_parser("slice", help="slice with the installed slicer: print time and filament")
+    s.add_argument("part", nargs="?")
+    s.add_argument("--printer", help="slice for a shipped profile instead of printer.toml")
+    # Defaulted in the module rather than here, so `nurb --help` stays an import lighter.
+    s.add_argument("--nozzle", help="nozzle size, in mm (default 0.4)")
+    s.add_argument("--layer", default="0.20", help="layer height, in mm (default 0.20)")
+    s.add_argument("--filament", default="PLA", help="filament to price the print in (default PLA)")
+    s.add_argument("--plate", default="Textured PEI Plate", help="build plate (default Textured PEI Plate)")
+    s.set_defaults(fn=cmd_slice)
 
     s = sub.add_parser("render", help="write a PNG of a part to build/renders/")
     s.add_argument("part", nargs="?")

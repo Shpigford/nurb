@@ -1,0 +1,420 @@
+"""The handoff to a slicer, and the two numbers that come back.
+
+nurb owns the geometry and the stance it prints in. Everything after that, layer
+heights and flow rates and how this filament behaves at 220 degrees, belongs to the
+slicer the user already has configured, and re-deriving any of it here would be a
+second opinion nobody asked for that goes stale every firmware release.
+
+So this module is deliberately thin. It finds the slicer, picks the profile that
+matches the machine the project already named in `printer.toml`, and hands over the
+STL. What it wants back is the pair of numbers that change a design decision while
+there is still time to change it: how long the print takes, and how much filament it
+eats. A wall that goes from 2 to 3mm is a shrug in the viewer and forty minutes on
+the plate, and finding that out after the part is on the bed is finding out too late.
+
+Local only. No account, no network call, no printer credentials: this runs the
+slicer that is already on the machine and reads the files it wrote.
+"""
+
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+
+# Slicers that share the one CLI grammar this module speaks: `--load-settings`,
+# `--load-filaments`, `--slice`, `--outputdir`, and a bundled tree of vendor profiles
+# under Resources/profiles. They are a fork and its parent, which is why one adapter
+# covers both. Orca leads because it carries profiles for more machines.
+SLICERS = ("OrcaSlicer", "BambuStudio")
+COMMANDS = {
+    "OrcaSlicer": ("OrcaSlicer", "orcaslicer", "orca-slicer"),
+    "BambuStudio": ("BambuStudio", "bambustudio", "bambu-studio"),
+}
+FLATPAKS = {
+    "OrcaSlicer": "com.orcaslicer.OrcaSlicer",
+    "BambuStudio": "com.bambulab.BambuStudio",
+}
+
+# What each shipped profile is called in a slicer's own vendor bundle. It lives beside
+# the machine rather than in this module's head, so `printers.toml` stays the one place
+# a machine is described; see `checks.printer`, which drops this key before the rest of
+# a profile becomes check settings.
+NOZZLE = "0.4"
+PLATE = "Textured PEI Plate"
+
+
+class Unavailable(Exception):
+    """No slicer, or no profile in it for this machine. The message says what to do."""
+
+
+def app(search=None):
+    """The installed slicer's executable, or None.
+
+    macOS keeps it in a bundle. Linux uses a command, an AppImage on PATH, or one of
+    the two official Flatpaks. A Flatpak is returned as its command prefix; `run`
+    appends the slicing arguments in exactly the same way it does for an executable.
+    """
+    for name in search or SLICERS:
+        bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
+        if bundle.is_file():
+            return bundle
+        for command in COMMANDS.get(name, (name, name.lower())):
+            found = shutil.which(command)
+            if found:
+                return pathlib.Path(found)
+        # AppImage filenames carry a version, so `which` cannot name one exactly.
+        # Looking only on PATH keeps discovery explicit and bounded.
+        patterns = (f"{name}*.AppImage", f"{name.replace('Studio', '_Studio')}*.AppImage")
+        for folder in os.get_exec_path():
+            for pattern in patterns:
+                for found in sorted(pathlib.Path(folder).glob(pattern)):
+                    if found.is_file() and os.access(found, os.X_OK):
+                        return found
+        app_id = FLATPAKS.get(name)
+        flatpak = shutil.which("flatpak")
+        if app_id and flatpak and any(root.is_dir() for root in _flatpak_roots(app_id)):
+            return (flatpak, "run", app_id)
+    return None
+
+
+def vendors(exe):
+    """The slicer's bundled profile tree."""
+    paths = [] if isinstance(exe, tuple) else [pathlib.Path(exe), pathlib.Path(exe).resolve()]
+    flavor = _flavor(exe)
+    candidates = []
+    for path in dict.fromkeys(paths):
+        candidates += [
+            path.parent.parent / "Resources" / "profiles",  # macOS bundle
+            path.parent / "resources" / "profiles",  # unpacked AppImage
+            path.parent.parent / "resources" / "profiles",
+        ]
+        prefix = path.parent.parent
+        for name in _resource_names(flavor):
+            candidates += [
+                prefix / "share" / name / "profiles",
+                prefix / "share" / name / "resources" / "profiles",
+                prefix / "share" / name / "system",
+            ]
+    candidates += _user_profile_roots(flavor)
+    app_id = next((a for a in FLATPAKS.values() if isinstance(exe, tuple) and a in exe), None)
+    for root in _flatpak_roots(app_id) if app_id else ():
+        files = root / "files" / "share"
+        candidates.append(root / "files" / "resources" / "profiles")
+        for name in _resource_names(flavor):
+            candidates += [
+                files / name / "profiles",
+                files / name / "resources" / "profiles",
+                files / name / "system",
+            ]
+    return next((root for root in candidates if root.is_dir()), None)
+
+
+def label(exe):
+    """A slicer name suitable for an error, whether it is a path or Flatpak command."""
+    return _flavor(exe)
+
+
+def _flavor(exe):
+    """The application family, from a path or Flatpak command."""
+    said = " ".join(str(v) for v in exe) if isinstance(exe, tuple) else str(exe)
+    return "OrcaSlicer" if "orca" in said.lower() else "BambuStudio"
+
+
+def _resource_names(flavor):
+    return (flavor, flavor.lower(), flavor.replace("Slicer", "-slicer").replace("Studio", "-studio").lower())
+
+
+def _flatpak_roots(app_id):
+    if not app_id:
+        return ()
+    home = pathlib.Path.home()
+    return (
+        home / ".local" / "share" / "flatpak" / "app" / app_id / "current" / "active",
+        pathlib.Path("/var/lib/flatpak/app") / app_id / "current" / "active",
+    )
+
+
+def _user_profile_roots(flavor):
+    """Profile caches written after an AppImage or Flatpak has run once."""
+    home = pathlib.Path.home()
+    config = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
+    app_id = FLATPAKS[flavor]
+    return [
+        config / flavor / "system",
+        home / ".var" / "app" / app_id / "config" / flavor / "system",
+    ]
+
+
+def _readable(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}  # a template fragment or a file this version writes differently
+
+
+def machine(profiles, name, nozzle=NOZZLE):
+    """The vendor profile for a machine, by the name a slicer knows it under."""
+    want = f"{name} {nozzle} nozzle"
+    for candidate in sorted(profiles.glob(f"*/machine/{want}.json")):
+        return candidate
+    all_machines = sorted(profiles.glob("*/machine/* nozzle.json"))
+    prefix, suffix = f"{name} ", " nozzle"
+    nozzles = sorted(
+        {
+            path.stem[len(prefix) : -len(suffix)]
+            for path in all_machines
+            if path.stem.startswith(prefix) and path.stem.endswith(suffix)
+        }
+    )
+    if nozzles:
+        raise Unavailable(
+            f"this slicer has no {nozzle}mm profile for {name!r}.\n"
+            f"  For this machine it has: {', '.join(f'{size}mm' for size in nozzles)} nozzle."
+        )
+    have = sorted({p.stem.rsplit(" ", 2)[0] for p in all_machines})
+    # Its neighbours, not the first six alphabetically: someone whose MK4S is missing
+    # needs to know which Prusas are here, and a list starting at Anker tells them
+    # nothing except that the list is long.
+    family = name.split()[0]
+    near = [m for m in have if m.startswith(family)]
+    raise Unavailable(
+        f"this slicer has no profile for {name!r} with a {nozzle}mm nozzle.\n"
+        + (
+            f"  From the same maker it has: {', '.join(near)}.\n"
+            if near
+            else f"  It has nothing from {family} at all, out of {len(have)} machines.\n"
+        )
+        + "  OrcaSlicer carries the widest set if yours is missing here."
+    )
+
+
+def _compatible(folder, printer, prefer, fallback=True, whole=False):
+    """The best profile in `folder` that this printer can actually use.
+
+    `compatible_printers` is the vendor bundle's own answer to which process goes with
+    which machine, so it is the thing to ask rather than matching on the name suffixes,
+    which differ per vendor and change between releases.
+    """
+    usable = []
+    for path in sorted(folder.glob("*.json")):
+        data = _readable(path)
+        if data.get("instantiation") != "true":
+            continue
+        if printer in data.get("compatible_printers", []):
+            usable.append(path)
+    if not usable:
+        return None
+    for want in prefer:
+        for path in usable:
+            matches = (
+                re.search(rf"(?<![\w-]){re.escape(want)}(?![\w-])", path.stem, re.IGNORECASE)
+                if whole
+                else want.lower() in path.stem.lower()
+            )
+            if matches:
+                return path
+    return usable[0] if fallback else None
+
+
+def profiles_for(machine_path, layer="0.20", filament="PLA"):
+    """The process and filament this machine should slice with.
+
+    Both are picked rather than configured, and the picks get printed, because a
+    prediction is only worth reading next to the settings that produced it.
+    """
+    printer = machine_path.stem
+    vendor = machine_path.parent.parent
+    process = _compatible(vendor / "process", printer, [f"{layer}mm Standard", f"{layer}mm", "Standard"])
+    stock = _compatible(
+        vendor / "filament",
+        printer,
+        [f"{filament} Basic", filament],
+        fallback=False,
+        whole=True,
+    )
+    if not process or not stock:
+        missing = "process" if not process else "filament"
+        asked = f" matching {filament!r}" if missing == "filament" else ""
+        raise Unavailable(
+            f"this slicer ships no {missing} profile{asked} compatible with {printer!r}"
+        )
+    return process, stock
+
+
+def run(model, target, machine_path, process, filament, exe=None, plate=PLATE):
+    """Slice one model to `target`, and return what the slicer predicted.
+
+    Returns ((seconds, filament_mm), path). Either number can be None: a slicer that
+    changes how it reports is a reason to say less, never a reason to make one up.
+
+    The slicer names its own output after the plate, so it gets a scratch directory and
+    the gcode is moved to the name the rest of build/ uses. A part is `thing.stl` and
+    `thing.gcode`, not `thing.stl` and `gcode/thing/plate_1.gcode`.
+    """
+    exe = exe or app()
+    target = pathlib.Path(target)
+    out_dir = target.parent / f".{target.stem}.slicing"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # A failed attempt must not leave yesterday's printable file looking current.
+    target.unlink(missing_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for stale in ("plate_1.gcode", "result.json"):
+        (out_dir / stale).unlink(missing_ok=True)
+    try:
+        flattened = []
+        for kind, source in (("machine", machine_path), ("process", process), ("filament", filament)):
+            full = out_dir / f"{kind}.json"
+            full.write_text(json.dumps(_flatten(source)), encoding="utf-8")
+            flattened.append(full)
+        machine_full, process_full, filament_full = flattened
+        command = list(exe) if isinstance(exe, tuple) else [str(exe)]
+        done = subprocess.run(
+            [
+                *command,
+                "--curr-bed-type", plate,
+                "--load-settings", f"{machine_full};{process_full}",
+                "--load-filaments", str(filament_full),
+                "--slice", "0",
+                "--outputdir", str(out_dir),
+                str(model),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        gcode = out_dir / "plate_1.gcode"
+        if done.returncode != 0 or not gcode.is_file():
+            raise Unavailable(f"the slicer refused this model: {_why(done, out_dir)}")
+        predicted = _predicted(out_dir)  # read while both files are still together
+        gcode.rename(target)
+    finally:
+        # In `finally` because the refusal path is the one that leaves debris, and a
+        # hidden directory nobody looks in is one that never gets cleaned up by hand.
+        shutil.rmtree(out_dir, ignore_errors=True)
+    return predicted, target
+
+
+def _flatten(path, seen=None):
+    """One complete preset: inherited values, then its split-out template fields."""
+    path = pathlib.Path(path)
+    seen = set() if seen is None else seen
+    if path in seen:
+        raise Unavailable(f"profile inheritance loops at {path.name}")
+    seen.add(path)
+    data = _read_profile(path)
+    parent = data.pop("inherits", None)
+    full = {}
+    if parent:
+        parent_path = _parent_profile(path, parent)
+        if parent_path is None:
+            raise Unavailable(f"{path.name} inherits missing profile {parent!r}")
+        full = _flatten(parent_path, seen)
+    full.update(data)
+    # Bambu keeps large G-code fields in sibling fragments named after the preset.
+    # They are part of the full profile the CLI requires, but their own bookkeeping
+    # must not turn the selected leaf back into an uninstantiable template.
+    prefix = f"{path.stem} template "
+    for template in sorted(p for p in path.parent.glob("*.json") if p.stem.startswith(prefix)):
+        patch = _read_profile(template)
+        for key in ("name", "inherits", "instantiation", "from", "type"):
+            patch.pop(key, None)
+        full.update(patch)
+    return full
+
+
+def _read_profile(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise Unavailable(f"cannot read slicer profile {path.name}: {exc}") from exc
+
+
+def _parent_profile(path, name):
+    """Find a named parent in this vendor first, then elsewhere in the bundle."""
+    direct = path.parent / f"{name}.json"
+    if direct.is_file():
+        return direct
+    profiles = path.parents[2]
+    kind = path.parent.name
+    matches = sorted(
+        candidate
+        for candidate in profiles.glob(f"*/{kind}/**/*.json")
+        if candidate.stem == name
+    )
+    return matches[0] if len(matches) == 1 else None
+
+
+def _why(done, out_dir):
+    """The slicer's own reason, which it puts in result.json before it puts it on stderr."""
+    said = _readable(out_dir / "result.json").get("error_string")
+    if said and said != "Success.":
+        return said
+    tail = [line for line in (done.stderr or done.stdout or "").splitlines() if "error" in line.lower()]
+    return tail[-1] if tail else f"exit code {done.returncode}"
+
+
+TIME = re.compile(r"total estimated time: ([^;\n]+)")
+LENGTH = re.compile(r"total filament length \[mm\] ?: ?([\d.]+)")
+
+
+def _predicted(out_dir):
+    """Time in seconds and filament in mm, from whichever of the two files carries it.
+
+    The structured file is authoritative on time and silent on filament length, and the
+    gcode header carries both, so they are read in that order rather than one being
+    trusted for everything. The header's weight line reads 0 on a stock profile whose
+    density never resolved, so it is not read at all: a wrong gram figure is worse than
+    no gram figure, because only one of them gets checked.
+    """
+    seconds = None
+    plates = _readable(out_dir / "result.json").get("sliced_plates") or []
+    if plates and isinstance(plates[0], dict):
+        predicted = plates[0].get("total_predication")
+        seconds = float(predicted) if predicted else None
+    head = ""
+    gcode = out_dir / "plate_1.gcode"
+    if gcode.is_file():
+        with gcode.open("r", encoding="utf-8", errors="replace") as fh:
+            head = fh.read(4096) + _tail(gcode)
+    if seconds is None:
+        said = TIME.search(head)
+        seconds = _clock(said[1]) if said else None
+    length = LENGTH.search(head)
+    return seconds, float(length[1]) if length else None
+
+
+def _tail(gcode, size=8192):
+    """These slicers write their totals as a footer, so the head alone would miss them."""
+    with gcode.open("rb") as fh:
+        fh.seek(max(0, gcode.stat().st_size - size))
+        return fh.read().decode("utf-8", errors="replace")
+
+
+def _clock(said):
+    """`1d 4h 20m 12s` as seconds.
+
+    Days are in here because a long print reaches them and dropping the unit would not
+    fail, it would quietly report a 28 hour print as four. Anything this does not
+    recognise makes the whole reading None, on the module's own rule that a slicer
+    reporting differently is a reason to say less rather than to answer confidently.
+    """
+    units = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+    total = 0
+    for value, unit in re.findall(r"(\d+)\s*([a-z])", said.lower()):
+        if unit not in units:
+            return None
+        total += int(value) * units[unit]
+    return total or None
+
+
+def spoken(seconds):
+    """A duration a human reads at a glance rather than divides."""
+    if not seconds:
+        return "unknown"
+    days, rest = divmod(int(seconds), 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes = rest // 60
+    if days:
+        return f"{days}d {hours}h {minutes:02d}m"
+    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
