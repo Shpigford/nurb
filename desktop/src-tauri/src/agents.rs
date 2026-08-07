@@ -287,6 +287,17 @@ pub async fn agent_login(app: tauri::AppHandle, agent: String) -> Result<(), Str
     let launcher = app.state::<crate::env::Launcher>();
     let (program, mut args) = launcher.adapter(kind);
     let adapter_path = launcher.adapter_path();
+    // codex-acp's login spawns `codex app-server` off PATH, unlike the rest of
+    // the adapter, which falls back to the copy npm installed beside it. On a
+    // user's machine nothing but node is on that PATH, so the spawn fails with
+    // ENOENT and the login reports only its exit code. Point it at the
+    // bundled CLI. (Dev checkouts run the adapter through npx, which puts that
+    // same CLI on PATH itself, which is why this only ever broke the shipped
+    // app.)
+    let codex_cli = match kind {
+        AgentKind::Codex => launcher.paths().map(crate::env::Paths::codex_cli),
+        _ => None,
+    };
     match kind {
         AgentKind::Claude => {
             args.extend(["--cli", "auth", "login", "--claudeai"].map(String::from))
@@ -302,6 +313,9 @@ pub async fn agent_login(app: tauri::AppHandle, agent: String) -> Result<(), Str
         let mut command = Command::new(program);
         if let Some(path) = adapter_path {
             command.env("PATH", path);
+        }
+        if let Some(cli) = codex_cli {
+            command.env("CODEX_PATH", cli);
         }
         let mut child = command
             .args(&args)
@@ -321,7 +335,9 @@ pub async fn agent_login(app: tauri::AppHandle, agent: String) -> Result<(), Str
         if status.success() {
             Ok(())
         } else {
-            Err("The sign-in did not finish. Try again, or sign in from a terminal.".into())
+            // No terminal advice: the audience is hobbyists, and the usual
+            // cause is a browser tab closed before the login landed.
+            Err("The sign-in did not finish. Try again, and complete the sign-in in the browser tab that opens.".into())
         }
     });
     // A human in a browser sets the pace; ten minutes is generous. On timeout
@@ -377,5 +393,17 @@ mod tests {
             assert_eq!(manifest["dependencies"][package], version);
             assert_eq!(locked[package], version);
         }
+    }
+
+    /// `agent_login` hands Codex a CODEX_PATH pointing at `.bin/codex`, which
+    /// only exists because the adapter depends on a Codex CLI that installs
+    /// under that name. An adapter bump that dropped it would put the login
+    /// back on the bare PATH lookup that broke it.
+    #[test]
+    fn the_codex_adapter_installs_the_cli_its_login_is_pointed_at() {
+        let lock: serde_json::Value =
+            serde_json::from_str(include_str!("../../adapter-runtime/package-lock.json")).unwrap();
+        let codex = &lock["packages"]["node_modules/@openai/codex"];
+        assert!(codex["bin"]["codex"].is_string(), "no codex bin: {codex}");
     }
 }

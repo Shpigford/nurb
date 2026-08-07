@@ -178,6 +178,14 @@ impl Paths {
             .join(kind.adapter_bin().expect("adapter-hosted"))
     }
 
+    /// The Codex CLI npm installs as a dependency of the Codex adapter.
+    /// codex-acp's ACP server falls back to this copy on its own, but its
+    /// login path spawns a bare `codex` off PATH instead, so the app has to
+    /// name it. See `CODEX_PATH` in agents.rs.
+    pub fn codex_cli(&self) -> PathBuf {
+        self.adapters().join("node_modules/.bin/codex")
+    }
+
     pub fn stamp(&self) -> PathBuf {
         self.data.join("provisioned.json")
     }
