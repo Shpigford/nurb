@@ -664,9 +664,16 @@ def test_skill_nudge_stays_quiet_with_nothing_installed(tmp_path, monkeypatch, c
 def test_slice_asks_which_printer_rather_than_refusing(tmp_path, monkeypatch):
     """A machine that was never chosen is a question, and the viewer needs the list
     to ask it with. Reporting `no printer chosen` and stopping is the dead end this
-    whole surface exists to avoid."""
-    from nurb import checks
+    whole surface exists to avoid.
 
+    The slicer is stubbed present because a missing one outranks a missing printer,
+    and this test is about the second question. Without the stub it passes on a
+    developer's Mac, where a slicer is installed, and asserts the wrong branch in CI,
+    where none is.
+    """
+    from nurb import checks, slicing
+
+    monkeypatch.setattr(slicing, "app", lambda *a, **k: pathlib.Path("/Applications/Orca"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty"))
     said = json.loads(asyncio.run(project(tmp_path).slice("thing")).body)
     assert said["kind"] == "choose"
