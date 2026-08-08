@@ -46,6 +46,7 @@ nurb build [part]    build once, report size and timing
 nurb check [part]    run the printability rules, --strict for CI
 nurb inspect [part]  faces, normals, concave edges, each finding on its face, --render for stills of them
 nurb scan <file>     measure a mesh in mm, a phone scan or a downloaded model (STL/OBJ/GLB or triangulated PLY), --section for a profile polyline
+nurb compare [part]  deviation from the card's target mesh, both directions, --against for a one-off file
 nurb rules           print the design doctrine
 nurb api             the vocabulary a part file gets, with signatures
 nurb skill           print an agent skill file for any AI harness, --sync rewrites installed copies
@@ -73,6 +74,7 @@ A release is a version bump merged to main: `uv version X.Y.Z`, plus the matchin
 src/nurb/registry.py      @part, signature introspection
 src/nurb/builder.py       load, build, tessellate, GLB
 src/nurb/checks.py        printability rules, convexity, Finding/Context, variants
+src/nurb/compare.py       deviation from a target mesh, the ghost's numbers
 src/nurb/polish.py        the bisecting polish pass, and chamfer with real errors
 src/nurb/orient.py        stand(), the diagonal print stance with its bed facet
 src/nurb/probe.py         what `nurb inspect` measures, in the rules' own units

@@ -455,6 +455,8 @@
       <button id="sectionbtn" title="cut the part open along an axis"><svg><use href="#i-layers"/></svg><span>section</span></button>
       <span class="sep"></span>
       <button id="pinsbtn" class="on" title="hide the finding markers to see what they cover; the checks stay on"><svg><use href="#i-pin"/></svg><span>pins</span></button>
+      <span class="sep" id="ghostsep" style="display:none"></span>
+      <button id="ghostbtn" style="display:none" title="show or hide the target mesh this part is remodelling"><svg><use href="#i-cube"/></svg><span>target</span></button>
     </div>
     <div id="print"></div>
     <div class="pill" id="cut">
@@ -632,6 +634,44 @@ function syncPins() { pins.visible = pinsWanted && pinsPlaced; }
 const material = new THREE.MeshStandardMaterial({
   color: 0x9aa6b8, metalness: 0.05, roughness: 0.62, flatShading: false,
 });
+
+// ---- target ghost ----
+// The mesh a part is remodelling, drawn where the deviation numbers measured it.
+// Amber against the part's grey-blue, double-sided because a scan can be an open
+// surface, and never writing depth so the part always reads through it. Hidden in
+// headless stills: ?view= is a render's signature, and a still is of the part.
+let ghostWanted = !view;
+const ghostGeo = new Map();  // part -> { stamp, geometry }, so a save never refetches a big scan
+const ghostMaterial = new THREE.MeshStandardMaterial({
+  color: 0xd9a066, metalness: 0.0, roughness: 0.9,
+  transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide,
+});
+
+async function ghostAttach(name, entry) {
+  const t = entry.target;
+  if (!t || t.error || !renderer) return;
+  let rec = ghostGeo.get(name);
+  if (!rec || rec.stamp !== t.stamp) {
+    const gltf = await loader.loadAsync(`/glb/${name}.target.glb?v=${t.stamp}`);
+    let geometry = null;
+    gltf.scene.traverse(o => { if (o.isMesh && !geometry) geometry = o.geometry; });
+    if (!geometry) return;
+    if (!geometry.attributes.normal) geometry.computeVertexNormals();
+    rec = { stamp: t.stamp, geometry };
+    ghostGeo.set(name, rec);
+  }
+  // The fetch was awaited, so the part on screen may have moved on; attach only to
+  // the group that is still current, and never twice.
+  if (current !== name || !mesh) return;
+  const stale = mesh.getObjectByName('target');
+  if (stale) mesh.remove(stale);
+  const g = new THREE.Mesh(rec.geometry, ghostMaterial.clone());
+  g.material.clippingPlanes = [plane];
+  g.name = 'target';
+  g.position.set(...(t.offset || [0, 0, 0]));
+  g.visible = ghostWanted;
+  mesh.add(g);
+}
 
 // ---- axis triad ----
 // Issue #55: a tray's front kept reading as its rear while orbiting. A corner triad
@@ -1052,6 +1092,13 @@ document.getElementById('pinsbtn').onclick = ev => {
   syncPins();
 };
 document.getElementById('pinsbtn').classList.toggle('on', pinsWanted);
+document.getElementById('ghostbtn').onclick = ev => {
+  ghostWanted = !ghostWanted;
+  ev.currentTarget.classList.toggle('on', ghostWanted);
+  const g = mesh && mesh.getObjectByName('target');
+  if (g) g.visible = ghostWanted;
+};
+document.getElementById('ghostbtn').classList.toggle('on', ghostWanted);
 // Dragging takes over from an absolute ?cut= position: the slider is the fraction.
 document.getElementById('cutpos').oninput = ev => { cutAt = +ev.target.value; cutMm = null; sectionUpdate(); };
 for (const b of document.querySelectorAll('#cut button')) {
@@ -1238,7 +1285,7 @@ async function paint(name, { keepCamera }) {
     // words for this exact part, so clear the scene and let it say them.
     if (mesh) {
       scene.remove(mesh);
-      mesh.traverse(o => { if (o.isMesh) o.geometry.dispose(); });
+      mesh.traverse(o => { if (o.isMesh && o.name !== 'target') o.geometry.dispose(); });
       mesh = null;
     }
     sectionAttach(true);
@@ -1248,7 +1295,9 @@ async function paint(name, { keepCamera }) {
     return;
   }
 
-  if (mesh) { scene.remove(mesh); mesh.traverse(o => { if (o.isMesh) o.geometry.dispose(); }); }
+  // The ghost's geometry survives: it is cached per part, and a save should not
+  // push a quarter-million-triangle scan back to the GPU.
+  if (mesh) { scene.remove(mesh); mesh.traverse(o => { if (o.isMesh && o.name !== 'target') o.geometry.dispose(); }); }
   // Always a group, even for one blob: a part is a group of one, an assembly is a
   // group whose named children the joints move, and nothing downstream branches.
   mesh = new THREE.Group();
@@ -1282,12 +1331,16 @@ async function paint(name, { keepCamera }) {
   // drag never rebuilds. Reposing here is what keeps a save from snapping the door.
   applyJointPoses();
 
+  // Not awaited: the ghost is context, and the part's geometry should land at the
+  // speed it always did whatever the size of the scan behind it.
+  ghostAttach(name, entry);
+
   // Obstacles are context for an assembly, not things going onto the printer. Keep
   // them in the camera frame, but do not let an offset wall move the printed parts
   // away from the plate center or lift them off it.
   const bb = new THREE.Box3().setFromObject(mesh);
   const plated = new THREE.Box3();
-  for (const c of mesh.children) if (c.isMesh && c.name !== 'context') plated.expandByObject(c);
+  for (const c of mesh.children) if (c.isMesh && c.name !== 'context' && c.name !== 'target') plated.expandByObject(c);
   if (plated.isEmpty()) plated.copy(bb);  // a context-only scene still needs a sane view
   // The grid is the build plate, so a part sits on it, centered, the way a slicer
   // plates it. Where a part's own origin falls is a modeling datum and nothing to
@@ -1406,6 +1459,18 @@ function flagRefusal(e) {
   if (row) row.classList.add('refused');
 }
 
+function targetLine(e) {
+  const t = e.target;
+  if (!t) return '';
+  const file = (t.file || '').split('/').pop();
+  if (t.error) return `<br><span class="note">target ${file}: ${t.error}</span>`;
+  if (!t.metrics) return `<br><span class="note">vs ${file}: measuring</span>`;
+  // Two directions on purpose: extra is surface the original never had, missing is
+  // detail not modelled yet, and one averaged number would let them cancel out.
+  return `<br><span class="note">vs ${file}: extra ${t.metrics.part.max.toFixed(1)}mm, `
+    + `missing ${t.metrics.target.max.toFixed(1)}mm</span>`;
+}
+
 function hud(e) {
   // With a variant on screen the HUD carries its card note, because the sidebar can
   // say which variant but never why it exists, and the why is the point of it.
@@ -1414,7 +1479,11 @@ function hud(e) {
     ? `<b>${e.name}</b><br>${e.refused ? 'refused these values' : 'build failed'}`
     : `<b>${v ? v.name : e.name}</b>`
       + (v && v.note ? `<br><span class="note">${v.note}</span>` : '')
-      + `<br>${e.bbox.join(' &times; ')} mm<br>${e.ms} ms`;
+      + `<br>${e.bbox.join(' &times; ')} mm<br>${e.ms} ms`
+      + targetLine(e);
+  const ghosted = !e.error && e.target && !e.target.error && renderer;
+  document.getElementById('ghostbtn').style.display = ghosted ? '' : 'none';
+  document.getElementById('ghostsep').style.display = ghosted ? '' : 'none';
   printRow();
   // An assembly is placed parts, not one printable solid, so its buttons download
   // one zip with a file per placed part. Only an assembly that places nothing goes
@@ -2039,7 +2108,9 @@ function connect() {
     }
     if (msg.type === 'checked') {
       parts.set(msg.name, msg);
-      if (msg.name === current) checks(msg.name);
+      // The hud too: the deviation against a target mesh rides this message, the
+      // way findings do, and a number from the previous build must not linger.
+      if (msg.name === current) { checks(msg.name); hud(msg); }
     }
     // Success never arrives as a message: the server execs itself and the socket
     // drops, so only a failure has anything to say.

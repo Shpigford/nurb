@@ -179,6 +179,10 @@ class Server:
         self.draft = draft
         self.open_browser = open_browser
         self.state = {}
+        # Loaded target meshes, keyed by (file, units) and stamped with the file's
+        # mtime: a scan can be a quarter-million triangles, and re-reading it on
+        # every save would put a constant tax on the loop for a file that never moves.
+        self.targets = {}
         # What the sliders are holding, per part, and only where it differs from the
         # file. Empty means the part is exactly what its source says.
         self.overrides = {}
@@ -255,6 +259,7 @@ class Server:
             entry["ms"] = round(ms, 1)
             entry["error"] = None
             entry["shape"] = shape  # kept for the check pass, never serialized
+            self._attach_target(entry, path, shape)
             scene = getattr(shape, "_nurb_scene", None)
             if scene is not None:
                 from .assembly import wire
@@ -391,7 +396,76 @@ class Server:
                     "where": None,
                 }
             ]
+        target = entry.get("target")
+        if target and not target.get("error"):
+            from . import compare
+
+            try:
+                hit = self._target_mesh(target["file"], target.get("units"))
+                metrics = compare.against(entry["shape"], hit["mesh"], self.tolerance)
+                # The ghost draws at the offset the numbers used, never a stale one.
+                target["offset"] = metrics.pop("offset")
+                target["metrics"] = metrics
+            except Exception as exc:
+                target["error"] = f"{type(exc).__name__}: {exc}"
         return entry
+
+    # ---------- target mesh ----------
+
+    def _attach_target(self, entry, path, shape):
+        """The card's target mesh, riding the entry: the ghost's GLB and where it
+        sits relative to this build. The deviation numbers cost a beat, so they
+        arrive with the check pass, the way findings already do."""
+        from . import checks, compare
+
+        try:
+            declared = compare.setting(checks.settings(path))
+        except ValueError as exc:
+            entry["target"] = {"error": str(exc)}
+            return
+        if not declared:
+            return
+        file, units = declared
+        try:
+            hit = self._target_mesh(file, units)
+        except (ValueError, OSError) as exc:
+            entry["target"] = {"file": file, "error": str(exc)}
+            return
+        bb = shape.bounding_box()
+        part = ((bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2, (bb.min.Z + bb.max.Z) / 2)
+        mesh = hit["mesh"].bounds.mean(axis=0)
+        entry["target"] = {
+            "file": file,
+            "units": units,
+            "stamp": hit["stamp"],
+            "offset": [round(float(p - m), 2) for p, m in zip(part, mesh)],
+        }
+        entry["target_glb"] = hit["glb"]
+
+    def _target_mesh(self, file, units):
+        """The loaded target, cached by the file's mtime."""
+        import trimesh
+
+        from . import compare
+
+        path = pathlib.Path(file)
+        if not path.is_absolute():
+            path = self.root / path
+        if not path.is_file():
+            # The stat would say the same thing in errno, which is not a message.
+            raise ValueError(f"no file at {path}")
+        stamp = f"{path.stat().st_mtime_ns:x}"
+        hit = self.targets.get((file, units))
+        if hit and hit["stamp"] == stamp:
+            return hit
+        mesh, unit, source = compare.load(self.root, file, units=units)
+        hit = {
+            "mesh": mesh,
+            "glb": trimesh.Scene([mesh]).export(file_type="glb"),
+            "stamp": stamp,
+        }
+        self.targets[(file, units)] = hit
+        return hit
 
     # ---------- http ----------
 
@@ -424,6 +498,13 @@ class Server:
                 return self._resp(200, target.read_bytes(), types[target.suffix])
             return self._resp(404, b"not found", "text/plain")
         if path.startswith("/glb/"):
+            # The ghost first: the generic route would read x.target.glb as a part
+            # named x.target and answer 404 for a file that exists.
+            if path.endswith(".target.glb"):
+                entry = self.state.get(path[5:].removesuffix(".target.glb"))
+                if entry and entry.get("target_glb"):
+                    return self._resp(200, entry["target_glb"], "model/gltf-binary")
+                return self._resp(404, b"no target", "text/plain")
             entry = self.state.get(path[5:].removesuffix(".glb"))
             if entry and entry["glb"]:
                 return self._resp(200, entry["glb"], "model/gltf-binary")
@@ -707,7 +788,7 @@ class Server:
 
     @staticmethod
     def _meta(entry):
-        return {k: v for k, v in entry.items() if k not in ("glb", "shape")}
+        return {k: v for k, v in entry.items() if k not in ("glb", "shape", "target_glb")}
 
     def _family(self):
         """Parameters most of this project's parts declare identically.

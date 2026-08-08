@@ -672,6 +672,44 @@ def cmd_scan(args):
         print(line)
 
 
+def cmd_compare(args):
+    """Measure a part against the mesh it is remodelling, both directions.
+
+    The target normally comes from the card, so the dev loop's ghost and this report
+    read the same declaration. --against exists for the one-off question.
+    """
+    from . import builder, checks, compare
+
+    root = project_root()
+    named = args.part is not None
+    for path in _resolve(root, args.part):
+        try:
+            declared = compare.setting(checks.settings(path))
+        except ValueError as exc:
+            sys.exit(f"  {exc}")
+        if args.against:
+            file, units = args.against, args.units
+        elif declared:
+            file, units = declared[0], args.units or declared[1]
+        else:
+            if named:
+                sys.exit(
+                    f"  {path.stem} has no target mesh. Name one in the card's ```toml"
+                    f" settings block:\n      target = \"scans/original.stl\"\n"
+                    f"  or ask directly: nurb compare {path.stem} --against <file>"
+                )
+            print(f"  {path.stem}: no target in its card")
+            continue
+        try:
+            mesh, unit, source = compare.load(root, file, units=units)
+            shape, _, _ = builder.build(path, draft=False)
+            metrics = compare.against(shape, mesh)
+        except (ValueError, builder.BuildError) as exc:
+            sys.exit(f"  {exc}")
+        for line in compare.report(path.stem, file, metrics, unit, source):
+            print(line)
+
+
 def skill_targets():
     """The two paths nurb's install flow writes the skill to.
 
@@ -1084,6 +1122,22 @@ def main(argv=None):
         help="simplify the profile to this many mm (default 0.2)",
     )
     s.set_defaults(fn=cmd_scan)
+
+    s = sub.add_parser(
+        "compare", help="deviation from the part's target mesh, in both directions"
+    )
+    s.add_argument("part", nargs="?")
+    s.add_argument(
+        "--against",
+        metavar="FILE",
+        help="compare against this mesh instead of the card's declared target",
+    )
+    s.add_argument(
+        "--units",
+        choices=("mm", "cm", "m", "in"),
+        help="the mesh file's units. default: the card's say, the format's, or a size guess",
+    )
+    s.set_defaults(fn=cmd_compare)
 
     s = sub.add_parser("skill", help="print an agent skill file for your AI harness")
     s.add_argument("--sync", action="store_true", help="rewrite installed copies from this package instead of printing")
