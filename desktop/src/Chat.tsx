@@ -84,6 +84,7 @@ const NURB_VERBS: Record<string, [string, string]> = {
   check: ["checking printability", "check printability"],
   inspect: ["inspecting the part", "inspect the part"],
   verify: ["double-checking the part", "double-check the part"],
+  compare: ["measuring against the original", "measure against the original"],
   render: ["rendering a preview", "render a preview"],
   export: ["exporting print files", "export print files"],
   rules: ["reading the design rules", "read the design rules"],
