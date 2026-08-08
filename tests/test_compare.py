@@ -6,7 +6,7 @@ import pytest
 import trimesh
 from build123d import Box
 
-from nurb import compare
+from nurb import cli, compare
 from nurb.server import Server
 
 PART = """from nurb import *
@@ -83,6 +83,44 @@ def test_check_adds_the_deviation_and_reuses_the_loaded_mesh(tmp_path):
     assert entry["target"]["metrics"]["part"]["max"] < 0.05
     assert entry["target"]["metrics"]["target"]["max"] < 0.05
     assert server.targets[("scans/original.stl", None)] is held
+
+
+def test_target_units_version_the_viewers_cached_geometry(tmp_path):
+    server = project(tmp_path)
+    millimetres = server._target_mesh("scans/original.stl", "mm")
+    metres = server._target_mesh("scans/original.stl", "m")
+    assert millimetres["stamp"] != metres["stamp"]
+    assert metres["mesh"].extents.max() == pytest.approx(
+        millimetres["mesh"].extents.max() * 1000
+    )
+
+
+def test_compare_command_walks_the_cards_variants(tmp_path, monkeypatch, capsys):
+    project(tmp_path)
+    card = CARD.replace(
+        "```\n",
+        "\n[variants.narrow.params]\nwidth = 20.0\n```\n",
+    )
+    (tmp_path / "parts" / "thing.md").write_text(card)
+    monkeypatch.chdir(tmp_path)
+
+    cli.main(["compare", "thing"])
+
+    output = capsys.readouterr().out
+    assert "thing against scans/original.stl" in output
+    assert "narrow against scans/original.stl" in output
+
+
+def test_viewer_discards_a_ghost_loaded_for_a_replaced_mesh_group():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    ghost = viewer.split("async function ghostAttach", 1)[1].split(
+        "// ---- axis triad ----", 1
+    )[0]
+    assert "const group = mesh;" in ghost
+    assert "mesh !== group" in ghost
+    assert "group.add(g);" in ghost
 
 
 def test_a_missing_target_file_reports_instead_of_breaking_the_build(tmp_path):

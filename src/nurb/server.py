@@ -456,7 +456,11 @@ class Server:
         if not path.is_file():
             # The stat would say the same thing in errno, which is not a message.
             raise ValueError(f"no file at {path}")
-        stamp = f"{path.stat().st_mtime_ns:x}"
+        # This stamp also versions the browser's geometry cache. The same bytes read
+        # as metres and millimetres are different ghosts even though their mtime is
+        # identical, and changing the card must replace the one already on screen.
+        identity = f"{path.resolve()}\0{units or ''}\0{path.stat().st_mtime_ns}"
+        stamp = hashlib.blake2b(identity.encode(), digest_size=8).hexdigest()
         hit = self.targets.get((file, units))
         if hit and hit["stamp"] == stamp:
             return hit

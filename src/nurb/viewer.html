@@ -649,7 +649,8 @@ const ghostMaterial = new THREE.MeshStandardMaterial({
 
 async function ghostAttach(name, entry) {
   const t = entry.target;
-  if (!t || t.error || !renderer) return;
+  const group = mesh;
+  if (!t || t.error || !renderer || !group) return;
   let rec = ghostGeo.get(name);
   if (!rec || rec.stamp !== t.stamp) {
     let gltf;
@@ -665,17 +666,17 @@ async function ghostAttach(name, entry) {
     rec = { stamp: t.stamp, geometry };
     ghostGeo.set(name, rec);
   }
-  // The fetch was awaited, so the part on screen may have moved on; attach only to
-  // the group that is still current, and never twice.
-  if (current !== name || !mesh) return;
-  const stale = mesh.getObjectByName('target');
-  if (stale) mesh.remove(stale);
+  // The fetch was awaited, so the part on screen may have rebuilt or moved on;
+  // attach only to the exact group that asked for this ghost, and never twice.
+  if (current !== name || mesh !== group) return;
+  const stale = group.getObjectByName('target');
+  if (stale) group.remove(stale);
   const g = new THREE.Mesh(rec.geometry, ghostMaterial.clone());
   g.material.clippingPlanes = [plane];
   g.name = 'target';
   g.position.set(...(t.offset || [0, 0, 0]));
   g.visible = ghostWanted;
-  mesh.add(g);
+  group.add(g);
 }
 
 // ---- axis triad ----
