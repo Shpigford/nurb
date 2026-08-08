@@ -428,7 +428,9 @@ class Server:
         file, units = declared
         try:
             hit = self._target_mesh(file, units)
-        except (ValueError, OSError) as exc:
+        except Exception as exc:
+            # Broad on purpose: a target that will not load is a target problem, and
+            # letting it escape here would report a part that builds fine as broken.
             entry["target"] = {"file": file, "error": str(exc)}
             return
         bb = shape.bounding_box()
@@ -458,7 +460,7 @@ class Server:
         hit = self.targets.get((file, units))
         if hit and hit["stamp"] == stamp:
             return hit
-        mesh, unit, source = compare.load(self.root, file, units=units)
+        mesh, _, _ = compare.load(self.root, file, units=units)
         hit = {
             "mesh": mesh,
             "glb": trimesh.Scene([mesh]).export(file_type="glb"),

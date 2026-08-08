@@ -706,6 +706,10 @@ def cmd_compare(args):
             metrics = compare.against(shape, mesh)
         except (ValueError, builder.BuildError) as exc:
             sys.exit(f"  {exc}")
+        except Exception as exc:
+            # A part can reject its own defaults, and the mesh libraries have their
+            # own ideas about failure. Neither is worth a traceback.
+            sys.exit(f"  {path.stem}: {type(exc).__name__}: {exc}")
         for line in compare.report(path.stem, file, metrics, unit, source):
             print(line)
 

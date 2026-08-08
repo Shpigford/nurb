@@ -652,7 +652,12 @@ async function ghostAttach(name, entry) {
   if (!t || t.error || !renderer) return;
   let rec = ghostGeo.get(name);
   if (!rec || rec.stamp !== t.stamp) {
-    const gltf = await loader.loadAsync(`/glb/${name}.target.glb?v=${t.stamp}`);
+    let gltf;
+    // Not awaited by any caller, so a rejection here would surface as an unhandled
+    // error for what is only a race: a server restart or a rebuild replacing the
+    // entry mid-fetch. The next paint fetches again.
+    try { gltf = await loader.loadAsync(`/glb/${name}.target.glb?v=${t.stamp}`); }
+    catch (e) { return; }
     let geometry = null;
     gltf.scene.traverse(o => { if (o.isMesh && !geometry) geometry = o.geometry; });
     if (!geometry) return;
