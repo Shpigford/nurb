@@ -91,6 +91,13 @@ forward = [-1, 0, 0]
 
 [accepted]
 sliver = 4
+
+# Aims the stress button: the item's weight on the working surface, carried by
+# the bracket channel floors.
+[stress]
+kg = 1
+load = [-20.2, 62.9, -15]
+hold = [[-4.2, 0, -15], [-4.2, 25.2, -15], [-4.2, 50.3, -15], [-4.2, 75.5, -15], [-4.2, 100.6, -15], [-4.2, 125.8, -15]]
 ```
 
 ## Don't

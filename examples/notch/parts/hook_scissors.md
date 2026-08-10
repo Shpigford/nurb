@@ -83,6 +83,13 @@ item_height = 35.0
 hook_projection = 45.0
 hook_width = 20.0
 upstand_height = 20.0
+
+# Aims the stress button: the item's weight on the working surface, carried by
+# the bracket channel floors.
+[stress]
+kg = 0.2
+load = [-17, 0, -24]
+hold = [[-4.2, 0, -15]]
 ```
 
 ## Don't

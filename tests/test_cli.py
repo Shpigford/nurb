@@ -729,3 +729,75 @@ def test_a_missing_slicer_removes_the_previous_gcode(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         cli.main(["slice", "thing", "--printer", "bambu_a1_mini"])
     assert not stale.exists()
+
+
+def test_stress_walks_variants_without_reusing_the_base_cards_coordinates(
+    tmp_path, monkeypatch, capsys
+):
+    import argparse
+
+    from nurb import stress
+
+    monkeypatch.chdir(tmp_path)
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    part = parts / "thing.py"
+    part.write_text(
+        """from nurb import *
+
+@part
+def thing(width=10.0):
+    return Box(width, 10, 5)
+"""
+    )
+    part.with_suffix(".md").write_text(
+        """# thing
+
+```toml
+[stress]
+kg = 2
+load = [0, 0, 2.5]
+hold = [[-5, 0, 0]]
+
+[variants.wide.params]
+width = 20.0
+```
+"""
+    )
+    calls = []
+
+    def analyze(shape, holds, load, kg, **kwargs):
+        calls.append((shape.bounding_box().size.X, holds, load, kg, kwargs["material"]))
+        return {
+            "material": "PLA",
+            "hold_centers": holds,
+            "load_center": load,
+            "max_mpa": 1,
+            "hotspot": (0, 0, 0),
+            "across_mpa": 0,
+            "deflection_mm": 0,
+            "factor": 2,
+            "gives": "plastic",
+        }
+
+    monkeypatch.setattr(stress, "analyze", analyze)
+    monkeypatch.setattr(stress, "default_spots", lambda shape: ([(9, 9, 9)], (8, 8, 8)))
+
+    cli.cmd_stress(
+        argparse.Namespace(
+            part="thing",
+            kg=None,
+            at=None,
+            hold=[],
+            pitch=None,
+            material=None,
+        )
+    )
+
+    assert calls == [
+        (10.0, [(-5.0, 0.0, 0.0)], (0.0, 0.0, 2.5), 2.0, "PLA"),
+        (20.0, [(9, 9, 9)], (8, 8, 8), 2.0, "PLA"),
+    ]
+    output = capsys.readouterr().out
+    assert "thing:" in output
+    assert "wide:" in output

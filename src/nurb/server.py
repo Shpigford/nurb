@@ -238,17 +238,29 @@ class Server:
             "findings": None,
             "variants": self._variants(path),
             "variant": None,
+            "stress_spots": None,
         }
         try:
             shape, params, ms = self._build(path, name)
             entry.update(builder.stats(shape))
             entry["params"] = params
             entry["variant"] = self._active_variant(params, entry["variants"])
+            # Card picks describe the default geometry. A variant or free slider edit
+            # can move the named faces while leaving the old coordinates on some other
+            # face, which is worse than an explicit auto-aim. Keep card picks only for
+            # the exact defaults they were written against.
+            spots = self._stress_spots(path)
+            if spots and (entry["variant"] is not None or self.overrides.get(name)):
+                # Weight and material still describe the use case; only coordinates
+                # become untrustworthy when geometry moves.
+                spots = {k: spots[k] for k in ("kg", "material") if k in spots}
+            entry["stress_spots"] = spots or None
             try:
                 up = self._context(path, entry["variant"]).up
             except Exception:
                 # A bad card is reported by the check pass; it must not hide geometry.
                 up = (0, 0, 1)
+            entry["up"] = up  # the print orientation, which is also the stress solver's layer normal
             entry["glb"] = builder.to_glb(shape, self.tolerance, up=up)
             # What this build is, as opposed to that it happened. The tessellation is
             # deterministic, so identical geometry hashes identically, and a rebuild
@@ -288,6 +300,29 @@ class Server:
             entry["traceback"] = _user_traceback(exc, path)
         self.state[name] = entry
         return entry
+
+    @staticmethod
+    def _stress_spots(path):
+        """The card's [stress] block, as the viewer's pre-aimed picks.
+
+        This is how the agent that built the part hands its context to the button: it
+        knows a shelf hangs on four hooks and the user should not have to. Malformed
+        or absent both mean None, because the button works fine unaimed.
+        """
+        from . import checks
+
+        try:
+            block = checks.settings(path).get("stress")
+            load = [float(v) for v in block["load"]][:3]
+            hold = [[float(v) for v in p][:3] for p in block["hold"]]
+            if len(load) != 3 or not hold or any(len(point) != 3 for point in hold):
+                return None
+            spots = {"load": load, "hold": hold, "kg": float(block.get("kg", 1.0))}
+            if block.get("material"):
+                spots["material"] = str(block["material"])
+            return spots
+        except Exception:
+            return None
 
     @staticmethod
     def _variants(path):
@@ -781,6 +816,70 @@ class Server:
         builder.write_stl(built, target)
         return target
 
+    # ---------- stress ----------
+    # One load case, asked for by two clicks in the viewer: where the weight sits and
+    # where the part is held. Solved here rather than client-side because the solver
+    # needs the B-rep faces and a sparse solve. The answer returns only to the tab that
+    # asked: each tab owns its own load, material, and markers.
+
+    async def stress(self, msg, client=None):
+        from . import stress as solver
+
+        name = msg.get("name")
+        entry = self.state.get(name) if isinstance(name, str) else None
+        if not entry or entry.get("shape") is None:
+            await self.reply(
+                client,
+                {"type": "stressed", "name": name, "error": "no built part to analyze"},
+            )
+            return
+        auto = bool(msg.get("auto"))
+        try:
+            kg = float(msg.get("kg", 1.0))
+            material = str(msg.get("material") or "PLA")
+            hold = None if auto else [[float(v) for v in p][:3] for p in msg["hold"]]
+            load = None if auto else [float(v) for v in msg["load"]][:3]
+        except (KeyError, TypeError, ValueError):
+            await self.reply(
+                client,
+                {"type": "stressed", "name": name, "error": "malformed stress request"},
+            )
+            return
+        # Read before the solve, like the slice route: the answer is about this shape,
+        # and the viewer has to see when a rebuild has moved on underneath it.
+        shape_id = entry.get("shape_id")
+        try:
+            # The lock matters twice over: the solver tessellates via OCCT, which makes
+            # no thread-safety promises, and a rebuild swapping the shape mid-solve
+            # would hand back a map for geometry nobody can see any more.
+            # `auto` is the button pressed on a part whose card never aimed it: the
+            # solver guesses the spots the way the CLI does, and the answer carries
+            # them back so the viewer can show the guess as movable markers.
+            def solve():
+                holds, at = (hold, load)
+                if auto:
+                    holds, at = solver.default_spots(entry["shape"])
+                return solver.analyze(
+                    entry["shape"], holds, at, kg, self.tolerance,
+                    material=material, up=entry.get("up") or (0, 0, 1),
+                )
+
+            async with self.building:
+                result = await asyncio.to_thread(solve)
+        except Exception as exc:
+            said = str(exc) if isinstance(exc, ValueError) else f"{type(exc).__name__}: {exc}"
+            await self.reply(client, {"type": "stressed", "name": name, "error": said})
+            return
+        print(
+            f"  {name}: stress {result['max_mpa']}MPa peak under {kg}kg, "
+            f"{result['elements']} elements",
+            flush=True,
+        )
+        await self.reply(
+            client,
+            {"type": "stressed", "name": name, "shape_id": shape_id, **result},
+        )
+
     @staticmethod
     def _machines():
         """Every shipped profile, for the picker an unnamed machine gets."""
@@ -918,6 +1017,10 @@ class Server:
                 client,
                 {"type": "printer", "profile": msg["profile"], "bed": self._bed()},
             )
+            return
+
+        if msg.get("type") == "stress":
+            await self.stress(msg, client)
             return
 
         name = msg.get("name")

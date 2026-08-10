@@ -913,6 +913,96 @@ def cmd_slice(args):
         sys.exit(worst)
 
 
+def cmd_stress(args):
+    from . import builder, stress
+
+    root = project_root()
+
+    def point(text, flag):
+        try:
+            v = tuple(float(x) for x in text.split(","))
+            if len(v) != 3:
+                raise ValueError
+            return v
+        except ValueError:
+            sys.exit(f"{flag} takes x,y,z in mm, like --at 10,0,25")
+
+    for path in _resolve(root, args.part):
+        # A card's load coordinates describe only the source geometry. Variants can
+        # move them onto unrelated faces, so variants auto-aim while retaining the
+        # use case's weight and material.
+        from . import checks
+
+        try:
+            card = checks.settings(path).get("stress") or {}
+        except ValueError:
+            card = {}
+        for name, overrides, ctx in _configs(path):
+            try:
+                shape, _, _ = builder.build(path, overrides=overrides or None)
+            except Exception as exc:
+                print(f"  {name}: {type(exc).__name__}: {exc}")
+                continue
+            aimed = (
+                card
+                if not overrides
+                else {key: card[key] for key in ("kg", "material") if key in card}
+            )
+            try:
+                holds = (
+                    [point(h, "--hold") for h in args.hold]
+                    if args.hold
+                    else [tuple(map(float, p)) for p in aimed.get("hold", [])] or None
+                )
+                load = (
+                    point(args.at, "--at")
+                    if args.at
+                    else tuple(map(float, aimed["load"])) if "load" in aimed else None
+                )
+                guessed = holds is None or load is None
+                if guessed:
+                    d_holds, d_load = stress.default_spots(shape)
+                    holds, load = holds or d_holds, load or d_load
+                kg = args.kg if args.kg is not None else float(aimed.get("kg", 1.0))
+                material = args.material or aimed.get("material", "PLA")
+                out = stress.analyze(
+                    shape,
+                    holds,
+                    load,
+                    kg,
+                    pitch=args.pitch,
+                    material=material,
+                    up=ctx.up,
+                )
+            except ValueError as exc:
+                print(f"  {name}: {exc}")
+                continue
+            spot = lambda p: "(" + ", ".join(f"{v:.0f}" for v in p) + ")"
+            held = ", ".join(spot(c) for c in out["hold_centers"])
+            print(
+                f"  {name}: {kg:g} kg on {out['material']} at "
+                f"{spot(out['load_center'])}, held at {held}"
+                + (
+                    " (guessed; aim with --at/--hold x,y,z, or a [stress] block in the card)"
+                    if guessed
+                    else ""
+                )
+            )
+            print(
+                f"      peak {out['max_mpa']} MPa at {spot(out['hotspot'])}, "
+                f"{out['across_mpa']} MPa pulling across layers, "
+                f"sags {out['deflection_mm']} mm"
+            )
+            f, seam = out["factor"], out["gives"] == "layers"
+            how = "splitting at the layer seams" if seam else "in the plastic itself"
+            if f is None:
+                print("      no stress to speak of")
+            elif f < 1:
+                print(f"      breaks under this, {how}: holds about {kg * f:.1f} kg")
+            else:
+                print(f"      holds ~{f}x this load; when it does break, it breaks {how}")
+
+
 def cmd_diff(args):
     """What this part became, against what its card says it was.
 
@@ -1189,6 +1279,17 @@ def main(argv=None):
     s.add_argument("--filament", default="PLA", help="filament to price the print in (default PLA)")
     s.add_argument("--plate", default="Textured PEI Plate", help="build plate (default Textured PEI Plate)")
     s.set_defaults(fn=cmd_slice)
+
+    s = sub.add_parser("stress", help="static stress under a load: peak MPa, margin, hot spot")
+    s.add_argument("part", nargs="?")
+    s.add_argument("--kg", type=float, help="the weight pressing down (default: the card's, else 1)")
+    s.add_argument("--at", help="x,y,z where the weight sits (default: the highest big upward face)")
+    s.add_argument("--hold", action="append",
+                   help="x,y,z of a spot that holds the part; repeat it for every mounting point "
+                        "(default: its largest downward or side face)")
+    s.add_argument("--pitch", type=float, help="voxel size in mm (default: sized from the part)")
+    s.add_argument("--material", help="what it prints in: PLA, PETG, ABS, ASA, Nylon, PC (default: the card's, else PLA)")
+    s.set_defaults(fn=cmd_stress)
 
     s = sub.add_parser("render", help="write a PNG of a part to build/renders/")
     s.add_argument("part", nargs="?")

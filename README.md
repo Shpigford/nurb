@@ -73,6 +73,8 @@ nurb card [part]    regenerate a card's AUTO block
 nurb diff [part]    what moved since the card was written: size, volume, faces, verdict
 nurb slice [part]   print time and grams of filament, from the slicer you already have
                     (the viewer's print time row is the same answer, on the part you are looking at)
+nurb stress [part]  where a load stresses the part: peak MPa, sag, margin to breaking
+                    (the viewer's stress button is the same answer, aimed by clicking the part)
 nurb verify [part]  run the doctrine's verification list; --report bundles it with renders
 nurb render [part]  write a PNG into build/renders/; --section cuts it open
 nurb export [part]  write STL into build/, --formats for STEP or GLB

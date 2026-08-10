@@ -79,6 +79,41 @@ def test_rebuild_carries_the_cards_variants(tmp_path):
     assert server._wire(entry)["variants"] == entry["variants"]
 
 
+def test_variant_rebuild_keeps_stress_defaults_but_discards_base_coordinates(tmp_path):
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    (tmp_path / "parts" / "thing.md").write_text(
+        """# thing
+
+```toml
+[stress]
+kg = 2
+material = "PETG"
+load = [0, 0, 2.5]
+hold = [[-20, 0, 0]]
+
+[variants.slim.params]
+width = 15.0
+```
+"""
+    )
+
+    base = server.rebuild(part)
+    assert base["stress_spots"]["load"] == [0.0, 0.0, 2.5]
+
+    server.overrides["thing"] = {"width": 15.0}
+    variant = server.rebuild(part)
+
+    assert variant["variant"] == "slim"
+    assert variant["stress_spots"] == {"kg": 2.0, "material": "PETG"}
+
+    server.overrides["thing"] = {"width": 17.0}
+    custom = server.rebuild(part)
+
+    assert custom["variant"] is None
+    assert custom["stress_spots"] == {"kg": 2.0, "material": "PETG"}
+
+
 def test_rebuild_names_a_non_numeric_variant_from_its_built_values(tmp_path):
     server = project(tmp_path)
     part = tmp_path / "parts" / "thing.py"
@@ -937,6 +972,60 @@ def test_concurrent_estimates_do_not_run_the_slicer_together(tmp_path, monkeypat
 
     assert asyncio.run(both()) == [(10, 1.0, 1), (10, 1.0, 1)]
     assert high_water == 1
+
+
+def test_stress_answer_returns_only_to_the_requesting_socket(tmp_path, monkeypatch):
+    from nurb import stress
+
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+
+    class Client:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, text):
+            self.sent.append(json.loads(text))
+
+    requester, other = Client(), Client()
+    server.clients.update((requester, other))
+    monkeypatch.setattr(
+        stress,
+        "analyze",
+        lambda *args, **kwargs: {"max_mpa": 1, "elements": 8},
+    )
+
+    asyncio.run(
+        server.command(
+            json.dumps(
+                {
+                    "type": "stress",
+                    "name": "thing",
+                    "kg": 1,
+                    "material": "PLA",
+                    "load": [0, 0, 2.5],
+                    "hold": [[-20, 0, 0]],
+                }
+            ),
+            requester,
+        )
+    )
+
+    assert requester.sent[-1]["type"] == "stressed"
+    assert requester.sent[-1]["max_mpa"] == 1
+    assert other.sent == []
+
+
+def test_viewer_discards_stress_coordinates_when_geometry_changes():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    landed = viewer[viewer.index("function stressLanded") : viewer.index("function stressOff")]
+    start = viewer.index("function stressAfterPaint")
+    painted = viewer[start : viewer.index("document.getElementById('stressbtn')", start)]
+
+    assert "stressAim(e, true);" in landed
+    assert "stressAim(entry, true);" in painted
 
 
 def test_the_viewer_carries_a_print_estimate_and_never_a_stale_one():

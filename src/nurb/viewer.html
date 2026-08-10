@@ -141,6 +141,35 @@
              background: rgba(29,32,39,.9); box-shadow: 0 4px 16px rgba(0,0,0,.35);
              backdrop-filter: blur(10px); }
   #reframe svg { color: var(--dim); }
+  /* The stress row: the weight, the two-click prompt, then the answer, all in the one
+     place the button press happened, the way the print row works. */
+  #stressrow { display: none; align-items: center; gap: 7px; padding: 5px 11px; font-size: 11px; }
+  #stressrow.open { display: flex; }
+  #stressrow .ic { width: 12px; height: 12px; flex: none; color: var(--dim); }
+  #stressrow input { width: 46px; background: none; border: 1px solid var(--line); border-radius: 5px;
+                     color: var(--text); font: inherit; font-size: 11px; padding: 2px 5px; text-align: right; }
+  #stressrow input::-webkit-outer-spin-button, #stressrow input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  #stressrow .lbl { color: var(--dim); }
+  #stressrow select { flex: none; background: var(--panel); color: var(--text);
+                      border: 1px solid var(--line); border-radius: 5px; padding: 2px 4px;
+                      font: inherit; font-size: 11px; }
+  #stressrow .unit { color: var(--dim); margin-left: -3px; }
+  #stressrow .msg { color: var(--dim); display: flex; align-items: center; gap: 6px; }
+  #stressrow .msg b { color: var(--text); font-weight: 600; }
+  #stressrow .msg.bad { color: var(--bad); }
+  #stressrow .msg.warn { color: var(--warn); }
+  #stressrow .grad { width: 54px; height: 8px; border-radius: 4px; flex: none;
+                     background: linear-gradient(90deg,#2038c8,#18b89e,#f8e34c,#e83c18); }
+  #stressrow button { padding: 4px 6px; color: var(--dim); background: none; border: none; }
+  #stressrow button:hover { color: var(--text); }
+  #stressrow #stressgo { color: var(--accent); background: rgba(110,231,168,.1); border-radius: 6px; padding: 3px 10px; }
+  /* The picking instruction floats centered over the canvas, where the click is about
+     to happen, the way AR measure tools prompt. The corner pill is too far from the
+     action to be read at the moment it matters. */
+  #stresshint { position: absolute; left: 50%; top: 26%; transform: translateX(-50%);
+                z-index: 1; pointer-events: none; color: var(--text); font-size: 14px;
+                text-align: center; text-shadow: 0 1px 6px rgba(0,0,0,.8); }
+  #stresshint:empty { display: none; }
   #cut { display: none; align-items: center; }
   #cut.open { display: flex; }
   #cut button { padding: 4px 9px; color: var(--dim); }
@@ -164,6 +193,7 @@
   body.nogl #empty { display: none !important; }
   body.nogl #sectionbtn, body.nogl .sep:has(+ #sectionbtn), body.nogl #reframe { display: none; }
   body.nogl #pinsbtn, body.nogl .sep:has(+ #pinsbtn) { display: none; }
+  body.nogl #stressbtn, body.nogl .sep:has(+ #stressbtn), body.nogl #stressrow { display: none; }
   #checks {
     position: absolute; top: 14px; left: 16px; max-width: 46%; max-height: 60%;
     overflow: auto; display: none; font-size: 11px; line-height: 1.6;
@@ -408,6 +438,7 @@
   <symbol id="i-cube" viewBox="0 0 18 18"><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="currentColor" opacity=".3" stroke-width="0"/><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><polyline points="12.251 7.1035 9 9 5.75 7.1035" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><line x1="9.0005" y1="12.7817" x2="9" y2="9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-variant" viewBox="0 0 12 12"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><line x1="11.25" y1="8.75" x2="6.25" y2="8.75"/><circle cx="4.25" cy="8.75" r="2"/><line x1="2.25" y1="8.75" x2=".75" y2="8.75"/><line x1=".75" y1="3.25" x2="5.75" y2="3.25"/><circle cx="7.75" cy="3.25" r="2"/><line x1="9.75" y1="3.25" x2="11.25" y2="3.25"/></g></symbol>
   <symbol id="i-cubes" viewBox="0 0 18 18"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M4.648,8.086l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="8.84 10.005 5.25 12.087 1.66 10.005"/><line x1="5.25" y1="16.25" x2="5.25" y2="12.087"/><path d="M12.148,8.086l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="16.34 10.005 12.75 12.087 9.16 10.005"/><line x1="12.75" y1="16.25" x2="12.75" y2="12.087"/><path d="M8.398,1.586l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="12.59 3.505 9 5.587 5.41 3.505"/><line x1="9" y1="9.75" x2="9" y2="5.587"/></g></symbol>
+  <symbol id="i-stress" viewBox="0 0 12 12"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><line x1="6" y1="1.25" x2="6" y2="5.5"/><polyline points="3.9 3.65 6 5.75 8.1 3.65"/><line x1="1.75" y1="8.5" x2="10.25" y2="8.5"/><line x1="3.4" y1="8.5" x2="1.9" y2="10.75"/><line x1="8.6" y1="8.5" x2="10.1" y2="10.75"/></g></symbol>
   <symbol id="i-chev" viewBox="0 0 12 12"><polyline points="3 4.75 6 7.75 9 4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-pin" viewBox="0 0 12 12"><path d="M6 .75c-2.35 0-4.25 1.87-4.25 4.18 0 3.07 4.25 6.32 4.25 6.32s4.25-3.25 4.25-6.32C10.25 2.62 8.35.75 6 .75Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><circle cx="6" cy="4.9" r="1.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-clock" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5.25" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><polyline points="6 3 6 6 8.25 7.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
@@ -463,11 +494,25 @@
       <span class="sep"></span>
       <button id="sectionbtn" title="cut the part open along an axis"><svg><use href="#i-layers"/></svg><span>section</span></button>
       <span class="sep"></span>
+      <button id="stressbtn" title="where a weight stresses the part: click where it presses, then where the part attaches to the wall or desk"><svg><use href="#i-stress"/></svg><span>stress</span></button>
+      <span class="sep"></span>
       <button id="pinsbtn" class="on" title="hide the finding markers to see what they cover; the checks stay on"><svg><use href="#i-pin"/></svg><span>pins</span></button>
       <span class="sep" id="ghostsep" style="display:none"></span>
       <button id="ghostbtn" style="display:none" title="show or hide the target mesh this part is remodelling"><svg><use href="#i-cube"/></svg><span>target</span></button>
     </div>
     <div id="print"></div>
+    <div class="pill" id="stressrow">
+      <svg class="ic"><use href="#i-stress"/></svg>
+      <span class="lbl">weight on it</span>
+      <input id="stresskg" type="number" min="0.1" step="0.5" value="1" title="how heavy the thing resting on the part is. 1 kg is about 2 lb, a liter of water"><span class="unit">kg</span>
+      <select id="stressmat" title="what the part prints in; TPU is too stretchy for this kind of answer">
+        <option>PLA</option><option>PETG</option><option>ABS</option>
+        <option>ASA</option><option>Nylon</option><option>PC</option>
+      </select>
+      <span id="stressmsg" class="msg"></span>
+      <button id="stressgo" style="display:none">go</button>
+      <button id="stressredo" title="pick the spots again"><svg><use href="#i-reset"/></svg></button>
+    </div>
     <div class="pill" id="cut">
       <button data-axis="x">x</button>
       <button data-axis="y">y</button>
@@ -477,6 +522,7 @@
     <button id="reframe" title="refit the camera to the part"><svg><use href="#i-focus"/></svg><span>reframe</span></button>
   </div>
   <div id="hud"></div>
+  <div id="stresshint"></div>
   <div id="building"><span class="spin"></span><span>rebuilding</span><span id="buildsecs"></span></div>
   <div id="checks"></div>
   <div id="err"></div>
@@ -1114,6 +1160,321 @@ document.getElementById('ghostbtn').onclick = ev => {
   if (g) g.visible = ghostWanted;
 };
 document.getElementById('ghostbtn').classList.toggle('on', ghostWanted);
+
+// ---- stress ----
+// One static load case, aimed with two clicks on the part: where the weight sits and
+// where the part is held. The server voxelizes the solid, solves it, and sends back a
+// stress value per mesh vertex, painted here as vertex colors over the same geometry.
+// An answer belongs to one shape, so a rebuild that changes the geometry discards its
+// old picks, aims the new shape, and solves again instead of painting a stale map.
+let stressOn = false, stressFor = null, stressLoad = null, stressHolds = [];
+let stressBusy = false, stressSaid = null;
+const stressMarks = new THREE.Group();
+scene.add(stressMarks);
+const stressLoadMat = new THREE.MeshBasicMaterial({ color: 0xe8734a, depthTest: false, depthWrite: false });
+const stressHoldMat = new THREE.MeshBasicMaterial({ color: 0x60a5fa, depthTest: false, depthWrite: false });
+// Each visible dot rides inside a much larger invisible sphere, because the dot
+// itself is a few pixels and a grab that misses falls through to the orbit.
+const stressHitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthTest: false, depthWrite: false });
+const raycaster = new THREE.Raycaster();
+
+function stressMsg(html, cls) {
+  const m = document.getElementById('stressmsg');
+  m.className = 'msg' + (cls ? ' ' + cls : '');
+  m.innerHTML = html;
+}
+
+// Picks stay open until the answer: the weight first, then as many holding spots as
+// the part really has (a shelf on four hooks is held four times), then go.
+function stressPicking() { return stressOn && !stressBusy && !stressSaid; }
+
+function stressCursor() {
+  main.style.cursor = stressPicking() ? 'crosshair' : '';
+}
+
+// Card coordinates belong to one geometry. A rebuild can keep the use case's weight
+// and material, but it must either receive fresh coordinates or auto-aim the new part.
+function stressAim(entry, keepCase = false) {
+  const spots = (entry || {}).stress_spots;
+  stressLoad = spots && Array.isArray(spots.load) ? spots.load.slice() : null;
+  stressHolds = spots && Array.isArray(spots.hold) ? spots.hold.map(p => p.slice()) : [];
+  if (!keepCase && spots && spots.kg !== undefined) document.getElementById('stresskg').value = spots.kg;
+  if (!keepCase && spots && spots.material) document.getElementById('stressmat').value = spots.material;
+  markStress();
+}
+
+function stressPrompt() {
+  document.getElementById('stressrow').title = '';
+  document.getElementById('stressgo').style.display =
+    stressPicking() && stressLoad && stressHolds.length ? '' : 'none';
+  let hint = '';
+  if (stressBusy) stressMsg('<span class="spin"></span>solving');
+  else if (!stressLoad) hint = 'click where the weight presses down';
+  else if (!stressHolds.length) hint = 'now click what holds it up:\nthe face on the wall, desk, or screws';
+  else if (!stressSaid) hint = 'click every spot that holds it,\nthen press go';
+  if (hint) stressMsg(hint.split('\n')[0]);
+  document.getElementById('stresshint').textContent = stressOn ? hint.replace('\n', ' ') : '';
+}
+
+function markStress() {
+  for (const c of stressMarks.children) if (c.dispose) c.dispose();
+  stressMarks.clear();
+  if (!mesh) return;
+  stressMarks.position.copy(mesh.position);
+  const r = Math.max(0.6, lastSize ? lastSize / 110 : 1);
+  const dot = (p, mat, kind, index) => {
+    const m = new THREE.Mesh(pinGeom, mat);
+    m.position.set(...p);
+    m.scale.setScalar(r);
+    m.renderOrder = 999;
+    stressMarks.add(m);
+    const grab = new THREE.Mesh(pinGeom, stressHitMat);
+    grab.position.set(...p);
+    grab.scale.setScalar(r * 3.5);
+    grab.userData.stressKind = kind;
+    grab.userData.stressIndex = index;
+    stressMarks.add(grab);
+  };
+  if (stressLoad) {
+    dot(stressLoad, stressLoadMat, 'load', 0);
+    // The arrow says which way the weight presses without spending a word on it.
+    const len = r * 8;
+    const a = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, -1),
+      new THREE.Vector3(stressLoad[0], stressLoad[1], stressLoad[2] + len + r),
+      len, 0xe8734a, len * 0.4, len * 0.25);
+    stressMarks.add(a);
+  }
+  stressHolds.forEach((p, i) => dot(p, stressHoldMat, 'hold', i));
+}
+
+function stressColor(msg) {
+  stressUncolor();
+  const kids = mesh ? mesh.children.filter(c => c.isMesh && c.name !== 'context' && c.name !== 'target') : [];
+  if (kids.length !== 1) return;
+  const m = kids[0], g = m.geometry, n = g.attributes.position.count;
+  if (msg.values.length !== n) { stressMsg('the map no longer matches the mesh', 'bad'); return; }
+  const max = msg.max_mpa || 1;
+  const col = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    // sqrt lifts the mid-range: linearly, one sharp concentration leaves the whole
+    // part a uniform blue and the map says nothing.
+    const t = Math.sqrt(Math.min(1, msg.values[i] / max));
+    col[3 * i] = Math.min(1, Math.max(0, 1.6 * t - 0.1));
+    col[3 * i + 1] = Math.min(1, Math.max(0, 1.8 - Math.abs(t - 0.55) * 3.2));
+    col[3 * i + 2] = Math.min(1, Math.max(0, 1.1 - 1.6 * t));
+  }
+  m.userData.stressBase = { color: g.getAttribute('color') || null, vertexColors: m.material.vertexColors };
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  // Absolute colors, not tints: the grey base material would mud the whole scale.
+  m.material.vertexColors = true;
+  m.material.color.set(0xffffff);
+  m.material.needsUpdate = true;
+}
+
+function stressUncolor() {
+  if (!mesh) return;
+  for (const m of mesh.children) {
+    if (!m.isMesh || !m.userData.stressBase) continue;
+    const base = m.userData.stressBase;
+    if (base.color) m.geometry.setAttribute('color', base.color);
+    else m.geometry.deleteAttribute('color');
+    m.material.vertexColors = base.vertexColors;
+    m.material.color.set(0x9aa6b8);
+    m.material.needsUpdate = true;
+    delete m.userData.stressBase;
+  }
+}
+
+function stressRun() {
+  if (!sock || sock.readyState !== WebSocket.OPEN || !current) return;
+  const e = parts.get(current);
+  if (!e || e.error) return;
+  stressBusy = true;
+  stressPrompt();
+  stressCursor();
+  // No picks and no card block still gets an answer: the server guesses the spots
+  // and sends them back, so the first press always produces a map, never homework.
+  const auto = !stressLoad || !stressHolds.length;
+  sock.send(JSON.stringify({
+    type: 'stress', name: current, auto,
+    load: auto ? null : stressLoad, hold: auto ? null : stressHolds,
+    kg: +document.getElementById('stresskg').value || 1,
+    material: document.getElementById('stressmat').value,
+  }));
+}
+
+function stressLanded(msg) {
+  if (!stressOn || msg.name !== current) return;
+  stressBusy = false;
+  stressCursor();
+  if (msg.error) { stressMsg(msg.error, 'bad'); return; }
+  const e = parts.get(current);
+  // An answer about a shape the sliders have since replaced: discard its coordinates
+  // too. They can now name a different face even when the numbers still look nearby.
+  if (e && e.shape_id !== msg.shape_id) {
+    stressSaid = null;
+    stressAim(e, true);
+    stressRun();
+    return;
+  }
+  stressSaid = msg;
+  // A guessed run answers with the spots it chose; showing them as the same movable
+  // markers a click places is what makes the guess honest and correctable.
+  if (!stressLoad && msg.load_center) {
+    stressLoad = msg.load_center.slice();
+    stressHolds = (msg.hold_centers || []).map(p => p.slice());
+    markStress();
+  }
+  stressColor(msg);
+  // The headline is the breaking weight in kg, because that is the unit the person
+  // asking thinks in; the MPa peak stays as the footnote tying the number to the map.
+  const f = msg.factor;
+  const seams = msg.gives === 'layers';
+  let phrase = 'barely feels this', cls = '';
+  if (f !== null && f < 100) {
+    const breaks = msg.kg * f;
+    // Both units, because the person reading this weighs things in whichever one
+    // their kitchen scale uses, and a number in the wrong unit is a number skipped.
+    const said = `${breaks >= 10 ? Math.round(breaks) : +breaks.toFixed(1)} kg (${Math.round(breaks * 2.2046) || 1} lb)`;
+    if (f < 1) { phrase = `would break: holds about ${said}, not ${msg.kg} kg`; cls = 'bad'; }
+    else if (f < 2) { phrase = `cutting it close: breaks near ${said}`; cls = 'warn'; }
+    else phrase = `holds up to about ${said}`;
+  }
+  stressMsg(`<span class="grad" title="0 to ${msg.max_mpa} MPa"></span>`
+    + `<b>${phrase}</b> · peak ${msg.max_mpa} MPa`, cls);
+  document.getElementById('stressrow').title =
+    `${msg.material}, printed flat the way the plate shows it. peak stress ${msg.max_mpa} MPa; `
+    + `${msg.across_mpa} MPa of that pulls the layer seams apart, so when it breaks, it breaks `
+    + `${seams ? 'by splitting at the layer seams' : 'in the plastic itself, not at the seams'}. `
+    + `sags ${msg.deflection_mm} mm. voxel estimate (about ±30%), ${msg.elements} elements at ${msg.pitch} mm.`;
+}
+
+function stressOff() {
+  stressOn = false; stressFor = null; stressLoad = null; stressHolds = [];
+  stressBusy = false; stressSaid = null;
+  document.getElementById('stressbtn').classList.remove('on');
+  document.getElementById('stressrow').classList.remove('open');
+  document.getElementById('stresshint').textContent = '';
+  stressUncolor();
+  markStress();
+  stressCursor();
+}
+
+// Called by paint() once fresh geometry is on screen. A changed shape invalidates
+// both its map and coordinate picks; the new card defaults or auto-aim replace them.
+function stressAfterPaint(name, entry) {
+  if (!stressOn) return;
+  if (name !== stressFor) { stressOff(); return; }
+  markStress();
+  // A rebuild only re-asks once an answer exists: mid-picking there is nothing to redo.
+  if (!stressSaid || stressBusy) return;
+  if (stressSaid.shape_id === entry.shape_id) stressColor(stressSaid);
+  else {
+    stressSaid = null;
+    stressAim(entry, true);
+    stressRun();
+  }
+}
+
+document.getElementById('stressbtn').onclick = ev => {
+  if (stressOn) { stressOff(); return; }
+  stressOn = true;
+  stressFor = current;
+  ev.currentTarget.classList.add('on');
+  document.getElementById('stressrow').classList.add('open');
+  // The part's card can carry the picks, written by whoever built the part and knows
+  // where it hangs. Then the button opens already aimed and just answers; re-pick is
+  // one click away for a user who disagrees.
+  stressAim(parts.get(current));
+  // Card-aimed or server-guessed, the first press always solves; the guided clicks
+  // only exist behind the re-pick button, for whoever disagrees with the aim.
+  stressRun();
+};
+
+document.getElementById('stressgo').onclick = () => {
+  if (stressPicking() && stressLoad && stressHolds.length) stressRun();
+};
+
+document.getElementById('stressredo').onclick = () => {
+  stressLoad = null; stressHolds = []; stressSaid = null;
+  stressUncolor();
+  markStress();
+  stressPrompt();
+  stressCursor();
+};
+
+document.getElementById('stresskg').onchange = () => {
+  if (stressOn && stressSaid && !stressBusy) stressRun();
+};
+
+document.getElementById('stressmat').onchange = () => {
+  if (stressOn && stressSaid && !stressBusy) stressRun();
+};
+
+if (renderer) {
+  const aim = e => {
+    const r = renderer.domElement.getBoundingClientRect();
+    raycaster.setFromCamera(new THREE.Vector2(
+      ((e.clientX - r.left) / r.width) * 2 - 1,
+      -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  };
+  const partHit = () => {
+    const targets = mesh.children.filter(c => c.isMesh && c.name !== 'context' && c.name !== 'target');
+    return raycaster.intersectObjects(targets, false)[0];
+  };
+
+  // A placed marker drags: grab the dot, slide it along the part, release to
+  // re-solve. This is how a wrong guess gets corrected without starting over.
+  let stressDrag = null;
+  renderer.domElement.addEventListener('pointerdown', e => {
+    if (!stressOn || stressBusy || !mesh) return;
+    aim(e);
+    const marks = stressMarks.children.filter(c => c.userData && c.userData.stressKind);
+    const hit = raycaster.intersectObjects(marks, false)[0];
+    if (!hit) return;
+    stressDrag = { kind: hit.object.userData.stressKind, index: hit.object.userData.stressIndex, moved: false };
+    controls.enabled = false;
+    renderer.domElement.setPointerCapture(e.pointerId);
+  });
+  renderer.domElement.addEventListener('pointermove', e => {
+    if (!stressDrag || !mesh) return;
+    aim(e);
+    const hit = partHit();
+    if (!hit) return;
+    const p = hit.point.clone().sub(mesh.position);
+    if (stressDrag.kind === 'load') stressLoad = [p.x, p.y, p.z];
+    else stressHolds[stressDrag.index] = [p.x, p.y, p.z];
+    stressDrag.moved = true;
+    markStress();
+  });
+  renderer.domElement.addEventListener('pointerup', () => {
+    if (!stressDrag) return;
+    const moved = stressDrag.moved;
+    controls.enabled = true;
+    // Cleared a beat later, so the click that ends a drag cannot double as a pick
+    // in the other pointerup listener below.
+    setTimeout(() => { stressDrag = null; }, 0);
+    if (moved && stressLoad && stressHolds.length && stressSaid) stressRun();
+  });
+
+  // A pick is a click, and orbiting is a drag: the 5px gate is what tells them apart.
+  let stressDown = null;
+  renderer.domElement.addEventListener('pointerdown', e => { stressDown = stressDrag ? null : [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener('pointerup', e => {
+    if (!stressPicking() || !mesh || stressDrag) return;
+    if (!stressDown || Math.hypot(e.clientX - stressDown[0], e.clientY - stressDown[1]) > 5) return;
+    aim(e);
+    const hit = partHit();
+    if (!hit) return;
+    const p = hit.point.clone().sub(mesh.position);  // back into the part's own coordinates
+    if (!stressLoad) stressLoad = [p.x, p.y, p.z];
+    else stressHolds.push([p.x, p.y, p.z]);
+    markStress();
+    stressPrompt();
+  });
+}
+
 // Dragging takes over from an absolute ?cut= position: the slider is the fraction.
 document.getElementById('cutpos').oninput = ev => { cutAt = +ev.target.value; cutMm = null; sectionUpdate(); };
 for (const b of document.querySelectorAll('#cut button')) {
@@ -1396,6 +1757,7 @@ async function paint(name, { keepCamera }) {
   sectionAttach(!keep);
   framed = name;
   lastSize = size;
+  stressAfterPaint(name, entry);
   hud(parts.get(name) || entry);
   checks(name);
   params(parts.get(name) || entry);
@@ -2137,6 +2499,7 @@ function connect() {
       bedUpdate(msg.bed);
       estimate();
     }
+    if (msg.type === 'stressed') stressLanded(msg);
     if (msg.type === 'checked') {
       parts.set(msg.name, msg);
       // The hud too: the deviation against a target mesh rides this message, the

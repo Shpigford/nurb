@@ -100,6 +100,13 @@ bracket_count = 2
 
 [variants.bin_small_parts_4x.params]
 bracket_count = 4
+
+# Aims the stress button: the item's weight on the working surface, carried by
+# the bracket channel floors.
+[stress]
+kg = 0.5
+load = [-33.2, 25.2, -57]
+hold = [[-4.2, 0, -15], [-4.2, 25.2, -15], [-4.2, 50.3, -15]]
 ```
 
 ## Don't

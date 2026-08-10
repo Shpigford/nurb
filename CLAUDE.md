@@ -54,6 +54,7 @@ nurb update          upgrade nurb, then re-sync the installed skill to match
 nurb card [part]     regenerate a card's AUTO block
 nurb diff [part]     what moved since the card was written: size, volume, faces, verdict
 nurb slice [part]    print time and filament, via an installed OrcaSlicer or BambuStudio
+nurb stress [part]   static stress under a load: peak MPa, sag, margin to breaking
 nurb verify [part]   the doctrine's verification list, --report bundles it with renders
 nurb render [part]   write build/renders/<part>.png, --section cuts it open, needs the render extra
 nurb export [part]   write STL into build/, --formats for STEP or GLB
@@ -87,6 +88,7 @@ src/nurb/measurements.py  measured(), and the refusal to guess
 src/nurb/edit.py          writes slider values back into a part's keyword defaults
 src/nurb/render.py        headless PNG, the only module that wants a browser
 src/nurb/slicing.py       the handoff to an installed slicer, and the two numbers back
+src/nurb/stress.py        voxel FEA behind `nurb stress` and the viewer's stress button
 src/nurb/doctrine.md      the doctrine itself, shipped in the package
 src/nurb/server.py        watcher, rebuild, HTTP + websocket on one port
 src/nurb/viewer.html      three.js viewer, Z-up, camera persistence, sliders, section

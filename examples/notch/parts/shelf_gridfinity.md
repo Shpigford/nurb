@@ -74,6 +74,14 @@ forward = [-1, 0, 0]
 [accepted]
 sliver = 18
 
+# Where a load really goes: a bin pressing mid-grid, carried by the four bracket
+# channel floors (x = -4.2, one per hook at the 25.16 pitch). These aim the viewer's
+# stress button so nobody has to know where the hooks are.
+[stress]
+kg = 2.0
+load = [-52.0, 37.7, -35.0]
+hold = [[-4.2, 0.0, -15.0], [-4.2, 25.2, -15.0], [-4.2, 50.3, -15.0], [-4.2, 75.5, -15.0]]
+
 [variants.shelf_gridfinity_2x1.params]
 grid_y = 1
 item_height = 35.0
