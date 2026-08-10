@@ -13,6 +13,7 @@ import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus } from "./Ic
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
 import type { Column } from "./layout";
 import Setup from "./Setup";
+import Settings from "./Settings";
 import "./App.css";
 
 type Project = {
@@ -69,6 +70,7 @@ type PartChat = { id: string | null; agent: string | null; gen: number };
 type ResumeState = { path: string; byPart: Record<string, PartChat> };
 
 const NO_PARTS: Part[] = [];
+const PROJECTS_FOLDER_KEY = "nurb-projects-folder";
 
 // What the rail says about an assembly, or nothing for an ordinary part. An
 // assembly that places nothing is still an assembly; it just has no list.
@@ -209,6 +211,11 @@ function App() {
   const [about, setAbout] = useState<AboutInfo | null>(null);
   const [showAbout, setShowAbout] = useState(false);
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [defaultProjectsFolder, setDefaultProjectsFolder] = useState<string | null>(null);
+  const [projectsFolder, setProjectsFolder] = useState<string | null>(
+    () => localStorage.getItem(PROJECTS_FOLDER_KEY),
+  );
   const [update, setUpdate] = useState<Update | null>(null);
   const [updating, setUpdating] = useState(false);
   // The one update this run acts on: found once, downloaded eagerly so the
@@ -246,6 +253,7 @@ function App() {
   useEffect(() => {
     if (ready !== true) return;
     invoke<AboutInfo>("about_info").then(setAbout).catch(() => {});
+    invoke<string>("default_projects_folder").then(setDefaultProjectsFolder).catch(() => {});
   }, [ready]);
 
   const installUpdate = useCallback(async () => {
@@ -340,6 +348,35 @@ function App() {
     setProjects(list);
     return list;
   }, []);
+
+  const changeProjectsFolder = async (folder: string | null) => {
+    setProjectsFolder(folder);
+    if (folder) localStorage.setItem(PROJECTS_FOLDER_KEY, folder);
+    else localStorage.removeItem(PROJECTS_FOLDER_KEY);
+
+    const selected =
+      folder ?? defaultProjectsFolder ?? await invoke<string>("default_projects_folder");
+    if (!defaultProjectsFolder && !folder) setDefaultProjectsFolder(selected);
+    if (
+      !(await ask("Load existing nurb projects directly inside this folder?", {
+        title: "Projects folder changed",
+        okLabel: "Load Projects",
+        cancelLabel: "Not Now",
+      }))
+    ) return;
+
+    try {
+      const loaded = await invoke<string[]>("add_projects_from_folder", { folder: selected });
+      await refreshProjects();
+      if (loaded.length === 0) {
+        await message("No nurb projects were found directly inside that folder.", {
+          title: "Projects folder",
+        });
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const openProject = useCallback(
     async (path: string) => {
@@ -496,7 +533,7 @@ function App() {
       setCreating(true);
       setError(null);
       try {
-        const path = await invoke<string>("create_project", { name });
+        const path = await invoke<string>("create_project", { name, folder: projectsFolder });
         setNaming(false);
         await refreshProjects();
         openProject(path);
@@ -506,7 +543,7 @@ function App() {
         setCreating(false);
       }
     },
-    [creating, refreshProjects, openProject],
+    [creating, projectsFolder, refreshProjects, openProject],
   );
 
   const createProject = async (event: FormEvent<HTMLFormElement>) => {
@@ -911,6 +948,9 @@ function App() {
         )}
         {error && <div className="rail-error">{error}</div>}
         <div className="rail-foot">
+          <button className="rail-version" onClick={() => setShowSettings(true)}>
+            settings
+          </button>
           {about && (
             <button className="rail-version" onClick={() => setShowAbout(true)}>
               nurb {about.appVersion}
@@ -972,6 +1012,15 @@ function App() {
             )}
           </div>
         </div>
+      )}
+      {showSettings && (
+        <Settings
+          folder={projectsFolder ?? defaultProjectsFolder ?? "~/Documents/nurb"}
+          customized={projectsFolder !== null}
+          onChange={changeProjectsFolder}
+          onReset={() => changeProjectsFolder(null)}
+          onClose={() => setShowSettings(false)}
+        />
       )}
       {showAbout && about && (
         <About

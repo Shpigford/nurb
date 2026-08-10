@@ -51,17 +51,39 @@ fn seed_part_name(project: &str) -> String {
     }
 }
 
+fn project_base(folder: Option<String>, default: PathBuf) -> PathBuf {
+    folder
+        .filter(|path| !path.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or(default)
+}
+
+fn default_projects_folder_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .document_dir()
+        .map_err(|e| format!("no Documents folder: {e}"))?
+        .join("nurb"))
+}
+
 #[tauri::command]
-async fn create_project(app: AppHandle, name: String) -> Result<String, String> {
+fn default_projects_folder(app: AppHandle) -> Result<String, String> {
+    Ok(default_projects_folder_path(&app)?
+        .to_string_lossy()
+        .into_owned())
+}
+
+#[tauri::command]
+async fn create_project(
+    app: AppHandle,
+    name: String,
+    folder: Option<String>,
+) -> Result<String, String> {
     let name = name.trim().to_string();
     if name.is_empty() || name.contains('/') || name.starts_with('.') {
         return Err("project names cannot be empty or contain slashes".into());
     }
-    let base = app
-        .path()
-        .document_dir()
-        .map_err(|e| format!("no Documents folder: {e}"))?
-        .join("nurb");
+    let base = project_base(folder, default_projects_folder_path(&app)?);
     let dir = base.join(&name);
     if dir.exists() {
         return Err(format!(
@@ -115,8 +137,13 @@ fn seed(launcher: &env::Launcher, dir: &std::path::Path, part: &str) -> Result<(
 }
 
 #[tauri::command]
-fn add_project(app: AppHandle, path: String) -> Result<String, String> {
-    let dir = PathBuf::from(&path)
+fn add_project(registry: State<Registry>, path: String) -> Result<String, String> {
+    let dir = register_project(&registry, PathBuf::from(path))?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+fn register_project(registry: &Registry, path: PathBuf) -> Result<PathBuf, String> {
+    let dir = path
         .canonicalize()
         .map_err(|e| format!("cannot read that folder: {e}"))?;
     if !dir.join("parts").is_dir() {
@@ -126,8 +153,39 @@ fn add_project(app: AppHandle, path: String) -> Result<String, String> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or("cannot use the filesystem root as a project")?;
-    app.state::<Registry>().upsert(&name, &dir, None);
-    Ok(dir.to_string_lossy().into_owned())
+    registry.upsert(&name, &dir, None);
+    Ok(dir)
+}
+
+fn register_projects_in_folder(
+    registry: &Registry,
+    folder: PathBuf,
+) -> Result<Vec<String>, String> {
+    let folder = folder
+        .canonicalize()
+        .map_err(|e| format!("cannot read that folder: {e}"))?;
+    let entries =
+        std::fs::read_dir(&folder).map_err(|e| format!("cannot read {}: {e}", folder.display()))?;
+    let mut projects = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.join("parts").is_dir() {
+            continue;
+        }
+        if let Ok(path) = register_project(registry, path) {
+            projects.push(path.to_string_lossy().into_owned());
+        }
+    }
+    projects.sort();
+    Ok(projects)
+}
+
+#[tauri::command]
+fn add_projects_from_folder(
+    registry: State<Registry>,
+    folder: String,
+) -> Result<Vec<String>, String> {
+    register_projects_in_folder(&registry, PathBuf::from(folder))
 }
 
 #[tauri::command]
@@ -407,8 +465,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_projects,
+            default_projects_folder,
             create_project,
             add_project,
+            add_projects_from_folder,
             remove_project,
             select_part,
             select_part_chat,
@@ -444,7 +504,9 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{part_views, seed_part_name};
+    use super::registry::Registry;
+    use super::{part_views, project_base, register_projects_in_folder, seed_part_name};
+    use std::path::PathBuf;
 
     #[test]
     fn seed_part_names_survive_becoming_identifiers() {
@@ -455,6 +517,54 @@ mod tests {
         assert_eq!(seed_part_name("_widget"), "part-_widget");
         assert_eq!(seed_part_name("émile"), "mile");
         assert_eq!(seed_part_name("支架"), "part");
+    }
+
+    #[test]
+    fn project_base_uses_the_custom_folder_or_the_documents_default() {
+        let documents = PathBuf::from("/Users/test/Documents");
+        assert_eq!(
+            project_base(Some("/Volumes/Work/nurb".into()), documents.join("nurb")),
+            PathBuf::from("/Volumes/Work/nurb")
+        );
+        assert_eq!(
+            project_base(None, documents.join("nurb")),
+            documents.join("nurb")
+        );
+        assert_eq!(
+            project_base(Some("  ".into()), documents.join("nurb")),
+            documents.join("nurb")
+        );
+    }
+
+    #[test]
+    fn a_projects_folder_loads_only_its_direct_nurb_projects() {
+        let root = std::env::temp_dir().join(format!(
+            "nurb-project-folder-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let folder = root.join("projects");
+        std::fs::create_dir_all(folder.join("alpha/parts")).unwrap();
+        std::fs::create_dir_all(folder.join("beta/parts")).unwrap();
+        std::fs::create_dir_all(folder.join("not-a-project")).unwrap();
+        std::fs::create_dir_all(folder.join("group/nested/parts")).unwrap();
+
+        let registry = Registry::load(&root);
+        let loaded = register_projects_in_folder(&registry, folder).unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(
+            registry
+                .list()
+                .into_iter()
+                .map(|view| view.project.name)
+                .collect::<Vec<_>>(),
+            ["alpha", "beta"]
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
