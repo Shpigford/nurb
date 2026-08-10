@@ -985,3 +985,19 @@ def test_the_print_row_cannot_reach_the_checks_panel():
     viewer = server_mod.VIEWER.read_text(encoding="utf-8")
     assert "max-width: 46%" in viewer  # checks
     assert "max-width: 54%" in viewer  # the print row
+
+
+def test_the_checks_panel_folds_and_stays_folded():
+    """On a narrow viewer the card buried the toolbar with no way past it (issue #103).
+    The header is the dismiss, and the choice has to persist: the panel repaints on
+    every rebuild, so an unfolded default would climb back over the buttons on save."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    # Folded, the rows go and the header stays, count included.
+    assert "#checks.min .f, #checks.min .ok { display: none; }" in viewer
+    # Both paints carry the fold handle: findings and clean alike.
+    assert viewer.count('<use href="#i-chev"/>') >= 2
+    # The fold outlives the repaint and the reload.
+    assert "localStorage.getItem('nurb.checks.min')" in viewer
+    assert "localStorage.setItem('nurb.checks.min', '1')" in viewer

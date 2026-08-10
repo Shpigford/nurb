@@ -72,10 +72,46 @@ textarea {
   -webkit-user-select: text;
 }
 
+/* The columns come from App state, inline: the rail and chat widths are draggable
+   at their seams and remembered, and the viewer takes whatever is left, because
+   the canvas is what a bigger window is for. */
 .shell {
   display: grid;
-  grid-template-columns: 220px minmax(280px, 1fr) minmax(0, 2.2fr);
   height: 100vh;
+  position: relative;
+}
+
+/* A seam sits astride its column border: a 9px grab strip around the 1px line the
+   columns already draw. Invisible until touched, so the chrome gains nothing at
+   rest; the delay keeps a pointer just passing through from flashing it. */
+.seam {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  margin-left: -5px;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.seam::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: transparent;
+  transition: background 0.1s 0.15s;
+}
+
+.seam:hover::after {
+  background: var(--dim);
+}
+
+.seam.dragging::after {
+  background: var(--accent);
+  transition: none;
 }
 
 .rail {

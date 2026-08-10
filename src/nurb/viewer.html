@@ -172,8 +172,16 @@
     box-shadow: 0 4px 16px rgba(0,0,0,.35); backdrop-filter: blur(10px);
   }
   #checks h2 { display: flex; align-items: center; gap: 6px; font-size: 11px;
-               font-weight: 600; color: var(--dim); margin-bottom: 5px; letter-spacing: .04em; }
+               font-weight: 600; color: var(--dim); margin-bottom: 5px; letter-spacing: .04em;
+               cursor: pointer; user-select: none; }
+  #checks h2:hover { color: var(--text); }
   #checks h2 .n { background: #262b34; border-radius: 8px; padding: 0 7px; }
+  #checks h2 .chev { width: 10px; height: 10px; margin-left: 2px; transition: transform .12s; }
+  /* Folded, the card is its header: the count still says whether there is anything to
+     look at, and the toolbar it was burying is clickable again (issue #103). */
+  #checks.min .f, #checks.min .ok { display: none; }
+  #checks.min h2 { margin-bottom: 0; }
+  #checks.min h2 .chev { transform: rotate(-90deg); }
   #checks .f { display: flex; gap: 7px; padding: 2px 0; cursor: default; }
   #checks .f:hover { color: #fff; }
   #checks .ic { flex: none; width: 12px; height: 12px; margin-top: 2.5px; }
@@ -400,6 +408,7 @@
   <symbol id="i-cube" viewBox="0 0 18 18"><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="currentColor" opacity=".3" stroke-width="0"/><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><polyline points="12.251 7.1035 9 9 5.75 7.1035" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><line x1="9.0005" y1="12.7817" x2="9" y2="9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-variant" viewBox="0 0 12 12"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><line x1="11.25" y1="8.75" x2="6.25" y2="8.75"/><circle cx="4.25" cy="8.75" r="2"/><line x1="2.25" y1="8.75" x2=".75" y2="8.75"/><line x1=".75" y1="3.25" x2="5.75" y2="3.25"/><circle cx="7.75" cy="3.25" r="2"/><line x1="9.75" y1="3.25" x2="11.25" y2="3.25"/></g></symbol>
   <symbol id="i-cubes" viewBox="0 0 18 18"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="M4.648,8.086l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="8.84 10.005 5.25 12.087 1.66 10.005"/><line x1="5.25" y1="16.25" x2="5.25" y2="12.087"/><path d="M12.148,8.086l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="16.34 10.005 12.75 12.087 9.16 10.005"/><line x1="12.75" y1="16.25" x2="12.75" y2="12.087"/><path d="M8.398,1.586l-2.55,1.479c-.37,.215-.598,.61-.598,1.038v2.968c0,.428,.228,.823,.598,1.038l2.55,1.479c.372,.216,.832,.216,1.204,0l2.55-1.479c.37-.215,.598-.61,.598-1.038v-2.968c0-.428-.228-.823-.598-1.038l-2.55-1.479c-.372-.216-.832-.216-1.204,0Z"/><polyline points="12.59 3.505 9 5.587 5.41 3.505"/><line x1="9" y1="9.75" x2="9" y2="5.587"/></g></symbol>
+  <symbol id="i-chev" viewBox="0 0 12 12"><polyline points="3 4.75 6 7.75 9 4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-pin" viewBox="0 0 12 12"><path d="M6 .75c-2.35 0-4.25 1.87-4.25 4.18 0 3.07 4.25 6.32 4.25 6.32s4.25-3.25 4.25-6.32C10.25 2.62 8.35.75 6 .75Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><circle cx="6" cy="4.9" r="1.4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-clock" viewBox="0 0 12 12"><circle cx="6" cy="6" r="5.25" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><polyline points="6 3 6 6 8.25 7.5" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-reset" viewBox="0 0 18 18"><path d="M5.25 9.5L3 7.25L0.75 9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M13.495 13.345C12.3587 14.5226 10.7641 15.25 9 15.25C5.548 15.25 2.75 12.45 2.75 9C2.75 8.4 2.834 7.83003 2.99 7.28003" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M12.75 8.5L15 10.75L17.25 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M4.50629 4.65564C5.64249 3.48544 7.23658 2.75 8.99998 2.75C12.452 2.75 15.25 5.55 15.25 9C15.25 9.58 15.171 10.14 15.024 10.67" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
@@ -1424,7 +1433,8 @@ function checks(name) {
   box.dataset.for = name;
   box.style.display = 'block';
   if (!found.length) {
-    box.innerHTML = '<h2>checks</h2><div class="ok"><svg class="ic"><use href="#i-ok"/></svg>clean</div>';
+    box.innerHTML = `<h2 title="${FOLD_HINT}">checks<svg class="chev"><use href="#i-chev"/></svg></h2>`
+      + '<div class="ok"><svg class="ic"><use href="#i-ok"/></svg>clean</div>';
     return;
   }
   // The icon is the severity tag: shape and color both carry it, the title spells it out.
@@ -1435,7 +1445,8 @@ function checks(name) {
     `<div class="f ${f.severity}" title="${f.severity}: ${f.rule}">`
     + `<svg class="ic"><use href="#i-${f.severity === 'fail' ? 'fail' : 'warn'}"/></svg>`
     + `<span class="rule">${f.label || f.rule}</span><span>${f.message}</span></div>`).join('');
-  box.innerHTML = `<h2>checks <span class="n">${found.length}</span></h2>${rows}`;
+  box.innerHTML = `<h2 title="${FOLD_HINT}">checks <span class="n">${found.length}</span>`
+    + `<svg class="chev"><use href="#i-chev"/></svg></h2>${rows}`;
   const shift = mesh ? mesh.position : new THREE.Vector3();
   for (const f of found) {
     if (f.face && f.face.length) {
@@ -1453,6 +1464,20 @@ function checks(name) {
                             // reaches its children in some three.js versions
     pins.add(pin);
   }
+}
+
+// The header is also the dismiss: on a narrow viewer the card buried the toolbar with
+// no way past it (issue #103). Folding keeps the count and the pins, and the choice
+// sticks across rebuilds and reloads so a save does not unfold it back over the buttons.
+const FOLD_HINT = 'fold the findings out of the way; the count and the pins stay';
+{
+  const box = document.getElementById('checks');
+  if (localStorage.getItem('nurb.checks.min')) box.classList.add('min');
+  box.addEventListener('click', ev => {
+    if (!ev.target.closest('h2')) return;
+    if (box.classList.toggle('min')) localStorage.setItem('nurb.checks.min', '1');
+    else localStorage.removeItem('nurb.checks.min');
+  });
 }
 
 // A refusal (reject() in the part) may name the parameter it is about. The panel

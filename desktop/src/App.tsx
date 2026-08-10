@@ -1,4 +1,4 @@
-import { Fragment, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -10,6 +10,8 @@ import About from "./About";
 import AgentsHelp from "./AgentsHelp";
 import Chat, { AGENT_LABEL } from "./Chat";
 import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus } from "./Icons";
+import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
+import type { Column } from "./layout";
 import Setup from "./Setup";
 import "./App.css";
 
@@ -105,6 +107,11 @@ function placedInMap(parts: Part[]) {
   return map;
 }
 
+// The sidebar columns, draggable at their seams (issue #103: overlays in the viewer
+// had nowhere to go). Clamped so neither the labels nor the canvas can be crushed
+// into uselessness; a width that keeps a column workable is the whole point of one.
+const viewportWidth = () => document.documentElement.clientWidth;
+
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [servers, setServers] = useState<Record<string, Server>>({});
@@ -129,6 +136,67 @@ function App() {
   const [busyParts, setBusyParts] = useState<Record<string, boolean>>({});
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
   const [signingIn, setSigningIn] = useState<string | null>(null);
+  // A UI preference like the agent below, so it persists the same way.
+  const [columnWidths, setColumnWidths] = useState(() =>
+    initialColumns(
+      {
+        rail: Number(localStorage.getItem(COLUMNS.rail.key)),
+        chat: Number(localStorage.getItem(COLUMNS.chat.key)),
+      },
+      viewportWidth(),
+    ),
+  );
+  const { rail: railW, chat: chatW } = columnWidths;
+  useEffect(() => {
+    const fit = () =>
+      setColumnWidths((current) => {
+        const next = fitColumns(current, viewportWidth());
+        if (next.rail === current.rail && next.chat === current.chat) return current;
+        localStorage.setItem(COLUMNS.rail.key, String(next.rail));
+        localStorage.setItem(COLUMNS.chat.key, String(next.chat));
+        return next;
+      });
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
+  // Pointer capture, not a mousemove listener on the window: the drag crosses the
+  // viewer iframe, and capture is what keeps the moves coming once it does.
+  const dragSeam = (e: ReactPointerEvent<HTMLDivElement>, which: Column) => {
+    const handle = e.currentTarget;
+    const startX = e.clientX;
+    const from = columnWidths[which];
+    let last = from;
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("dragging");
+    const move = (ev: PointerEvent) => {
+      last = resizedColumn(
+        which,
+        from + ev.clientX - startX,
+        columnWidths,
+        viewportWidth(),
+      );
+      setColumnWidths((current) => ({ ...current, [which]: last }));
+    };
+    const up = () => {
+      handle.classList.remove("dragging");
+      handle.removeEventListener("pointermove", move);
+      localStorage.setItem(COLUMNS[which].key, String(last));
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up, { once: true });
+  };
+  const resetSeam = (which: Column) => {
+    localStorage.removeItem(COLUMNS[which].key);
+    setColumnWidths((current) => ({
+      ...current,
+      [which]: resizedColumn(
+        which,
+        COLUMNS[which].fallback,
+        current,
+        viewportWidth(),
+      ),
+    }));
+  };
   // Fresh conversations use this agent; existing ones keep the agent that ran
   // them. Persisted locally: it is a UI preference, not project state.
   const [defaultAgent, setDefaultAgent] = useState(
@@ -648,7 +716,10 @@ function App() {
   }
 
   return (
-    <div className="shell">
+    <div
+      className="shell"
+      style={{ gridTemplateColumns: `${railW}px ${chatW}px minmax(0, 1fr)` }}
+    >
       <aside className="rail">
         <div className="rail-title" data-tauri-drag-region />
         <div className="rail-heading">
@@ -978,6 +1049,20 @@ function App() {
           <div className="viewer-status">open a project to start</div>
         )}
       </main>
+      <div
+        className="seam"
+        style={{ left: railW }}
+        title="drag to resize; double-click to reset"
+        onPointerDown={(e) => dragSeam(e, "rail")}
+        onDoubleClick={() => resetSeam("rail")}
+      />
+      <div
+        className="seam"
+        style={{ left: railW + chatW }}
+        title="drag to resize; double-click to reset"
+        onPointerDown={(e) => dragSeam(e, "chat")}
+        onDoubleClick={() => resetSeam("chat")}
+      />
     </div>
   );
 }
