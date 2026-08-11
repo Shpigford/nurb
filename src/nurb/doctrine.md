@@ -146,6 +146,18 @@ afterwards: slope chamfers leave runout slivers and tip chamfers make compound-a
 artifacts where they meet the platform. **Shape problems on a thin web get fixed in the
 profile, not with a dress-up feature.**
 
+## Aesthetics
+
+Function is not the whole job. A part gets looked at every day it hangs on the wall, and among the shapes that all work, pick the one worth looking at. The priority is fixed: a measured fit is never rounded for looks and structure is never thinned for elegance. But most dimensions on a part are neither fit nor structure, they are choices, and a choice made with intent is what separates a designed object from an extruded one.
+
+- **Free dimensions get deliberate proportions.** When nothing constrains a ratio, pick one and mean it, rather than letting a dimension land wherever the arithmetic left it. Near-equal reads as a mistake: make two dimensions equal or make them clearly different.
+- **Visual weight follows load.** Material where the stress is and air where it is not makes a part look strong in the same places it is strong. A uniform slab reads as unconsidered; a gusseted, relieved shape explains itself.
+- **Symmetry is the default.** An asymmetric feature is earned by function, a cable exit, a handed mount, and once earned it is committed to rather than half-hidden.
+- **Features align.** Holes share a centerline, faces land on shared planes, repeated features sit on an even rhythm. An edge that almost lines up with another is worse than either placement.
+- **Restraint is the ornament.** The faceted language, one chamfer size, every facet at 45 degrees, is already the decoration. Nothing decorative gets added that printability has to pay for, and nothing arbitrary breaks the system.
+
+Beyond these, proportion is taste, and taste is a slider: expose the parameter and let the user's eye decide in the viewer rather than defending a number in chat.
+
 ## Polish pass
 
 The polish pass runs last, after structure is finished.
