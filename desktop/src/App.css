@@ -369,6 +369,15 @@ textarea {
   color: var(--dim);
 }
 
+/* The whole-project conversation sits above the parts it spans. A hairline under it
+   keeps it from reading as the first part of the list. */
+.part-row.project-chat {
+  margin-bottom: 3px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0 5px 0 0;
+}
+
 /* The accent left edge is the viewer's own "this one is live" mark. */
 .part-row.selected {
   color: var(--text);
@@ -1072,10 +1081,15 @@ textarea {
   border-color: rgba(110, 231, 168, 0.65);
 }
 
+/* The column can be dragged to 240px, narrower than attach + the model summary +
+   send in one line. Wrapping beats clipping: send drops under the box, and the
+   auto margin keeps it on the right edge of its own row. */
 .chat-composer-controls {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 2px 8px;
 }
 
 .chat-attach {
@@ -1238,6 +1252,8 @@ textarea {
   color: #10281b;
   cursor: pointer;
   flex: none;
+  /* Wrapped onto its own line in a narrow column, it stays on the right edge. */
+  margin-left: auto;
 }
 
 .chat-send:hover {

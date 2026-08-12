@@ -31,6 +31,10 @@ use crate::prefs::{ConfigChoice, ConfigRow, PrefStore};
 pub(crate) use events::ChatEvent;
 use events::{forward, permission_choice, permission_title, wire_string};
 
+/// The whole-project conversation rides the per-part session plumbing under a
+/// name no part file can have. The twin constant lives in desktop/src/Chat.tsx.
+const PROJECT_CHAT: &str = "//project";
+
 type Pending = Arc<Mutex<HashMap<u32, oneshot::Sender<RequestPermissionOutcome>>>>;
 
 pub struct Chats {
@@ -315,10 +319,12 @@ pub async fn send_prompt(
             )
         })
         .unwrap_or_default();
-    let selected = part
-        .as_ref()
-        .map(|part| format!(" This conversation is about the part \"{part}\", which is on screen beside the chat."))
-        .unwrap_or_default();
+    let selected = match part.as_deref() {
+        // The rail's project row; the twin constant lives in Chat.tsx.
+        Some(PROJECT_CHAT) => " This conversation is about the whole project rather than one part. You can create parts with `nurb new`, edit any part, and lift design the parts share into system.py at the project root; the app notices new and rebuilt parts on its own.".to_string(),
+        Some(part) => format!(" This conversation is about the part \"{part}\", which is on screen beside the chat."),
+        None => String::new(),
+    };
     let context = format!(
         "Context: nurb project \"{project_name}\".{selected}{server} \
         The user is a 3D-printing hobbyist, not a programmer, and the app hides all files and code: \

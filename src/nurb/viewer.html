@@ -341,6 +341,26 @@
   #family[open] summary::before { content: '\25be  '; }
   #family summary:hover { color: var(--text); }
   #family:has(.p.dirty) summary { color: var(--accent); }
+  /* Constructions this part repeats with its siblings, from the server's duplication
+     scan. A nudge, not a finding: the parts build fine, they just say the same thing
+     twice, and the fold offers the lift without nagging from the checks panel. */
+  #sharedbox details { border-top: 1px dashed var(--line); margin-top: 6px; }
+  #sharedbox summary {
+    cursor: pointer; color: var(--dim); font-size: 11px; padding: 9px 0 5px;
+    list-style: none; letter-spacing: .04em;
+  }
+  #sharedbox summary::-webkit-details-marker { display: none; }
+  #sharedbox summary::before { content: '\25b8  '; }
+  #sharedbox details[open] summary::before { content: '\25be  '; }
+  #sharedbox summary:hover { color: var(--text); }
+  #sharedbox .run { color: var(--dim); font-size: 11px; padding: 3px 0 3px 7px; line-height: 1.5; }
+  #sharedbox .run b { color: var(--text); font-weight: 500; }
+  #sharedbox button {
+    display: block; margin: 4px 0 6px 7px; padding: 3px 8px; font: inherit; font-size: 11px;
+    color: var(--dim); background: none; border: 1px solid var(--line); border-radius: 4px;
+    cursor: pointer;
+  }
+  #sharedbox button:hover { color: var(--text); border-color: var(--dim); }
   .p { padding: 5px 0 7px 7px; border-left: 2px solid transparent; }
   .p.dirty { border-left-color: var(--accent); }
   .p .top { display: flex; align-items: center; }
@@ -448,6 +468,7 @@
   <h1><svg><use href="#i-cube"/></svg><b>nurb</b><span id="project"></span><span id="conn">connecting</span></h1>
   <div id="list"></div>
   <div id="params" class="empty"></div>
+  <div id="sharedbox"></div>
   <div id="foot">
     <span id="version"></span>
     <span id="links">
@@ -540,6 +561,9 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 const parts = new Map();
+// Constructions the project's parts repeat, from the server's duplication scan.
+// Project-wide, so it rides sync and its own message rather than any part's entry.
+let sharedRuns = [];
 // `framed` is the part the camera is currently pointed at, which is not `current`: a
 // part becomes current the moment it is selected and only gets a camera once its
 // geometry lands. Nothing is framed until the first mesh paints.
@@ -1998,7 +2022,42 @@ function showTip(row) {
   box.addEventListener('pointerdown', hideTip);
 }
 
+function sharedPanel(name) {
+  const box = document.getElementById('sharedbox');
+  const mine = name ? sharedRuns.filter(r => r.parts.includes(name)) : [];
+  if (!mine.length) { box.innerHTML = ''; return; }
+  const fold = document.createElement('details');
+  fold.innerHTML =
+    '<summary title="The same steps appear in three or more parts. Lifted into the '
+    + 'project&#39;s shared design, the parts stay in step.">'
+    + `shared with siblings (${mine.length})</summary>`;
+  for (const run of mine) {
+    const others = run.parts.filter(p => p !== name);
+    const row = document.createElement('div');
+    row.className = 'run';
+    row.innerHTML = `builds the same construction as <b></b>`;
+    row.querySelector('b').textContent = others.join(', ');
+    fold.appendChild(row);
+    if (embed) {
+      // The shell routes this to the project conversation with a prefilled ask;
+      // prefilled, never sent, so the lift stays the user's call.
+      const btn = document.createElement('button');
+      btn.textContent = 'unify in chat';
+      btn.title = 'ask the project chat to lift what these parts share';
+      btn.onclick = () => window.parent.postMessage({ type: 'nurb:shared', parts: run.parts }, '*');
+      fold.appendChild(btn);
+    } else {
+      const hint = document.createElement('div');
+      hint.className = 'run';
+      hint.innerHTML = '<code>nurb extract</code> shows the details';
+      fold.appendChild(hint);
+    }
+  }
+  box.replaceChildren(fold);
+}
+
 function params(e) {
+  sharedPanel(e.name);
   const box = document.getElementById('params');
   // A failed build reports no parameters, and clearing the panel here would take the
   // sliders away at the one moment they are needed: a value that breaks the build has
@@ -2390,7 +2449,9 @@ async function fallback() {
     const msg = await (await fetch('/api/sync')).json();
     const rows = msg.parts || [];
     bedUpdate(msg.bed);
-    if (parts.size || !rows.length) return;  // a sync won the race, or truly empty
+    if (parts.size) return;  // a socket sync won the race
+    sharedRuns = msg.shared || [];
+    if (!rows.length) return;  // truly empty
     rows.forEach(p => parts.set(p.name, p));
     current = parts.has(want) ? want : rows[0].name;
     render();
@@ -2432,6 +2493,7 @@ function connect() {
       checkUpdate(msg.version);
       parts.clear();
       msg.parts.forEach(p => parts.set(p.name, p));
+      sharedRuns = msg.shared || [];
       if (want && !msg.sources.includes(want)) { want = null; wantVariant = null; }
       // A fallback render may have filled `current` while the socket was down.
       // The still-pending deep link outranks that temporary choice.
@@ -2498,6 +2560,10 @@ function connect() {
       }
       bedUpdate(msg.bed);
       estimate();
+    }
+    if (msg.type === 'shared') {
+      sharedRuns = msg.runs || [];
+      sharedPanel(current);
     }
     if (msg.type === 'stressed') stressLanded(msg);
     if (msg.type === 'checked') {

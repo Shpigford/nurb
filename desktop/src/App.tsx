@@ -8,7 +8,7 @@ import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
-import Chat, { AGENT_LABEL } from "./Chat";
+import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
 import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus } from "./Icons";
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
 import type { Column } from "./layout";
@@ -136,6 +136,12 @@ function App() {
   // background; only the selected part's column is visible.
   const [mountedParts, setMountedParts] = useState<string[]>([]);
   const [busyParts, setBusyParts] = useState<Record<string, boolean>>({});
+  // The project row's conversation covers the whole project; while it is focused
+  // the viewer keeps showing the selected part, so this is chat focus, not selection.
+  const [projectChatFocused, setProjectChatFocused] = useState(false);
+  // Composer text waiting for the project chat, from the viewer's "unify in chat"
+  // nudge. Prefilled, never sent: the lift stays the user's call.
+  const [projectSeed, setProjectSeed] = useState<string | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
   const [signingIn, setSigningIn] = useState<string | null>(null);
   // A UI preference like the agent below, so it persists the same way.
@@ -306,16 +312,36 @@ function App() {
   // And its STL/STEP buttons write into the project's build folder, then hand
   // over the path: a webview ignores an <a download>, so the file is revealed in
   // Finder instead of downloaded.
+  const focusProjectChat = useCallback((seed?: string) => {
+    setMountedParts((list) =>
+      list.includes(PROJECT_CHAT) ? list : [...list, PROJECT_CHAT],
+    );
+    setProjectChatFocused(true);
+    if (seed) setProjectSeed(seed);
+  }, []);
+
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(event.origin)) return;
       if (event.data === "nurb:drag") getCurrentWindow().startDragging().catch(() => {});
       if (event.data?.type === "nurb:saved" && typeof event.data.path === "string")
         revealItemInDir(event.data.path).catch(() => {});
+      // The viewer's "unify in chat" nudge: parts repeating the same construction
+      // are a project-wide matter, so it lands in the project conversation.
+      if (
+        event.data?.type === "nurb:shared" &&
+        Array.isArray(event.data.parts) &&
+        event.data.parts.every((p: unknown) => typeof p === "string")
+      ) {
+        const names = event.data.parts as string[];
+        focusProjectChat(
+          `The parts ${names.join(", ")} repeat the same construction. If it is genuinely shared, unify it so they stay in step.`,
+        );
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [focusProjectChat]);
 
   const refreshAgents = useCallback(async () => {
     setAgentStatuses(await invoke<AgentStatus[]>("agent_statuses"));
@@ -455,6 +481,8 @@ function App() {
     setMountedParts([]);
     setBusyParts({});
     setPartNaming(false);
+    setProjectChatFocused(false);
+    setProjectSeed(null);
     if (!active) return;
     let stale = false;
     invoke<ChatInfo[]>("list_sessions", { path: active })
@@ -505,6 +533,7 @@ function App() {
   useEffect(() => {
     if (!active || partState?.path !== active) return;
     const live = new Set(partState.parts.map((part) => part.name));
+    live.add(PROJECT_CHAT); // no rail part backs it, but its row never goes away
     setMountedParts((list) => {
       const kept = list.filter((part) => live.has(part));
       return kept.length === list.length ? list : kept;
@@ -594,6 +623,7 @@ function App() {
 
   const selectPart = (name: string) => {
     if (!active) return;
+    setProjectChatFocused(false);
     setProjects((list) =>
       list.map((p) => (p.path === active ? { ...p, selectedPart: name } : p)),
     );
@@ -801,6 +831,20 @@ function App() {
               </div>
               {project.path === active && partsReady && (
                 <ul className="parts">
+                  {/* The whole-project conversation: spawn parts, set what the
+                      family shares, act on the duplication nudge. Chat focus, not
+                      part selection, so the viewer stays on the selected part. */}
+                  <li
+                    className={`part-row project-chat ${projectChatFocused ? "selected" : ""}`}
+                    title="a conversation about the whole project"
+                    onClick={() => focusProjectChat()}
+                  >
+                    <IconCubes label="the whole project" />
+                    <span className="part-name">project</span>
+                    {busyParts[PROJECT_CHAT] && (
+                      <span className="part-busy" title="the agent is working on the project" />
+                    )}
+                  </li>
                   {parts.map((part) => (
                     <Fragment key={part.name}>
                       <li
@@ -1050,6 +1094,7 @@ function App() {
         mountedParts.map((part) => {
           const chat = resumeState.byPart[part];
           const agent = chat?.agent ?? defaultAgent;
+          const isProject = part === PROJECT_CHAT;
           return (
             <Chat
               key={`${active}:${part}:${chat?.gen ?? 0}:${agent}`}
@@ -1065,7 +1110,9 @@ function App() {
                   label: AGENT_LABEL[status.id] ?? status.label,
                 }))}
               resume={chat?.id ?? null}
-              hidden={part !== selectedPart}
+              hidden={isProject ? !projectChatFocused : part !== selectedPart || projectChatFocused}
+              seed={isProject ? projectSeed : null}
+              onSeed={isProject ? () => setProjectSeed(null) : undefined}
               onSession={(id) => chatStarted(active, part, id, agent)}
               onFresh={() => startFresh(part)}
               onAgent={(id) => startFresh(part, id)}

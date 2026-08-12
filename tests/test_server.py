@@ -1090,3 +1090,92 @@ def test_the_checks_panel_folds_and_stays_folded():
     # The fold outlives the repaint and the reload.
     assert "localStorage.getItem('nurb.checks.min')" in viewer
     assert "localStorage.setItem('nurb.checks.min', '1')" in viewer
+
+
+# A construction long enough for the shared-runs nudge: six statements, well past
+# the four the scan requires before calling repetition a family matter.
+BIN_BODY = """from nurb import *
+
+@part
+def {name}(width=60.0, depth=40.0, height=30.0, wall=2.0):
+    body = Box(width, depth, height)
+    lip = Box(width - 2 * wall, depth - 2 * wall, height)
+    body = body - Pos(0, 0, wall) * lip
+    label = Box(width * 0.6, wall, 8.0)
+    body = body + Pos(0, -depth / 2, height * 0.3) * label
+    return body
+"""
+
+
+def bins(tmp_path, names):
+    (tmp_path / "parts").mkdir()
+    for name in names:
+        (tmp_path / "parts" / f"{name}.py").write_text(BIN_BODY.format(name=name))
+    return Server(tmp_path)
+
+
+def test_shared_wires_a_construction_three_parts_repeat(tmp_path):
+    server = bins(tmp_path, ["bin_large", "bin_medium", "bin_small"])
+    runs = server._shared()
+    assert len(runs) == 1
+    assert runs[0]["parts"] == ["bin_large", "bin_medium", "bin_small"]
+    assert runs[0]["statements"] >= 4
+    # Names and a count only: the panel's audience never sees files or lines.
+    assert set(runs[0]) == {"parts", "statements"}
+
+
+def test_shared_stays_quiet_for_two_parts(tmp_path):
+    """Two parts saying the same thing is not yet a system."""
+    server = bins(tmp_path, ["bin_large", "bin_small"])
+    assert server._shared() == []
+
+
+def test_shared_ignores_short_residue(tmp_path):
+    """A finished extraction still shares a couple of lines on purpose; the notch
+    examples are full of them. The nudge is for whole constructions."""
+    (tmp_path / "parts").mkdir()
+    residue = (
+        "from nurb import *\n\n"
+        "@part\n"
+        "def {name}(width={w}, wall=2.0):\n"
+        "    body = Box(width, width * 0.8, wall * 4.0) - Box(width - 2 * wall, width, wall)\n"
+        "    return polish(body, body.edges(), wall / 2.0)\n"
+    )
+    for name, w in (("a", "30.0"), ("b", "40.0"), ("c", "50.0")):
+        (tmp_path / "parts" / f"{name}.py").write_text(residue.format(name=name, w=w))
+    assert Server(tmp_path)._shared() == []
+
+
+def test_shared_reports_nothing_over_a_part_that_does_not_parse(tmp_path):
+    """No nudge beats a stale one: a part mid-edit blanks the scan honestly."""
+    server = bins(tmp_path, ["bin_large", "bin_medium", "bin_small"])
+    (tmp_path / "parts" / "broken.py").write_text("def oops(:\n")
+    assert server._shared() == []
+
+
+def test_shared_read_failure_cannot_kill_the_rebuild_loop(tmp_path, monkeypatch):
+    """A file can disappear between the directory scan and the read during an
+    atomic save. The optional nudge must fail closed instead of escaping drain()."""
+    from nurb import server as server_mod
+
+    missing = tmp_path / "parts" / "gone.py"
+    monkeypatch.setattr(server_mod.builder, "find_parts", lambda _root: [missing])
+    assert Server(tmp_path)._shared() == []
+
+
+def test_sync_carries_the_shared_runs(tmp_path):
+    server = bins(tmp_path, ["bin_large", "bin_medium", "bin_small"])
+    server.shared = server._shared()
+    payload = server._sync()
+    assert payload["shared"] == server.shared
+    assert payload["shared"][0]["parts"] == ["bin_large", "bin_medium", "bin_small"]
+
+
+def test_http_fallback_carries_shared_runs_into_the_panel():
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    fallback = viewer[
+        viewer.index("async function fallback()") : viewer.index("function connect()")
+    ]
+    assert "sharedRuns = msg.shared || [];" in fallback

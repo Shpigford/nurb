@@ -20,7 +20,7 @@ from websockets.asyncio.server import serve
 from websockets.http11 import Response
 from websockets.datastructures import Headers
 
-from . import __version__, builder, registry
+from . import __version__, builder, extract, registry
 
 VIEWER = pathlib.Path(__file__).parent / "viewer.html"
 VENDOR = (pathlib.Path(__file__).parent / "vendor").resolve()
@@ -186,6 +186,9 @@ class Server:
         # What the sliders are holding, per part, and only where it differs from the
         # file. Empty means the part is exactly what its source says.
         self.overrides = {}
+        # Constructions the parts say twice, recomputed after every rebuild burst so
+        # the viewer's nudge never outlives the geometry it described.
+        self.shared = []
         self.clients = set()
         self.loop = None
         self.queue = None
@@ -919,6 +922,32 @@ class Server:
         )
         return {name for (name, _), n in seen.items() if n > len(built) / 2}
 
+    def _shared(self):
+        """Constructions repeated across enough parts to be worth a nudge.
+
+        `nurb extract`'s full report is the agent's; the viewer only needs enough to
+        say "these parts repeat themselves". The bar is higher than the report's:
+        three or more parts (same "too few to tell from a coincidence" line _family
+        draws) and at least four statements, calibrated on the notch examples, whose
+        finished extraction still shares short residue runs on purpose. Wired as part
+        names and a count only; the agent rediscovers lines itself, and the panel's
+        audience never sees files.
+        """
+        try:
+            runs = extract.duplication(builder.find_parts(self.root))
+        except (OSError, SyntaxError, UnicodeError):
+            # A part mid-edit may not parse, may briefly disappear during an atomic
+            # save, or may not be UTF-8. No nudge beats a dead rebuild loop.
+            return []
+        return [
+            {
+                "parts": sorted({site[0].stem for site in run["sites"]}),
+                "statements": run["statements"],
+            }
+            for run in runs
+            if len({site[0] for site in run["sites"]}) >= 3 and run["statements"] >= 4
+        ]
+
     def _wire(self, entry):
         """`_meta`, with each parameter told whether the whole family shares it."""
         out = self._meta(entry)
@@ -959,6 +988,7 @@ class Server:
             # deleted or misspelled one.
             "sources": [p.stem for p in builder.find_parts(self.root)],
             "parts": [self._wire(e) for e in self.state.values()],
+            "shared": self.shared,
         }
         if include_token:
             # HTTP fallback is intentionally read-only. Only the origin-checked socket
@@ -1258,6 +1288,13 @@ class Server:
                             f"    {len(entry['findings'])} finding(s), {bad} to fix",
                             flush=True,
                         )
+            # The duplication scan reads every part file, so once per settled burst,
+            # not per path; a burst still queuing gets it on its last round instead.
+            if self.queue.empty():
+                shared = await asyncio.to_thread(self._shared)
+                if shared != self.shared:
+                    self.shared = shared
+                    await self.send({"type": "shared", "runs": shared})
 
     # ---------- run ----------
 

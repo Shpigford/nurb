@@ -20,6 +20,7 @@ A part is a Python function and its keyword defaults are its parameters. A proje
     "allow": [
       "Bash(nurb:*)",
       "Edit(parts/**)",
+      "Edit(system.py)",
       "Edit(measurements.toml)",
       "Edit(printer.toml)"
     ]
@@ -27,7 +28,7 @@ A part is a Python function and its keyword defaults are its parameters. A proje
 }
 ```
 
-Other harnesses take the same two grants, the `nurb` prefix and edits under `parts/`, in their own file: Codex a `prefix_rule` in `.codex/rules/`, Gemini `tools.allowed` in `.gemini/settings.json`, Cursor's CLI a `Shell(nurb)` entry in `.cursor/cli.json`, OpenCode a `permission` block in `opencode.json`. Amp never prompts, so there is nothing to offer.
+Other harnesses take the same grants, the `nurb` prefix and edits under `parts/` plus `system.py`, in their own file: Codex a `prefix_rule` in `.codex/rules/`, Gemini `tools.allowed` in `.gemini/settings.json`, Cursor's CLI a `Shell(nurb)` entry in `.cursor/cli.json`, OpenCode a `permission` block in `opencode.json`. Amp never prompts, so there is nothing to offer.
 
 **Run `nurb rules` before you design.** It prints the doctrine: printability, load paths, aesthetics, the polish pass, the kernel traps, card discipline, and what to verify. This file stays thin on purpose so there is one copy of that, in the package, which cannot drift.
 
@@ -50,6 +51,8 @@ Other harnesses take the same two grants, the `nurb` prefix and edits under `par
 **`import_stl` is for a shape you would otherwise retype, not for a model you found.** It returns a real solid, but only from a closed mesh under a couple of thousand triangles, and only flat faces survive: a box comes back as six faces at its exact size and each of them chamfers, while a cylinder comes back as a 126-sided prism whose rim no selector can find. So it earns its place on a plate, a bracket, a wedge, a machined blank someone exported for you, and it refuses a model site's download by name rather than letting you discover the problem later. Even where it works you have geometry and no parameters, so prefer rebuilding whenever the user might want to change a dimension, which is nearly always. STEP is the exception worth asking about: if the listing offers one, take it, because it imports as real B-rep with its curves intact and chamfers like anything you modelled.
 
 **When parts have to work together, assemble them before printing either.** A part that mounts to another, or moves against one, gets an `@assembly`: a function in `parts/` that returns placed solids, with `use()` building the siblings, `hinge()` declaring how one moves, and `obstacle()` standing in for the machine or wall they mount into. `nurb check` then sweeps each joint through its declared range and reports the angle where it jams and where the contact is, which is the one failure no per-part check can see: a door that builds clean, checks clean, prints beautifully and will not open. The joint angle is a keyword default, so the viewer's slider swings the assembly live for the user. Model obstacles from the user's measurements, and say on the assembly's card how rough they are.
+
+**A family of parts keeps its shared design in one file.** When siblings are meant to match, the shared wall, chamfer, corner radius or label geometry lives in `system.py` at the project root, imported by every part; saving it rebuilds the whole project, so one edit moves the family together. But a system is extracted, never scaffolded: build the first two or three parts plainly, then run `nurb extract`, which reports the constructions the files already say twice. Lift what is genuinely shared and leave the rest, because two parts saying the same thing is not yet a system; two parts that would both have to change is. The viewer runs the same scan and quietly folds a "shared with siblings" note under the parameters when three or more parts repeat a construction.
 
 **Finish with the polish pass.** Chamfered edges are what make a print feel designed rather than extruded, so the doctrine's last step (`polish`, 1mm on exposed edges) stays in the part through every edit; the template `nurb new` emits already ends with it. When the user asks for a rounded rim on a closed wall, that is `crown(wall)`, the bead that survives a roofline rising and falling; hand-rolling it instead is how issue #55 spent 689 lines. Never round a rim unprompted: chamfer stays the default on every edge, rims included. Say so when you hand the part over, because the user can only ask for sharp edges if they know the chamfers are there on purpose. The viewer builds polished by default, and its polish button flips to the faster draft build.
 

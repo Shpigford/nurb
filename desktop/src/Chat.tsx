@@ -13,6 +13,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { IconChevronDown, IconMessagePlus, IconPaperclip } from "./Icons";
 import Markdown from "./Markdown";
 
+// The whole-project conversation rides the per-part plumbing under a name no part
+// file can have. Twins live in App.tsx's mount and acp.rs's context line.
+export const PROJECT_CHAT = "//project";
+
 // Mirrors ChatEvent in src-tauri/src/acp.rs.
 type ChatEvent =
   | { type: "user_text"; text: string }
@@ -129,6 +133,8 @@ function Chat({
   agents,
   resume,
   hidden,
+  seed,
+  onSeed,
   onSession,
   onFresh,
   onAgent,
@@ -146,6 +152,10 @@ function Chat({
   agents: { id: string; label: string }[];
   resume: string | null;
   hidden: boolean;
+  // Text waiting for the composer, from a viewer nudge. Prefilled when the column
+  // is visible, never sent; onSeed reports it landed so the owner clears it.
+  seed?: string | null;
+  onSeed?: () => void;
   onSession: (id: string) => void;
   onFresh: () => void;
   // Switching agents cannot move a conversation across two different session
@@ -155,6 +165,9 @@ function Chat({
   onSignedIn: () => Promise<void>;
 }) {
   const label = AGENT_LABEL[agent] ?? agent;
+  // The sentinel never reaches copy: everywhere the column says its name, the
+  // project conversation speaks of the project.
+  const isProject = part === PROJECT_CHAT;
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
   // A resumed transcript starts loading after the first paint, so treat it as
@@ -226,6 +239,22 @@ function Chat({
       unlisten.then((stop) => stop());
     };
   }, []);
+
+  useEffect(() => {
+    // A seed lands once the column is visible. Below any half-typed draft rather
+    // than over it; the user's own words outrank a nudge's.
+    if (hidden || !seed) return;
+    const box = inputRef.current;
+    if (box) {
+      // Idempotent: StrictMode double-runs mount effects, and the clearing of
+      // the seed above only lands after this commit.
+      if (box.value !== seed && !box.value.endsWith(`\n${seed}`)) {
+        box.value = box.value.trim() ? `${box.value}\n${seed}` : seed;
+      }
+      box.focus();
+    }
+    onSeed?.();
+  }, [hidden, seed, onSeed]);
 
   useEffect(() => {
     // OS file drags arrive as Tauri window events with paths, not HTML5 drops.
@@ -558,7 +587,7 @@ function Chat({
         {/* The part name is the only thing here allowed to truncate, so the
             switcher lives beside it rather than inside it. */}
         <span className="chat-header-left">
-          <span className="chat-header-label">{part}</span>
+          <span className="chat-header-label">{isProject ? "project" : part}</span>
           <span aria-hidden="true">·</span>
           {agents.length > 1 ? (
             <span className="chat-switcher">
@@ -624,8 +653,9 @@ function Chat({
       <div className="chat-transcript" ref={scrollRef}>
         {items.length === 0 && !busy && (
           <div className="chat-empty">
-            You're chatting with {part}. Describe it or ask for changes, and{" "}
-            {label} will model it in the viewer.
+            {isProject
+              ? `This conversation covers the whole project. Ask ${label} for new parts, or for changes every part should share.`
+              : `You're chatting with ${part}. Describe it or ask for changes, and ${label} will model it in the viewer.`}
           </div>
         )}
         {items.map((item, index) => {
@@ -794,7 +824,7 @@ function Chat({
                 ? restoringRef.current
                   ? "Restoring conversation…"
                   : `Starting ${label}…`
-                : `Describe or change ${part}…`
+                : `Describe or change ${isProject ? "the project" : part}…`
           }
           rows={2}
           disabled={busy || starting}

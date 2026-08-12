@@ -617,6 +617,11 @@ def test_the_skill_is_the_shim_with_a_trigger_on_top():
             assert ": " not in value, f"strict-YAML trap in: {line}"
 
 
+def test_skill_allowlist_covers_the_shared_project_module():
+    skill = (pathlib.Path(cli.__file__).parent / "skill.md").read_text(encoding="utf-8")
+    assert '"Edit(system.py)"' in skill
+
+
 def test_skill_frontmatter_version_is_the_package_version():
     """The frontmatter version is what `nurb dev` compares an installed copy against,
     so a release that bumps pyproject.toml without regenerating the skill files must
