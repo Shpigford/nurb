@@ -98,12 +98,13 @@ sliver            faces too small to print as anything but a smear
 concave_cosmetic  polish laid into an inside corner
 bed_bevel         polish laid on the edges that meet the build plate
 warp_risk         large first layers with corners likely to lift as they cool
+pin               a free-standing pin too thin to be more than perimeters
 stability         center of mass outside the footprint
 projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The viewer's print time row will also ask you for it the first time you use it, and write the answer here. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file carries the export preference too: an `[export]` table with `formats = ["stl", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The viewer's print time row will also ask you for it the first time you use it, and write the answer here. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file can also name what you print in (`material = "abs"`), and `warp_risk` tightens to match how hard that plastic shrinks. Either file carries the export preference too: an `[export]` table with `formats = ["stl", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
 
 ```toml
 [part]

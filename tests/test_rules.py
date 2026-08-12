@@ -237,6 +237,90 @@ def test_a_ribbed_floor_contracts_too_little_to_peel():
     assert only(ribbed, "warp_risk") == []
 
 
+def test_a_shrinky_material_tightens_the_warp_threshold():
+    """The 100mm plate that PLA holds down: ABS contracts five times as much, so
+    the same pull arrives off a fifth of the area, and the finding says which
+    plastic to blame."""
+    plate = Box(100, 100, 5)
+    assert only(plate, "warp_risk") == []
+    found = only(plate, "warp_risk", Context(material="abs"))
+    assert len(found) == 1
+    assert "ABS" in found[0].message
+
+
+def test_a_shrinky_material_scales_the_face_threshold_too():
+    """An 8,100mm2 ABS plate is past its 4,000mm2 threshold even though it is
+    smaller than half the unscaled PLA threshold."""
+    found = only(Box(90, 90, 5), "warp_risk", Context(material="abs"))
+    assert len(found) == 1
+    assert found[0].value == 4
+
+
+def test_petg_judges_as_pla():
+    assert only(Box(100, 100, 5), "warp_risk", Context(material="petg")) == []
+
+
+# --- pin ---------------------------------------------------------------------
+
+SEAT = (Align.CENTER, Align.CENTER, Align.MIN)
+
+
+def test_a_thin_pin_may_not_print_at_all():
+    """2.5mm across: the nozzle re-melts each ring as it lays the next."""
+    shape = Box(20, 20, 4) + Pos(0, 0, 2) * Cylinder(1.25, 10, align=SEAT)
+    found = only(shape, "pin")
+    assert len(found) == 1
+    assert found[0].severity == FAIL
+    assert found[0].value == 2.5
+
+
+def test_a_pin_under_5mm_is_perimeter_only():
+    """4mm across prints, but as a tube with nothing inside, weakest at its base."""
+    shape = Box(20, 20, 4) + Pos(0, 0, 2) * Cylinder(2, 12, align=SEAT)
+    found = only(shape, "pin")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+
+
+def test_a_5mm_pin_has_room_for_infill():
+    shape = Box(20, 20, 4) + Pos(0, 0, 2) * Cylinder(3, 15, align=SEAT)
+    assert only(shape, "pin") == []
+
+
+def test_a_stub_has_nothing_to_lever_with():
+    """The same 4mm diameter, under twice its height: a locating nub, not a pin."""
+    shape = Box(20, 20, 4) + Pos(0, 0, 2) * Cylinder(2, 7, align=SEAT)
+    assert only(shape, "pin") == []
+
+
+def test_a_pin_lying_down_is_strands_not_rings():
+    """Printed horizontal, bending loads continuous strands, not stacked welds."""
+    shape = Box(4, 20, 20) + Pos(2, 0, 0) * Cylinder(1.25, 10, rotation=(0, 90, 0), align=SEAT)
+    assert only(shape, "pin") == []
+
+
+def test_a_bead_merged_into_a_wall_is_not_a_pin():
+    """A half-round hugging a wall for its whole height loses part of its wrap to
+    the join, and the wall carries the bending the rule worries about."""
+    wall = Pos(0, 0, 2) * Box(2, 20, 10, align=SEAT)
+    shape = Box(20, 20, 4) + wall + Pos(2, 0, 2) * Cylinder(1.25, 10, align=SEAT)
+    assert only(shape, "pin") == []
+
+
+def test_a_column_connected_at_both_ends_is_not_a_pin():
+    """A narrow standoff between two plates has no free tip to lever at its base."""
+    post = Pos(0, 0, 2) * Cylinder(2, 12, align=SEAT)
+    cap = Pos(0, 0, 14) * Box(20, 20, 4)
+    shape = Box(20, 20, 4) + post + cap
+    assert len(shape.solids()) == 1
+    assert only(shape, "pin") == []
+
+
+def test_a_hole_is_the_same_surface_facing_inward():
+    shape = Box(20, 20, 10) - Cylinder(1.25, 20)
+    assert only(shape, "pin") == []
+
+
 # --- sliver ------------------------------------------------------------------
 
 

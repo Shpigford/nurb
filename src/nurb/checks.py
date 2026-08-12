@@ -36,6 +36,7 @@ LABELS = {
     "concave_cosmetic": "inside corner",
     "bed_bevel": "poor bed grip",
     "warp_risk": "corners lift",
+    "pin": "skinny pin",
     "stability": "tips over",
     "projection_ratio": "long reach",
     "build_volume": "too big",
@@ -106,6 +107,7 @@ class Context:
     sliver_area: float = 1.0
     warp_area: float = 20000.0  # first-layer mm2 past which contraction peels sharp corners
     warp_radius: float = 8.0  # a plan corner rounded under this is still a peel point
+    material: str | None = None  # what this prints in; scales warp_area, see SHRINK
     accepted: dict = field(default_factory=dict)  # rule -> how many are already known
 
 
@@ -942,6 +944,21 @@ def _sharp_plan_corners(face, up, radius):
     return out
 
 
+# Cooling contraction by material, in percent. `warp_area` was calibrated on a PLA
+# plate, so PLA is the unit: a plastic that contracts five times as much peels the same
+# corners off a fifth of the area. The figures are the guides' (Prusa's material pages
+# put ABS at 1-2% shrink and flatly refuse bed-covering ABS, ASA or PC parts; Hubs
+# gives 0.2-1% across materials), rounded to one calibration point per family.
+SHRINK = {
+    "pla": 0.3,
+    "petg": 0.3,
+    "abs": 1.5,
+    "asa": 1.5,
+    "pc": 2.0,
+    "pp": 2.0,
+}
+
+
 @rule("warp_risk")
 def warp_risk(shape, ctx):
     """A first layer big enough for cooling contraction to peel its corners.
@@ -964,12 +981,13 @@ def warp_risk(shape, ctx):
     bed, _ = _span(shape, up)
     footing = [f for f in shape.faces() if _span(f, up)[1] <= bed + 1e-4]
     area = sum(f.area for f in footing)
-    if area <= ctx.warp_area:
+    pull = SHRINK[(ctx.material or "pla").lower()] / SHRINK["pla"]
+    if area * pull <= ctx.warp_area:
         return []
     sharp = [
         point
         for face in footing
-        if face.area >= ctx.warp_area / 2
+        if face.area * pull >= ctx.warp_area / 2
         for point in _sharp_plan_corners(face, up, ctx.warp_radius)
     ]
     if not sharp:
@@ -977,20 +995,119 @@ def warp_risk(shape, ctx):
     centre = sum((f.center() * f.area for f in footing), Vector(0, 0, 0)) / area
     worst = max(sharp, key=lambda point: (point - centre).length)
     count = len(sharp)
+    made_of = f" in {ctx.material.upper()}, which contracts {pull:.0f}x what PLA does" if pull > 1 else ""
+    plastic = ctx.material.upper() if pull > 1 else "The plastic"
     return [
         Finding(
             "warp_risk",
             WARN,
             f"{count} sharp corner{'' if count == 1 else 's'} on a {area:.0f}mm2 "
-            f"first layer; contraction peels them as the print cools. Round plan "
-            f"corners past {ctx.warp_radius:.0f}mm, rib the floor instead of a "
+            f"first layer{made_of}; contraction peels them as the print cools. Round "
+            f"plan corners past {ctx.warp_radius:.0f}mm, rib the floor instead of a "
             f"solid slab, and print with a brim",
-            plain="a big flat base with sharp corners. The plastic shrinks as it "
+            plain=f"a big flat base with sharp corners. {plastic} shrinks as it "
             "cools and curls them off the bed; rounded corners and a brim keep it down",
             value=count,
             where=tuple(round(v, 2) for v in worst),
         )
     ]
+
+
+def _pins(shape, up):
+    """Free-standing vertical cylinders, as (diameter, height, top_centre) each.
+
+    Faces are grouped by axis and radius because a boolean routinely splits one
+    cylinder into two half faces, and only a group whose faces close the full circle
+    is a pin: anything merged into a wall loses part of its wrap to the join, and a
+    fillet or a rounded corner never had it. A hole is the same surface with its
+    normal pointing inward, so a group with any inward face is not a pin either.
+    """
+    from OCP.BRepAdaptor import BRepAdaptor_Surface
+
+    groups = {}
+    for face in shape.faces():
+        if face.geom_type != GeomType.CYLINDER:
+            continue
+        surf = BRepAdaptor_Surface(face.wrapped)
+        cyl = surf.Cylinder()
+        axis = Vector(cyl.Axis().Direction().X(), cyl.Axis().Direction().Y(), cyl.Axis().Direction().Z())
+        if abs(axis.dot(up)) < 0.99:
+            continue  # lying down, printed as solid strands rather than stacked rings
+        spot = cyl.Location()
+        point = Vector(spot.X(), spot.Y(), spot.Z())
+        foot = point - up * point.dot(up)
+        key = (round(foot.X, 2), round(foot.Y, 2), round(foot.Z, 2), round(cyl.Radius(), 3))
+        sample = face.position_at(0.5, 0.5)
+        radial = sample - foot - up * sample.dot(up)
+        low, high = _span(face, up)
+        wrap = abs(surf.LastUParameter() - surf.FirstUParameter())
+        entry = groups.setdefault(
+            key,
+            {
+                "wrap": 0.0,
+                "low": low,
+                "high": high,
+                "out": True,
+                "foot": foot,
+                "radius": cyl.Radius(),
+            },
+        )
+        entry["wrap"] += wrap
+        entry["low"] = min(entry["low"], low)
+        entry["high"] = max(entry["high"], high)
+        entry["out"] &= face.normal_at(sample).dot(radial) > 0
+    first, second = _bed_axes(up)
+    out = []
+    for entry in groups.values():
+        if not entry["out"] or entry["wrap"] < 2 * pi - 0.05:
+            continue
+        radius = entry["radius"]
+        top = entry["foot"] + up * entry["high"]
+        # A standoff between two bodies has the same full cylindrical wrap as a pin,
+        # but opens into material beyond its radius instead of ending in a free tip.
+        above = top + up * PROBE
+        if any(
+            shape.is_inside(above + across * (radius + PROBE))
+            for across in (first, -first, second, -second)
+        ):
+            continue
+        out.append((2 * radius, entry["high"] - entry["low"], top))
+    return out
+
+
+@rule("pin")
+def pin(shape, ctx):
+    """A free-standing pin too thin to be more than perimeters.
+
+    Under 5mm across there is no room inside the perimeters for infill, so a pin is
+    walls with nothing between them, loaded in bending at the one place FDM is
+    weakest, its base weld. Under 3mm the nozzle is re-melting what it laid one ring
+    ago and the pin may not survive its own printing. Only slender pins are the
+    problem: a stub no taller than twice its diameter has nothing to lever with,
+    which is why a chamfered boss or a locating nub never fires this.
+    """
+    up = Vector(*ctx.up).normalized()
+    found = []
+    for dia, height, top in _pins(shape, up):
+        if dia >= 5.0 or height < 2 * dia:
+            continue
+        if dia < 3.0:
+            severity, because = FAIL, "under 3mm it may not print at all"
+        else:
+            severity, because = WARN, "perimeter-only, weakest at its base weld"
+        found.append(
+            Finding(
+                "pin",
+                severity,
+                f"a {dia:.1f}mm pin standing {height:.0f}mm, {because}. Thicken it "
+                f"past 5mm, or model the hole and press in a metal pin",
+                plain=f"a printed peg only {dia:.1f}mm across. It prints as a thin "
+                "tube and snaps off at the base",
+                value=round(dia, 1),
+                where=tuple(round(v, 2) for v in top),
+            )
+        )
+    return found
 
 
 # --- printer profiles --------------------------------------------------------
@@ -1172,6 +1289,13 @@ def _apply(ctx, block, where):
                 f"have: {', '.join(sorted(vars(Context())))}"
             )
         setattr(ctx, field_name, tuple(value) if isinstance(value, list) else value)
+    if ctx.material is not None:
+        ctx.material = str(ctx.material).lower()
+        if ctx.material not in SHRINK:
+            raise ValueError(
+                f"{where}: no material called {ctx.material!r}. "
+                f"have: {', '.join(sorted(SHRINK))}"
+            )
     return ctx
 
 

@@ -63,6 +63,18 @@ def test_an_unknown_profile_says_what_exists(tmp_path):
         printer(tmp_path)
 
 
+def test_an_unknown_material_says_what_exists(tmp_path):
+    project(tmp_path, 'material = "wood"\n')
+    with pytest.raises(ValueError, match="petg"):
+        printer(tmp_path)
+
+
+def test_the_material_reaches_the_context_lowercased(tmp_path):
+    """The file can say ABS; the SHRINK table speaks lowercase."""
+    project(tmp_path, 'material = "ABS"\n')
+    assert printer(tmp_path).material == "abs"
+
+
 def test_the_export_table_is_not_a_printer_setting(tmp_path):
     """`[export]` belongs to `nurb export`; a check must walk past it, not choke."""
     project(tmp_path, 'profile = "bambu_a1_mini"\n\n[export]\nformats = ["stl"]\n')

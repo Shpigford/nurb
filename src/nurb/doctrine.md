@@ -61,8 +61,15 @@ bounding box and still exports, so nothing downstream catches it.
   steepen one or match it to a ratio. Let the landing point fall where 45 degrees puts
   it. Mismatched facet angles are a veto: every facet on the part, cosmetic or
   structural or corbel, has to read as one system.
-- **A large first layer peels its corners as it cools.** Every layer shrinks as it cools and pulls toward the middle of the part, and the pull lands hardest on a sharp plan corner, farthest from the middle and holding on at a point. Past about 20,000mm2 of first layer the accumulated pull beats corner adhesion, and `warp_risk` names the corners that will lift. The fixes are in the outline, which is what makes this a CAD problem where elephant's foot is not: round the vertical corners at 8mm or more, so the peel front is a curve instead of a point, and give a big plate a ribbed floor rather than a solid slab, which is stiffer per gram and halves what contracts. A 1mm polish chamfer is not relief here; it moves the point half a millimetre. The brim and the clean bed are the slicer's share, and they treat the symptom the outline caused.
+- **A large first layer peels its corners as it cools.** Every layer shrinks as it cools and pulls toward the middle of the part, and the pull lands hardest on a sharp plan corner, farthest from the middle and holding on at a point. Past about 20,000mm2 of first layer the accumulated pull beats corner adhesion, and `warp_risk` names the corners that will lift. The fixes are in the outline, which is what makes this a CAD problem where elephant's foot is not: round the vertical corners at 8mm or more, so the peel front is a curve instead of a point, and give a big plate a ribbed floor rather than a solid slab, which is stiffer per gram and halves what contracts. A 1mm polish chamfer is not relief here; it moves the point half a millimetre. The brim and the clean bed are the slicer's share, and they treat the symptom the outline caused. Material multiplies the pull: the threshold is calibrated on PLA, and naming what the machine prints in `printer.toml`, `material = "abs"` next to the profile line, tightens it fivefold, because ABS contracts 1 to 2% as it cools where PLA holds under half a percent. PETG judges as PLA, ASA as ABS, and PC and PP tighter still. At the far end the rule stops being about corners: a bed-covering part in ABS, ASA or PC is the wrong material, and the fix is PETG or PLA, not a wider brim.
 - **Elephant's foot is a slicer setting**, not a CAD problem. Do not model around it.
+- **A pin under 5mm across is perimeters with nothing inside.** There is no room between the walls for infill, so a thin printed pin is a tube, loaded in bending at the weakest weld it has, its base. Under 3mm the nozzle is re-melting each ring as it lays the next, and the pin may not survive its own printing. `pin` fires on a free-standing vertical cylinder taller than twice its diameter; a stub or a locating nub has nothing to lever with and stays silent. The fixes, in order: thicken it past 5mm, give its base a structural chamfer sized like any other loaded junction, or model the hole instead and press in a metal pin, the same trade the fastener rules already make, because off-the-shelf steel beats printed plastic everywhere they compete.
+
+### Holes
+
+- **No hole under 2mm across.** Below that the perimeters converge and the bore prints as a smear or closes outright. A locating hole that small is a drill's job: model a 1mm dimple to centre the bit and let steel cut the diameter.
+- **Every vertical bore prints small**, by the same few tenths the fastener table's medium column already absorbs for screws, and the physics does not care that a dowel or a shaft is not a screw. Any bore gets the medium column's slack against its rod's true diameter, and when the diameter genuinely matters, printing is the wrong finisher: model half a millimetre under and drill to size, because a drill holds a tolerance no printer does.
+- **A horizontal hole's crown is a bridge.** Under the printer's span limit no rule minds it, but the crown sags into the bore and prints out of round exactly where a fit would bear. Prefer standing the hole vertical; the orientation rules usually allow it. When the axis cannot move and roundness matters, roof the bore with two 45 degree chords meeting in a point above the crown, a teardrop, which is the counterbore's idea turned sideways: every layer leans on the one before instead of spanning air.
 
 ### Fasteners
 
@@ -87,6 +94,23 @@ Clearance is ISO 273, cap head is ISO 4762 socket head, nut is ISO 4032 hex. In 
 **A nut pocket is a hex prism, and `counterbore` cannot cut one.** It cuts a cylinder, so the pocket is modelled by hand: `extrude(RegularPolygon(across_corners / 2, 6), thickness + 0.2)` sized on the across-corners column, or a round pocket at across-corners plus 0.2 if the nut is free to spin. A hex takes about 0.2 of slack across the flats, and rotating the prism so a flat rather than a point faces up prints a cleaner socket. It floats its own ceiling exactly the way a screw head does and earns the same `hole_ceiling` finding, so the two sacrificial bridge layers still apply; that trick is the part of `counterbore` worth copying, and the cylinder is not.
 
 **Heat-set inserts are the exception that proves the rule.** Their boss diameter is set by the insert a particular vendor ships and not by any standard, the same nominal thread differs by half a millimetre between brands, and the number that matters is the one on the bag in the user's drawer. Ask, or measure one, and record it with `measured()`.
+
+**Never model a thread under M5.** A printed thread below that is slivers arranged in a helix: the crests print as smears, and what does print strips the first time it is torqued. The hardware above is the answer, a nut in its pocket or a heat-set insert, and even past M5 a modelled thread is a choice the card justifies, never a default.
+
+**A loaded hole earns a fastener diameter of wall.** An M5 screw wants 5mm of material around its bore. Thinner, and the boss bulges as the screw seats, then splits along a layer weld, which is the one direction a boss cannot spare. The clearance columns say where the hole is; this says how much part has to be around it.
+
+### Fits between printed parts
+
+The fastener table covers steel meeting plastic. Two printed faces that work together get a designed gap of their own, sized by what the pair does, and stated as the total extra on the opening: a bore over its shaft, a pocket over its tongue, whatever dimension the pair shares.
+
+| Fit | Extra on the opening | What it feels like |
+| --- | --- | --- |
+| press | 0.1 | driven together once, holds by friction |
+| snug | 0.2 | slides on by hand, no rattle |
+| moving | 0.3 | swings and slides through its whole travel, the hinge floor |
+| free | 0.5 | drops in every time, on any printer, in any material |
+
+In mm. The table is where a fit starts, never what lets it skip the coupon: anything fit-critical is still measured, printed as a coupon, and corrected before the part prints. Two limits: below 0.1 is not a tighter press, it is a bind that varies by machine, and a moving pair never ships at less than 0.3, because the 0.2 that swings freely on the printer that made it seizes on the next one.
 
 ## Print orientation
 
@@ -146,6 +170,15 @@ a short vertical face of about 6mm, drawn in the profile. Do not chamfer thin-we
 afterwards: slope chamfers leave runout slivers and tip chamfers make compound-angle
 artifacts where they meet the platform. **Shape problems on a thin web get fixed in the
 profile, not with a dress-up feature.**
+
+### Features that flex
+
+Everything above stiffens. A clip or a snap arm works by bending instead, and bending is the load layer welds carry worst, so flexure gets one veto and a few numbers.
+
+- **Flex lies in the layer plane, never across it.** A snap arm built standing up bends around a layer weld and peels on the first deflection, or the fiftieth, and both are failures. Printed lying down, the same bend stretches continuous strands and the arm is as good as the plastic. This is the anisotropy rule with the load reversed: a static part carries load across welds badly, a flexing one not at all, so orientation is decided by the flexing feature before anything else gets a vote.
+- **A snap arm is at least 5mm wide, relieved at the root by half its own thickness, and tapered toward the tip.** The root relief is structural, sized with the load and cut before polish like the 3mm inside-corner rule it echoes, because the root is where every snap arm breaks. The taper spreads strain along the arm instead of parking it all at the root.
+- **A clip deflects during assembly and never while engaged.** Plastic creeps: an arm parked under bend is an arm slowly letting go. Give the engaged position 0.5mm of clearance so holding on costs the arm nothing.
+- **A living hinge is a proof of concept, not a part.** A printed one lasts tens of flexes, not thousands: the web is one or two beads thick, and every flex works the weld between them. A hinge that has to live is two parts and a pin, which the assemblies rules already know how to swing.
 
 ## Aesthetics
 
@@ -401,7 +434,9 @@ obstacle as something with honest volume in the first place.
 **Tangent is clear, and clear is not clearance.** Collision is intersection volume, so
 two faces that kiss at zero volume pass, the closed door resting on its stop included.
 In plastic a zero-clearance pass is already a bind. The declared range should carry
-the same honesty about clearance that a tongue's `fit` carries about width.
+the same honesty about clearance that a tongue's `fit` carries about width. The fits
+table puts numbers to that honesty: 0.3mm is the least a moving pair carries through
+its whole travel, and 0.5mm is what never binds.
 
 **The stop the sweep finds can be the detent the design wants.** The door that
 motivated all of this rests open at 240 degrees against the back of its own mount,
