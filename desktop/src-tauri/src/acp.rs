@@ -949,8 +949,14 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
 /// agent; they just raise it at different moments (Claude on session/prompt,
 /// Codex as early as session/new or session/list). The `auth_required:`
 /// prefix is the frontend's marker.
+///
+/// A token revoked or expired server-side never earns -32000: the local
+/// credential store still looks signed in, so Claude wraps the API's 401 as
+/// an internal error containing "Failed to authenticate" (the bundled CLI's
+/// wording for both cases). Without matching the message the user gets a
+/// dead-end note and no sign-in button (#115).
 fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
-    if error.code == ErrorCode::AuthRequired {
+    if error.code == ErrorCode::AuthRequired || error.message.contains("Failed to authenticate") {
         format!(
             "auth_required: {} is not signed in on this Mac",
             kind.label()
@@ -962,8 +968,19 @@ fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{attachment_block, rows};
+    use super::{attachment_block, friendly, rows, AgentKind};
     use agent_client_protocol::schema::v1::{ContentBlock, SessionConfigOption};
+
+    /// The exact message a revoked token produces (#115): an internal error,
+    /// not -32000, so only the message can route it to the sign-in button.
+    #[test]
+    fn revoked_token_reads_as_auth_required() {
+        let error = agent_client_protocol::Error::new(
+            -32603,
+            "Internal error: Failed to authenticate. API Error: 401 OAuth access token has been revoked.",
+        );
+        assert!(friendly(AgentKind::Claude, error).starts_with("auth_required:"));
+    }
 
     /// What claude-agent-acp 0.64.2 actually answers session/new with, captured
     /// off the wire. Mode, fast, and agent ride along and must not reach the
