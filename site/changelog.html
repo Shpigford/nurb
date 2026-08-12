@@ -117,6 +117,17 @@
   <h1>What's new</h1>
   <p class="lede">Every nurb release, newest first. Install once, then <b>nurb update</b> keeps you current.</p>
 
+  <article class="release" id="v0.17.0">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.17.0">v0.17.0</a></span><time datetime="2026-08-12">August 12, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span><b>Corners lift.</b> A wide flat part pulls its corners off the bed as it cools, and nurb catches it before you print. It measures how sharp the corners are looking down at the part, names the worst one, and says what to do: round the corners, rib the floor instead of leaving it solid, print with a brim. Tell nurb you print in ABS and it expects the lift on smaller parts, because that plastic pulls harder.</span></li>
+      <li><b class="tag new">new</b><span><b>Thin posts.</b> A skinny post standing straight up off the bed breaks along the layers. Under 3mm across it fails, under 5mm it warns, and a post lying down or merged into a wall is left alone.</span></li>
+      <li><b class="tag new">new</b><span><b>Your projects folder.</b> The Mac app keeps projects in Documents/nurb, and Settings now lets you keep them anywhere. Point it at a folder that already holds nurb projects and it offers to load them where they are, without moving anything.</span></li>
+      <li><b class="tag">improved</b><span>Your AI knows more about what survives a print. New rules cover parts meant to flex, how much room two printed parts need to fit together, hole sizes and the vertical bores that come out undersized, and what it takes to put a screw into plastic. There is an aesthetics section too, so the dimensions that nothing else decides get chosen on purpose rather than left to chance.</span></li>
+      <li><b class="tag">fixed</b><span>One viewer tab per project. An AI that lost track of the viewer it already started used to open another tab every time it looked. A second start on a project that is already open now hands back the window that is running.</span></li>
+    </ul>
+  </article>
+
   <article class="release" id="v0.16.0">
     <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.16.0">v0.16.0</a></span><time datetime="2026-08-10">August 10, 2026</time></div>
     <ul>
