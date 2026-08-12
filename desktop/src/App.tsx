@@ -57,6 +57,8 @@ type AboutInfo = {
   appVersion: string;
   nurbVersion: string;
   occtVersion: string | null;
+  osVersion: string;
+  arch: string;
 };
 
 // Conversation state per part: id of the session to resume (null means start
@@ -1071,6 +1073,8 @@ function App() {
           appVersion={about.appVersion}
           nurbVersion={about.nurbVersion}
           occtVersion={about.occtVersion}
+          osVersion={about.osVersion}
+          arch={about.arch}
           onClose={() => setShowAbout(false)}
         />
       )}

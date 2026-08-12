@@ -282,6 +282,8 @@ pub struct AboutInfo {
     pub app_version: String,
     pub nurb_version: String,
     pub occt_version: Option<String>,
+    pub os_version: String,
+    pub arch: String,
 }
 
 #[tauri::command]
@@ -301,10 +303,20 @@ pub fn about_info(app: tauri::AppHandle) -> Result<AboutInfo, String> {
     let occt_version = std::fs::read_to_string(dir.join("requirements.lock"))
         .ok()
         .and_then(|lock| occt_version(&lock));
+    let os_version = std::process::Command::new("sw_vers")
+        .arg("-productVersion")
+        .output()
+        .ok()
+        .filter(|out| out.status.success())
+        .and_then(|out| String::from_utf8(out.stdout).ok())
+        .map(|v| v.trim().to_string())
+        .unwrap_or_else(|| "unknown".into());
     Ok(AboutInfo {
         app_version,
         nurb_version,
         occt_version,
+        os_version,
+        arch: std::env::consts::ARCH.into(),
     })
 }
 

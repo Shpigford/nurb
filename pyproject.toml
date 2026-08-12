@@ -39,7 +39,7 @@ dev = [
 ]
 
 [project.scripts]
-nurb = "nurb.cli:main"
+nurb = "nurb_entrypoint:main"
 
 [tool.pytest.ini_options]
 # evals/ is its own uv project with its own suite; collecting it from here fails on
@@ -51,6 +51,7 @@ requires = ["uv_build>=0.11.26,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
+module-name = ["nurb", "nurb_entrypoint"]
 source-include = [
     "src/nurb/viewer.html",
     "src/nurb/doctrine.md",

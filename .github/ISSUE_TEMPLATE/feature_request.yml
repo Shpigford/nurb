@@ -1,0 +1,17 @@
+name: Feature request
+description: An idea for something nurb should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task or part you were working on when you wanted this. The problem matters more than the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like nurb to do?
+    validations:
+      required: true

@@ -1516,6 +1516,19 @@ textarea {
   margin-bottom: 12px;
 }
 
+.about-copy {
+  font: inherit;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.about-copy:hover {
+  text-decoration: underline;
+}
+
 .about-body a {
   color: var(--accent);
   text-decoration: none;

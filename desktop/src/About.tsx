@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Logo from "./Logo";
 import lgpl from "./licenses/OCCT_LICENSE_LGPL_21.txt?raw";
@@ -8,6 +10,8 @@ type Props = {
   appVersion: string;
   nurbVersion: string;
   occtVersion: string | null;
+  osVersion: string;
+  arch: string;
   onClose: () => void;
 };
 
@@ -28,7 +32,29 @@ function ExternalLink({ href, children }: { href: string; children: string }) {
 /// About and third-party notices. The OCCT section is the load-bearing one:
 /// its LGPL terms travel with every install the app performs, so the license
 /// text ships here, in the app, not behind a URL.
-export default function About({ appVersion, nurbVersion, occtVersion, onClose }: Props) {
+export default function About({
+  appVersion,
+  nurbVersion,
+  occtVersion,
+  osVersion,
+  arch,
+  onClose,
+}: Props) {
+  const [copied, setCopied] = useState(false);
+  const debugInfo = [
+    `app ${appVersion}`,
+    `CAD engine ${nurbVersion}`,
+    occtVersion ? `OCCT ${occtVersion}` : null,
+    `macOS ${osVersion} (${arch})`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const copyDebugInfo = () => {
+    writeText(debugInfo).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
   const occtSources = occtVersion
     ? `https://github.com/Open-Cascade-SAS/OCCT/tree/V${occtVersion.split(".").join("_")}`
     : "https://github.com/Open-Cascade-SAS/OCCT";
@@ -53,9 +79,12 @@ export default function About({ appVersion, nurbVersion, occtVersion, onClose }:
           <p className="about-links">
             <ExternalLink href="https://nurb.dev">nurb.dev</ExternalLink>
             <ExternalLink href="https://github.com/Shpigford/nurb">github</ExternalLink>
-            <ExternalLink href="https://github.com/Shpigford/nurb/issues/new">
+            <ExternalLink href="https://github.com/Shpigford/nurb/issues/new/choose">
               report an issue
             </ExternalLink>
+            <button className="about-copy" onClick={copyDebugInfo}>
+              {copied ? "copied" : "copy debug info"}
+            </button>
           </p>
           <p>
             © 2026 Ordinary Systems LLC. nurb is source-available under FSL-1.1-MIT; each

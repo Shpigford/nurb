@@ -36,4 +36,5 @@ sha2 = "0.10"
 # Part deletion goes through the Trash, never rm: it is the one place the app
 # destroys user work, so it has to be recoverable.
 trash = "5"
+tauri-plugin-clipboard-manager = "2"
 

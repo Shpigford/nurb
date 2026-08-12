@@ -48,10 +48,10 @@ export default function AgentsHelp({
           <p>
             Using one that isn't here?{" "}
             <a
-              href="https://github.com/Shpigford/nurb/issues/new"
+              href="https://github.com/Shpigford/nurb/issues/new?template=feature_request.yml"
               onClick={(e) => {
                 e.preventDefault();
-                openUrl("https://github.com/Shpigford/nurb/issues/new");
+                openUrl("https://github.com/Shpigford/nurb/issues/new?template=feature_request.yml");
               }}
             >
               Ask for it on GitHub.

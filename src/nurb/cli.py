@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import errno
+import importlib.metadata
 import pathlib
 import sys
 
@@ -1203,6 +1204,13 @@ def main(argv=None):
         # traceback should learn where the rest of it is.
         epilog="start with `nurb rules`, which prints the design doctrine",
     )
+    # The installed entry point handles a bare `nurb --version` before this
+    # package loads. Keep the action here so help and programmatic calls agree.
+    try:
+        version = importlib.metadata.version("nurb")
+    except importlib.metadata.PackageNotFoundError:
+        version = "0.0.0"
+    p.add_argument("--version", action="version", version=f"nurb {version}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("new", help="create a part")

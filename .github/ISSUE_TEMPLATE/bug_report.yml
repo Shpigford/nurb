@@ -1,0 +1,58 @@
+name: Bug report
+description: Something broke or behaved wrong
+labels: [bug]
+body:
+  - type: dropdown
+    id: surface
+    attributes:
+      label: How do you run nurb?
+      options:
+        - Desktop app
+        - Terminal, or an AI agent using the terminal
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: version
+    attributes:
+      label: nurb version
+      description: Desktop app; open About nurb from the menu bar and click "copy debug info", then paste it here. CLI; run `nurb --version`.
+      placeholder: "0.18.0"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Skip this if the debug info above already covers it.
+      placeholder: macOS 15.6
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, and what went wrong? A screenshot helps a lot; drag it in here.
+      placeholder: "When I do X, Y happens. I expected Z."
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest path that makes it happen again.
+      placeholder: |
+        1. Open the app
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: part
+    attributes:
+      label: Part file
+      description: If the bug involves a specific part, paste the part function here. It renders as Python automatically.
+      render: python
+  - type: textarea
+    id: output
+    attributes:
+      label: Error output
+      description: Any traceback, terminal output, or message the app showed. Paste it as text, not a screenshot, so we can search it.
+      render: text

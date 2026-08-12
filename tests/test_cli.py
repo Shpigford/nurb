@@ -2,10 +2,28 @@
 
 import pathlib
 import re
+import subprocess
+import sys
 
 import pytest
 
-from nurb import cli
+from nurb import __version__, cli
+
+
+def test_version_command_does_not_import_the_cad_package(tmp_path, monkeypatch):
+    blocked = tmp_path / "nurb"
+    blocked.mkdir()
+    (blocked / "__init__.py").write_text(
+        'raise AssertionError("version command imported nurb")\n', encoding="utf-8"
+    )
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+    result = subprocess.run(
+        [pathlib.Path(sys.executable).with_name("nurb"), "--version"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout == f"nurb {__version__}\n"
 
 
 def test_export_rejects_a_configuration_error(monkeypatch, tmp_path):
