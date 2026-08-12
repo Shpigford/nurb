@@ -97,6 +97,7 @@ min_wall          thinnest section, ray cast corrected by an inscribed sphere
 sliver            faces too small to print as anything but a smear
 concave_cosmetic  polish laid into an inside corner
 bed_bevel         polish laid on the edges that meet the build plate
+warp_risk         large first layers with corners likely to lift as they cool
 stability         center of mass outside the footprint
 projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all

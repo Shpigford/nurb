@@ -61,6 +61,7 @@ bounding box and still exports, so nothing downstream catches it.
   steepen one or match it to a ratio. Let the landing point fall where 45 degrees puts
   it. Mismatched facet angles are a veto: every facet on the part, cosmetic or
   structural or corbel, has to read as one system.
+- **A large first layer peels its corners as it cools.** Every layer shrinks as it cools and pulls toward the middle of the part, and the pull lands hardest on a sharp plan corner, farthest from the middle and holding on at a point. Past about 20,000mm2 of first layer the accumulated pull beats corner adhesion, and `warp_risk` names the corners that will lift. The fixes are in the outline, which is what makes this a CAD problem where elephant's foot is not: round the vertical corners at 8mm or more, so the peel front is a curve instead of a point, and give a big plate a ribbed floor rather than a solid slab, which is stiffer per gram and halves what contracts. A 1mm polish chamfer is not relief here; it moves the point half a millimetre. The brim and the clean bed are the slicer's share, and they treat the symptom the outline caused.
 - **Elephant's foot is a slicer setting**, not a CAD problem. Do not model around it.
 
 ### Fasteners

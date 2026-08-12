@@ -11,7 +11,7 @@ import pathlib
 from dataclasses import dataclass, field, replace
 from math import asin, atan2, cos, degrees, pi, sin
 
-from build123d import Axis, CenterOf, GeomType, Vector
+from build123d import Axis, CenterOf, GeomType, Plane, Vector
 
 FAIL = "fail"  # this will not print, or will not work
 WARN = "warn"  # this needs attention, most often support
@@ -35,6 +35,7 @@ LABELS = {
     "sliver": "tiny detail",
     "concave_cosmetic": "inside corner",
     "bed_bevel": "poor bed grip",
+    "warp_risk": "corners lift",
     "stability": "tips over",
     "projection_ratio": "long reach",
     "build_volume": "too big",
@@ -103,6 +104,8 @@ class Context:
     cosmetic_chamfer: float = 1.0  # the size the polish pass uses
     min_wall: float = 1.0  # what this printer lays down reliably; per part, per card
     sliver_area: float = 1.0
+    warp_area: float = 20000.0  # first-layer mm2 past which contraction peels sharp corners
+    warp_radius: float = 8.0  # a plan corner rounded under this is still a peel point
     accepted: dict = field(default_factory=dict)  # rule -> how many are already known
 
 
@@ -347,9 +350,15 @@ def _span(shape, up):
     vertices put the bed 8mm above the actual bottom of a cylinder, marked every face
     grounded, and turned the overhang rule off without any sign that it had happened.
 
-    Exact for an axis-aligned build direction, which is what a part placed on a bed
-    has. Conservative otherwise.
+    A bounding box only answers exactly along its own axes. For any other build
+    direction, first put the shape into a coordinate system whose Z is `up`; its local
+    Z bounds are then the exact projection rather than the conservative projection of
+    the world-axis box.
     """
+    if max(abs(up.X), abs(up.Y), abs(up.Z)) < 1.0 - 1e-9:
+        local = Plane(origin=(0, 0, 0), z_dir=up).to_local_coords(shape)
+        box = local.bounding_box()
+        return box.min.Z, box.max.Z
     box = shape.bounding_box()
     corners = [
         Vector(x, y, z)
@@ -875,6 +884,113 @@ def stability(shape, ctx):
                 )
             ]
     return []
+
+
+def _sharp_plan_corners(face, up, radius):
+    """Where a face's outline turns a corner's worth too fast for a `radius` round.
+
+    Sharpness here is turn per length of perimeter, not vertex angle, because a 1mm
+    polish chamfer is still the corner it dresses: the outline turns its full 90
+    degrees within a couple of millimetres either way. Sampled as a polyline so a
+    true vertex, a chamfered corner and an undersized fillet all answer the same
+    question. The window is the perimeter a `radius` round spends turning 60
+    degrees, so anything rounded at least that generously stays under the bar
+    exactly. Concave corners turn against the outline's orientation and are
+    skipped: an inside corner has material outboard of it holding it down.
+    """
+    first, second = _bed_axes(up)
+    wire = face.outer_wire()
+    n = max(int(wire.length), 24)
+    pts = [wire.position_at(i / n) for i in range(n)]
+    flat = [(p.dot(first), p.dot(second)) for p in pts]
+    spacing = wire.length / n
+    turns = []
+    for i in range(n):
+        ax, ay = flat[i]
+        bx, by = flat[(i + 1) % n]
+        cx, cy = flat[(i + 2) % n]
+        ux, uy = bx - ax, by - ay
+        vx, vy = cx - bx, cy - by
+        turns.append(atan2(ux * vy - uy * vx, ux * vx + uy * vy))
+    orient = 1.0 if sum(turns) >= 0 else -1.0
+    corner = pi / 3
+    window = max(1, round(radius * corner / spacing))
+    hits = [
+        i
+        for i in range(n)
+        if orient * sum(turns[(i + j) % n] for j in range(window)) >= corner - 1e-9
+    ]
+    if not hits:
+        return []
+    # Consecutive windows over one corner are one corner. Clusters are gaps wider
+    # than the window itself, and the last cluster can wrap into the first.
+    clusters = [[hits[0]]]
+    for i in hits[1:]:
+        if i - clusters[-1][-1] <= window:
+            clusters[-1].append(i)
+        else:
+            clusters.append([i])
+    if len(clusters) > 1 and (hits[0] + n) - clusters[-1][-1] <= window:
+        clusters[0] = clusters.pop() + clusters[0]
+    out = []
+    for cluster in clusters:
+        peak = max(
+            (j % n for i in cluster for j in range(i, i + window)),
+            key=lambda j: orient * turns[j],
+        )
+        out.append(pts[(peak + 1) % n])
+    return out
+
+
+@rule("warp_risk")
+def warp_risk(shape, ctx):
+    """A first layer big enough for cooling contraction to peel its corners.
+
+    Every layer shrinks as it cools and pulls toward the middle of the part. On a
+    small part first-layer adhesion wins. On a big flat plate the accumulated pull
+    beats it, and it lets go where the pull concentrates: a sharp plan corner,
+    farthest from the middle and holding on at a point. The design-side fixes are in
+    the outline, which is why this is a CAD finding and elephant's foot is not:
+    round the vertical corners past `warp_radius` so the peel front is a curve, and
+    prefer a ribbed floor to a solid slab, which halves what contracts. The brim is
+    the slicer's share and the message says so, but a brim on sharp corners is
+    treating the symptom.
+
+    Only faces that are themselves plate-sized get their corners read: the ribs
+    under a properly ribbed floor are skinny rectangles full of sharp corners, and
+    each pulls far too little to peel.
+    """
+    up = Vector(*ctx.up).normalized()
+    bed, _ = _span(shape, up)
+    footing = [f for f in shape.faces() if _span(f, up)[1] <= bed + 1e-4]
+    area = sum(f.area for f in footing)
+    if area <= ctx.warp_area:
+        return []
+    sharp = [
+        point
+        for face in footing
+        if face.area >= ctx.warp_area / 2
+        for point in _sharp_plan_corners(face, up, ctx.warp_radius)
+    ]
+    if not sharp:
+        return []
+    centre = sum((f.center() * f.area for f in footing), Vector(0, 0, 0)) / area
+    worst = max(sharp, key=lambda point: (point - centre).length)
+    count = len(sharp)
+    return [
+        Finding(
+            "warp_risk",
+            WARN,
+            f"{count} sharp corner{'' if count == 1 else 's'} on a {area:.0f}mm2 "
+            f"first layer; contraction peels them as the print cools. Round plan "
+            f"corners past {ctx.warp_radius:.0f}mm, rib the floor instead of a "
+            f"solid slab, and print with a brim",
+            plain="a big flat base with sharp corners. The plastic shrinks as it "
+            "cools and curls them off the bed; rounded corners and a brim keep it down",
+            value=count,
+            where=tuple(round(v, 2) for v in worst),
+        )
+    ]
 
 
 # --- printer profiles --------------------------------------------------------

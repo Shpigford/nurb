@@ -6,7 +6,7 @@ finding is obvious from the geometry: a known angle, a known count, a known tip.
 
 from math import cos, radians, sin, tan
 
-from build123d import Align, Box, Cylinder, Plane, Pos, Rot, extrude, Polygon
+from build123d import Align, Axis, Box, Cylinder, Plane, Pos, Rot, extrude, Polygon
 import pytest
 
 from nurb.checks import FAIL, WARN, Context, run
@@ -178,6 +178,63 @@ def test_grown_fins_clear_the_stability_rule_on_a_tall_part():
 
     finned = stand(Box(4, 30, 160), tilt=45, facet=2.0)
     assert only(finned, "stability") == []
+
+
+# --- warp risk ---------------------------------------------------------------
+
+
+def test_a_big_plate_with_sharp_corners_will_curl():
+    """The 300 x 150 shelf that lifted all four corners off the bed: a 45,000mm2
+    first layer with each corner holding on at a point."""
+    found = only(Box(300, 150, 5), "warp_risk")
+    assert len(found) == 1
+    assert found[0].severity == WARN
+    assert found[0].value == 4
+
+
+def test_a_polish_chamfer_is_not_corner_relief():
+    """A 1mm chamfer moves the point half a millimetre; the outline still turns its
+    full 90 degrees within a couple of millimetres and still peels."""
+    from build123d import chamfer
+
+    plate = chamfer(Box(300, 150, 5).edges().filter_by(Axis.Z), 1.0)
+    assert len(only(plate, "warp_risk")) == 1
+
+
+def test_rounded_corners_spread_the_peel_and_clear_it():
+    from build123d import fillet
+
+    plate = fillet(Box(300, 150, 5).edges().filter_by(Axis.Z), 8.0)
+    assert only(plate, "warp_risk") == []
+
+
+def test_an_undersized_round_is_still_a_peel_point():
+    from build123d import fillet
+
+    plate = fillet(Box(300, 150, 5).edges().filter_by(Axis.Z), 6.0)
+    assert len(only(plate, "warp_risk")) == 1
+
+
+def test_warp_risk_uses_a_non_axis_aligned_build_direction():
+    """Changing coordinates does not change the plate or make its footing disappear."""
+    plate = Rot(0, 45, 0) * Box(300, 150, 5)
+    diagonal = sin(radians(45)), 0, cos(radians(45))
+    found = only(plate, "warp_risk", Context(up=diagonal))
+    assert len(found) == 1
+    assert found[0].value == 4
+
+
+def test_a_small_first_layer_never_warps():
+    """Sharp corners and all: 10,000mm2 is what adhesion holds without help."""
+    assert only(Box(100, 100, 5), "warp_risk") == []
+
+
+def test_a_ribbed_floor_contracts_too_little_to_peel():
+    """The same 300 x 150 plate lifted onto ribs: the first layer is the rib
+    bottoms, skinny rectangles full of sharp corners that each pull too little."""
+    floor = Pos(0, 0, 3.5) * Box(300, 150, 3)
+    ribbed = sum((Pos(x, 0, 1) * Box(3, 150, 2) for x in range(-135, 150, 30)), floor)
+    assert only(ribbed, "warp_risk") == []
 
 
 # --- sliver ------------------------------------------------------------------
