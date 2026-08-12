@@ -79,6 +79,23 @@ impl Registry {
         self.save(&projects);
     }
 
+    /// Insert an entry without claiming recency. A project swept in from a
+    /// folder was never opened, so it must not win the launch-time
+    /// "most recently opened" restore over the one the user was actually in.
+    pub fn adopt(&self, name: &str, path: &Path) {
+        let mut projects = self.projects.lock().unwrap();
+        if projects.iter().any(|p| p.path == path) {
+            return;
+        }
+        projects.push(Project {
+            name: name.to_string(),
+            path: path.to_path_buf(),
+            last_opened: 0,
+            selected_part: None,
+        });
+        self.save(&projects);
+    }
+
     pub fn touch(&self, path: &Path) {
         let mut projects = self.projects.lock().unwrap();
         if let Some(project) = projects.iter_mut().find(|p| p.path == path) {

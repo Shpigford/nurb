@@ -52,10 +52,14 @@ fn seed_part_name(project: &str) -> String {
 }
 
 fn project_base(folder: Option<String>, default: PathBuf) -> PathBuf {
-    folder
-        .filter(|path| !path.trim().is_empty())
-        .map(PathBuf::from)
-        .unwrap_or(default)
+    match folder
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        Some(path) => PathBuf::from(path),
+        None => default,
+    }
 }
 
 fn default_projects_folder_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -138,11 +142,12 @@ fn seed(launcher: &env::Launcher, dir: &std::path::Path, part: &str) -> Result<(
 
 #[tauri::command]
 fn add_project(registry: State<Registry>, path: String) -> Result<String, String> {
-    let dir = register_project(&registry, PathBuf::from(path))?;
+    let (name, dir) = validated_project(PathBuf::from(path))?;
+    registry.upsert(&name, &dir, None);
     Ok(dir.to_string_lossy().into_owned())
 }
 
-fn register_project(registry: &Registry, path: PathBuf) -> Result<PathBuf, String> {
+fn validated_project(path: PathBuf) -> Result<(String, PathBuf), String> {
     let dir = path
         .canonicalize()
         .map_err(|e| format!("cannot read that folder: {e}"))?;
@@ -153,8 +158,7 @@ fn register_project(registry: &Registry, path: PathBuf) -> Result<PathBuf, Strin
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .ok_or("cannot use the filesystem root as a project")?;
-    registry.upsert(&name, &dir, None);
-    Ok(dir)
+    Ok((name, dir))
 }
 
 fn register_projects_in_folder(
@@ -172,8 +176,9 @@ fn register_projects_in_folder(
         if !path.join("parts").is_dir() {
             continue;
         }
-        if let Ok(path) = register_project(registry, path) {
-            projects.push(path.to_string_lossy().into_owned());
+        if let Ok((name, dir)) = validated_project(path) {
+            registry.adopt(&name, &dir);
+            projects.push(dir.to_string_lossy().into_owned());
         }
     }
     projects.sort();
@@ -564,6 +569,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["alpha", "beta"]
         );
+        // Swept-in projects were never opened, so none of them may win the
+        // launch-time "most recently opened" restore.
+        assert!(registry
+            .list()
+            .iter()
+            .all(|view| view.project.last_opened == 0));
         std::fs::remove_dir_all(root).unwrap();
     }
 

@@ -10,9 +10,11 @@ type Props = {
 
 export default function Settings({ folder, customized, onChange, onReset, onClose }: Props) {
   const changeFolder = async () => {
+    // Before the backend resolves the default, the folder shown is the
+    // literal "~/Documents/nurb" placeholder, which is not a path.
     const picked = await pickFolder({
       directory: true,
-      defaultPath: folder,
+      defaultPath: folder.startsWith("~") ? undefined : folder,
       title: "Choose where new nurb projects are created",
     });
     if (typeof picked === "string") await onChange(picked);
