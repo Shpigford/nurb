@@ -44,7 +44,7 @@ def test_export_collection_keeps_the_source_part(monkeypatch, tmp_path):
 # --- picking a port -----------------------------------------------------------
 
 
-def test_an_unasked_port_walks_past_one_that_is_busy():
+def test_an_unasked_port_walks_past_one_that_is_busy(tmp_path):
     """A project is any directory with parts/, so two at once is the ordinary case."""
     import socket
 
@@ -52,19 +52,20 @@ def test_an_unasked_port_walks_past_one_that_is_busy():
         held.bind(("127.0.0.1", 0))
         held.listen()
         busy = held.getsockname()[1]
-        assert cli._pick_port(None) != busy
+        assert cli._pick_port(None, tmp_path) != busy
         assert cli._is_free(busy) is False
 
 
-def test_an_exhausted_walk_falls_back_to_an_ephemeral_port(monkeypatch):
+def test_an_exhausted_walk_falls_back_to_an_ephemeral_port(monkeypatch, tmp_path):
     """Forty viewers is not a reason to refuse to start (issue #55)."""
     monkeypatch.setattr(cli, "_is_free", lambda port: False)
-    port = cli._pick_port(None)
+    monkeypatch.setattr(cli, "_serving", lambda port, root: None)
+    port = cli._pick_port(None, tmp_path)
     assert port not in range(cli.DEFAULT_PORT, cli.DEFAULT_PORT + 40)
     assert port > 0
 
 
-def test_asking_for_a_busy_port_is_an_error_not_a_suggestion():
+def test_asking_for_a_busy_port_is_an_error_not_a_suggestion(tmp_path):
     """`--port 7373` picking 7374 would open a tab onto somebody else's parts."""
     import socket
 
@@ -73,8 +74,77 @@ def test_asking_for_a_busy_port_is_an_error_not_a_suggestion():
         held.listen()
         busy = held.getsockname()[1]
         with pytest.raises(SystemExit) as exc:
-            cli._pick_port(busy)
+            cli._pick_port(busy, tmp_path)
         assert str(busy) in str(exc.value.code)
+
+
+def _fake_dev_server(root):
+    """A thread answering /api/sync the way a running nurb dev does."""
+    import http.server
+    import json
+    import threading
+
+    body = json.dumps({"type": "sync", "root": str(root)}).encode()
+
+    class Sync(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = http.server.HTTPServer(("127.0.0.1", 0), Sync)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def test_a_second_dev_for_the_same_project_refuses_with_the_running_url(monkeypatch, tmp_path):
+    """Restarting `nurb dev` per turn is how an agent piles up viewer tabs (issue #102)."""
+    httpd = _fake_dev_server(tmp_path)
+    try:
+        port = httpd.server_address[1]
+        with pytest.raises(SystemExit) as exc:
+            cli._pick_port(port, tmp_path)
+        assert f"http://127.0.0.1:{port}" in str(exc.value.code)
+        assert "already serving" in str(exc.value.code)
+        # The unasked walk refuses too, rather than quietly binding the next port.
+        monkeypatch.setattr(cli, "DEFAULT_PORT", port)
+        with pytest.raises(SystemExit) as exc:
+            cli._pick_port(None, tmp_path)
+        assert "already serving" in str(exc.value.code)
+    finally:
+        httpd.shutdown()
+
+
+def test_a_free_lower_port_does_not_hide_the_running_project(monkeypatch, tmp_path):
+    """A stopped earlier project can leave a gap below this project's server."""
+    base = cli.DEFAULT_PORT
+    running = base + 1
+    monkeypatch.setattr(cli, "_is_free", lambda port: port == base)
+    monkeypatch.setattr(
+        cli,
+        "_serving",
+        lambda port, root: f"http://127.0.0.1:{port}" if port == running else None,
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli._pick_port(None, tmp_path)
+
+    assert f"http://127.0.0.1:{running}" in str(exc.value.code)
+
+
+def test_a_dev_for_a_different_project_is_walked_past_not_reused(tmp_path):
+    """The running URL is only an answer when it shows this project's parts."""
+    httpd = _fake_dev_server(tmp_path / "other")
+    try:
+        port = httpd.server_address[1]
+        assert cli._serving(port, tmp_path) is None
+    finally:
+        httpd.shutdown()
 
 
 # --- day one ------------------------------------------------------------------

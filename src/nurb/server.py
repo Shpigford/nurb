@@ -947,6 +947,9 @@ class Server:
         payload = {
             "type": "sync",
             "project": self.root.name,
+            # How a second `nurb dev` recognizes this server as its own project and
+            # refuses to double up instead of walking to the next port.
+            "root": str(self.root),
             "bed": self._bed(),
             "version": __version__,
             "upgradable": _upgrade_command() is not None,

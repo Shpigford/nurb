@@ -1083,12 +1083,38 @@ def _is_free(port):
             return False
 
 
-def _pick_port(asked):
+def _serving(port, root):
+    """The URL of a nurb dev already serving `root` on `port`, or None.
+
+    A taken port is two different situations: this project's own server, which is an
+    answer to reuse, and any other process, which is a reason to keep walking. Asking
+    the port's /api/sync for its project root tells them apart.
+    """
+    import json
+    import urllib.request
+
+    url = f"http://127.0.0.1:{port}"
+    try:
+        with urllib.request.urlopen(f"{url}/api/sync", timeout=0.5) as resp:
+            payload = json.load(resp)
+    except Exception:
+        return None
+    if payload.get("type") == "sync" and payload.get("root") == str(root):
+        return url
+    return None
+
+
+def _pick_port(asked, root):
     """The port to serve on, checked before anything expensive happens.
 
     A project is any directory with a `parts/` folder, so working on two at once is
     the ordinary case rather than an advanced one, and it should not cost a flag. An
     unasked-for port walks up from the default until one is free.
+
+    A port already serving this same project is not free and not skippable either:
+    starting a second server there is how an agent that lost track of its background
+    shell piles identical viewer tabs on the user (issue #102), so the answer is the
+    running URL, not another instance.
 
     Asking explicitly means asking, so a port that is taken is an error rather than a
     suggestion: `--port 7373` picking 7374 would send you to a tab showing somebody
@@ -1097,13 +1123,28 @@ def _pick_port(asked):
     if asked is not None:
         if _is_free(asked):
             return asked
+        if url := _serving(asked, root):
+            sys.exit(
+                f"  nurb dev is already serving this project at {url}\n"
+                f"  use that URL; a save reaches it without a restart"
+            )
         sys.exit(
             f"  port {asked} is already in use, most likely by another nurb dev.\n"
             f"  leave --port off and one will be picked for you"
         )
+    free = None
     for port in range(DEFAULT_PORT, DEFAULT_PORT + 40):
         if _is_free(port):
-            return port
+            if free is None:
+                free = port
+            continue
+        if url := _serving(port, root):
+            sys.exit(
+                f"  nurb dev is already serving this project at {url}\n"
+                f"  use that URL; a save reaches it without a restart"
+            )
+    if free is not None:
+        return free
     # Forty viewers is unusual but not a reason to refuse to start (issue #55 hit
     # this wall): fall back to whatever the OS hands out, as headless renders do.
     import socket
@@ -1119,7 +1160,7 @@ def cmd_dev(args):
     root = project_root()
     # Before the build, not after. Discovering the port is taken used to cost a full
     # rebuild of every part in the project first.
-    port = _pick_port(args.port)
+    port = _pick_port(args.port, root)
     server = Server(root, port=port, draft=args.draft, open_browser=args.open)
     print(f"  building {root.name}/parts")
     try:
