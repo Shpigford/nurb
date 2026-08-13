@@ -39,10 +39,10 @@ fn profile(project: &Path, engine_root: &Path) -> String {
     }
     if let Some(home) = home() {
         // The agents' own state (`~/.claude` and the `~/.claude.json` family,
-        // `~/.codex`): one prefix rule per agent home, so session files,
-        // config, and their temp-file variants are all covered without
-        // enumerating filenames.
-        for dot in [".claude", ".codex"] {
+        // `~/.codex`, `~/.cursor`, `~/.grok`): one prefix rule per agent
+        // home, so session files, config, and their temp-file variants are
+        // all covered without enumerating filenames.
+        for dot in [".claude", ".codex", ".cursor", ".grok"] {
             rules.push_str(&format!(
                 "  (regex #\"^{}/\\{dot}\")\n",
                 regex_escaped(&home.display().to_string())
@@ -172,11 +172,20 @@ mod tests {
         // Inside the project: allowed. The user's own dotfiles: refused.
         assert!(sh(&profile, &format!("echo hi > '{}/part.py'", project.display())));
         assert!(!sh(&profile, "echo hacked >> \"$HOME/nurb-sbx-canary\" && rm \"$HOME/nurb-sbx-canary\""));
-        // Agent state under ~/.claude writes fine (created and removed).
-        assert!(sh(
-            &profile,
-            "mkdir -p \"$HOME/.claude/nurb-sbx-test\" && rmdir \"$HOME/.claude/nurb-sbx-test\""
-        ));
+        // Agent state under each agent home writes fine (created and removed).
+        for dot in [".claude", ".codex", ".cursor", ".grok"] {
+            let existed = home().map(|h| h.join(dot).exists()).unwrap_or(false);
+            assert!(sh(
+                &profile,
+                &format!("mkdir -p \"$HOME/{dot}/nurb-sbx-test\" && rmdir \"$HOME/{dot}/nurb-sbx-test\"")
+            ));
+            // Do not leave dotdirs behind for agents this machine lacks.
+            if !existed {
+                if let Some(h) = home() {
+                    std::fs::remove_dir(h.join(dot)).ok();
+                }
+            }
+        }
         std::fs::remove_dir_all(&project).ok();
     }
 
