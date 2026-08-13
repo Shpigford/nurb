@@ -206,10 +206,10 @@ function Chat({
   onBusyRef.current = onBusy;
 
   useEffect(() => {
-    // The rail's busy dot: report turn activity up, and clear it on unmount.
-    onBusyRef.current(busy);
+    // A removed column cannot leave a stale rail dot behind. Turn transitions
+    // report synchronously in send(), before adapter startup can race UI state.
     return () => onBusyRef.current(false);
-  }, [busy]);
+  }, []);
 
   useEffect(() => {
     // Kill the adapter when this project's chat column goes away. StrictMode
@@ -239,6 +239,18 @@ function Chat({
       unlisten.then((stop) => stop());
     };
   }, []);
+
+  useEffect(() => {
+    // Same hook, submit half: every mounted column hears the event, so only
+    // the visible one sends.
+    if (!import.meta.env.DEV || hidden) return;
+    const unlisten = listen("test-send", () => {
+      inputRef.current?.form?.requestSubmit();
+    });
+    return () => {
+      unlisten.then((stop) => stop());
+    };
+  }, [hidden]);
 
   useEffect(() => {
     // A seed lands once the column is visible. Below any half-typed draft rather
@@ -483,6 +495,7 @@ function Chat({
         },
       ]);
       setBusy(true);
+      onBusyRef.current(true);
       setAuthNeeded(false);
       try {
         const session = await ensureSession();
@@ -509,6 +522,7 @@ function Chat({
       } finally {
         sendingRef.current = false;
         setBusy(false);
+        onBusyRef.current(false);
         setPermissions([]);
       }
     },

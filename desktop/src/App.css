@@ -403,13 +403,21 @@ textarea {
   font-weight: 600;
 }
 
-.part-busy {
+.part-busy,
+.part-unseen {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--amber);
   flex: none;
+}
+
+.part-busy {
+  background: var(--amber);
   animation: part-busy-pulse 1.2s ease-in-out infinite;
+}
+
+.part-unseen {
+  background: var(--accent);
 }
 
 @keyframes part-busy-pulse {

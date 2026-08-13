@@ -387,12 +387,19 @@ fn test_hook(app: AppHandle) {
             let mut stream = stream;
             if stream.read_to_string(&mut text).is_ok() && !text.is_empty() {
                 use tauri::Emitter;
-                // "create:<name>" drives project creation; anything else is
-                // composer text. AX presses buttons fine but cannot write
-                // into WKWebView text fields, hence both.
-                let _ = match text.strip_prefix("create:") {
-                    Some(name) => app.emit("test-create", name.to_string()),
-                    None => app.emit("test-type", text),
+                // "create:<name>" drives project creation, "open:<name>"
+                // switches to a listed project, "send:" submits the visible
+                // composer; anything else is composer text. AX presses
+                // buttons only while the webview is frontmost and cannot
+                // reach WKWebView text fields or list rows, hence all four.
+                let _ = if let Some(name) = text.strip_prefix("create:") {
+                    app.emit("test-create", name.to_string())
+                } else if let Some(name) = text.strip_prefix("open:") {
+                    app.emit("test-open", name.to_string())
+                } else if text == "send:" {
+                    app.emit("test-send", ())
+                } else {
+                    app.emit("test-type", text)
                 };
             }
         }

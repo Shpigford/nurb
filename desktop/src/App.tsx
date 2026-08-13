@@ -9,6 +9,13 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
+import {
+  chatKey,
+  markChatSeen,
+  retainChatColumns,
+  updateChatActivity,
+  type ChatColumn,
+} from "./chatColumns";
 import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus } from "./Icons";
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
 import type { Column } from "./layout";
@@ -61,14 +68,11 @@ type AboutInfo = {
   arch: string;
 };
 
-// Conversation state per part: id of the session to resume (null means start
-// fresh), the agent that owns it (null until a session exists; fresh columns
-// take the pane's default), and a generation that only "start fresh" bumps to
-// remount that part's column. There is no visible session list; each part has
-// one rolling conversation, picked up where it left off. The map is built
-// once per project open from the newest listed session recorded against each
-// part.
-type PartChat = { id: string | null; agent: string | null; gen: number };
+// What a project's session list says to resume, per part: the newest recorded
+// session's id and the agent that owns it. There is no visible session list;
+// each part has one rolling conversation, picked up where it left off. Built
+// once per project open, then only read to seed columns.
+type PartChat = { id: string | null; agent: string | null };
 type ResumeState = { path: string; byPart: Record<string, PartChat> };
 
 const NO_PARTS: Part[] = [];
@@ -133,11 +137,18 @@ function App() {
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [resumeState, setResumeState] = useState<ResumeState | null>(null);
-  // Parts whose chat column has been opened this run. Columns stay mounted
-  // when the selection moves away, so a part's agent keeps working in the
-  // background; only the selected part's column is visible.
-  const [mountedParts, setMountedParts] = useState<string[]>([]);
-  const [busyParts, setBusyParts] = useState<Record<string, boolean>>({});
+  // Chat columns opened this run. Columns stay mounted when the selection
+  // moves away, so a part's agent keeps working in the background; only the
+  // selected part's column is visible. A column whose agent is mid-turn even
+  // survives a project switch (issue: creating a project used to kill a
+  // 30-minute run in the previous one). A hidden completed column stays until
+  // shown, preserving results and unsent drafts that session history cannot.
+  const [columns, setColumns] = useState<ChatColumn[]>([]);
+  const [busyChats, setBusyChats] = useState<Record<string, boolean>>({});
+  // A ref for effects that must read the latest busy map without re-running on
+  // every activity update.
+  const busyRef = useRef(busyChats);
+  busyRef.current = busyChats;
   // The project row's conversation covers the whole project; while it is focused
   // the viewer keeps showing the selected part, so this is chat focus, not selection.
   const [projectChatFocused, setProjectChatFocused] = useState(false);
@@ -315,9 +326,8 @@ function App() {
   // over the path: a webview ignores an <a download>, so the file is revealed in
   // Finder instead of downloaded.
   const focusProjectChat = useCallback((seed?: string) => {
-    setMountedParts((list) =>
-      list.includes(PROJECT_CHAT) ? list : [...list, PROJECT_CHAT],
-    );
+    // The column itself mounts via the focus effect below, once the project's
+    // session list has arrived.
     setProjectChatFocused(true);
     if (seed) setProjectSeed(seed);
   }, []);
@@ -480,8 +490,9 @@ function App() {
   // an agent without session listing), just mean fresh chats.
   useEffect(() => {
     setResumeState(null);
-    setMountedParts([]);
-    setBusyParts({});
+    // Leaving a project keeps busy columns and hidden results. Ordinary idle
+    // columns go now; an unseen one goes after its exact chat has been shown.
+    setColumns((list) => retainChatColumns(list, active, busyRef.current));
     setPartNaming(false);
     setProjectChatFocused(false);
     setProjectSeed(null);
@@ -494,7 +505,7 @@ function App() {
         for (const entry of list) {
           // Newest first, so the first session seen per part wins.
           if (entry.part && !byPart[entry.part]) {
-            byPart[entry.part] = { id: entry.id, agent: entry.agent, gen: 0 };
+            byPart[entry.part] = { id: entry.id, agent: entry.agent };
           }
         }
         setResumeState({ path: active, byPart });
@@ -531,24 +542,22 @@ function App() {
 
   // A deleted or renamed source has no rail row that can reveal its chat.
   // Unmount that column so its adapter and any pending permission request do
-  // not survive invisibly until the whole project closes.
+  // not survive invisibly until the whole project closes. The busy flag
+  // clears itself on unmount.
   useEffect(() => {
     if (!active || partState?.path !== active) return;
     const live = new Set(partState.parts.map((part) => part.name));
     live.add(PROJECT_CHAT); // no rail part backs it, but its row never goes away
-    setMountedParts((list) => {
-      const kept = list.filter((part) => live.has(part));
+    setColumns((list) => {
+      const kept = list.filter((col) => col.path !== active || live.has(col.part));
       return kept.length === list.length ? list : kept;
-    });
-    setBusyParts((map) => {
-      const kept = Object.fromEntries(
-        Object.entries(map).filter(([part]) => live.has(part)),
-      );
-      return Object.keys(kept).length === Object.keys(map).length ? map : kept;
     });
   }, [active, partState]);
 
   const removeProject = async (path: string) => {
+    // Removed projects lose their columns even mid-turn; there is no rail row
+    // left to ever show the result.
+    setColumns((list) => list.filter((col) => col.path !== path));
     await invoke("remove_project", { path });
     setServers((s) => {
       const { [path]: _, ...rest } = s;
@@ -595,6 +604,19 @@ function App() {
     };
   }, [createNamed]);
 
+  // Same hook: "open:<name>" switches to a listed project, which AX cannot
+  // do either (the rail's rows are list items, not buttons).
+  useEffect(() => {
+    const unlisten = listen<string>("test-open", (event) => {
+      const name = event.payload.trim();
+      const project = projects.find((entry) => entry.name === name);
+      if (project) openProject(project.path);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [projects, openProject]);
+
   const addExisting = async () => {
     const picked = await pickFolder({ directory: true });
     if (typeof picked !== "string") return;
@@ -615,13 +637,61 @@ function App() {
     : parts[0]?.name;
   const partsReady = partState?.path === active;
 
+  // Only the active project's focused chat shows; every other column stays
+  // mounted but hidden so its turn keeps streaming. The viewer-side gates
+  // (server up, parts listed, project present) put the placeholder up instead.
+  const visiblePart =
+    active && activeServer && partsReady && !activeProject?.missing
+      ? projectChatFocused
+        ? PROJECT_CHAT
+        : selectedPart
+      : null;
+  const visibleChatKey = active && visiblePart ? chatKey(active, visiblePart) : null;
+  const columnVisible = (col: ChatColumn) =>
+    visibleChatKey === chatKey(col.path, col.part);
+
+  // A hidden result has now actually painted. It can return to the ordinary
+  // idle-column lifecycle and be torn down the next time its project is left.
+  useEffect(() => {
+    if (!active || !visiblePart) return;
+    setColumns((list) => markChatSeen(list, active, visiblePart));
+  }, [active, visiblePart]);
+
+  // Opening a chat column waits for the project's session list, then seeds
+  // the column with the conversation to resume. A column that survived a
+  // project switch is already in the list and is left alone, mid-stream.
+  const openChat = useCallback(
+    (part: string) => {
+      if (!active || resumeState?.path !== active) return;
+      const seed = resumeState.byPart[part];
+      setColumns((list) =>
+        list.some((col) => col.path === active && col.part === part)
+          ? list
+          : [
+              ...list,
+              {
+                path: active,
+                part,
+                agent: seed?.agent ?? null,
+                resume: seed?.id ?? null,
+                gen: 0,
+                unseen: false,
+              },
+            ],
+      );
+    },
+    [active, resumeState],
+  );
+
   // Selecting a part opens (and keeps open) its chat column.
   useEffect(() => {
-    if (!active || resumeState?.path !== active || !selectedPart) return;
-    setMountedParts((list) =>
-      list.includes(selectedPart) ? list : [...list, selectedPart],
-    );
-  }, [active, resumeState, selectedPart]);
+    if (selectedPart) openChat(selectedPart);
+  }, [openChat, selectedPart]);
+
+  // Focusing the project conversation opens its column the same way.
+  useEffect(() => {
+    if (projectChatFocused) openChat(PROJECT_CHAT);
+  }, [openChat, projectChatFocused]);
 
   const selectPart = (name: string) => {
     if (!active) return;
@@ -688,13 +758,12 @@ function App() {
   // new conversation takes the current default; naming one pins it, which is
   // how the chat header switches agents. Either way the old conversation stays
   // in its agent's own store.
-  const startFresh = async (part: string, agent: string | null = null) => {
-    if (!active) return;
+  const startFresh = async (path: string, part: string, agent: string | null = null) => {
     try {
       // Persist the empty selection before remounting. Otherwise quitting
       // before the first new prompt would restore the old newest session.
       await invoke("select_part_chat", {
-        path: active,
+        path,
         part,
         sessionId: null,
       });
@@ -702,17 +771,13 @@ function App() {
       setError(String(e));
       return;
     }
-    setResumeState((state) => {
-      if (!state) return state;
-      const prior = state.byPart[part];
-      return {
-        ...state,
-        byPart: {
-          ...state.byPart,
-          [part]: { id: null, agent, gen: (prior?.gen ?? 0) + 1 },
-        },
-      };
-    });
+    setColumns((list) =>
+      list.map((col) =>
+        col.path === path && col.part === part
+          ? { ...col, resume: null, agent, gen: col.gen + 1 }
+          : col,
+      ),
+    );
   };
 
   // Track live session ids so switching parts and back resumes the same
@@ -726,23 +791,34 @@ function App() {
     invoke("select_part_chat", { path, part, sessionId: id }).catch((e) =>
       setError(String(e)),
     );
-    setResumeState((state) => {
-      if (!state || state.path !== path) return state;
-      const prior = state.byPart[part];
-      return {
-        ...state,
-        byPart: { ...state.byPart, [part]: { id, agent, gen: prior?.gen ?? 0 } },
-      };
-    });
+    setColumns((list) =>
+      list.map((col) =>
+        col.path === path && col.part === part ? { ...col, resume: id, agent } : col,
+      ),
+    );
   };
 
-  const chatBusy = (part: string, busy: boolean) => {
-    setBusyParts((map) => {
-      if (busy) return { ...map, [part]: true };
-      if (!(part in map)) return map;
-      const { [part]: _, ...rest } = map;
+  const chatBusy = (
+    path: string,
+    part: string,
+    agent: string,
+    busy: boolean,
+    visible: boolean,
+  ) => {
+    const key = chatKey(path, part);
+    const wasBusy = Boolean(busyRef.current[key]);
+    setBusyChats((map) => {
+      if (busy) return { ...map, [key]: true };
+      if (!(key in map)) return map;
+      const { [key]: _, ...rest } = map;
       return rest;
     });
+    // Pin a fresh column before adapter startup can overlap a default-agent
+    // change. Hidden completions remain mounted until the user sees them: an
+    // auth failure's restored draft and error have no session to reload.
+    setColumns((list) =>
+      updateChatActivity(list, path, part, agent, busy, visible, wasBusy),
+    );
   };
 
   // ?embed hides the viewer's own title and part list; the rail is the one
@@ -830,6 +906,27 @@ function App() {
                 ) : opening[project.path] ? (
                   <span className="tag">starting…</span>
                 ) : null}
+                {project.path !== active &&
+                  Object.keys(busyChats).some((key) =>
+                    key.startsWith(chatKey(project.path, "")),
+                  ) && (
+                    // The dot the part rows wear, lifted to the project row:
+                    // an agent is still working here in the background.
+                    <span
+                      className="part-busy"
+                      title="the agent is still working in this project"
+                    />
+                  )}
+                {project.path !== active &&
+                  !Object.keys(busyChats).some((key) =>
+                    key.startsWith(chatKey(project.path, "")),
+                  ) &&
+                  columns.some((col) => col.path === project.path && col.unseen) && (
+                    <span
+                      className="part-unseen"
+                      title="the agent finished in this project"
+                    />
+                  )}
               </div>
               {project.path === active && partsReady && (
                 <ul className="parts">
@@ -843,9 +940,16 @@ function App() {
                   >
                     <IconCubes label="the whole project" />
                     <span className="part-name">project</span>
-                    {busyParts[PROJECT_CHAT] && (
+                    {busyChats[chatKey(project.path, PROJECT_CHAT)] ? (
                       <span className="part-busy" title="the agent is working on the project" />
-                    )}
+                    ) : columns.some(
+                        (col) =>
+                          col.path === project.path &&
+                          col.part === PROJECT_CHAT &&
+                          col.unseen,
+                      ) ? (
+                      <span className="part-unseen" title="the agent finished on the project" />
+                    ) : null}
                   </li>
                   {parts.map((part) => (
                     <Fragment key={part.name}>
@@ -863,9 +967,16 @@ function App() {
                       >
                         {part.assembly ? <IconCubes label={assemblyLabel(part)} /> : <IconCube />}
                         <span className="part-name">{part.name}</span>
-                        {busyParts[part.name] && (
+                        {busyChats[chatKey(project.path, part.name)] ? (
                           <span className="part-busy" title="the agent is working on this part" />
-                        )}
+                        ) : columns.some(
+                            (col) =>
+                              col.path === project.path &&
+                              col.part === part.name &&
+                              col.unseen,
+                          ) ? (
+                          <span className="part-unseen" title="the agent finished on this part" />
+                        ) : null}
                         {part.error && (
                           // A refusal is the part declining a configuration, not
                           // breaking, so it wears amber like the viewer's own mark.
@@ -1089,43 +1200,42 @@ function App() {
           }}
         />
       )}
-      {active && activeServer && partsReady && resumeState?.path === active &&
-      !activeProject?.missing && mountedParts.length > 0 ? (
-        // One column per opened part, all mounted so background turns keep
-        // streaming, only the selected part's visible. Keyed by project, part,
-        // and generation: switching projects or starting fresh tears the
-        // column (and its adapter) down; switching parts does not.
-        mountedParts.map((part) => {
-          const chat = resumeState.byPart[part];
-          const agent = chat?.agent ?? defaultAgent;
-          const isProject = part === PROJECT_CHAT;
-          return (
-            <Chat
-              key={`${active}:${part}:${chat?.gen ?? 0}:${agent}`}
-              path={active}
-              part={part}
-              agent={agent}
-              agents={agentStatuses
-                // The rail advertises uninstalled agents with an install
-                // hint; the switcher only offers ones that can actually run.
-                .filter((status) => status.installed)
-                .map((status) => ({
-                  id: status.id,
-                  label: AGENT_LABEL[status.id] ?? status.label,
-                }))}
-              resume={chat?.id ?? null}
-              hidden={isProject ? !projectChatFocused : part !== selectedPart || projectChatFocused}
-              seed={isProject ? projectSeed : null}
-              onSeed={isProject ? () => setProjectSeed(null) : undefined}
-              onSession={(id) => chatStarted(active, part, id, agent)}
-              onFresh={() => startFresh(part)}
-              onAgent={(id) => startFresh(part, id)}
-              onBusy={(busy) => chatBusy(part, busy)}
-              onSignedIn={refreshAgents}
-            />
-          );
-        })
-      ) : (
+      {/* One column per opened chat, all mounted so background turns keep
+          streaming; only the active project's focused chat is visible. Keyed
+          by project, part, and generation: starting fresh remounts a column
+          (and its adapter); switching parts or projects does not. */}
+      {columns.map((col) => {
+        const agent = col.agent ?? defaultAgent;
+        const isProject = col.part === PROJECT_CHAT;
+        return (
+          <Chat
+            key={`${col.path}:${col.part}:${col.gen}:${agent}`}
+            path={col.path}
+            part={col.part}
+            agent={agent}
+            agents={agentStatuses
+              // The rail advertises uninstalled agents with an install
+              // hint; the switcher only offers ones that can actually run.
+              .filter((status) => status.installed)
+              .map((status) => ({
+                id: status.id,
+                label: AGENT_LABEL[status.id] ?? status.label,
+              }))}
+            resume={col.resume}
+            hidden={!columnVisible(col)}
+            seed={isProject && col.path === active ? projectSeed : null}
+            onSeed={isProject ? () => setProjectSeed(null) : undefined}
+            onSession={(id) => chatStarted(col.path, col.part, id, agent)}
+            onFresh={() => startFresh(col.path, col.part)}
+            onAgent={(id) => startFresh(col.path, col.part, id)}
+            onBusy={(busy) =>
+              chatBusy(col.path, col.part, agent, busy, columnVisible(col))
+            }
+            onSignedIn={refreshAgents}
+          />
+        );
+      })}
+      {!columns.some(columnVisible) && (
         <section className="chat">
           <div className="chat-header" data-tauri-drag-region />
           <div className="placeholder">chat</div>
