@@ -1,6 +1,6 @@
 # nurb
 
-Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real solids, checks them against print physics, and shows you the result live. You judge, drag sliders, download the STL.
+Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real solids, checks them against print physics, and shows you the result live. You judge, drag sliders, download the 3MF.
 
 <img width="2062" height="1232" alt="Viewer" src="https://github.com/user-attachments/assets/77c7c392-3454-42a0-aaf6-159b81e7dcff" />
 
@@ -40,7 +40,7 @@ Open your agent in the directory where the project should live, and talk:
 
 > Make an adapter that connects my shop vac hose to the dust port on my table saw
 
-The agent does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and starts `nurb dev` so you get a link to watch. Every save updates the browser without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `stl`, print. A `write` button saves your slider values back into the file's defaults, where the agent will see them.
+The agent does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and starts `nurb dev` so you get a link to watch. Every save updates the browser without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `3mf`, print. A `write` button saves your slider values back into the file's defaults, where the agent will see them.
 
 ## A part
 
@@ -77,7 +77,7 @@ nurb stress [part]  where a load stresses the part: peak MPa, sag, margin to bre
                     (the viewer's stress button is the same answer, aimed by clicking the part)
 nurb verify [part]  run the doctrine's verification list; --report bundles it with renders
 nurb render [part]  write a PNG into build/renders/; --section cuts it open
-nurb export [part]  write STL into build/, --formats for STEP or GLB
+nurb export [part]  write 3MF into build/, --formats for STL, STEP or GLB
 nurb extract        find duplication across parts
 nurb launcher       write viewer.command, a double-clickable `nurb dev`
 ```
@@ -104,7 +104,7 @@ projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The viewer's print time row will also ask you for it the first time you use it, and write the answer here. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file can also name what you print in (`material = "abs"`), and `warp_risk` tightens to match how hard that plastic shrinks. Either file carries the export preference too: an `[export]` table with `formats = ["stl", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The viewer's print time row will also ask you for it the first time you use it, and write the answer here. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file can also name what you print in (`material = "abs"`), and `warp_risk` tightens to match how hard that plastic shrinks. Either file carries the export preference too: an `[export]` table with `formats = ["3mf", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
 
 ```toml
 [part]
@@ -131,7 +131,7 @@ The same function flexed is a variant on the card, not a copy of the file:
 grid_x = 3
 ```
 
-`build`, `check`, `card` and `export` walk variants like parts, so each gets its own STL and baselines.
+`build`, `check`, `card` and `export` walk variants like parts, so each gets its own 3MF and baselines.
 
 ## Layout
 

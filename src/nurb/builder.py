@@ -317,6 +317,49 @@ def write_stl(shape, target):
     export_stl(shape, str(target), tolerance=0.01, angular_tolerance=0.2)
 
 
+def write_3mf(shape, target):
+    """Write a 3MF from the same tessellation the viewer and the STL already use.
+
+    Unlike STL the file names its unit, so a slicer never has to guess the scale.
+    lib3mf rides along with build123d, so this costs no dependency.
+
+    Deliberately not build123d's `Mesher.add_shape`, which re-meshes the shape and
+    then refuses to write anything whose triangulation is not manifold. OCCT leaves
+    the odd seam crack on a curved face, so that check turns one four-edge hole into
+    a dead export ("3mf mesh is invalid") with nothing the user can do about it. The
+    STL has always carried the same holes and every slicer repairs them on load, so
+    a 3MF that matches the STL is the honest file to write. Verified by slicing one:
+    Bambu Studio takes the cracked mesh and prices it exactly as it does the STL.
+    """
+    import lib3mf
+    from build123d import Mesher
+
+    target = pathlib.Path(target)
+    mesh = to_mesh(shape, 0.01)
+    # A 3MF indexes shared vertices, while `to_mesh` splits them per face to keep the
+    # viewer's edges crisp. Rebuilding welds them, which is both what the format wants
+    # and a third off the file size.
+    welded = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=True)
+    # lib3mf will happily write an empty model, and a downloaded file that opens to an
+    # empty plate is worse than a refusal: it looks like it worked. A part that
+    # tessellates to nothing is what the `solids` rule is for, so say that.
+    if not len(welded.faces):
+        target.unlink(missing_ok=True)
+        raise BuildError(f"{target.stem} has no geometry to export; `nurb check` says why")
+    # Mesher is still what owns the lib3mf handle, the millimetre unit and the write,
+    # so the platform's library layout stays build123d's problem. Only its meshing and
+    # its validity gate are skipped.
+    mesher = Mesher()
+    obj = mesher.model.AddMeshObject()
+    obj.SetGeometry(
+        [lib3mf.Position(Coordinates=(x, y, z)) for x, y, z in welded.vertices.tolist()],
+        [lib3mf.Triangle(Indices=(a, b, c)) for a, b, c in welded.faces.tolist()],
+    )
+    obj.SetType(lib3mf.ObjectType.Model)
+    mesher.model.AddBuildItem(obj, mesher.wrapper.GetIdentityTransform())
+    mesher.write(str(target))
+
+
 def stl_triangles(target):
     """Triangle count of a binary STL, from the header."""
     with open(target, "rb") as f:

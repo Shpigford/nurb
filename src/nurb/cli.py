@@ -298,7 +298,12 @@ def cmd_export(args):
             continue
         for fmt in formats:
             target = out / f"{name}.{fmt}"
-            if fmt == "stl":
+            if fmt == "3mf":
+                try:
+                    builder.write_3mf(shape, target)
+                except builder.BuildError as exc:
+                    sys.exit(f"  {exc}")
+            elif fmt == "stl":
                 builder.write_stl(shape, target)
             elif fmt == "step":
                 export_step(shape, str(target))
@@ -849,7 +854,7 @@ def cmd_slice(args):
         sys.exit(
             f"  no slicer found. `nurb slice` drives one you already have installed:\n"
             f"  {' or '.join(slicing.SLICERS)}, in /Applications, on PATH, or through Flatpak.\n"
-            f"  `nurb export` writes the STL if you would rather open it yourself."
+            f"  `nurb export` writes the 3MF if you would rather open it yourself."
         )
     try:
         wanted, profile = checks.slicer_name(root, args.printer)
@@ -1067,9 +1072,10 @@ def cmd_render(args):
 
 DEFAULT_PORT = 7373
 
+# 3MF first: it carries units, and it is what Bambu Studio and Orca open natively.
 # GLB is the viewer's format, so it is on request rather than written every time.
-FORMATS = ("stl", "step", "glb")
-DEFAULT_FORMATS = ("stl",)
+FORMATS = ("3mf", "stl", "step", "glb")
+DEFAULT_FORMATS = ("3mf",)
 
 
 def _is_free(port):
@@ -1355,11 +1361,11 @@ def main(argv=None):
     )
     s.set_defaults(fn=cmd_render)
 
-    s = sub.add_parser("export", help="write STL/STEP/GLB to build/")
+    s = sub.add_parser("export", help="write 3MF/STL/STEP/GLB to build/")
     s.add_argument("part", nargs="?")
     s.add_argument(
         "--formats", nargs="+", default=None,
-        help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: step, glb",
+        help=f"default: {' '.join(DEFAULT_FORMATS)}, or printer.toml's [export] formats. also: stl, step, glb",
     )
     s.set_defaults(fn=cmd_export)
 

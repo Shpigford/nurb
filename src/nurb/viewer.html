@@ -120,6 +120,7 @@
      The pill carries the border and the shadow, so the toolbar reads as a single piece
      of chrome floating above the geometry rather than four stray buttons. */
   .pill {
+    position: relative; /* the download menu hangs off the pill's own box */
     display: flex; align-items: center; gap: 2px; padding: 3px;
     background: rgba(29,32,39,.9); border: 1px solid var(--line); border-radius: 9px;
     box-shadow: 0 4px 16px rgba(0,0,0,.35); backdrop-filter: blur(10px);
@@ -137,6 +138,21 @@
   .pill button.on svg { color: var(--accent); }
   #download { display: contents; }
   #download button:disabled { color: var(--dim); cursor: default; }
+  /* A split button: the wide half is the 3MF every modern slicer opens natively, the
+     narrow chevron lists the rest. One control with one default, where three sibling
+     buttons made the user pick a format every time. */
+  #dlmain { padding-right: 7px; }
+  #dlmore { padding: 5px 4px; }
+  #dlmore svg { width: 10px; height: 10px; }
+  #dlmenu { display: none; position: absolute; top: calc(100% + 5px); left: 0; min-width: 92px;
+            flex-direction: column; align-items: stretch; gap: 2px; padding: 3px; z-index: 2;
+            background: rgba(29,32,39,.95); border: 1px solid var(--line); border-radius: 9px;
+            box-shadow: 0 4px 16px rgba(0,0,0,.35); backdrop-filter: blur(10px); }
+  #dlmenu.open { display: flex; }
+  /* The toolbar and the rows under it paint in document order, so without this the
+     print or stress row draws over the open menu and swallows its clicks. */
+  .pill:has(#dlmenu.open) { z-index: 1; }
+  #dlmenu button { justify-content: flex-start; }
   #reframe { display: none; align-items: center; gap: 6px;
              background: rgba(29,32,39,.9); box-shadow: 0 4px 16px rgba(0,0,0,.35);
              backdrop-filter: blur(10px); }
@@ -448,6 +464,7 @@
 <!-- Nucleo icons, inlined as symbols so the viewer stays offline. Strokes are
      currentColor: an icon is tinted by the text color of whatever holds it. -->
 <svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-chev" viewBox="0 0 12 12"><polyline points="3.5 4.75 6 7.25 8.5 4.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-download" viewBox="0 0 12 12"><line x1="6" y1="7.75" x2="6" y2=".75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><polyline points="3.75 5.75 6 8 8.25 5.75" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><path d="m8.69,2.75c1.028,0,1.888.779,1.99,1.801l.35,3.5c.118,1.177-.807,2.199-1.99,2.199H2.96c-1.183,0-2.108-1.022-1.99-2.199l.35-3.5c.102-1.022.963-1.801,1.99-1.801" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
   <symbol id="i-wand" viewBox="0 0 18 18"><path d="M4.49298 4.74201L3.54698 4.42701L3.23098 3.47999C3.12898 3.17399 2.62198 3.17399 2.51998 3.47999L2.20398 4.42701L1.25798 4.74201C1.10498 4.79301 1.00098 4.93603 1.00098 5.09803C1.00098 5.26003 1.10498 5.40299 1.25798 5.45399L2.20398 5.76899L2.51998 6.71601C2.57098 6.86901 2.71398 6.97199 2.87498 6.97199C3.03598 6.97199 3.17998 6.86801 3.22998 6.71601L3.54598 5.76899L4.49198 5.45399C4.64498 5.40299 4.74898 5.26003 4.74898 5.09803C4.74898 4.93603 4.64598 4.79301 4.49298 4.74201Z" fill="currentColor"/><path d="M16.658 12.99L15.395 12.5689L14.974 11.3061C14.837 10.8981 14.162 10.8981 14.025 11.3061L13.604 12.5689L12.341 12.99C12.137 13.058 11.999 13.249 11.999 13.464C11.999 13.679 12.137 13.87 12.341 13.938L13.604 14.359L14.025 15.622C14.093 15.826 14.285 15.964 14.5 15.964C14.715 15.964 14.906 15.826 14.975 15.622L15.396 14.359L16.659 13.938C16.863 13.87 17.001 13.679 17.001 13.464C17.001 13.249 16.862 13.058 16.658 12.99Z" fill="currentColor"/><path d="M5.75 2.5C6.1642 2.5 6.5 2.164 6.5 1.75C6.5 1.336 6.1642 1 5.75 1C5.3358 1 5 1.336 5 1.75C5 2.164 5.3358 2.5 5.75 2.5Z" fill="currentColor"/><path d="M2.5 15.5L9.7545 8.24542" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M8.8428 2L11.6329 3.82147L14.7153 2.55713L13.8445 5.77307L16 8.31268L12.6731 8.47852L10.9231 11.314L9.7374 8.20062L6.5 7.41333L9.0945 5.32208L8.8428 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></symbol>
   <symbol id="i-layers" viewBox="0 0 12 12"><path d="m6.405,1.362l4.087,2.437c.343.205.343.699,0,.904l-4.087,2.437c-.249.149-.561.149-.81,0L1.507,4.702c-.343-.205-.343-.699,0-.904L5.595,1.362c.249-.149.561-.149.81,0Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><path d="m10.493,7.298c.343.205.343.699,0,.904l-4.087,2.437c-.249.149-.561.149-.81,0l-4.087-2.437c-.343-.205-.343-.699,0-.904" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
@@ -507,8 +524,12 @@
   <div id="tools">
     <div class="pill">
       <div id="download">
-        <button data-fmt="stl" title="download an STL built at the current slider values"><svg><use href="#i-download"/></svg><span>stl</span></button>
-        <button data-fmt="step" title="download a STEP built at the current slider values"><svg><use href="#i-download"/></svg><span>step</span></button>
+        <button id="dlmain" data-fmt="3mf" title="download a 3MF built at the current slider values"><svg><use href="#i-download"/></svg><span>3mf</span></button>
+        <button id="dlmore" title="download another format"><svg><use href="#i-chev"/></svg></button>
+        <div id="dlmenu">
+          <button data-fmt="stl" title="download an STL built at the current slider values"><svg><use href="#i-download"/></svg><span>stl</span></button>
+          <button data-fmt="step" title="download a STEP built at the current slider values"><svg><use href="#i-download"/></svg><span>step</span></button>
+        </div>
       </div>
       <span class="sep"></span>
       <button id="polishbtn" title="chamfer the exposed edges; off is the faster draft build"><svg><use href="#i-wand"/></svg><span>polish</span></button>
@@ -593,8 +614,8 @@ if (embed) {
   // A webview has no downloads folder and no download UI, so the button saves into
   // the project instead. Said before the click, because "download" would promise a
   // file the shell never produces.
-  const article = { stl: 'an STL', step: 'a STEP' };
-  for (const b of document.querySelectorAll('#download button'))
+  const article = { '3mf': 'a 3MF', stl: 'an STL', step: 'a STEP' };
+  for (const b of document.querySelectorAll('#download [data-fmt]'))
     b.title = `save ${article[b.dataset.fmt]} into the project's build folder and show it in Finder`;
   // The shell's rail switches parts by message, never by renavigating this frame:
   // WKWebView suspends requestAnimationFrame in an iframe that was navigated in
@@ -976,13 +997,25 @@ function sectionUpdate() {
 // preview economy: draft is for the loop, a download is on its way to a slicer.
 // Fetched rather than navigated, so a failed build lands in the note instead of
 // replacing the viewer with a traceback.
-for (const b of document.querySelectorAll('#download button')) {
+// The chevron half opens the alternates; picking one runs the same path as the
+// default. Closes on a pick, an outside click, or Escape.
+const dlmenu = document.getElementById('dlmenu');
+const dlmore = document.getElementById('dlmore');
+dlmore.onclick = e => { e.stopPropagation(); dlmenu.classList.toggle('open'); };
+addEventListener('click', e => { if (!dlmenu.contains(e.target)) dlmenu.classList.remove('open'); });
+addEventListener('keydown', e => { if (e.key === 'Escape') dlmenu.classList.remove('open'); });
+const dlall = [...document.querySelectorAll('#download [data-fmt]'), dlmore];
+for (const b of document.querySelectorAll('#download [data-fmt]')) {
   b.dataset.title = b.title;  // restored when an assembly stops being on screen
   b.onclick = async () => {
     if (!current) return;
-    // The label lives in a span so swapping it leaves the icon alone.
-    const fmt = b.dataset.fmt, lab = b.querySelector('span'), was = lab.textContent;
-    b.disabled = true; lab.textContent = 'building';
+    dlmenu.classList.remove('open');
+    // Progress lands on the main half whichever entry was picked: the menu closes on
+    // the click, so a label swapped inside it would report to nobody. The label lives
+    // in a span so swapping it leaves the icon alone.
+    const fmt = b.dataset.fmt, lab = document.querySelector('#dlmain span'), was = lab.textContent;
+    for (const d of dlall) d.disabled = true;
+    lab.textContent = 'building';
     try {
       // Embedded, the file goes to disk server-side and the shell reveals it: a
       // webview ignores an <a download>, so a blob there is a button that does
@@ -1006,7 +1039,8 @@ for (const b of document.querySelectorAll('#download button')) {
       const note = document.getElementById('note');
       if (note) { note.classList.add('bad'); note.textContent = `export failed: ${e.message}`; }
     } finally {
-      b.disabled = false; lab.textContent = was;
+      for (const d of dlall) d.disabled = false;
+      lab.textContent = was;
     }
   };
 }
@@ -1101,7 +1135,7 @@ function printAsking(ask) {
   if (ask.kind === 'slicer') {
     // The way out that does exist: the file is already one button to the left.
     return `<span class="ask line">${ask.error}</span>`
-      + '<span class="how line">stl still works, for whatever you do slice with</span>';
+      + '<span class="how line">the 3mf download still works, for whatever you do slice with</span>';
   }
   return `<span class="bad line">${ask.error}</span>`
     + (picker || '<button class="go">try again</button>');
@@ -1907,12 +1941,13 @@ function hud(e) {
   // dark: geometry built inline has no part file, and a part file is what a print is.
   const asm = Array.isArray(e.joints);
   const placed = asm ? (e.uses || []) : null;
-  for (const b of document.querySelectorAll('#download button')) {
+  for (const b of document.querySelectorAll('#download [data-fmt]')) {
     b.disabled = asm && !placed.length;
     b.title = !asm ? b.dataset.title
       : placed.length ? `${embed ? 'saves' : 'downloads'} the placed parts, zipped: ${placed.join(', ')}`
       : 'this assembly places no parts; nothing to print';
   }
+  document.getElementById('dlmore').disabled = asm && !placed.length;
 }
 
 // ---- parameters ----

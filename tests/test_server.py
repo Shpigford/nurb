@@ -297,6 +297,39 @@ def test_export_writes_step_too(tmp_path):
     assert resp.body.startswith(b"ISO-10303-21")
 
 
+def test_export_writes_3mf_at_the_slider_values(tmp_path):
+    """The download button's default, so it honors the sliders like the STL does."""
+    import zipfile
+
+    server = project(tmp_path)
+    server.overrides["thing"] = {"width": 15.0}
+    resp = asyncio.run(server.export("thing.3mf"))
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"] == "model/3mf"
+    with zipfile.ZipFile(io.BytesIO(resp.body)) as z:
+        model = z.read("3D/3dmodel.model").decode()
+    assert 'unit="millimeter"' in model
+
+
+def test_a_failed_saved_3mf_removes_the_previous_artifact(tmp_path):
+    """The desktop writes downloads into build/, where an older successful file
+    otherwise keeps looking printable after the next export refuses the geometry."""
+    server = project(tmp_path)
+    saved = tmp_path / "build" / "thing.3mf"
+    assert asyncio.run(server.export("thing.3mf", save=True)).status_code == 200
+    assert saved.exists()
+    (tmp_path / "parts" / "thing.py").write_text(
+        "from nurb import *\n\n@part\ndef thing(width=40.0):\n"
+        "    return Box(width, 30, 5) - Box(width * 2, 60, 10)\n"
+    )
+
+    resp = asyncio.run(server.export("thing.3mf", save=True))
+
+    assert resp.status_code == 500
+    assert b"no geometry to export" in resp.body
+    assert not saved.exists()
+
+
 def test_export_names_a_variants_file_after_the_variant(tmp_path):
     """A variant is a catalog entry, so the file it exports carries the catalog name."""
     server = project(tmp_path)
@@ -816,7 +849,7 @@ def test_the_viewer_keeps_a_missing_slicer_out_of_the_fault_colour():
     branch = viewer[viewer.index("if (ask.kind === 'slicer') {") :]
     branch = branch[: branch.index("return")] + branch[branch.index("return") : branch.index("\n  }")]
     assert '"ask line"' in branch  # calm, not the fault colour
-    assert "stl still works" in branch
+    assert "3mf download still works" in branch
     assert "class=\"go\"" not in branch  # no retry that cannot succeed
 
 

@@ -57,7 +57,7 @@ nurb slice [part]    print time and filament, via an installed OrcaSlicer or Bam
 nurb stress [part]   static stress under a load: peak MPa, sag, margin to breaking
 nurb verify [part]   the doctrine's verification list, --report bundles it with renders
 nurb render [part]   write build/renders/<part>.png, --section cuts it open, needs the render extra
-nurb export [part]   write STL into build/, --formats for STEP or GLB
+nurb export [part]   write 3MF into build/, --formats for STL, STEP or GLB
 nurb extract         find duplication across sibling parts
 nurb launcher        write viewer.command, a double-clickable `nurb dev`
 ```

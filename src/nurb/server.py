@@ -578,7 +578,7 @@ class Server:
     # What the download button serves. This is the configurator: the parameters were
     # always introspectable and the sliders already drive them, so publishing a part is
     # `nurb dev` plus this route, not a second modelling stack.
-    EXPORTS = {"stl": "model/stl", "step": "application/step"}
+    EXPORTS = {"3mf": "model/3mf", "stl": "model/stl", "step": "application/step"}
 
     async def export(self, filename, save=False):
         name, _, fmt = filename.rpartition(".")
@@ -591,6 +591,15 @@ class Server:
             async with self.building:
                 body, attach, mime = await asyncio.to_thread(self._export, name, fmt, label)
         except Exception as exc:
+            if save:
+                # The desktop viewer writes into build/. A failed rebuild must not
+                # leave yesterday's part or assembly bundle looking current there.
+                out = (self.root / "build").resolve()
+                for stale in (
+                    out / f"{_export_name(label or name)}.{fmt}",
+                    out / f"{_export_name(name)}-{fmt}.zip",
+                ):
+                    stale.unlink(missing_ok=True)
             message = f"{type(exc).__name__}: {exc}"
             return self._resp(500, message.encode(), "text/plain")
         if save:
@@ -633,7 +642,9 @@ class Server:
                 return None, scene
             with tempfile.TemporaryDirectory() as scratch:
                 target = pathlib.Path(scratch) / f"{stem}.{fmt}"
-                if fmt == "stl":
+                if fmt == "3mf":
+                    builder.write_3mf(built, target)
+                elif fmt == "stl":
                     builder.write_stl(built, target)
                 else:
                     export_step(built, str(target))
@@ -1309,8 +1320,14 @@ class Server:
         # project's worth of builds behind it was seconds of connection refused.
         for path in builder.find_parts(self.root):
             self.queue.put_nowait(str(path))
+        # open_timeout=None: process_request serves the HTTP routes inside the
+        # handshake window, and the default 10s guillotines any export whose polished
+        # build runs longer, closing the connection with no response at all. The
+        # download button then waits on a reply that is never coming. Local sockets
+        # from our own viewer do not need a handshake deadline.
         async with serve(
-            self.ws, "127.0.0.1", self.port, process_request=self.http, origins=self.origins
+            self.ws, "127.0.0.1", self.port, process_request=self.http,
+            origins=self.origins, open_timeout=None,
         ):
             print(f"\n  nurb  http://127.0.0.1:{self.port}\n", flush=True)
             if self.open_browser:

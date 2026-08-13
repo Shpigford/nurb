@@ -576,6 +576,66 @@ def test_check_says_where_the_printer_came_from(tmp_path, monkeypatch, capsys):
     assert "printer: prusa_mk4s (printer.toml)" in capsys.readouterr().out
 
 
+def test_3mf_writes_a_tessellation_with_a_crack_in_it(tmp_path, monkeypatch):
+    """OCCT leaves the odd seam crack on a curved face, and build123d's Mesher refuses
+    to write anything non-manifold: one four-edge hole used to kill the whole export
+    with "3mf mesh is invalid". The STL carries the same holes and slicers repair them,
+    so the 3MF writes too. A box missing a face stands in for the crack."""
+    import trimesh
+    import zipfile
+
+    from build123d import Box
+
+    from nurb import builder
+
+    cracked = trimesh.creation.box(extents=(10, 10, 10))
+    cracked.update_faces([i for i in range(len(cracked.faces)) if i > 1])
+    assert not cracked.is_watertight, "the stand-in has to be the broken case"
+    monkeypatch.setattr(builder, "to_mesh", lambda *a, **k: cracked)
+
+    target = tmp_path / "cracked.3mf"
+    builder.write_3mf(Box(10, 10, 10), target)
+
+    with zipfile.ZipFile(target) as z:
+        model = z.read("3D/3dmodel.model").decode()
+    assert 'unit="millimeter"' in model
+    assert model.count("<triangle ") == len(cracked.faces)
+
+
+def test_3mf_refuses_a_part_that_tessellates_to_nothing(tmp_path):
+    """lib3mf writes an empty model happily, and a download that opens to an empty
+    plate reads as success. Say what happened instead, without leaving yesterday's
+    printable artifact looking current."""
+    from build123d import Box
+
+    from nurb import builder
+
+    target = tmp_path / "gone.3mf"
+    target.write_bytes(b"stale 3mf")
+    with pytest.raises(builder.BuildError) as exc:
+        builder.write_3mf(Box(10, 10, 10) - Box(20, 20, 20), target)
+    assert "no geometry" in str(exc.value)
+    assert not target.exists(), "a refusal must not leave a file behind"
+
+
+def test_export_reports_an_empty_3mf_without_a_traceback(tmp_path, monkeypatch):
+    """The default exporter owns this expected refusal, so the command says it in
+    one line rather than leaking the implementation stack to the user."""
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "gone.py").write_text(
+        "from nurb import *\n\n@part\ndef gone():\n"
+        "    return Box(10, 10, 10) - Box(20, 20, 20)\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["export"])
+
+    assert "gone has no geometry to export" in str(exc.value)
+    assert not (tmp_path / "build" / "gone.3mf").exists()
+
+
 def test_stl_is_meshed_for_printing_not_archival(tmp_path):
     """build123d's 1e-3mm default made a 145x364mm tray 97k triangles (issue #55).
 
@@ -595,8 +655,32 @@ def test_stl_is_meshed_for_printing_not_archival(tmp_path):
 
 def test_the_shim_promises_what_export_actually_writes():
     shim = (pathlib.Path(cli.__file__).parent / "agents.md").read_text(encoding="utf-8")
-    assert "STL into build/" in shim
-    assert list(cli.DEFAULT_FORMATS) == ["stl"]
+    assert "3MF into build/" in shim
+    assert "hit 3mf to print" in shim
+    assert 'formats = ["3mf", "step"]' in shim
+    assert "hit stl to print" not in shim
+    assert list(cli.DEFAULT_FORMATS) == ["3mf"]
+
+    readme = (pathlib.Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    assert "click `3mf`, print" in readme
+    assert 'formats = ["3mf", "step"]' in readme
+
+
+def test_export_defaults_to_a_3mf_that_says_millimeter(tmp_path, monkeypatch):
+    """3MF is the default because it is what Bambu and Orca open natively, and unlike
+    STL the file carries its unit, so a slicer never guesses the scale."""
+    import argparse
+    import zipfile
+
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    monkeypatch.chdir(tmp_path)
+    cli.cmd_export(argparse.Namespace(part=None, formats=None))
+    target = tmp_path / "build" / "thing.3mf"
+    with zipfile.ZipFile(target) as z:
+        model = z.read("3D/3dmodel.model").decode()
+    assert 'unit="millimeter"' in model
 
 
 # --- the agent skill ----------------------------------------------------------
