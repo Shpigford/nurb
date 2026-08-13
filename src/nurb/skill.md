@@ -2,7 +2,7 @@
 name: nurb
 description: Design 3D-printable parts as Python functions with nurb. Use when the user wants a part designed, changed, or checked for 3D printing (a bracket, mount, holder, enclosure, shelf, or any STL/STEP to print), and in any directory with a parts/ folder. The user describes the part and judges it in a browser; you model it.
 metadata:
-  version: "0.18.1"
+  version: "0.18.2"
 ---
 # nurb
 
