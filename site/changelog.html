@@ -117,6 +117,15 @@
   <h1>What's new</h1>
   <p class="lede">Every nurb release, newest first. Install once, then <b>nurb update</b> keeps you current.</p>
 
+  <article class="release" id="v0.19.1">
+    <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.19.1">v0.19.1</a></span><time datetime="2026-08-14">August 14, 2026</time></div>
+    <ul>
+      <li><b class="tag">improved</b><span><b>Faster motion checks.</b> A part that swings all the way round took about fourteen seconds to check, and nothing else in the project would rebuild while it ran. The check now skips the parts that are nowhere near the one that moves, and a save or a slider drag interrupts it instead of queueing behind it.</span></li>
+      <li><b class="tag">fixed</b><span>Saving several parts at once left all but the last one without check results.</span></li>
+      <li><b class="tag">improved</b><span>Your AI understands tapered shapes better. A shape that steps through three or more outlines used to bow inward between them, so a wall you asked to be 15mm across came out 12.5mm. Your AI now keeps those walls straight, and knows which tapered rims will refuse a rounded edge.</span></li>
+    </ul>
+  </article>
+
   <article class="release" id="v0.19.0">
     <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.19.0">v0.19.0</a></span><time datetime="2026-08-13">August 13, 2026</time></div>
     <ul>
