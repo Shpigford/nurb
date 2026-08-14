@@ -46,6 +46,16 @@ from .registry import PartDef, declared, param_docs
 RULE = "motion"
 
 
+class Interrupted(Exception):
+    """Raised between poses when the sweep's `stop` callable turns true.
+
+    A sweep is the one check that can run for seconds, and OCCT cannot be preempted
+    mid-boolean, so this is how a caller who no longer wants the answer gets out: the
+    dev server passes a `stop` that turns true when another rebuild is queued, because
+    findings about a solid the next build replaces are worthless either way.
+    """
+
+
 @dataclass
 class Hinge:
     solid: object
@@ -218,7 +228,10 @@ def hinge(solid, axis, through, at=0.0, name=None, step=3.0):
     axis direction, so the axis is also how you pick which way is opening.
 
     `step` is the coarse sweep resolution; the jam angle itself is bisected to a tenth
-    of a degree regardless.
+    of a degree regardless. It is also the sweep's price: every step is a kernel
+    boolean against the scene, so a full circle at the default 3.0 walks 120 poses and
+    can take seconds on real geometry. A free spinner that only needs a gross clearance
+    audit should declare a larger step; the 3-degree walk is for doors hunting a jam.
     """
     rec = _recorder("hinge()")
     lo, hi = float(through[0]), float(through[1])
@@ -339,10 +352,27 @@ def _inside(bb, outer, slack=0.5):
     )
 
 
+def _apart(a, b):
+    return (
+        a.max.X < b.min.X
+        or b.max.X < a.min.X
+        or a.max.Y < b.min.Y
+        or b.max.Y < a.min.Y
+        or a.max.Z < b.min.Z
+        or b.max.Z < a.min.Z
+    )
+
+
 def _hits(moved, others):
     """The overlap volume and where it is, or (0, None)."""
     worst, where = 0.0, None
+    box = moved.bounding_box()
     for other in others:
+        # Disjoint boxes cannot intersect, and this reject is what keeps a clean
+        # sweep of a real scene affordable: at most poses the mover is nowhere near
+        # most of the scene, and an OCCT boolean is the expensive way to learn that.
+        if _apart(box, other.bounding_box()):
+            continue
         try:
             common = moved & other
             vol = common.volume if common else 0.0
@@ -371,7 +401,7 @@ def _hits(moved, others):
     return worst, where
 
 
-def _limit(h, others, direction):
+def _limit(h, others, direction, stop=None):
     """The last clear angle sweeping from the pose toward one end of the range.
 
     Coarse steps find the first collision, bisection then pins the boundary to under
@@ -384,6 +414,8 @@ def _limit(h, others, direction):
     clear, hit, contact = h.at, None, None
     steps = int(span // h.step) + 1
     for i in range(1, steps + 1):
+        if stop and stop():
+            raise Interrupted
         t = h.at + direction * min(i * h.step, span)
         moved = h.solid.rotate(h.axis, t - h.at)
         vol, where = _hits(moved, others)
@@ -394,6 +426,8 @@ def _limit(h, others, direction):
     if hit is None:
         return end, None
     while abs(hit - clear) > 0.1:
+        if stop and stop():
+            raise Interrupted
         mid = (hit + clear) / 2
         moved = h.solid.rotate(h.axis, mid - h.at)
         vol, where = _hits(moved, others)
@@ -404,11 +438,14 @@ def _limit(h, others, direction):
     return clear, contact
 
 
-def sweep(scene):
+def sweep(scene, stop=None):
     """Findings for every declared joint, in checks.py's own vocabulary.
 
     Each hinge sweeps alone; other hinged solids stand frozen at their pose, which is
     the conservative reading of a mechanism you can only move one hand at a time.
+
+    `stop` is polled between poses; when it turns true the sweep raises Interrupted
+    instead of finishing an answer nobody wants anymore.
     """
     from .checks import FAIL, Finding
 
@@ -435,7 +472,7 @@ def sweep(scene):
             )
             continue
         for direction, end in ((+1, h.hi), (-1, h.lo)):
-            reached, contact = _limit(h, others, direction)
+            reached, contact = _limit(h, others, direction, stop)
             if contact is None:
                 continue
             found.append(

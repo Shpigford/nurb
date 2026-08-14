@@ -267,3 +267,42 @@ def test_an_assembly_glb_keeps_its_movers_as_named_nodes(project):
     solid, _, _ = builder.build(project / "parts" / "plate.py")
     plain = trimesh.load(io.BytesIO(builder.to_glb(solid)), file_type="glb")
     assert len(plain.geometry) == 1
+
+
+def test_solids_whose_boxes_are_apart_never_reach_a_kernel_boolean():
+    """The AABB reject is what keeps a clean full-circle sweep affordable: most
+    poses of a real rotor are nowhere near most of the scene (#127)."""
+    from build123d import Box, Pos
+
+    from nurb.assembly import _hits
+
+    booleans = []
+
+    class Spy:
+        def __init__(self, solid):
+            self._solid = solid
+
+        def bounding_box(self):
+            return self._solid.bounding_box()
+
+        def __and__(self, other):
+            booleans.append(other)
+            return self._solid & other
+
+    near, far = Pos(1, 0, 0) * Box(2, 2, 2), Pos(100, 0, 0) * Box(2, 2, 2)
+    vol, where = _hits(Spy(Box(2, 2, 2)), [far, near])
+    assert booleans == [near]  # far was rejected on boxes alone
+    assert vol == pytest.approx(1 * 2 * 2, rel=1e-6)
+
+
+def test_a_stop_that_turns_true_interrupts_the_sweep_between_poses(project):
+    """The dev server aborts a sweep when a rebuild is queued; findings about a
+    solid the next build replaces are worthless (#127)."""
+    from nurb.assembly import Interrupted
+
+    path = write(project, "rig", FLAP_ASM)
+    shape, _, _ = builder.build(path)
+    with pytest.raises(Interrupted):
+        checks.run(shape, stop=lambda: True)
+    # A stop that stays false changes nothing.
+    assert [f.rule for f in checks.run(shape, stop=lambda: False)] == ["motion"] * 2

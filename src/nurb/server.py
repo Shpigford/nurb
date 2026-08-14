@@ -375,14 +375,16 @@ class Server:
                 return variant_ctx
         return ctx
 
-    def check(self, path):
+    def check(self, path, stop=None):
         """Run the rules on the last good build.
 
         Separate from `rebuild` and broadcast separately, because checking the shelf
         costs about as much again as building it. Geometry should land at the speed it
-        always did and the findings can arrive a beat later.
+        always did and the findings can arrive a beat later. `stop` reaches the motion
+        sweep, the one check that can hold the build lock for seconds.
         """
         from . import checks
+        from .assembly import Interrupted
 
         entry = self.state.get(pathlib.Path(path).stem)
         if not entry or entry.get("shape") is None:
@@ -393,7 +395,7 @@ class Server:
             # base part's 18. Matched on the built values, never on a mode flag, so
             # one slider drag off the variant honestly puts the base rules back.
             ctx = self._context(path, entry["variant"])
-            found = checks.run(entry["shape"], ctx)
+            found = checks.run(entry["shape"], ctx, stop=stop)
             # Each finding carries the triangles of the face it fired on, so the viewer
             # can paint the face itself instead of dropping a pin near it. Rounded to
             # 0.01mm, which is display precision, not geometry.
@@ -424,6 +426,11 @@ class Server:
                 }
                 for f, row in zip(found, rows)
             ]
+        except Interrupted:
+            # A rebuild is already queued, so these findings describe a solid the
+            # next build replaces. Returning None keeps drain from broadcasting
+            # anything; the last build in the burst still gets a full check.
+            return None
         except Exception as exc:
             entry["findings"] = [
                 {
@@ -1290,7 +1297,13 @@ class Server:
                 if not self.queue.empty():
                     continue
                 async with self.building:
-                    entry = await asyncio.to_thread(self.check, path)
+                    # The same reasoning mid-flight: a motion sweep can hold this lock
+                    # for seconds, and a save that lands during it should not wait out
+                    # findings about a solid it is replacing. The sweep polls the
+                    # queue between poses and bails.
+                    entry = await asyncio.to_thread(
+                        self.check, path, lambda: not self.queue.empty()
+                    )
                 if entry and entry.get("findings") is not None:
                     await self.broadcast(entry, kind="checked")
                     bad = sum(1 for f in entry["findings"] if f["severity"] == "fail")

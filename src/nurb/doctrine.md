@@ -446,10 +446,9 @@ motivated all of this rests open at 240 degrees against the back of its own moun
 held there by gravity, and that contact is a feature with a card entry, not a finding
 to engineer away. Read a jam before redesigning around it.
 
-**Never trust a swing worked out by hand.** The same hinge was hand-modelled three
-times and gave three answers, one of them "impossible"; the wrong one ran a convex
-test against a non-convex profile, which is exactly the kind of quiet modelling error
-a kernel boolean cannot make. The sweep is the authority, and it is cheap.
+**Never trust a swing worked out by hand.** The same hinge was hand-modelled three times and gave three answers, one of them "impossible"; the wrong one ran a convex test against a non-convex profile, which is exactly the kind of quiet modelling error a kernel boolean cannot make. The sweep is the authority.
+
+**The sweep is priced per pose, and the declaration sets the pose count.** Every step is a kernel boolean against the rest of the scene, so a door walking 90 degrees at the default 3-degree step is cheap, while a full-circle rotor at the same step is 120 poses and can hold the check for seconds on real geometry. A clean sweep pays the whole walk, since only a jam stops it early. `through=(0, 360)` at the default step is a fine-grained jam audit, not a formality: a free spinner that only needs a gross clearance check should declare a larger `step`, and a range wider than the design actually claims buys nothing but poses.
 
 One hinge sweeps at a time; the others hold their pose, which is the conservative
 reading of a mechanism you can only move one hand at a time. Printability rules stay

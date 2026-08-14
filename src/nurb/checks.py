@@ -122,7 +122,7 @@ def rule(name):
     return register
 
 
-def run(shape, ctx=None, only=None):
+def run(shape, ctx=None, only=None, stop=None):
     # An assembly's compound carries its recorded joints, and motion is the only
     # thing worth judging about it: overhang and min_wall on an assembled scene
     # would report confident nonsense about parts that each checked clean alone.
@@ -130,7 +130,7 @@ def run(shape, ctx=None, only=None):
     if scene is not None:
         from .assembly import sweep
 
-        return sweep(scene)
+        return sweep(scene, stop)
     ctx = ctx or Context()
     found = []
     for name, fn in RULES.items():
