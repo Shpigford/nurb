@@ -12,6 +12,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { IconChevronDown, IconMessagePlus, IconPaperclip } from "./Icons";
 import Markdown from "./Markdown";
+import { playChime, shouldPlayCompletionChime } from "./chime";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
@@ -484,6 +485,7 @@ function Chat({
   const send = useCallback(
     async (text: string, files: string[]) => {
       sendingRef.current = true;
+      const startedAt = Date.now();
       const localId = nextLocalIdRef.current++;
       setItems((list) => [
         ...list,
@@ -497,6 +499,7 @@ function Chat({
       setBusy(true);
       onBusyRef.current(true);
       setAuthNeeded(false);
+      let completed = false;
       try {
         const session = await ensureSession();
         await invoke<string>("send_prompt", {
@@ -505,6 +508,7 @@ function Chat({
           part: part ?? null,
           attachments: files,
         });
+        completed = true;
       } catch (e) {
         const message = String(e);
         if (message.includes("auth_required")) {
@@ -524,6 +528,9 @@ function Chat({
         setBusy(false);
         onBusyRef.current(false);
         setPermissions([]);
+        // Only successful turns long enough to wander away from earn a chime;
+        // quick back-and-forth and failures should stay quiet.
+        if (shouldPlayCompletionChime(completed, Date.now() - startedAt)) playChime();
       }
     },
     [ensureSession, part],

@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
+import { playChime, setSoundEnabled, soundEnabled } from "./chime";
 
 type Props = {
   folder: string;
@@ -9,6 +11,15 @@ type Props = {
 };
 
 export default function Settings({ folder, customized, onChange, onReset, onClose }: Props) {
+  const [sound, setSound] = useState(soundEnabled);
+
+  const toggleSound = (on: boolean) => {
+    setSoundEnabled(on);
+    setSound(on);
+    // Turning it on plays the chime once, so the choice is audible in place.
+    if (on) playChime();
+  };
+
   const changeFolder = async () => {
     // Before the backend resolves the default, the folder shown is the
     // literal "~/Documents/nurb" placeholder, which is not a path.
@@ -50,6 +61,15 @@ export default function Settings({ folder, customized, onChange, onReset, onClos
               </button>
             )}
           </div>
+          <h3>Sound</h3>
+          <label className="settings-toggle">
+            <input
+              type="checkbox"
+              checked={sound}
+              onChange={(e) => toggleSound(e.target.checked)}
+            />
+            Play a chime when the agent finishes a long task
+          </label>
         </div>
       </div>
     </div>

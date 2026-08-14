@@ -1614,6 +1614,19 @@ textarea {
   color: var(--text);
 }
 
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 13px var(--sans);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  accent-color: var(--accent);
+}
+
 /* ---- the "need another agent?" help ---- */
 
 .about-card.agents-help {
