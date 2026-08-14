@@ -51,8 +51,8 @@ class Interrupted(Exception):
 
     A sweep is the one check that can run for seconds, and OCCT cannot be preempted
     mid-boolean, so this is how a caller who no longer wants the answer gets out: the
-    dev server passes a `stop` that turns true when another rebuild is queued, because
-    findings about a solid the next build replaces are worthless either way.
+    dev server passes a `stop` that turns true when another rebuild is queued, so the
+    queued geometry can land first and this sweep can retry once the project settles.
     """
 
 

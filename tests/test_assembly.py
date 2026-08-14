@@ -296,8 +296,8 @@ def test_solids_whose_boxes_are_apart_never_reach_a_kernel_boolean():
 
 
 def test_a_stop_that_turns_true_interrupts_the_sweep_between_poses(project):
-    """The dev server aborts a sweep when a rebuild is queued; findings about a
-    solid the next build replaces are worthless (#127)."""
+    """The dev server aborts a sweep when a rebuild is queued, then drain retries
+    it after the queued geometry lands (#127)."""
     from nurb.assembly import Interrupted
 
     path = write(project, "rig", FLAP_ASM)

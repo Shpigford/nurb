@@ -1196,6 +1196,78 @@ def test_shared_read_failure_cannot_kill_the_rebuild_loop(tmp_path, monkeypatch)
     assert Server(tmp_path)._shared() == []
 
 
+def test_an_interrupted_check_retries_after_the_queued_sibling_rebuild(tmp_path):
+    """A sibling save aborts a slow sweep, but must not leave its checks pending."""
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    first, sibling = parts / "a.py", parts / "b.py"
+    first.write_text("")
+    sibling.write_text("")
+
+    async def go():
+        server = Server(tmp_path)
+        server.queue = asyncio.Queue()
+        server._shared = lambda: []
+        loop = asyncio.get_running_loop()
+        events = []
+        attempts = {"a": 0, "b": 0}
+        complete = asyncio.Event()
+
+        def rebuild(path):
+            name = pathlib.Path(path).stem
+            entry = {
+                "name": name,
+                "error": None,
+                "ms": 0,
+                "findings": None,
+            }
+            server.state[name] = entry
+            return entry
+
+        def check(path, stop=None):
+            name = pathlib.Path(path).stem
+            attempts[name] += 1
+            if name == "a" and attempts[name] == 1:
+                loop.call_soon_threadsafe(server.queue.put_nowait, str(sibling))
+                deadline = time.monotonic() + 1
+                while not stop():
+                    if time.monotonic() > deadline:
+                        raise AssertionError("queued rebuild never reached the sweep")
+                    time.sleep(0.001)
+                return None
+            entry = server.state[name]
+            entry["findings"] = []
+            return entry
+
+        async def broadcast(entry, kind="rebuilt"):
+            events.append((kind, entry["name"]))
+            if events[-2:] == [("checked", "a"), ("checked", "b")]:
+                complete.set()
+
+        server.rebuild = rebuild
+        server.check = check
+        server.broadcast = broadcast
+        server.queue.put_nowait(str(first))
+        task = asyncio.create_task(server.drain())
+        try:
+            await asyncio.wait_for(complete.wait(), timeout=2)
+        finally:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        assert events == [
+            ("rebuilt", "a"),
+            ("rebuilt", "b"),
+            ("checked", "a"),
+            ("checked", "b"),
+        ]
+        assert attempts == {"a": 2, "b": 1}
+
+    asyncio.run(go())
+
+
 def test_sync_carries_the_shared_runs(tmp_path):
     server = bins(tmp_path, ["bin_large", "bin_medium", "bin_small"])
     server.shared = server._shared()
