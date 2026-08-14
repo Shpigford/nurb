@@ -6,7 +6,7 @@ Agentic CAD for 3D printing. The user is a language model: your agent writes par
 
 ## Install
 
-The easiest way in is the Mac app: [**Download nurb for Mac**](https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg). Your projects, your AI, and the live viewer in one window; it sets everything up the first time you open it and updates itself. Apple silicon.
+The easiest way in is the Mac app: [**Download nurb for Apple silicon**](https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg) or [**for Intel Macs**](https://github.com/Shpigford/nurb/releases/latest/download/nurb-intel.dmg). Your projects, your AI, and the live viewer in one window; it sets everything up the first time you open it and updates itself.
 
 For the command line:
 

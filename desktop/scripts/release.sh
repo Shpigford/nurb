@@ -50,34 +50,62 @@ if [ "$VERSION" != "$PYVERSION" ]; then
   exit 1
 fi
 
-echo "🔨 Building nurb desktop v$VERSION (signed + notarized)..."
-npm run tauri build
+echo "🔨 Building nurb desktop v$VERSION for Apple silicon and Intel (signed + notarized)..."
+ARTIFACTS="$(mktemp -d)"
+trap 'rm -rf "$ARTIFACTS"' EXIT
 
-BUNDLE="src-tauri/target/release/bundle"
-APP="$BUNDLE/macos/nurb.app"
-TARGZ="$BUNDLE/macos/nurb.app.tar.gz"
-DMG="$BUNDLE/dmg/nurb_${VERSION}_aarch64.dmg"
+for target in aarch64-apple-darwin x86_64-apple-darwin; do
+  arch="${target%%-*}"
+  if [ "$arch" = "aarch64" ]; then
+    dmg_arch="aarch64"
+    dmg_name="nurb.dmg"
+  else
+    dmg_arch="x64"
+    dmg_name="nurb-intel.dmg"
+  fi
 
-echo "🔎 Verifying the signing chain..."
-codesign --verify --deep --strict "$APP"
-spctl --assess --type execute "$APP"
-xcrun stapler validate "$APP"
+  # A cross-target build needs its Rust standard library even when the host is
+  # Apple silicon. Xcode supplies the macOS SDK and linker for both slices.
+  rustup target add "$target"
+  npm run tauri build -- --target "$target"
 
-echo "🔏 Notarizing the DMG..."
-xcrun notarytool submit "$DMG" \
-  --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
-  --wait
-xcrun stapler staple "$DMG"
+  BUNDLE="src-tauri/target/$target/release/bundle"
+  APP="$BUNDLE/macos/nurb.app"
+  TARGZ="$BUNDLE/macos/nurb.app.tar.gz"
+  DMG="$BUNDLE/dmg/nurb_${VERSION}_${dmg_arch}.dmg"
+  UPDATE="nurb-${arch}.app.tar.gz"
+
+  echo "🔎 Verifying the $arch signing chain..."
+  codesign --verify --deep --strict "$APP"
+  spctl --assess --type execute "$APP"
+  xcrun stapler validate "$APP"
+
+  echo "🔏 Notarizing the $arch DMG..."
+  xcrun notarytool submit "$DMG" \
+    --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+    --wait
+  xcrun stapler staple "$DMG"
+
+  # Tauri names every target's updater archive nurb.app.tar.gz. Give each one
+  # a target-specific release name before the second build can overwrite it.
+  cp "$TARGZ" "$ARTIFACTS/$UPDATE"
+  cp "$TARGZ.sig" "$ARTIFACTS/$UPDATE.sig"
+  cp "$DMG" "$ARTIFACTS/$dmg_name"
+done
 
 echo "📡 Writing latest.json..."
-cat > "$BUNDLE/latest.json" << JSON
+cat > "$ARTIFACTS/latest.json" << JSON
 {
   "version": "$VERSION",
   "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "$(cat "$TARGZ.sig")",
-      "url": "https://github.com/$REPO/releases/download/$TAG/nurb.app.tar.gz"
+      "signature": "$(cat "$ARTIFACTS/nurb-aarch64.app.tar.gz.sig")",
+      "url": "https://github.com/$REPO/releases/download/$TAG/nurb-aarch64.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "$(cat "$ARTIFACTS/nurb-x86_64.app.tar.gz.sig")",
+      "url": "https://github.com/$REPO/releases/download/$TAG/nurb-x86_64.app.tar.gz"
     }
   }
 }
@@ -95,17 +123,20 @@ for attempt in $(seq 1 90); do
   sleep 10
 done
 
-if gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' 2>/dev/null | grep -q '^nurb.app.tar.gz$'; then
+if gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' 2>/dev/null | grep -qx -e 'nurb-aarch64.app.tar.gz' -e 'nurb-x86_64.app.tar.gz'; then
   echo "❌ $TAG already has desktop artifacts. Bump the version to release again."
   exit 1
 fi
 
-# The DMG uploads under a stable name so the site can link
-# releases/latest/download/nurb.dmg forever (the desktop-latest feed is a
-# prerelease, which /releases/latest ignores).
-cp "$DMG" "$BUNDLE/nurb.dmg"
+# Keep nurb.dmg as the established Apple silicon URL. Intel Macs use a named
+# companion download because GitHub release redirects cannot select an asset
+# from the caller's architecture.
 echo "🚀 Uploading to the $TAG release..."
-gh release upload "$TAG" "$BUNDLE/nurb.dmg" "$TARGZ" "$TARGZ.sig" --repo "$REPO"
+gh release upload "$TAG" \
+  "$ARTIFACTS/nurb.dmg" "$ARTIFACTS/nurb-intel.dmg" \
+  "$ARTIFACTS/nurb-aarch64.app.tar.gz" "$ARTIFACTS/nurb-aarch64.app.tar.gz.sig" \
+  "$ARTIFACTS/nurb-x86_64.app.tar.gz" "$ARTIFACTS/nurb-x86_64.app.tar.gz.sig" \
+  --repo "$REPO"
 
 echo "📡 Updating the desktop-latest feed..."
 if ! gh release view desktop-latest --repo "$REPO" >/dev/null 2>&1; then
@@ -113,8 +144,9 @@ if ! gh release view desktop-latest --repo "$REPO" >/dev/null 2>&1; then
     --title "nurb desktop update feed" \
     --notes "Machine-read by installed copies of the nurb desktop app. Download the real thing from the newest release."
 fi
-gh release upload desktop-latest "$BUNDLE/latest.json" --repo "$REPO" --clobber
+gh release upload desktop-latest "$ARTIFACTS/latest.json" --repo "$REPO" --clobber
 
 echo "✅ Done! Release: https://github.com/$REPO/releases/tag/$TAG"
-echo "   Latest DMG (stable URL): https://github.com/$REPO/releases/latest/download/nurb.dmg"
+echo "   Apple silicon: https://github.com/$REPO/releases/latest/download/nurb.dmg"
+echo "   Intel: https://github.com/$REPO/releases/latest/download/nurb-intel.dmg"
 echo "   Last step: run /changelog to write the site entry for v$VERSION."
