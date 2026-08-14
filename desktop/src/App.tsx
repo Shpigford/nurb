@@ -879,6 +879,9 @@ function App() {
               className="name-input"
               name="name"
               placeholder="project name"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               disabled={creating}
               autoFocus
               onKeyDown={(e) => e.key === "Escape" && setNaming(false)}
@@ -1025,6 +1028,9 @@ function App() {
                           className="name-input"
                           name="name"
                           placeholder="part name"
+                          autoCapitalize="off"
+                          autoCorrect="off"
+                          spellCheck={false}
                           disabled={partCreating}
                           autoFocus
                           onKeyDown={(e) => e.key === "Escape" && setPartNaming(false)}
