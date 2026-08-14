@@ -29,7 +29,7 @@ impl Launcher {
             };
         }
         Self::Provisioned {
-            paths: Paths { data },
+            paths: Paths::new(data),
         }
     }
 
@@ -134,6 +134,10 @@ pub struct Paths {
 }
 
 impl Paths {
+    pub(crate) fn new(data: PathBuf) -> Self {
+        Self { data }
+    }
+
     pub fn data(&self) -> &PathBuf {
         &self.data
     }

@@ -24,6 +24,8 @@ use crate::env::{uv_sidecar, Launcher, Paths, NODE_VERSION};
 
 const PYTHON_VERSION: &str = "3.13";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
+const NATIVE_CLI_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
+const NPM_CI_ARGS: &[&str] = &["ci", "--include=optional", "--no-fund", "--no-audit"];
 static PROBE_ID: AtomicU64 = AtomicU64::new(0);
 
 /// Published SHASUMS256 entries for the pinned Node tarballs.
@@ -170,14 +172,18 @@ fn chat_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
         return false;
     }
 
+    chat_runtime_ok(paths)
+}
+
+fn chat_runtime_ok(paths: &Paths) -> bool {
     let mut node = Command::new(paths.node_bin());
     node.arg("--version");
     if !probe_version(node, paths.data(), NODE_VERSION, HEALTH_TIMEOUT) {
         return false;
     }
 
-    // Only the adapter-hosted agents; the native CLIs are not provisioned.
-    agents::ALL.iter().all(|kind| {
+    // Only the adapter-hosted agents; Cursor and Grok are not provisioned.
+    if !agents::ALL.iter().all(|kind| {
         let Some(adapter_pin) = kind.adapter() else {
             return true;
         };
@@ -189,18 +195,49 @@ fn chat_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
         adapter.arg(script).arg("--version");
         let version = adapter_pin.rsplit_once('@').unwrap().1;
         probe_version(adapter, paths.data(), version, HEALTH_TIMEOUT)
-    })
+    }) {
+        return false;
+    }
+
+    // Adapter --version never loads the native CLIs supplied as optional npm
+    // packages. Exercise both real binaries so a skipped platform package
+    // cannot be stamped healthy and surface later as a misleading auth error.
+    let mut claude = Command::new(paths.node_bin());
+    claude
+        .arg(paths.adapter_script(crate::agents::AgentKind::Claude))
+        .args(["--cli", "--version"]);
+    if !probe_success(claude, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT) {
+        return false;
+    }
+
+    let mut codex = Command::new(paths.node_bin());
+    codex.arg(paths.codex_cli()).arg("--version");
+    probe_success(codex, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
 }
 
 /// Run a tiny version command without trusting that a corrupt executable will
 /// return. Output goes to a file, not a pipe that a noisy or forked process can
 /// hold open forever; the last token is the version emitted by both adapters.
 fn probe_version(
-    mut command: Command,
+    command: Command,
     output_dir: &std::path::Path,
     expected: &str,
     timeout: Duration,
 ) -> bool {
+    probe_output(command, output_dir, timeout)
+        .and_then(|text| text.split_whitespace().last().map(str::to_string))
+        .is_some_and(|version| version == expected)
+}
+
+fn probe_success(command: Command, output_dir: &std::path::Path, timeout: Duration) -> bool {
+    probe_output(command, output_dir, timeout).is_some()
+}
+
+fn probe_output(
+    mut command: Command,
+    output_dir: &std::path::Path,
+    timeout: Duration,
+) -> Option<String> {
     let output_path = output_dir.join(format!(
         ".health-{}-{}",
         std::process::id(),
@@ -211,7 +248,7 @@ fn probe_version(
         .create_new(true)
         .open(&output_path)
     else {
-        return false;
+        return None;
     };
     command
         .stdin(Stdio::null())
@@ -220,7 +257,7 @@ fn probe_version(
         .process_group(0);
     let Ok(mut child) = command.spawn() else {
         let _ = std::fs::remove_file(output_path);
-        return false;
+        return None;
     };
     let pgid = child.id() as i32;
     let deadline = Instant::now() + timeout;
@@ -239,13 +276,11 @@ fn probe_version(
             }
         }
     };
-    let matches = success
-        && std::fs::read_to_string(&output_path)
-            .ok()
-            .and_then(|text| text.split_whitespace().last().map(str::to_string))
-            .is_some_and(|version| version == expected);
+    let output = success
+        .then(|| std::fs::read_to_string(&output_path).ok())
+        .flatten();
     let _ = std::fs::remove_file(output_path);
-    matches
+    output
 }
 
 fn adapter_pins() -> Vec<String> {
@@ -499,7 +534,9 @@ fn provision_chat(
     let mut install = Command::new(paths.node_bin());
     install
         .arg(paths.npm_cli())
-        .args(["ci", "--no-fund", "--no-audit"])
+        // A user's npm config may omit optional dependencies, but both agent
+        // SDKs ship their macOS binaries as platform-specific optionals.
+        .args(NPM_CI_ARGS)
         .arg("--cache")
         .arg(paths.adapters().join("npm-cache"))
         .current_dir(paths.adapters());
@@ -507,6 +544,9 @@ fn provision_chat(
     // The npm cache is ~250 MB that only helps a reinstall, and adapter pins
     // change with app updates, not day to day.
     let _ = std::fs::remove_dir_all(paths.adapters().join("npm-cache"));
+    if !chat_runtime_ok(paths) {
+        return Err("the agent install is missing a platform-native CLI".into());
+    }
     Ok(())
 }
 
@@ -602,10 +642,15 @@ fn stream_lines(
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
     use std::time::Duration;
 
-    use super::{file_hash, occt_version, probe_version, wheel_version};
+    use super::{
+        chat_runtime_ok, file_hash, occt_version, probe_version, wheel_version, NPM_CI_ARGS,
+        PROBE_ID,
+    };
+    use crate::env::{Paths, NODE_VERSION};
 
     #[test]
     fn wheel_filename_yields_the_bundled_version() {
@@ -657,5 +702,67 @@ mod tests {
             "1.2.3",
             Duration::from_millis(50)
         ));
+    }
+
+    #[test]
+    fn npm_install_forces_platform_optional_dependencies() {
+        assert!(NPM_CI_ARGS
+            .windows(2)
+            .any(|args| args == ["ci", "--include=optional"]));
+    }
+
+    #[test]
+    fn chat_health_exercises_the_native_agent_clis() {
+        let dir = std::env::temp_dir().join(format!(
+            "nurb-chat-health-{}-{}",
+            std::process::id(),
+            PROBE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let paths = Paths::new(dir.clone());
+        std::fs::create_dir_all(paths.node_dir().join("bin")).unwrap();
+        std::fs::create_dir_all(paths.adapters().join("node_modules/.bin")).unwrap();
+
+        let node = paths.node_bin();
+        std::fs::write(
+            &node,
+            format!(
+                r#"#!/bin/sh
+case "$*" in
+  "--version") echo "{NODE_VERSION}" ;;
+  *"claude-agent-acp --cli --version"*)
+    [ ! -f "$0.missing-claude" ] || exit 1
+    [ ! -f "$0.slow-claude" ] || sleep 3
+    echo "2.1.220 (Claude Code)"
+    ;;
+  *"claude-agent-acp --version"*) echo "claude-agent-acp 0.64.2" ;;
+  *"codex-acp --version"*) echo "codex-acp 1.1.9" ;;
+  *"/codex --version"*)
+    [ ! -f "$0.missing-codex" ] || exit 1
+    echo "codex-cli 0.145.0"
+    ;;
+  *) exit 1 ;;
+esac
+"#
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
+        for agent in ["claude-agent-acp", "codex-acp", "codex"] {
+            std::fs::write(paths.adapters().join("node_modules/.bin").join(agent), b"").unwrap();
+        }
+
+        assert!(chat_runtime_ok(&paths));
+        let slow_claude = format!("{}.slow-claude", node.display());
+        std::fs::write(&slow_claude, b"").unwrap();
+        assert!(chat_runtime_ok(&paths));
+        std::fs::remove_file(slow_claude).unwrap();
+        let missing_claude = format!("{}.missing-claude", node.display());
+        std::fs::write(&missing_claude, b"").unwrap();
+        assert!(!chat_runtime_ok(&paths));
+        std::fs::remove_file(missing_claude).unwrap();
+        std::fs::write(format!("{}.missing-codex", node.display()), b"").unwrap();
+        assert!(!chat_runtime_ok(&paths));
+
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }
