@@ -134,8 +134,8 @@ def main():
         if not have:
             sys.exit(
                 "No supported agent CLI found on PATH. Install claude "
-                "(https://claude.com/claude-code) or codex (https://openai.com/codex), "
-                "sign in, and rerun."
+                "(https://claude.com/claude-code), codex (https://openai.com/codex), "
+                "or grok (https://x.ai), sign in, and rerun."
             )
         name = ask(
             "Which AI do you want to benchmark", [(n, f"{n} ({v})") for n, v in have],

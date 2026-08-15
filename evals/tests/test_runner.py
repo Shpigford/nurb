@@ -183,6 +183,7 @@ def test_usage_parsers_swallow_json_that_is_not_an_object():
     for garbage in ("[]", "null", "3", '"quoted"', "[]\nnull\n3"):
         assert HARNESSES["claude"].usage(garbage) == {}
         assert HARNESSES["codex"].usage(garbage) == {}
+        assert HARNESSES["grok"].usage(garbage) == {}
 
 
 def test_the_preamble_forbids_the_interactive_directives():
@@ -211,6 +212,17 @@ def test_real_adapters_build_the_documented_commands():
     assert "--ignore-user-config" in codex and "--ignore-rules" in codex
     assert "--ephemeral" in codex
     assert ["-s", "workspace-write"] == codex[codex.index("-s"):codex.index("-s") + 2]
+
+    grok = HARNESSES["grok"].command("do it", model="grok-4.6", effort="high")
+    assert grok[:2] == ["grok", "-p"] and "do it" in grok
+    assert "--always-approve" in grok and "--no-plan" in grok and "--no-ask-user" in grok
+    assert ["--output-format", "streaming-json"] == grok[
+        grok.index("--output-format"):grok.index("--output-format") + 2
+    ]
+    assert ["-m", "grok-4.6"] == grok[grok.index("-m"):grok.index("-m") + 2]
+    assert ["--reasoning-effort", "high"] == grok[
+        grok.index("--reasoning-effort"):grok.index("--reasoning-effort") + 2
+    ]
 
 
 def test_codex_runs_with_only_subscription_auth_in_its_home(tmp_path):
@@ -264,6 +276,42 @@ def test_claude_usage_parses_the_final_stream_event():
         "input_tokens": 50,
         "output_tokens": 80,
     }
+
+
+def test_grok_usage_parses_the_end_event():
+    from nurb_evals.harness import HARNESSES
+
+    stdout = "\n".join(
+        (
+            json.dumps({"type": "text", "data": "working"}),
+            json.dumps(
+                {
+                    "type": "usage",
+                    "usage": {"input_tokens": 10, "output_tokens": 4},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "end",
+                    "stopReason": "end_turn",
+                    "total_cost_usd": 0.007,
+                    "num_turns": 3,
+                    "usage": {
+                        "input_tokens": 21020,
+                        "output_tokens": 30,
+                        "reasoning_tokens": 25,
+                    },
+                }
+            ),
+        )
+    )
+    assert HARNESSES["grok"].usage(stdout) == {
+        "total_cost_usd": 0.007,
+        "num_turns": 3,
+        "input_tokens": 21020,
+        "output_tokens": 30,
+    }
+    assert HARNESSES["grok"].usage("not json") == {}
 
 
 def test_runner_requires_the_complete_row_identity():
