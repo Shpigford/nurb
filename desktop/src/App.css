@@ -348,6 +348,32 @@ textarea {
   color: var(--dim);
 }
 
+/* A card variant: the same part flexed to other values, so it nests under its
+   part the way the viewer's list draws it, indented past the icon column. */
+.part-var {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 9px;
+  padding: 2px 7px 2px 9px;
+  border-left: 1px solid var(--line);
+  border-radius: 0 5px 5px 0;
+  font-size: 11px;
+  color: var(--dimmer);
+  cursor: pointer;
+}
+
+.part-var:hover {
+  background: var(--hover);
+  color: var(--dim);
+}
+
+.part-var.selected {
+  color: var(--text);
+  background: var(--active);
+  border-left-color: var(--accent);
+}
+
 .part-add {
   display: flex;
   align-items: center;

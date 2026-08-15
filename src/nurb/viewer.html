@@ -596,6 +596,7 @@ const q = new URLSearchParams(location.search);
 let want = q.get('part');
 const view = q.get('view'), bare = q.has('bare'), embed = q.has('embed');
 let wantVariant = q.get('variant');   // consumed by the first sync, then the URL just mirrors
+let wantConfiguration = wantVariant !== null;
 const VIEWS = {
   iso: [0.7, -0.75, 0.6], front: [0, -1, 0], back: [0, 1, 0],
   left: [-1, 0, 0], right: [1, 0, 0], top: [0, 0, 1],
@@ -624,13 +625,36 @@ if (embed) {
   window.addEventListener('message', e => {
     if (e.source !== window.parent || !e.data || e.data.type !== 'nurb:part') return;
     const name = String(e.data.name);
-    if (name === current) return;
-    want = null; wantVariant = null;
+    const hasConfiguration = Object.prototype.hasOwnProperty.call(e.data, 'variant');
+    const vname = hasConfiguration && e.data.variant !== null ? String(e.data.variant) : null;
+    want = null; wantVariant = null; wantConfiguration = false;
     const entry = parts.get(name);
-    if (!entry) { want = name; return; }   // still building; sync or rebuilt finishes the switch
+    if (!entry) {   // still building; sync or rebuilt finishes the switch
+      want = name; wantVariant = vname; wantConfiguration = hasConfiguration;
+      return;
+    }
+    const switching = name !== current;
+    // A missing variant is selection synchronization, never a command to change
+    // slider values. Only a rail click includes the field.
+    if (!hasConfiguration) {
+      if (!switching) return;
+      current = name;
+      render(); show(name, { keepCamera: false }); setURL();
+      return;
+    }
+    const v = vname && (entry.variants || []).find(x => x.name === vname) || null;
+    if (vname !== null && !v) return;
+    // The entry is the last completed build. Pending slider or variant work is
+    // newer, so an explicit click must supersede it even when the entry appears
+    // to already show the requested configuration.
+    const changing = inflight === name || (pending !== null && pendingFor === name);
+    const needsApply = changing || (v ? !variantActive(entry, v) : !!activeVariant(entry));
+    if (!switching && !needsApply) return;
     current = name;
-    if (activeVariant(entry)) applyVariant(name, { params: {} });
-    render(); show(name, { keepCamera: false }); setURL();
+    if (needsApply) applyVariant(name, v || { params: {} });
+    render();
+    if (switching) show(name, { keepCamera: false });
+    setURL(v && v.name);
   });
 }
 
@@ -2313,10 +2337,14 @@ function activeVariant(e) {
 // push per parameter; sync() moves the sliders when the rebuild lands.
 function applyVariant(name, v) {
   if (!sock || sock.readyState !== WebSocket.OPEN) return;
-  pending = null; pendingFor = null;   // a drag in flight must not resurrect old values
-  inflight = name;
-  beginStale();
-  sock.send(JSON.stringify({ type: 'params', name, values: { ...v.params } }));
+  // Join the sliders' one-flight queue. If an older build is away, `settled`
+  // sends these values after its response instead of mistaking that response
+  // for this newer request and letting the older configuration win.
+  clearTimeout(timer);
+  pending = { ...v.params };
+  pendingFor = name;
+  pendingCommitted = true;
+  flush();
 }
 
 // The address bar always holds the link to what is on screen, so any part or variant
@@ -2351,7 +2379,7 @@ function render() {
       + `<span class="ms">${e.error ? (e.refused ? '' : 'err') : e.ms + 'ms'}</span>`;
     row.onclick = () => {
       // A click supersedes a deep link whose part is still waiting to build.
-      want = null; wantVariant = null;
+      want = null; wantVariant = null; wantConfiguration = false;
       current = e.name;
       // The part row is the defaults configuration. With a variant active it is also
       // the only way back: a variant that flips a bool has no slider to drag home.
@@ -2368,7 +2396,7 @@ function render() {
       const how = Object.entries(v.params).map(([k, val]) => `${k} = ${val}`).join('\n');
       vr.title = v.note ? `${v.note}\n\n${how}` : how;
       vr.onclick = () => {
-        want = null; wantVariant = null;
+        want = null; wantVariant = null; wantConfiguration = false;
         if (current !== e.name) { current = e.name; show(e.name, { keepCamera: false }); }
         applyVariant(e.name, v);
         render();
@@ -2529,7 +2557,9 @@ function connect() {
       parts.clear();
       msg.parts.forEach(p => parts.set(p.name, p));
       sharedRuns = msg.shared || [];
-      if (want && !msg.sources.includes(want)) { want = null; wantVariant = null; }
+      if (want && !msg.sources.includes(want)) {
+        want = null; wantVariant = null; wantConfiguration = false;
+      }
       // A fallback render may have filled `current` while the socket was down.
       // The still-pending deep link outranks that temporary choice.
       if (want && parts.has(want)) current = want;
@@ -2537,11 +2567,15 @@ function connect() {
       // ?variant= is an ask, so it loads that variant's overrides once. Once, because
       // a reconnect sync must not snap back what the user has since dragged away.
       let linked = null;
-      if (wantVariant && current === want) {
-        linked = (parts.get(current).variants || []).find(v => v.name === wantVariant);
+      if (wantConfiguration && current === want) {
+        linked = wantVariant && (parts.get(current).variants || []).find(v => v.name === wantVariant);
         if (linked) applyVariant(current, linked);
+        else if (wantVariant === null && activeVariant(parts.get(current)))
+          applyVariant(current, { params: {} });
       }
-      if (current === want) { want = null; wantVariant = null; }
+      if (current === want) {
+        want = null; wantVariant = null; wantConfiguration = false;
+      }
       render();
       if (current) show(current, { keepCamera: false });
       setURL(linked && linked.name);
@@ -2551,9 +2585,12 @@ function connect() {
       let linked = null;
       if (msg.name === want) {
         current = want;
-        linked = wantVariant && (msg.variants || []).find(v => v.name === wantVariant);
+        linked = wantConfiguration && wantVariant
+          && (msg.variants || []).find(v => v.name === wantVariant);
         if (linked) applyVariant(current, linked);
-        want = null; wantVariant = null;
+        else if (wantConfiguration && wantVariant === null && activeVariant(msg))
+          applyVariant(current, { params: {} });
+        want = null; wantVariant = null; wantConfiguration = false;
       }
       // The first part in an empty project arrives here, not in a sync, so without
       // this `nurb new` in a running `nurb dev` fills the list and leaves the canvas
@@ -2571,7 +2608,9 @@ function connect() {
     // sliders that rebuild a file that is not there.
     if (msg.type === 'gone') {
       parts.delete(msg.name);
-      if (want === msg.name) { want = null; wantVariant = null; }
+      if (want === msg.name) {
+        want = null; wantVariant = null; wantConfiguration = false;
+      }
       if (current === msg.name) {
         current = parts.size ? parts.keys().next().value : null;
         if (current) show(current, { keepCamera: false });

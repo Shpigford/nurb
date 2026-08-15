@@ -109,6 +109,22 @@ export function IconChevronDown({ size = 10 }: { size?: number }) {
   );
 }
 
+// The viewer's sliders glyph for a variant: the same part at other values.
+export function IconVariant({ size = 11 }: { size?: number }) {
+  return (
+    <svg className="row-icon" width={size} height={size} viewBox="0 0 12 12" aria-hidden="true">
+      <g {...strokeProps}>
+        <line x1="11.25" y1="8.75" x2="6.25" y2="8.75" />
+        <circle cx="4.25" cy="8.75" r="2" />
+        <line x1="2.25" y1="8.75" x2=".75" y2="8.75" />
+        <line x1=".75" y1="3.25" x2="5.75" y2="3.25" />
+        <circle cx="7.75" cy="3.25" r="2" />
+        <line x1="9.75" y1="3.25" x2="11.25" y2="3.25" />
+      </g>
+    </svg>
+  );
+}
+
 export function IconCube({ size = 12 }: { size?: number }) {
   return (
     <svg className="row-icon" width={size} height={size} viewBox="0 0 18 18" aria-hidden="true">
