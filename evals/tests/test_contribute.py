@@ -50,7 +50,12 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     os.symlink(real / "tasks" / "cable_clip", root / "tasks" / "cable_clip")
 
     monkeypatch.setattr(contribute, "EVALS", root)
-    monkeypatch.setattr(contribute.shutil, "which", lambda name: "/usr/bin/true")
+    which = contribute.shutil.which
+    monkeypatch.setattr(
+        contribute.shutil,
+        "which",
+        lambda name: "/usr/bin/true" if name == "stub" else which(name),
+    )
     monkeypatch.setitem(harnesses.HARNESSES, "stub", Stub(GOOD))
     monkeypatch.setattr(
         sys,

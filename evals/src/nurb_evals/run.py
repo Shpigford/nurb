@@ -19,7 +19,6 @@ import os
 import pathlib
 import signal
 import shutil
-import stat
 import subprocess
 import sys
 import tempfile
@@ -41,32 +40,64 @@ done, the part file named below must exist at its stated path.
 
 
 @contextlib.contextmanager
-def _answer_key_hidden():
-    """Make the scorers, reference solutions, and prior rows unreadable while the
-    agent runs.
+def _isolated_nurb_environment(env, raw):
+    """Install the locked nurb build outside the checkout for one agent run.
 
-    Moving the project into a temp directory is not enough: the nurb on PATH is an
-    editable install, so `which nurb` or `import nurb` hands any curious model a path
-    back to the checkout, and real transcripts show models following it into
-    tests/solutions and tasks/*/task.py mid-trial. Instead of hiding the path, which
-    cannot be done, deny the read: chmod the sensitive directories to 0 for the
-    duration of the harness run and restore them before grading. This is a guard
-    against a model wandering, not against an adversary (the same user can chmod them
-    back, and the repo is public), and it assumes one trial at a time per checkout.
+    The benchmark itself is editable, so handing its Python or nurb executable to an
+    agent also hands it a path back to tests/solutions and tasks/*/task.py. A locked,
+    non-editable install in the trial's temp directory removes that breadcrumb without
+    changing shared checkout permissions. Concurrent and interrupted trials therefore
+    cannot expose answers to one another or leave the repository unreadable.
     """
+    uv = shutil.which("uv")
+    if uv is None:
+        raise RuntimeError("uv is required to prepare the isolated nurb runtime")
+
     evals = pathlib.Path(__file__).parents[2]
-    saved = []
-    for name in ("tasks", "tests", "submissions", "results"):
-        path = evals / name
-        if path.is_dir():
-            saved.append((path, path.stat().st_mode))
-    for path, _ in saved:
-        os.chmod(path, 0)
-    try:
-        yield
-    finally:
-        for path, mode in saved:
-            os.chmod(path, stat.S_IMODE(mode))
+    runtime = pathlib.Path(raw) / "runtime"
+    venv = runtime / "venv"
+    setup_env = dict(os.environ)
+    setup_env["VIRTUAL_ENV"] = str(venv)
+    commands = (
+        [uv, "venv", "--python", sys.executable, str(venv)],
+        [
+            uv,
+            "sync",
+            "--project", str(evals),
+            "--active",
+            "--frozen",
+            "--offline",
+            "--no-editable",
+            "--no-dev",
+            "--no-install-project",
+            "--no-progress",
+        ],
+    )
+    for command in commands:
+        done = subprocess.run(command, env=setup_env, capture_output=True, text=True)
+        if done.returncode != 0:
+            detail = (done.stderr or done.stdout).strip().splitlines()
+            raise RuntimeError(
+                "could not prepare isolated nurb runtime"
+                + (f": {detail[-1]}" if detail else "")
+            )
+
+    # Local wheel metadata records where it was built. It is irrelevant at runtime
+    # and would recreate the checkout breadcrumb this environment exists to remove.
+    site = next((venv / "lib").glob("python*/site-packages"))
+    for direct_url in site.glob("nurb-*.dist-info/direct_url.json"):
+        direct_url.unlink()
+
+    clean = dict(env)
+    benchmark_bin = pathlib.Path(sys.executable).parent.resolve()
+    inherited = [
+        entry
+        for entry in clean.get("PATH", "").split(os.pathsep)
+        if not entry or pathlib.Path(entry).expanduser().resolve() != benchmark_bin
+    ]
+    clean["PATH"] = os.pathsep.join((str(venv / "bin"), *inherited))
+    clean["VIRTUAL_ENV"] = str(venv)
+    yield clean
 
 
 def _invoke(cmd, *, cwd, env, timeout):
@@ -117,21 +148,21 @@ def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=3600.0):
         env["PATH"] = f"{pathlib.Path(sys.executable).parent}:{env.get('PATH', '')}"
         env["PWD"] = str(project)
 
-        started = time.monotonic()
         error = None
         stdout = ""
-        # Build the command before the answer key goes dark: an adapter is free to
-        # read whatever it wants at build time, the agent it launches is not.
+        # Build the adapter command before swapping in the agent's isolated runtime.
         cmd = h.command(
             prompt,
             model=model,
             effort=effort,
             instructions=(project / "AGENTS.md").read_text(encoding="utf-8"),
         )
-        with h.environment(env) as clean_env, _answer_key_hidden():
-            returncode, stdout, stderr, timed_out = _invoke(
-                cmd, cwd=project, env=clean_env, timeout=timeout,
-            )
+        with _isolated_nurb_environment(env, raw) as isolated_env:
+            started = time.monotonic()
+            with h.environment(isolated_env) as clean_env:
+                returncode, stdout, stderr, timed_out = _invoke(
+                    cmd, cwd=project, env=clean_env, timeout=timeout,
+                )
         harness_s = round(time.monotonic() - started, 1)
 
         # The model must not run below the benchmark checkout, where walking to a

@@ -6,6 +6,7 @@ materialized, part graded, row written, transcript kept — not any real model.
 """
 
 import contextlib
+import concurrent.futures
 import json
 import pathlib
 import sys
@@ -38,12 +39,12 @@ class Stub:
     def command(self, prompt, model=None, effort=None, instructions=None):
         assert instructions and instructions.startswith("#")
         if self.source is None:
-            return [sys.executable, "-c", "pass"]
-        # Embed the solution's text rather than its path: the command is built before
-        # the run, while the "agent" subprocess executes with the answer key dark.
+            return ["python", "-c", "pass"]
+        # Embed the solution's text rather than its path: the "agent" subprocess runs
+        # with only the isolated nurb installation on its import and executable paths.
         text = pathlib.Path(self.source).read_text(encoding="utf-8")
         write = f"import pathlib; pathlib.Path('parts/{self.part}.py').write_text({text!r})"
-        return [sys.executable, "-c", write]
+        return ["python", "-c", write]
 
     def usage(self, stdout):
         return {"stub": True}
@@ -80,7 +81,7 @@ def test_the_agent_project_is_not_inside_the_benchmark_checkout(tmp_path, monkey
                 "print(any((p/'grader-secret').exists() for p in (here,*here.parents)));"
                 f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})"
             )
-            return [sys.executable, "-c", script]
+            return ["python", "-c", script]
 
     row = runner.trial(AncestorProbe(GOOD), TASK, SEED, 1, out)
     assert row["score"] == 1.0
@@ -89,31 +90,90 @@ def test_the_agent_project_is_not_inside_the_benchmark_checkout(tmp_path, monkey
     assert (slot / "project" / "parts" / "cable_clip.py").is_file()
 
 
-def test_the_answer_key_is_unreadable_while_the_agent_runs(tmp_path):
-    """Real transcripts show models following the editable install's path back into
-    tests/solutions and tasks/*/task.py mid-trial. During the harness run those
-    directories deny reads; grading afterwards still works."""
+def test_the_answer_key_checkout_is_not_discoverable_while_the_agent_runs(tmp_path):
+    """The agent's nurb executable, Python, import path, and install metadata all
+    belong to its throwaway runtime rather than the benchmark checkout."""
 
     class Peeker(Stub):
         def command(self, prompt, model=None, effort=None, instructions=None):
             script = (
-                "import pathlib\n"
-                f"for secret in ({str(GOOD)!r}, {str(TASK / 'task.py')!r}):\n"
-                "    try:\n"
-                "        pathlib.Path(secret).read_text()\n"
-                "        print('LEAKED', secret)\n"
-                "    except PermissionError:\n"
-                "        print('denied')\n"
+                "import importlib.metadata, importlib.util, os, shutil, sys\n"
+                f"checkout = {str(EVALS.parent)!r}\n"
+                "dist = importlib.metadata.distribution('nurb')\n"
+                "breadcrumbs = [shutil.which('nurb'), sys.executable, *sys.path, "
+                "*os.environ['PATH'].split(os.pathsep), "
+                "importlib.util.find_spec('nurb').origin, "
+                "dist.read_text('direct_url.json')]\n"
+                "print('LEAKED' if any(checkout in (p or '') for p in breadcrumbs) "
+                "else 'hidden')\n"
                 f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})\n"
             )
-            return [sys.executable, "-c", script]
+            return ["python", "-c", "import pathlib\n" + script]
 
     row = runner.trial(Peeker(GOOD), TASK, SEED, 1, tmp_path)
-    assert row["score"] == 1.0, "directories are restored in time for grading"
+    assert row["score"] == 1.0
     transcript = (tmp_path / "cable_clip" / "trial_1" / "transcript.txt").read_text()
     assert "LEAKED" not in transcript
-    assert transcript.count("denied") == 2
-    assert GOOD.read_text(), "and restored for the next caller"
+    assert transcript.strip() == "hidden"
+
+
+def test_the_isolated_nurb_cli_builds_the_agent_project(tmp_path):
+    class Builds(Stub):
+        def command(self, prompt, model=None, effort=None, instructions=None):
+            script = (
+                "import pathlib,subprocess\n"
+                f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})\n"
+                "subprocess.run(['nurb', 'build', 'cable_clip'], check=True)\n"
+            )
+            return ["python", "-c", script]
+
+    row = runner.trial(Builds(GOOD), TASK, SEED, 1, tmp_path)
+    assert row["score"] == 1.0
+    assert row["error"] is None
+
+
+def test_trials_never_change_checkout_permissions(tmp_path, monkeypatch):
+    chmod = runner.os.chmod
+
+    def guarded(path, *args, **kwargs):
+        if pathlib.Path(path).resolve().is_relative_to(EVALS.resolve()):
+            raise AssertionError("a trial must not mutate shared checkout permissions")
+        return chmod(path, *args, **kwargs)
+
+    monkeypatch.setattr(runner.os, "chmod", guarded)
+    assert runner.trial(Stub(GOOD), TASK, SEED, 1, tmp_path)["score"] == 1.0
+
+
+def test_two_trials_can_run_concurrently(tmp_path):
+    rendezvous = tmp_path / "rendezvous"
+    rendezvous.mkdir()
+
+    class Overlap(Stub):
+        def __init__(self, marker):
+            super().__init__(GOOD)
+            self.marker = marker
+
+        def command(self, prompt, model=None, effort=None, instructions=None):
+            script = (
+                "import pathlib,time\n"
+                f"shared=pathlib.Path({str(rendezvous)!r})\n"
+                f"(shared/{self.marker!r}).write_text('ready')\n"
+                "deadline=time.monotonic()+20\n"
+                "while len(list(shared.iterdir())) < 2 and time.monotonic() < deadline:\n"
+                "    time.sleep(0.01)\n"
+                "assert len(list(shared.iterdir())) == 2\n"
+                f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})\n"
+            )
+            return ["python", "-c", script]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        rows = list(
+            pool.map(
+                lambda pair: runner.trial(pair[0], TASK, SEED, pair[1], tmp_path),
+                ((Overlap("one"), 1), (Overlap("two"), 2)),
+            )
+        )
+    assert [row["score"] for row in rows] == [1.0, 1.0]
 
 
 def test_the_part_path_follows_the_task(tmp_path):
@@ -195,7 +255,7 @@ def test_timeout_kills_harness_descendants(tmp_path):
                 "while not pathlib.Path('child_started').exists(): time.sleep(0.01)\n"
                 "time.sleep(60)"
             )
-            return [sys.executable, "-c", parent]
+            return ["python", "-c", parent]
 
     runner.trial(SpawnsChild(), TASK, SEED, 1, tmp_path, timeout=1.0)
     project = tmp_path / "cable_clip" / "trial_1" / "project"
