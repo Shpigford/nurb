@@ -370,7 +370,7 @@ wheels = [
 
 [[package]]
 name = "nurb"
-version = "0.19.2"
+version = "0.20.0"
 source = { editable = "../" }
 dependencies = [
     { name = "build123d" },
