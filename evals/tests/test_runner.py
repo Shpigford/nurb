@@ -39,10 +39,10 @@ class Stub:
         assert instructions and instructions.startswith("#")
         if self.source is None:
             return [sys.executable, "-c", "pass"]
-        write = (
-            "import pathlib, shutil;"
-            f"shutil.copy({str(self.source)!r}, 'parts/{self.part}.py')"
-        )
+        # Embed the solution's text rather than its path: the command is built before
+        # the run, while the "agent" subprocess executes with the answer key dark.
+        text = pathlib.Path(self.source).read_text(encoding="utf-8")
+        write = f"import pathlib; pathlib.Path('parts/{self.part}.py').write_text({text!r})"
         return [sys.executable, "-c", write]
 
     def usage(self, stdout):
@@ -75,10 +75,10 @@ def test_the_agent_project_is_not_inside_the_benchmark_checkout(tmp_path, monkey
 
         def command(self, prompt, model=None, effort=None, instructions=None):
             script = (
-                "import pathlib,shutil;"
+                "import pathlib;"
                 "here=pathlib.Path.cwd();"
                 "print(any((p/'grader-secret').exists() for p in (here,*here.parents)));"
-                f"shutil.copy({str(GOOD)!r}, 'parts/cable_clip.py')"
+                f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})"
             )
             return [sys.executable, "-c", script]
 
@@ -87,6 +87,33 @@ def test_the_agent_project_is_not_inside_the_benchmark_checkout(tmp_path, monkey
     slot = out / "cable_clip" / "trial_1"
     assert (slot / "transcript.txt").read_text(encoding="utf-8").strip() == "False"
     assert (slot / "project" / "parts" / "cable_clip.py").is_file()
+
+
+def test_the_answer_key_is_unreadable_while_the_agent_runs(tmp_path):
+    """Real transcripts show models following the editable install's path back into
+    tests/solutions and tasks/*/task.py mid-trial. During the harness run those
+    directories deny reads; grading afterwards still works."""
+
+    class Peeker(Stub):
+        def command(self, prompt, model=None, effort=None, instructions=None):
+            script = (
+                "import pathlib\n"
+                f"for secret in ({str(GOOD)!r}, {str(TASK / 'task.py')!r}):\n"
+                "    try:\n"
+                "        pathlib.Path(secret).read_text()\n"
+                "        print('LEAKED', secret)\n"
+                "    except PermissionError:\n"
+                "        print('denied')\n"
+                f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})\n"
+            )
+            return [sys.executable, "-c", script]
+
+    row = runner.trial(Peeker(GOOD), TASK, SEED, 1, tmp_path)
+    assert row["score"] == 1.0, "directories are restored in time for grading"
+    transcript = (tmp_path / "cable_clip" / "trial_1" / "transcript.txt").read_text()
+    assert "LEAKED" not in transcript
+    assert transcript.count("denied") == 2
+    assert GOOD.read_text(), "and restored for the next caller"
 
 
 def test_the_part_path_follows_the_task(tmp_path):

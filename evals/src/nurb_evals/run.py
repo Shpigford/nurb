@@ -13,11 +13,13 @@ left behind, because a leaderboard row nobody can audit is a rumor.
 """
 
 import argparse
+import contextlib
 import json
 import os
 import pathlib
 import signal
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -36,6 +38,35 @@ current directory). There is no human to ask and no browser to look at: never ru
 done, the part file named below must exist at its stated path.
 
 """
+
+
+@contextlib.contextmanager
+def _answer_key_hidden():
+    """Make the scorers, reference solutions, and prior rows unreadable while the
+    agent runs.
+
+    Moving the project into a temp directory is not enough: the nurb on PATH is an
+    editable install, so `which nurb` or `import nurb` hands any curious model a path
+    back to the checkout, and real transcripts show models following it into
+    tests/solutions and tasks/*/task.py mid-trial. Instead of hiding the path, which
+    cannot be done, deny the read: chmod the sensitive directories to 0 for the
+    duration of the harness run and restore them before grading. This is a guard
+    against a model wandering, not against an adversary (the same user can chmod them
+    back, and the repo is public), and it assumes one trial at a time per checkout.
+    """
+    evals = pathlib.Path(__file__).parents[2]
+    saved = []
+    for name in ("tasks", "tests", "submissions", "results"):
+        path = evals / name
+        if path.is_dir():
+            saved.append((path, path.stat().st_mode))
+    for path, _ in saved:
+        os.chmod(path, 0)
+    try:
+        yield
+    finally:
+        for path, mode in saved:
+            os.chmod(path, stat.S_IMODE(mode))
 
 
 def _invoke(cmd, *, cwd, env, timeout):
@@ -89,17 +120,17 @@ def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=3600.0):
         started = time.monotonic()
         error = None
         stdout = ""
-        with h.environment(env) as clean_env:
+        # Build the command before the answer key goes dark: an adapter is free to
+        # read whatever it wants at build time, the agent it launches is not.
+        cmd = h.command(
+            prompt,
+            model=model,
+            effort=effort,
+            instructions=(project / "AGENTS.md").read_text(encoding="utf-8"),
+        )
+        with h.environment(env) as clean_env, _answer_key_hidden():
             returncode, stdout, stderr, timed_out = _invoke(
-                h.command(
-                    prompt,
-                    model=model,
-                    effort=effort,
-                    instructions=(project / "AGENTS.md").read_text(encoding="utf-8"),
-                ),
-                cwd=project,
-                env=clean_env,
-                timeout=timeout,
+                cmd, cwd=project, env=clean_env, timeout=timeout,
             )
         harness_s = round(time.monotonic() - started, 1)
 
