@@ -215,7 +215,8 @@ def test_real_adapters_build_the_documented_commands():
 
     grok = HARNESSES["grok"].command("do it", model="grok-4.6", effort="high")
     assert grok[:2] == ["grok", "-p"] and "do it" in grok
-    assert "--always-approve" in grok and "--no-plan" in grok and "--no-ask-user" in grok
+    assert "--always-approve" in grok and "--no-plan" in grok
+    assert "--no-ask-user" in grok and "--no-memory" in grok
     assert ["--output-format", "streaming-json"] == grok[
         grok.index("--output-format"):grok.index("--output-format") + 2
     ]
@@ -240,6 +241,43 @@ def test_codex_runs_with_only_subscription_auth_in_its_home(tmp_path):
         assert {path.name for path in clean.iterdir()} == {"auth.json"}
         assert (clean / "auth.json").read_text(encoding="utf-8") == '{"token": "test"}'
     assert not clean.exists()
+
+
+def test_grok_runs_with_only_subscription_auth_in_its_home(tmp_path):
+    import pytest
+    from nurb_evals.harness import HARNESSES
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "auth.json").write_text('{"token": "test"}', encoding="utf-8")
+    (source / "rules").mkdir()
+    (source / "config.toml").write_text("personal = true", encoding="utf-8")
+
+    inherited = {
+        "GROK_HOME": str(source),
+        "GROK_CLAUDE_SKILLS_ENABLED": "true",
+        "GROK_CURSOR_RULES_ENABLED": "true",
+        "GROK_AGENT": "personal",
+        "PATH": "/usr/bin",
+    }
+    with HARNESSES["grok"].environment(inherited) as env:
+        clean = pathlib.Path(env["GROK_HOME"])
+        assert clean != source
+        assert {path.name for path in clean.iterdir()} == {"auth.json", "config.toml"}
+        assert (clean / "auth.json").read_text(encoding="utf-8") == '{"token": "test"}'
+        written = (clean / "config.toml").read_text(encoding="utf-8")
+        assert "skills = false" in written and "[compat.claude]" in written
+        assert "GROK_CLAUDE_SKILLS_ENABLED" not in env
+        assert "GROK_CURSOR_RULES_ENABLED" not in env
+        assert "GROK_AGENT" not in env
+        assert env["PATH"] == "/usr/bin"
+    assert not clean.exists()
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(RuntimeError, match="grok subscription auth"):
+        with HARNESSES["grok"].environment({"GROK_HOME": str(empty)}):
+            pass
 
 
 def test_claude_usage_parses_the_result_json():
