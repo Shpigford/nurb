@@ -29,7 +29,7 @@ curl -fsSL https://nurb.dev/bench.sh | sh
 Install the nurb skill once and your agent reaches for nurb on its own whenever you ask for a printable part. The installer above already did this; by hand, [skills.sh](https://www.skills.sh/) detects whatever harnesses you have and installs into each:
 
 ```bash
-npx skills add shpigford/nurb
+npx skills add shpigford/nurb --skill nurb
 ```
 
 Or `nurb skill` prints the same skill file out for you. Later, `nurb update` upgrades nurb and rewrites the installed skill to match, so the two move together.

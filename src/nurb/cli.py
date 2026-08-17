@@ -780,7 +780,7 @@ def cmd_skill(args):
             state = "updated"
         print(f"  ~/{target.relative_to(home)}: {state}")
     if not found:
-        print("  no installed skill found. install one: npx skills add shpigford/nurb")
+        print("  no installed skill found. install one: npx skills add shpigford/nurb --skill nurb")
 
 
 def cmd_update(args):

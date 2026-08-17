@@ -783,7 +783,7 @@ def test_skill_sync_leaves_a_current_copy_alone(tmp_path, monkeypatch, capsys):
 def test_skill_sync_with_nothing_installed_points_at_the_installer(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HOME", str(tmp_path))
     cli.main(["skill", "--sync"])
-    assert "npx skills add shpigford/nurb" in capsys.readouterr().out
+    assert "npx skills add shpigford/nurb --skill nurb" in capsys.readouterr().out
 
 
 # --- diff --------------------------------------------------------------------

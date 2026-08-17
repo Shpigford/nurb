@@ -46,8 +46,10 @@ main() {
 
   say "[3/3] teaching your AI to use nurb..."
   if command -v npx >/dev/null 2>&1; then
-    # skills.sh detects every AI harness on the machine and installs into each
-    npx -y skills add shpigford/nurb -g -y </dev/null || install_skill_directly || fail "could not install the nurb skill; run manually: npx skills add shpigford/nurb"
+    # skills.sh detects every AI harness on the machine and installs into each.
+    # --skill nurb keeps it to the shipped skill; the repo also carries dev-only
+    # skills (release, changelog) that must not land on a user's machine.
+    npx -y skills add shpigford/nurb --skill nurb -g -y </dev/null || install_skill_directly || fail "could not install the nurb skill; run manually: npx skills add shpigford/nurb --skill nurb"
   else
     install_skill_directly || fail "could not install the nurb skill; see https://nurb.dev"
   fi
