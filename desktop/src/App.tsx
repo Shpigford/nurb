@@ -18,6 +18,7 @@ import {
 } from "./chatColumns";
 import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus, IconVariant } from "./Icons";
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
+import Logo from "./Logo";
 import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
 import Setup from "./Setup";
@@ -129,6 +130,7 @@ const viewportWidth = () => document.documentElement.clientWidth;
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [servers, setServers] = useState<Record<string, Server>>({});
   const [opening, setOpening] = useState<Record<string, boolean>>({});
   const [active, setActive] = useState<string | null>(null);
@@ -396,6 +398,7 @@ function App() {
   const refreshProjects = useCallback(async () => {
     const list = await invoke<Project[]>("list_projects");
     setProjects(list);
+    setProjectsLoaded(true);
     return list;
   }, []);
 
@@ -1295,7 +1298,37 @@ function App() {
       {!columns.some(columnVisible) && (
         <section className="chat">
           <div className="chat-header" data-tauri-drag-region />
-          <div className="placeholder">chat</div>
+          {projectsLoaded && projects.length === 0 ? (
+            // The zero-project welcome: the one moment the app has to explain
+            // itself, so the create form lives here, not behind the rail's +.
+            <div className="welcome">
+              <Logo size={36} />
+              <div className="welcome-title">Design your first part</div>
+              <p className="welcome-copy">
+                A project holds the parts you design. Name it, then describe
+                what you want to make.
+              </p>
+              <form className="name-form welcome-form" onSubmit={createProject}>
+                <input
+                  className="name-input"
+                  name="name"
+                  placeholder="project name"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  disabled={creating}
+                />
+                <button className="rail-button welcome-create" type="submit" disabled={creating}>
+                  {creating ? "creating…" : "create"}
+                </button>
+              </form>
+              <button className="welcome-existing" onClick={addExisting}>
+                or add an existing folder…
+              </button>
+            </div>
+          ) : (
+            <div className="placeholder">chat</div>
+          )}
         </section>
       )}
       <main className="viewer">
@@ -1318,7 +1351,11 @@ function App() {
         ) : active && opening[active] ? (
           <div className="viewer-status">starting the CAD engine…</div>
         ) : (
-          <div className="viewer-status">open a project to start</div>
+          <div className="viewer-status">
+            {projectsLoaded && projects.length === 0
+              ? "create a project to start"
+              : "open a project to start"}
+          </div>
         )}
       </main>
       <div
