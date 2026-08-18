@@ -16,7 +16,7 @@ import {
   updateChatActivity,
   type ChatColumn,
 } from "./chatColumns";
-import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus, IconVariant } from "./Icons";
+import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus, IconGear, IconVariant } from "./Icons";
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
 import Logo from "./Logo";
 import type { Column } from "./layout";
@@ -1165,19 +1165,26 @@ function App() {
         )}
         {error && <div className="rail-error">{error}</div>}
         <div className="rail-foot">
-          <button className="rail-version" onClick={() => setShowSettings(true)}>
-            settings
-          </button>
-          {about && (
-            <button className="rail-version" onClick={() => setShowAbout(true)}>
-              nurb {about.appVersion}
-            </button>
-          )}
           {update && (
             <button className="rail-update" disabled={updating} onClick={installUpdate}>
               {updating ? "updating…" : `update to ${update.version}`}
             </button>
           )}
+          <div className="rail-foot-row">
+            {about && (
+              <button className="rail-version" onClick={() => setShowAbout(true)}>
+                nurb {about.appVersion}
+              </button>
+            )}
+            <button
+              className="rail-settings"
+              title="settings"
+              aria-label="settings"
+              onClick={() => setShowSettings(true)}
+            >
+              <IconGear />
+            </button>
+          </div>
         </div>
       </aside>
       {menu && (

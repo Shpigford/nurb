@@ -1485,6 +1485,27 @@ textarea {
   align-items: flex-start;
 }
 
+.rail-foot-row {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rail-settings {
+  background: none;
+  border: none;
+  color: var(--dimmer);
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+}
+
+/* .row-icon pins its own color, so the hover has to land on the icon, not the button. */
+.rail-settings:hover .row-icon {
+  color: var(--text);
+}
+
 .rail-version {
   background: none;
   border: none;
