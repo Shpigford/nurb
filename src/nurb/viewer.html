@@ -757,6 +757,17 @@ function syncPins() { pins.visible = pinsWanted && pinsPlaced; }
 
 const material = new THREE.MeshStandardMaterial({
   color: 0x9aa6b8, metalness: 0.05, roughness: 0.62, flatShading: false,
+  // Pushed back a hair so the edge overlay draws without z-fighting the surface.
+  polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
+});
+
+// Faces of one grey material melt together under soft lighting; a faint dark line on
+// every sharp crease gives the eye the boundary back. 25 degrees keeps tessellated
+// curves clean (adjacent facets on a cylinder differ by a few degrees) while every
+// modeled corner and chamfer qualifies.
+const EDGE_ANGLE = 25;
+const edgeMaterial = new THREE.LineBasicMaterial({
+  color: 0x0c0e12, transparent: true, opacity: 0.35,
 });
 
 // ---- target ghost ----
@@ -1713,9 +1724,9 @@ async function paint(name, { keepCamera }) {
     err.textContent = entry.traceback || entry.error;
     if (mesh) {                              // last good geometry stays, visibly stale
       mesh.traverse(o => {
-        if (!o.isMesh) return;
+        if (!o.isMesh && !o.isLineSegments) return;
         o.material.transparent = true;
-        o.material.opacity = 0.22;
+        o.material.opacity = o.isLineSegments ? 0.1 : 0.22;
         o.material.needsUpdate = true;
       });
     }
@@ -1743,7 +1754,7 @@ async function paint(name, { keepCamera }) {
     // words for this exact part, so clear the scene and let it say them.
     if (mesh) {
       scene.remove(mesh);
-      mesh.traverse(o => { if (o.isMesh && o.name !== 'target') o.geometry.dispose(); });
+      mesh.traverse(o => { if ((o.isMesh || o.isLineSegments) && o.name !== 'target') o.geometry.dispose(); });
       mesh = null;
     }
     sectionAttach(true);
@@ -1755,7 +1766,7 @@ async function paint(name, { keepCamera }) {
 
   // The ghost's geometry survives: it is cached per part, and a save should not
   // push a quarter-million-triangle scan back to the GPU.
-  if (mesh) { scene.remove(mesh); mesh.traverse(o => { if (o.isMesh && o.name !== 'target') o.geometry.dispose(); }); }
+  if (mesh) { scene.remove(mesh); mesh.traverse(o => { if ((o.isMesh || o.isLineSegments) && o.name !== 'target') o.geometry.dispose(); }); }
   // Always a group, even for one blob: a part is a group of one, an assembly is a
   // group whose named children the joints move, and nothing downstream branches.
   mesh = new THREE.Group();
@@ -1773,6 +1784,12 @@ async function paint(name, { keepCamera }) {
       // Ghosted, so the printed parts stay the subject of the picture.
       m.material.transparent = true;
       m.material.opacity = 0.3;
+    } else {
+      // A child, so joints pose it with its mesh and the section plane clips both.
+      const outline = new THREE.LineSegments(
+        new THREE.EdgesGeometry(src.geometry, EDGE_ANGLE), edgeMaterial.clone());
+      outline.material.clippingPlanes = [plane];
+      m.add(outline);
     }
     mesh.add(m);
   }
