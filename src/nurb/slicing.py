@@ -50,6 +50,46 @@ class Unavailable(Exception):
     """No slicer, or no profile in it for this machine. The message says what to do."""
 
 
+# What every exported part gets over the stock process profile. Values are strings
+# because that is how a slicer's own config files carry them. Gyroid instead of grid
+# because it is isotropic and printable without crossings, which is why it holds the
+# same strength at 10% that grid needs 15% for; three walls instead of two because
+# these are functional parts, and walls carry load that infill never sees.
+TUNED = {
+    "sparse_infill_pattern": "gyroid",
+    "sparse_infill_density": "10%",
+    "wall_loops": "3",
+}
+
+# The findings that mean this part needs help holding the bed. Both are the checks'
+# own judgement: a first layer big enough to peel its corners, or a part standing
+# taller than first-layer adhesion holds. The brim is the slicer-side share of both
+# fixes, and these are the only slicer settings a finding drives, because supports
+# never appear here: a part that needs them has a finding to fix in CAD instead.
+BRIM_RULES = ("warp_risk", "stability")
+
+
+def tuned(shape, ctx=None):
+    """The process settings this part's geometry justifies, and the words for them.
+
+    Returns (settings, notes): the overrides to lay over a stock process profile, and
+    a short phrase per decision for whoever is reading an export line. This is the
+    module's one exception to leaving settings to the slicer, drawn on a line: what
+    follows from the geometry nurb built is nurb's knowledge, while flow, temperature
+    and layer height stay the slicer's.
+    """
+    from . import checks
+
+    settings = dict(TUNED)
+    notes = [f"gyroid {settings['sparse_infill_density']}", f"{settings['wall_loops']} walls"]
+    found = checks.run(shape, ctx, only=set(BRIM_RULES))
+    if found:
+        settings["brim_type"] = "outer_only"
+        settings["brim_width"] = "5"
+        notes.append(f"brim ({checks.LABELS[found[0].rule]})")
+    return settings, notes
+
+
 def app(search=None):
     """The installed slicer's executable, or None.
 
@@ -244,7 +284,29 @@ def profiles_for(machine_path, layer="0.20", filament="PLA"):
     return process, stock
 
 
-def run(model, target, machine_path, process, filament, exe=None, plate=PLATE):
+def _preset_args(out_dir, machine_path, process, filament, settings=None):
+    """The `--load-*` arguments, with the presets flattened into `out_dir` first.
+
+    `settings` lays over the flattened process profile, which is how `tuned` reaches
+    both the G-code and the project 3MF through one seam: the slicer only ever sees a
+    complete profile that already says gyroid.
+    """
+    flattened = []
+    for kind, source in (("machine", machine_path), ("process", process), ("filament", filament)):
+        data = _flatten(source)
+        if kind == "process" and settings:
+            data.update(settings)
+        full = out_dir / f"{kind}.json"
+        full.write_text(json.dumps(data), encoding="utf-8")
+        flattened.append(full)
+    machine_full, process_full, filament_full = flattened
+    return [
+        "--load-settings", f"{machine_full};{process_full}",
+        "--load-filaments", str(filament_full),
+    ]
+
+
+def run(model, target, machine_path, process, filament, exe=None, plate=PLATE, settings=None):
     """Slice one model to `target`, and return what the slicer predicted.
 
     Returns ((seconds, grams), path). Either number can be None: a slicer that changes
@@ -264,19 +326,12 @@ def run(model, target, machine_path, process, filament, exe=None, plate=PLATE):
     for stale in ("plate_1.gcode", "result.json"):
         (out_dir / stale).unlink(missing_ok=True)
     try:
-        flattened = []
-        for kind, source in (("machine", machine_path), ("process", process), ("filament", filament)):
-            full = out_dir / f"{kind}.json"
-            full.write_text(json.dumps(_flatten(source)), encoding="utf-8")
-            flattened.append(full)
-        machine_full, process_full, filament_full = flattened
         command = list(exe) if isinstance(exe, tuple) else [str(exe)]
         done = subprocess.run(
             [
                 *command,
                 "--curr-bed-type", plate,
-                "--load-settings", f"{machine_full};{process_full}",
-                "--load-filaments", str(filament_full),
+                *_preset_args(out_dir, machine_path, process, filament, settings),
                 "--slice", "0",
                 "--outputdir", str(out_dir),
                 str(model),
@@ -294,6 +349,78 @@ def run(model, target, machine_path, process, filament, exe=None, plate=PLATE):
         # hidden directory nobody looks in is one that never gets cleaned up by hand.
         shutil.rmtree(out_dir, ignore_errors=True)
     return predicted, target
+
+
+def kit(root):
+    """What upgrading a 3MF to carry print settings needs, or why it cannot.
+
+    Returns ((machine, process, filament, exe), None) when everything is in place,
+    and (None, reason) when it is not. The reason is one line because a bare 3MF is
+    the export working as it always has, not a failure to explain at length.
+    """
+    from . import checks
+
+    exe = app()
+    if exe is None:
+        return None, "no slicer installed to write print settings"
+    try:
+        wanted, _ = checks.slicer_name(root)
+        if not wanted:
+            return None, "no printer named in printer.toml to tune settings for"
+        bundle = vendors(exe)
+        if bundle is None:
+            return None, f"found {label(exe)} but not its profile bundle"
+        machine_path = machine(bundle, wanted)
+        material = (checks.printer(root).material or "PLA").upper()
+        process, filament = profiles_for(machine_path, filament=material)
+    except (ValueError, Unavailable) as exc:
+        return None, str(exc)
+    return (machine_path, process, filament, exe), None
+
+
+def write_project(model, target, machine_path, process, filament, exe=None, settings=None, plate=PLATE):
+    """Rewrite a bare 3MF as a project 3MF that carries its print settings.
+
+    A bare 3MF is geometry and a unit; the settings a slicer honors on open live in
+    `Metadata/project_settings.config`, a full dump of every process key in the
+    slicer's own format. The slicer writes that file itself here, via `--export-3mf`
+    with our overrides loaded, rather than nurb composing it: a hand-built config
+    with keys missing crashes Bambu Studio's own loader outright (verified, exit
+    -11), and the full key set changes with slicer releases, so the one program
+    guaranteed to know this version's complete schema is the slicer being asked to
+    read it back. `--arrange` because a bare 3MF carries no plate, and a project
+    file whose part sits half off the bed opens as an error.
+
+    `model` and `target` may be the same path: the export lands in a scratch
+    directory and only replaces `target` once the slicer has succeeded.
+    """
+    exe = exe or app()
+    target = pathlib.Path(target)
+    out_dir = target.parent / f".{target.stem}.slicing"
+    shutil.rmtree(out_dir, ignore_errors=True)
+    out_dir.mkdir(parents=True)
+    try:
+        command = list(exe) if isinstance(exe, tuple) else [str(exe)]
+        done = subprocess.run(
+            [
+                *command,
+                "--curr-bed-type", plate,
+                *_preset_args(out_dir, machine_path, process, filament, settings),
+                "--arrange", "1",
+                "--export-3mf", "project.3mf",
+                "--outputdir", str(out_dir),
+                str(model),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        written = out_dir / "project.3mf"
+        if done.returncode != 0 or not written.is_file():
+            raise Unavailable(f"the slicer refused this model: {_why(done, out_dir)}")
+        os.replace(written, target)
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+    return target
 
 
 def _flatten(path, seen=None):

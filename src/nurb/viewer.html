@@ -1057,8 +1057,11 @@ for (const b of document.querySelectorAll('#download [data-fmt]')) {
       // nothing. In a browser the blob is the download.
       const r = await fetch(`/export/${current}.${fmt}${embed ? '?save' : ''}`);
       if (!r.ok) throw new Error(await r.text());
+      let said = null;
       if (embed) {
-        window.parent.postMessage({ type: 'nurb:saved', path: (await r.json()).path }, '*');
+        const saved = await r.json();
+        window.parent.postMessage({ type: 'nurb:saved', path: saved.path }, '*');
+        said = saved.settings;
       } else {
         const url = URL.createObjectURL(await r.blob());
         // The server names the file, variant and all. An assembly comes back as one
@@ -1069,6 +1072,15 @@ for (const b of document.querySelectorAll('#download [data-fmt]')) {
                                 { href: url, download: named ? named[1] : `${current}.${fmt}` });
         a.click();
         URL.revokeObjectURL(url);
+        said = r.headers.get('X-Nurb-Print-Settings');
+      }
+      // A 3MF says what it carries besides geometry, because tuned settings the user
+      // never hears about read as their slicer misbehaving, and a bare file should say
+      // what it is missing rather than quietly being less than the last one.
+      if (said) {
+        lastNote = { name: current, bad: false, text: `3mf: ${said}` };
+        const note = document.getElementById('note');
+        if (note) { note.classList.remove('bad'); note.textContent = lastNote.text; }
       }
     } catch (e) {
       const note = document.getElementById('note');

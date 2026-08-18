@@ -655,7 +655,7 @@ def test_stl_is_meshed_for_printing_not_archival(tmp_path):
 
 def test_the_shim_promises_what_export_actually_writes():
     shim = (pathlib.Path(cli.__file__).parent / "agents.md").read_text(encoding="utf-8")
-    assert "3MF into build/" in shim
+    assert "3MF with tuned print settings into build/" in shim
     assert "hit 3mf to print" in shim
     assert 'formats = ["3mf", "step"]' in shim
     assert "hit stl to print" not in shim

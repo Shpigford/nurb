@@ -564,7 +564,7 @@ class Server:
         return self._resp(404, b"not found", "text/plain")
 
     @staticmethod
-    def _resp(status, body, content_type, attach=None):
+    def _resp(status, body, content_type, attach=None, said=None):
         headers = Headers(
             {
                 "Content-Type": content_type,
@@ -579,6 +579,9 @@ class Server:
         )
         if attach:
             headers["Content-Disposition"] = f'attachment; filename="{attach}"'
+        if said:
+            # What the 3MF carries besides geometry, for the note under the toolbar.
+            headers["X-Nurb-Print-Settings"] = said
         return Response(status, "OK" if status == 200 else "Error", headers, body)
 
     # What the download button serves. This is the configurator: the parameters were
@@ -595,7 +598,7 @@ class Server:
         label = self.state[name].get("variant") or name
         try:
             async with self.building:
-                body, attach, mime = await asyncio.to_thread(self._export, name, fmt, label)
+                body, attach, mime, said = await asyncio.to_thread(self._export, name, fmt, label)
         except Exception as exc:
             if save:
                 # The desktop viewer writes into build/. A failed rebuild must not
@@ -617,9 +620,10 @@ class Server:
             if target.parent != out:
                 return self._resp(500, b"unsafe export filename", "text/plain")
             target.write_bytes(body)
-            body = json.dumps({"path": str(target)}).encode()
+            saved = {"path": str(target), **({"settings": said} if said else {})}
+            body = json.dumps(saved).encode()
             return self._resp(200, body, "application/json")
-        return self._resp(200, body, mime, attach=attach)
+        return self._resp(200, body, mime, attach=attach, said=said)
 
     def _export(self, name, fmt, label=None):
         """Build at the values the sliders hold and export that, as (body, filename, mime).
@@ -640,28 +644,54 @@ class Server:
 
         from build123d import export_step
 
+        from . import slicing
+
+        # A 3MF leaves here carrying the print settings the part justifies, exactly as
+        # `nurb export` writes it, when a slicer and a printer are in place. `said` is
+        # the sentence about that for the note: what was embedded, or what a bare file
+        # is missing, because a download that quietly lost its settings teaches nobody.
+        kit = why = None
+        if fmt == "3mf":
+            kit, why = slicing.kit(self.root)
+            if why and "printer.toml" in why:
+                # The CLI's reason names the file; here the printer picker is already
+                # on screen under print time, so point at that instead.
+                why = "choose a printer under print time to embed tuned settings"
+
         def solid(path, stem):
-            """(bytes, None) for a part, (None, scene) for an assembly."""
+            """(bytes, None, said) for a part, (None, scene, None) for an assembly."""
             built, _, _ = builder.build(path, overrides=self.overrides.get(stem), draft=False)
             scene = getattr(built, "_nurb_scene", None)
             if scene is not None:
-                return None, scene
+                return None, scene, None
+            said = None
             with tempfile.TemporaryDirectory() as scratch:
                 target = pathlib.Path(scratch) / f"{stem}.{fmt}"
                 if fmt == "3mf":
                     builder.write_3mf(built, target)
+                    if kit:
+                        variant = (self.state.get(stem) or {}).get("variant")
+                        settings, notes = slicing.tuned(built, self._context(path, variant))
+                        machine, process, filament, exe = kit
+                        try:
+                            slicing.write_project(target, target, machine, process, filament, exe, settings=settings)
+                            said = ", ".join(notes)
+                        except slicing.Unavailable as exc:
+                            said = f"geometry only: {exc}"
+                    else:
+                        said = f"geometry only: {why}"
                 elif fmt == "stl":
                     builder.write_stl(built, target)
                 else:
                     export_step(built, str(target))
-                return target.read_bytes(), None
+                return target.read_bytes(), None, said
 
         path = next((p for p in builder.find_parts(self.root) if p.stem == name), None)
         if path is None:  # deleted between the click and the build
             raise builder.BuildError(f"{name} is no longer on disk")
-        body, scene = solid(path, name)
+        body, scene, said = solid(path, name)
         if scene is None:
-            return body, f"{_export_name(label or name)}.{fmt}", self.EXPORTS[fmt]
+            return body, f"{_export_name(label or name)}.{fmt}", self.EXPORTS[fmt], said
         queue = sorted(pathlib.Path(u) for u in scene.uses)
         if not queue:
             raise builder.BuildError(f"{name} places no parts; nothing to print")
@@ -673,12 +703,12 @@ class Server:
                 if placed in seen:
                     continue
                 seen.add(placed)
-                body, nested = solid(placed, placed.stem)
+                body, nested, _ = solid(placed, placed.stem)
                 if nested is not None:  # an assembly placing an assembly
                     queue += sorted(pathlib.Path(u) for u in nested.uses)
                     continue
                 bundle.writestr(f"{_export_name(placed.stem)}.{fmt}", body)
-        return buf.getvalue(), f"{_export_name(name)}-{fmt}.zip", "application/zip"
+        return buf.getvalue(), f"{_export_name(name)}-{fmt}.zip", "application/zip", None
 
     # ---------- what the print costs ----------
     # The two numbers a slicer knows and nothing upstream of it does. They belong on
