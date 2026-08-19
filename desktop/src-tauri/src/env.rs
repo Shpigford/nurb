@@ -68,11 +68,22 @@ impl Launcher {
             return (program, args.iter().map(|a| a.to_string()).collect());
         }
         let pin = kind.adapter().expect("adapter-hosted");
+        let acp_args = if kind == AgentKind::Gemini {
+            vec!["--acp".into()]
+        } else {
+            Vec::new()
+        };
         match self {
-            Self::Checkout { .. } => ("npx".into(), vec!["-y".into(), pin.into()]),
+            Self::Checkout { .. } => {
+                let mut args = vec!["-y".into(), pin.into()];
+                args.extend(acp_args);
+                ("npx".into(), args)
+            }
             Self::Provisioned { paths } => (
                 paths.node_bin().to_string_lossy().into_owned(),
-                vec![paths.adapter_script(kind).to_string_lossy().into_owned()],
+                std::iter::once(paths.adapter_script(kind).to_string_lossy().into_owned())
+                    .chain(acp_args)
+                    .collect(),
             ),
         }
     }
