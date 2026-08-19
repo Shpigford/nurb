@@ -1,5 +1,5 @@
-import { FormEvent, useState } from 'react';
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { FormEvent, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 type Props = {
   onSubmit: (key: string) => void;
@@ -7,7 +7,7 @@ type Props = {
 };
 
 export default function GeminiKeyDialog({ onSubmit, onClose }: Props) {
-  const [key, setKey] = useState('');
+  const [key, setKey] = useState("");
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -57,7 +57,7 @@ export default function GeminiKeyDialog({ onSubmit, onClose }: Props) {
             <button
               type="button"
               className="about-copy"
-              onClick={() => openUrl('https://aistudio.google.com/apikey')}
+              onClick={() => openUrl("https://aistudio.google.com/apikey")}
             >
               Create a key in Google AI Studio
             </button>

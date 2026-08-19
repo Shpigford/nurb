@@ -5,71 +5,43 @@ import {
   useEffect,
   useRef,
   useState,
-} from 'react';
-import { Channel, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { open } from '@tauri-apps/plugin-dialog';
-import { IconChevronDown, IconMessagePlus, IconPaperclip } from './Icons';
-import Markdown from './Markdown';
-import { playChime, shouldPlayCompletionChime } from './chime';
+} from "react";
+import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { open } from "@tauri-apps/plugin-dialog";
+import { IconChevronDown, IconMessagePlus, IconPaperclip } from "./Icons";
+import Markdown from "./Markdown";
+import { playChime, shouldPlayCompletionChime } from "./chime";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
-export const PROJECT_CHAT = '//project';
+export const PROJECT_CHAT = "//project";
 
 // Mirrors ChatEvent in src-tauri/src/acp.rs.
 type ChatEvent =
-  | { type: 'user_text'; text: string }
-  | { type: 'agent_text'; text: string }
-  | { type: 'agent_thought'; text: string }
-  | { type: 'session_info'; title: string | null }
-  | { type: 'note'; text: string }
-  | {
-      type: 'tool_call';
-      id: string;
-      title: string;
-      kind?: string;
-      status: string;
-      input?: string;
-      output?: string;
-    }
-  | {
-      type: 'tool_call_update';
-      id: string;
-      title?: string;
-      status?: string;
-      input?: string;
-      output?: string;
-    }
-  | { type: 'plan'; entries: PlanEntry[] }
-  | {
-      type: 'permission_request';
-      id: number;
-      title: string;
-      options: PermissionOption[];
-    }
-  | { type: 'permission_resolved'; id: number }
-  | { type: 'session_error'; message: string };
+  | { type: "user_text"; text: string }
+  | { type: "agent_text"; text: string }
+  | { type: "agent_thought"; text: string }
+  | { type: "session_info"; title: string | null }
+  | { type: "note"; text: string }
+  | { type: "tool_call"; id: string; title: string; kind?: string; status: string; input?: string; output?: string }
+  | { type: "tool_call_update"; id: string; title?: string; status?: string; input?: string; output?: string }
+  | { type: "plan"; entries: PlanEntry[] }
+  | { type: "permission_request"; id: number; title: string; options: PermissionOption[] }
+  | { type: "permission_resolved"; id: number }
+  | { type: "session_error"; message: string };
 
 type PlanEntry = { content: string; status: string };
 type PermissionOption = { optionId: string; name: string; kind: string };
 
 type Item =
-  | { kind: 'user'; text: string; files?: string[]; localId?: number }
-  | { kind: 'agent'; text: string }
-  | { kind: 'thought'; text: string }
-  | {
-      kind: 'tool';
-      id: string;
-      title: string;
-      toolKind?: string;
-      status: string;
-      input?: string;
-      output?: string;
-    }
-  | { kind: 'plan'; entries: PlanEntry[] }
-  | { kind: 'note'; text: string };
+  | { kind: "user"; text: string; files?: string[]; localId?: number }
+  | { kind: "agent"; text: string }
+  | { kind: "thought"; text: string }
+  | { kind: "tool"; id: string; title: string; toolKind?: string; status: string; input?: string; output?: string }
+  | { kind: "plan"; entries: PlanEntry[] }
+  | { kind: "note"; text: string };
 
 type Permission = { id: number; title: string; options: PermissionOption[] };
 
@@ -88,18 +60,18 @@ type ConfigRow = {
 
 // Mirrors AgentKind::label in src-tauri/src/agents.rs.
 export const AGENT_LABEL: Record<string, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  gemini: 'Gemini',
-  cursor: 'Cursor',
-  grok: 'Grok',
+  claude: "Claude",
+  codex: "Codex",
+  gemini: "Gemini",
+  cursor: "Cursor",
+  grok: "Grok",
 };
 
 const TOOL_STATUS_LABEL: Record<string, string> = {
-  pending: 'waiting',
-  in_progress: 'working…',
-  completed: 'done',
-  failed: 'failed',
+  pending: "waiting",
+  in_progress: "working…",
+  completed: "done",
+  failed: "failed",
 };
 
 // Tool titles arrive as developer-speak ("Edit parts/lid.py", "nurb check").
@@ -109,52 +81,45 @@ const TOOL_STATUS_LABEL: Record<string, string> = {
 const FILE_TITLE = /^(Read|Edit|Write)\s+(?:.*\/)?parts\/([A-Za-z0-9_]+)\.py$/;
 const NURB_TITLE = /^(?:uv run\s+)?nurb\s+([a-z]+)/;
 const FILE_VERBS: Record<string, [string, string]> = {
-  Read: ['looking at', 'look at'],
-  Edit: ['editing', 'edit'],
-  Write: ['creating', 'create'],
+  Read: ["looking at", "look at"],
+  Edit: ["editing", "edit"],
+  Write: ["creating", "create"],
 };
 const NURB_VERBS: Record<string, [string, string]> = {
-  build: ['building the part', 'build the part'],
-  check: ['checking printability', 'check printability'],
-  inspect: ['inspecting the part', 'inspect the part'],
-  verify: ['double-checking the part', 'double-check the part'],
-  compare: ['measuring against the original', 'measure against the original'],
-  render: ['rendering a preview', 'render a preview'],
-  export: ['exporting print files', 'export print files'],
-  rules: ['reading the design rules', 'read the design rules'],
-  api: ['checking the toolbox', 'check the toolbox'],
+  build: ["building the part", "build the part"],
+  check: ["checking printability", "check printability"],
+  inspect: ["inspecting the part", "inspect the part"],
+  verify: ["double-checking the part", "double-check the part"],
+  compare: ["measuring against the original", "measure against the original"],
+  render: ["rendering a preview", "render a preview"],
+  export: ["exporting print files", "export print files"],
+  rules: ["reading the design rules", "read the design rules"],
+  api: ["checking the toolbox", "check the toolbox"],
   card: ["updating the part's notes", "update the part's notes"],
 };
 const KIND_VERBS: Record<string, [string, string]> = {
-  read: ['reading project files', 'read project files'],
-  edit: ['editing project files', 'edit project files'],
-  delete: ['removing project files', 'remove project files'],
-  search: ['searching the project', 'search the project'],
-  execute: ['running a command', 'run a command'],
-  fetch: ['looking something up', 'look something up'],
-  think: ['thinking', 'think'],
+  read: ["reading project files", "read project files"],
+  edit: ["editing project files", "edit project files"],
+  delete: ["removing project files", "remove project files"],
+  search: ["searching the project", "search the project"],
+  execute: ["running a command", "run a command"],
+  fetch: ["looking something up", "look something up"],
+  think: ["thinking", "think"],
 };
 
-const basename = (path: string) => path.split('/').pop() ?? path;
+const basename = (path: string) => path.split("/").pop() ?? path;
 
 // The button's own label: the selected names, not the model ids, since those
 // are the agent's wire values and mean nothing to someone printing a bracket.
 function summarize(config: ConfigRow[]): string {
   return config
-    .map(
-      (row) =>
-        row.options.find((o) => o.value === row.value)?.name ?? row.value,
-    )
-    .join(' · ');
+    .map((row) => row.options.find((o) => o.value === row.value)?.name ?? row.value)
+    .join(" · ");
 }
 
 // mode 0 is the activity form for cards ("editing lid"); mode 1 the plain verb
 // form for permission dialogs ("edit lid").
-function describe(
-  title: string,
-  kind: string | undefined,
-  mode: 0 | 1,
-): string {
+function describe(title: string, kind: string | undefined, mode: 0 | 1): string {
   const file = title.match(FILE_TITLE);
   if (file) return `${FILE_VERBS[file[1]][mode]} ${file[2]}`;
   const nurb = title.match(NURB_TITLE);
@@ -256,7 +221,7 @@ function Chat({
       closedRef.current = true;
       const session = sessionRef.current;
       sessionRef.current = null;
-      if (session) invoke('close_chat', { sessionId: session }).catch(() => {});
+      if (session) invoke("close_chat", { sessionId: session }).catch(() => {});
     };
   }, []);
 
@@ -269,7 +234,7 @@ function Chat({
     // Dev-only test hook: the Rust side forwards loopback-socket text here so
     // UI automation can fill the composer without stealing keyboard focus.
     if (!import.meta.env.DEV) return;
-    const unlisten = listen<string>('test-type', (event) => {
+    const unlisten = listen<string>("test-type", (event) => {
       if (inputRef.current) inputRef.current.value = event.payload;
     });
     return () => {
@@ -281,7 +246,7 @@ function Chat({
     // Same hook, submit half: every mounted column hears the event, so only
     // the visible one sends.
     if (!import.meta.env.DEV || hidden) return;
-    const unlisten = listen('test-send', () => {
+    const unlisten = listen("test-send", () => {
       inputRef.current?.form?.requestSubmit();
     });
     return () => {
@@ -311,9 +276,9 @@ function Chat({
     // or one drop would attach to every conversation.
     if (hidden) return;
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
-      if (event.payload.type === 'enter') setDropping(true);
-      if (event.payload.type === 'leave') setDropping(false);
-      if (event.payload.type === 'drop') {
+      if (event.payload.type === "enter") setDropping(true);
+      if (event.payload.type === "leave") setDropping(false);
+      if (event.payload.type === "drop") {
         setDropping(false);
         const paths = event.payload.paths;
         setAttachments((list) => [...new Set([...list, ...paths])]);
@@ -326,46 +291,40 @@ function Chat({
 
   const applyEvent = useCallback((event: ChatEvent) => {
     switch (event.type) {
-      case 'user_text':
+      case "user_text":
         // Only replayed history carries user chunks; live turns render the
         // composer text directly in send().
         setItems((list) => {
           const last = list[list.length - 1];
-          if (last && last.kind === 'user') {
-            return [
-              ...list.slice(0, -1),
-              { ...last, text: last.text + event.text },
-            ];
+          if (last && last.kind === "user") {
+            return [...list.slice(0, -1), { ...last, text: last.text + event.text }];
           }
-          return [...list, { kind: 'user', text: event.text }];
+          return [...list, { kind: "user", text: event.text }];
         });
         break;
-      case 'session_info':
+      case "session_info":
         // Titles have no home since the visible session list went away.
         break;
-      case 'note':
-        setItems((list) => [...list, { kind: 'note', text: event.text }]);
+      case "note":
+        setItems((list) => [...list, { kind: "note", text: event.text }]);
         break;
-      case 'agent_text':
-      case 'agent_thought': {
-        const kind = event.type === 'agent_text' ? 'agent' : 'thought';
+      case "agent_text":
+      case "agent_thought": {
+        const kind = event.type === "agent_text" ? "agent" : "thought";
         setItems((list) => {
           const last = list[list.length - 1];
           if (last && last.kind === kind) {
-            return [
-              ...list.slice(0, -1),
-              { ...last, text: last.text + event.text },
-            ];
+            return [...list.slice(0, -1), { ...last, text: last.text + event.text }];
           }
           return [...list, { kind, text: event.text } as Item];
         });
         break;
       }
-      case 'tool_call':
+      case "tool_call":
         setItems((list) => [
           ...list,
           {
-            kind: 'tool',
+            kind: "tool",
             id: event.id,
             title: event.title,
             toolKind: event.kind,
@@ -375,11 +334,11 @@ function Chat({
           },
         ]);
         break;
-      case 'tool_call_update':
+      case "tool_call_update":
         // Absent fields mean unchanged; present ones replace (ACP semantics).
         setItems((list) =>
           list.map((item) =>
-            item.kind === 'tool' && item.id === event.id
+            item.kind === "tool" && item.id === event.id
               ? {
                   ...item,
                   title: event.title ?? item.title,
@@ -391,43 +350,43 @@ function Chat({
           ),
         );
         break;
-      case 'plan':
+      case "plan":
         setItems((list) => {
           let index = -1;
           for (let i = list.length - 1; i >= 0; i--) {
-            if (list[i].kind === 'plan') {
+            if (list[i].kind === "plan") {
               index = i;
               break;
             }
           }
           if (index >= 0) {
             const next = [...list];
-            next[index] = { kind: 'plan', entries: event.entries };
+            next[index] = { kind: "plan", entries: event.entries };
             return next;
           }
-          return [...list, { kind: 'plan', entries: event.entries }];
+          return [...list, { kind: "plan", entries: event.entries }];
         });
         break;
-      case 'permission_request':
+      case "permission_request":
         setPermissions((list) => [
           ...list,
           { id: event.id, title: event.title, options: event.options },
         ]);
         break;
-      case 'permission_resolved':
+      case "permission_resolved":
         setPermissions((list) => list.filter((p) => p.id !== event.id));
         break;
-      case 'session_error':
+      case "session_error":
         // The dead session is gone from the Rust map too; forgetting it here
         // is what lets the next send start the fresh chat the note promises.
         sessionRef.current = null;
-        setItems((list) => [...list, { kind: 'note', text: event.message }]);
+        setItems((list) => [...list, { kind: "note", text: event.message }]);
         break;
     }
   }, []);
 
   const refreshConfig = useCallback(() => {
-    invoke<ConfigRow[]>('chat_config', { agent, sessionId: sessionRef.current })
+    invoke<ConfigRow[]>("chat_config", { agent, sessionId: sessionRef.current })
       .then(setConfig)
       .catch(() => {});
   }, [agent]);
@@ -438,7 +397,7 @@ function Chat({
     // The lists arrive from the project's session-list probe, which can land
     // after this column mounted. Without this the first chat opened on a fresh
     // install has no picker until something else remounts it.
-    const unlisten = listen('agent-config', () => refreshConfig());
+    const unlisten = listen("agent-config", () => refreshConfig());
     return () => {
       unlisten.then((stop) => stop());
     };
@@ -449,13 +408,11 @@ function Chat({
       // Optimistic: the round trip goes through the adapter, and a select that
       // lags behind the click reads as a dropped one.
       setConfig((rows) =>
-        rows.map((row) =>
-          row.category === category ? { ...row, value } : row,
-        ),
+        rows.map((row) => (row.category === category ? { ...row, value } : row)),
       );
       try {
         setConfig(
-          await invoke<ConfigRow[]>('set_chat_config', {
+          await invoke<ConfigRow[]>("set_chat_config", {
             agent,
             sessionId: sessionRef.current,
             category,
@@ -481,7 +438,7 @@ function Chat({
       try {
         const onEvent = new Channel<ChatEvent>();
         onEvent.onmessage = applyEvent;
-        const session = await invoke<string>('start_chat', {
+        const session = await invoke<string>("start_chat", {
           path,
           agent,
           onEvent,
@@ -490,8 +447,8 @@ function Chat({
         if (closedRef.current) {
           // The user switched projects while the adapter was starting; without
           // this, the session outlives its column until app exit.
-          invoke('close_chat', { sessionId: session }).catch(() => {});
-          throw new Error('chat closed');
+          invoke("close_chat", { sessionId: session }).catch(() => {});
+          throw new Error("chat closed");
         }
         sessionRef.current = session;
         resumeRef.current = null;
@@ -515,11 +472,11 @@ function Chat({
     if (!resume) return;
     ensureSession().catch((e) => {
       const message = String(e);
-      if (message === 'Error: chat closed') return;
-      if (message.includes('auth_required')) {
+      if (message === "Error: chat closed") return;
+      if (message.includes("auth_required")) {
         setAuthNeeded(true);
       } else {
-        setItems((list) => [...list, { kind: 'note', text: message }]);
+        setItems((list) => [...list, { kind: "note", text: message }]);
       }
     });
     // ensureSession is stable for this mount; resume never changes without a
@@ -534,7 +491,7 @@ function Chat({
       setItems((list) => [
         ...list,
         {
-          kind: 'user',
+          kind: "user",
           text,
           files: files.length ? files.map(basename) : undefined,
           localId,
@@ -546,7 +503,7 @@ function Chat({
       let completed = false;
       try {
         const session = await ensureSession();
-        await invoke<string>('send_prompt', {
+        await invoke<string>("send_prompt", {
           sessionId: session,
           text,
           part: part ?? null,
@@ -555,19 +512,17 @@ function Chat({
         completed = true;
       } catch (e) {
         const message = String(e);
-        if (message.includes('auth_required')) {
+        if (message.includes("auth_required")) {
           // Nothing was sent. Put the exact draft back instead of leaving a
           // false sent bubble and making the user reconstruct attachments.
           setItems((list) =>
-            list.filter(
-              (item) => item.kind !== 'user' || item.localId !== localId,
-            ),
+            list.filter((item) => item.kind !== "user" || item.localId !== localId),
           );
           if (inputRef.current) inputRef.current.value = text;
           setAttachments(files);
           setAuthNeeded(true);
         } else {
-          setItems((list) => [...list, { kind: 'note', text: message }]);
+          setItems((list) => [...list, { kind: "note", text: message }]);
         }
       } finally {
         sendingRef.current = false;
@@ -576,8 +531,7 @@ function Chat({
         setPermissions([]);
         // Only successful turns long enough to wander away from earn a chime;
         // quick back-and-forth and failures should stay quiet.
-        if (shouldPlayCompletionChime(completed, Date.now() - startedAt))
-          playChime();
+        if (shouldPlayCompletionChime(completed, Date.now() - startedAt)) playChime();
       }
     },
     [ensureSession, part],
@@ -586,7 +540,7 @@ function Chat({
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const box = inputRef.current;
-    const text = box?.value.trim() ?? '';
+    const text = box?.value.trim() ?? "";
     // sendingRef, not busy: two Enters in one tick both read the stale state,
     // and a double send would spawn a second adapter. A photo alone is a
     // legitimate message ("model this"), so attachments count as content.
@@ -597,20 +551,20 @@ function Chat({
       startRef.current
     )
       return;
-    if (box) box.value = '';
+    if (box) box.value = "";
     setAttachments([]);
     send(text, attachments);
   };
 
   const attach = async () => {
-    const picked = await open({ multiple: true, title: 'Attach files' });
+    const picked = await open({ multiple: true, title: "Attach files" });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
     setAttachments((list) => [...new Set([...list, ...paths])]);
   };
 
   const keydown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       event.currentTarget.form?.requestSubmit();
     }
@@ -618,7 +572,7 @@ function Chat({
 
   const cancel = () => {
     const session = sessionRef.current;
-    if (session) invoke('cancel_turn', { sessionId: session }).catch(() => {});
+    if (session) invoke("cancel_turn", { sessionId: session }).catch(() => {});
   };
 
   const signIn = async () => {
@@ -628,10 +582,10 @@ function Chat({
       setAuthNeeded(false);
       setItems((list) => [
         ...list,
-        { kind: 'note', text: 'Signed in. Send your message again.' },
+        { kind: "note", text: "Signed in. Send your message again." },
       ]);
     } catch (e) {
-      setItems((list) => [...list, { kind: 'note', text: String(e) }]);
+      setItems((list) => [...list, { kind: "note", text: String(e) }]);
     } finally {
       setSigningIn(false);
     }
@@ -641,7 +595,7 @@ function Chat({
     const session = sessionRef.current;
     if (!session) return;
     setPermissions((list) => list.filter((p) => p.id !== permission.id));
-    invoke('respond_permission', {
+    invoke("respond_permission", {
       sessionId: session,
       requestId: permission.id,
       optionId,
@@ -649,14 +603,12 @@ function Chat({
   };
 
   return (
-    <section className={hidden ? 'chat chat-hidden' : 'chat'}>
+    <section className={hidden ? "chat chat-hidden" : "chat"}>
       <div className="chat-header" data-tauri-drag-region>
         {/* The part name is the only thing here allowed to truncate, so the
             switcher lives beside it rather than inside it. */}
         <span className="chat-header-left">
-          <span className="chat-header-label">
-            {isProject ? 'project' : part}
-          </span>
+          <span className="chat-header-label">{isProject ? "project" : part}</span>
           <span aria-hidden="true">·</span>
           {agents.length > 1 ? (
             <span className="chat-switcher">
@@ -667,8 +619,8 @@ function Chat({
                 disabled={busy || starting}
                 title={
                   items.length > 0
-                    ? 'switch agents, which starts a fresh conversation'
-                    : 'switch agents'
+                    ? "switch agents, which starts a fresh conversation"
+                    : "switch agents"
                 }
                 onClick={() => setSwitching((open) => !open)}
               >
@@ -677,19 +629,14 @@ function Chat({
               </button>
               {switching && (
                 <>
-                  <div
-                    className="chat-switcher-away"
-                    onClick={() => setSwitching(false)}
-                  />
+                  <div className="chat-switcher-away" onClick={() => setSwitching(false)} />
                   <div className="chat-switcher-menu">
                     {agents.map((option) => (
                       <button
                         key={option.id}
                         type="button"
                         className={
-                          option.id === agent
-                            ? 'chat-switcher-item current'
-                            : 'chat-switcher-item'
+                          option.id === agent ? "chat-switcher-item current" : "chat-switcher-item"
                         }
                         onClick={() => {
                           setSwitching(false);
@@ -734,7 +681,7 @@ function Chat({
         )}
         {items.map((item, index) => {
           switch (item.kind) {
-            case 'user':
+            case "user":
               return (
                 <div key={index} className="chat-user">
                   {item.text}
@@ -749,26 +696,25 @@ function Chat({
                   )}
                 </div>
               );
-            case 'agent':
+            case "agent":
               return (
                 <div key={index} className="chat-agent">
                   <Markdown text={item.text} />
                 </div>
               );
-            case 'thought':
+            case "thought":
               return (
                 <details key={index} className="chat-thought">
                   <summary>thinking</summary>
                   <div>{item.text}</div>
                 </details>
               );
-            case 'tool': {
+            case "tool": {
               const shown = describe(item.title, item.toolKind, 0);
               // The collapsed row is plain language; the expansion is the raw
               // material (command, output), untranslated on purpose. The raw
               // title only earns a line when the row paraphrased it away.
-              const raw =
-                item.input ?? (shown === item.title ? undefined : item.title);
+              const raw = item.input ?? (shown === item.title ? undefined : item.title);
               if (!raw && !item.output) {
                 return (
                   <div key={index} className={`chat-tool ${item.status}`}>
@@ -780,10 +726,7 @@ function Chat({
                 );
               }
               return (
-                <details
-                  key={index}
-                  className={`chat-tool expandable ${item.status}`}
-                >
+                <details key={index} className={`chat-tool expandable ${item.status}`}>
                   <summary>
                     <span className="chat-tool-title">{shown}</span>
                     <span className="chat-tool-status">
@@ -792,14 +735,12 @@ function Chat({
                   </summary>
                   <div className="chat-tool-detail">
                     {raw && <pre className="chat-tool-input">{raw}</pre>}
-                    {item.output && (
-                      <pre className="chat-tool-output">{item.output}</pre>
-                    )}
+                    {item.output && <pre className="chat-tool-output">{item.output}</pre>}
                   </div>
                 </details>
               );
             }
-            case 'plan':
+            case "plan":
               return (
                 <ul key={index} className="chat-plan">
                   {item.entries.map((entry, i) => (
@@ -809,7 +750,7 @@ function Chat({
                   ))}
                 </ul>
               );
-            case 'note':
+            case "note":
               return (
                 <div key={index} className="chat-note">
                   {item.text}
@@ -819,9 +760,7 @@ function Chat({
         })}
         {starting && (
           <div className="chat-status">
-            {restoringRef.current
-              ? 'restoring conversation…'
-              : `starting ${label}…`}
+            {restoringRef.current ? "restoring conversation…" : `starting ${label}…`}
           </div>
         )}
         {/* A first build can run ten minutes or more; a silent transcript
@@ -835,13 +774,13 @@ function Chat({
         )}
         {authNeeded && (
           <div className="chat-auth">
-            {label} isn't signed in on this Mac.{' '}
+            {label} isn't signed in on this Mac.{" "}
             <button
               className="chat-auth-button"
               disabled={signingIn}
               onClick={signIn}
             >
-              {signingIn ? 'signing in…' : 'sign in'}
+              {signingIn ? "signing in…" : "sign in"}
             </button>
           </div>
         )}
@@ -852,8 +791,7 @@ function Chat({
                 // The permission event carries no tool kind, so only pattern
                 // matches translate; anything else reads as "use: <title>".
                 // The Rust fallback title is already a full sentence.
-                if (permission.title.startsWith(`${label} `))
-                  return permission.title;
+                if (permission.title.startsWith(`${label} `)) return permission.title;
                 const asked = describe(permission.title, undefined, 1);
                 return asked === permission.title
                   ? `${label} wants to use: ${permission.title}`
@@ -875,7 +813,7 @@ function Chat({
         ))}
       </div>
       <form
-        className={dropping ? 'chat-composer dropping' : 'chat-composer'}
+        className={dropping ? "chat-composer dropping" : "chat-composer"}
         onSubmit={submit}
       >
         {attachments.length > 0 && (
@@ -905,9 +843,9 @@ function Chat({
               ? `${label} is working…`
               : starting
                 ? restoringRef.current
-                  ? 'Restoring conversation…'
+                  ? "Restoring conversation…"
                   : `Starting ${label}…`
-                : `Describe or change ${isProject ? 'the project' : part}…`
+                : `Describe or change ${isProject ? "the project" : part}…`
           }
           rows={2}
           disabled={busy || starting}
@@ -939,10 +877,7 @@ function Chat({
                 <>
                   {/* Click-away, rather than a document listener that has to be
                       taught which clicks are its own. */}
-                  <div
-                    className="chat-config-away"
-                    onClick={() => setPicking(false)}
-                  />
+                  <div className="chat-config-away" onClick={() => setPicking(false)} />
                   <div className="chat-config-menu">
                     {config.map((row) => (
                       <label key={row.category} className="chat-config-row">
@@ -950,9 +885,7 @@ function Chat({
                         <select
                           value={row.value}
                           disabled={busy || starting}
-                          onChange={(event) =>
-                            pick(row.category, event.target.value)
-                          }
+                          onChange={(event) => pick(row.category, event.target.value)}
                         >
                           {row.options.map((option) => (
                             <option key={option.value} value={option.value}>
@@ -965,7 +898,7 @@ function Chat({
                     <p className="chat-config-note">
                       {busy
                         ? `Wait for ${label} to finish to change these.`
-                        : 'Bigger models and higher effort use up your plan faster.'}
+                        : "Bigger models and higher effort use up your plan faster."}
                     </p>
                   </div>
                 </>
@@ -973,11 +906,7 @@ function Chat({
             </div>
           )}
           {busy ? (
-            <button
-              type="button"
-              className="chat-send chat-stop"
-              onClick={cancel}
-            >
+            <button type="button" className="chat-send chat-stop" onClick={cancel}>
               stop
             </button>
           ) : (

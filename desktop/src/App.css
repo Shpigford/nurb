@@ -1,7 +1,6 @@
 @font-face {
-  font-family: 'JetBrains Mono';
-  src: url(/vendor/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf)
-    format('truetype');
+  font-family: "JetBrains Mono";
+  src: url(/vendor/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf) format("truetype");
   font-weight: 100 800;
 }
 
@@ -24,10 +23,8 @@
   --accent: #6ee7a8;
   --amber: #f0c274;
   --bad: #f87171;
-  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
-    Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   font: 13px/1.5 var(--mono);
   color: var(--text);
   background-color: var(--bg);
@@ -98,7 +95,7 @@ textarea {
 }
 
 .seam::after {
-  content: '';
+  content: "";
   position: absolute;
   left: 4px;
   top: 0;
@@ -918,14 +915,14 @@ textarea {
 }
 
 .chat-tool summary::before {
-  content: '▸';
+  content: "▸";
   flex: none;
   font-size: 10px;
   color: var(--dimmer);
 }
 
 .chat-tool.expandable[open] summary::before {
-  content: '▾';
+  content: "▾";
 }
 
 .chat-tool summary:hover .chat-tool-title {
