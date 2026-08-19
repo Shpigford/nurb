@@ -1,6 +1,7 @@
 @font-face {
-  font-family: "JetBrains Mono";
-  src: url(/vendor/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf) format("truetype");
+  font-family: 'JetBrains Mono';
+  src: url(/vendor/jetbrains-mono/JetBrainsMono-VariableFont_wght.ttf)
+    format('truetype');
   font-weight: 100 800;
 }
 
@@ -23,8 +24,10 @@
   --accent: #6ee7a8;
   --amber: #f0c274;
   --bad: #f87171;
-  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, sans-serif;
   font: 13px/1.5 var(--mono);
   color: var(--text);
   background-color: var(--bg);
@@ -95,7 +98,7 @@ textarea {
 }
 
 .seam::after {
-  content: "";
+  content: '';
   position: absolute;
   left: 4px;
   top: 0;
@@ -915,14 +918,14 @@ textarea {
 }
 
 .chat-tool summary::before {
-  content: "▸";
+  content: '▸';
   flex: none;
   font-size: 10px;
   color: var(--dimmer);
 }
 
 .chat-tool.expandable[open] summary::before {
-  content: "▾";
+  content: '▾';
 }
 
 .chat-tool summary:hover .chat-tool-title {
@@ -1706,6 +1709,44 @@ textarea {
 .settings-action.secondary:hover {
   background: var(--active);
   color: var(--text);
+}
+
+.about-card.api-key-dialog {
+  width: min(440px, calc(100vw - 80px));
+}
+
+.api-key-label {
+  display: block;
+  margin: 18px 0 6px;
+  color: var(--dim);
+  font: 11px var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.api-key-input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  padding: 9px 10px;
+  font: 13px var(--mono);
+  outline: none;
+}
+
+.api-key-input:focus {
+  border-color: rgba(110, 231, 168, 0.55);
+}
+
+.api-key-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 8px;
+  color: var(--dimmer);
+  font: 11px var(--mono);
 }
 
 .settings-toggle {

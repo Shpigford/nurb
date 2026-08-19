@@ -39,10 +39,10 @@ fn profile(project: &Path, engine_root: &Path) -> String {
     }
     if let Some(home) = home() {
         // The agents' own state (`~/.claude` and the `~/.claude.json` family,
-        // `~/.codex`, `~/.cursor`, `~/.grok`): one prefix rule per agent
+        // `~/.codex`, `~/.gemini`, `~/.cursor`, `~/.grok`): one prefix rule per agent
         // home, so session files, config, and their temp-file variants are
         // all covered without enumerating filenames.
-        for dot in [".claude", ".codex", ".cursor", ".grok"] {
+        for dot in [".claude", ".codex", ".gemini", ".cursor", ".grok"] {
             rules.push_str(&format!(
                 "  (regex #\"^{}/\\{dot}\")\n",
                 regex_escaped(&home.display().to_string())
@@ -173,7 +173,7 @@ mod tests {
         assert!(sh(&profile, &format!("echo hi > '{}/part.py'", project.display())));
         assert!(!sh(&profile, "echo hacked >> \"$HOME/nurb-sbx-canary\" && rm \"$HOME/nurb-sbx-canary\""));
         // Agent state under each agent home writes fine (created and removed).
-        for dot in [".claude", ".codex", ".cursor", ".grok"] {
+        for dot in [".claude", ".codex", ".gemini", ".cursor", ".grok"] {
             let existed = home().map(|h| h.join(dot).exists()).unwrap_or(false);
             assert!(sh(
                 &profile,

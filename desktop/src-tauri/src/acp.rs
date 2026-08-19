@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::v1::ErrorCode;
 use agent_client_protocol::schema::v1::{
-    CancelNotification, ContentBlock, ImageContent, InitializeRequest, ListSessionsRequest,
+    AuthenticateRequest, CancelNotification, ContentBlock, ImageContent, InitializeRequest, ListSessionsRequest,
     LoadSessionRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
     SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions, SessionId,
@@ -27,6 +27,51 @@ use tauri::ipc::Channel;
 use tokio::sync::oneshot;
 
 use crate::agents::AgentKind;
+pub async fn authenticate(
+    app: tauri::AppHandle,
+    kind: AgentKind,
+    method: &str,
+    api_key: Option<&str>,
+) -> Result<(), String> {
+    use tauri::Manager;
+    let launcher = app.state::<crate::env::Launcher>();
+    let (program, args) = launcher.adapter(kind);
+    let mut config = AcpAgentConfig::new(program).args(args);
+    if kind == AgentKind::Gemini {
+        for name in ["BROWSER", "CI", "DEBIAN_FRONTEND", "NO_BROWSER", "SSH_CONNECTION"] {
+            config = config.env(name, "");
+        }
+    }
+    if let Some(path) = launcher.adapter_path() {
+        config = config.env("PATH", path);
+    }
+    if let Some(key) = api_key {
+        config = config.env("GEMINI_API_KEY", key);
+    }
+    let agent = AcpAgent::new(config);
+    let (stdin, stdout, stderr, mut child) = agent.spawn_process().map_err(|e| e.to_string())?;
+    drain_stderr(kind, stderr);
+    let method = method.to_string();
+    let login = Client.builder().connect_with(
+        ByteStreams::new(stdin, stdout),
+        move |cx: ConnectionTo<Agent>| async move {
+            cx.send_request(InitializeRequest::new(ProtocolVersion::V1))
+                .block_task()
+                .await?;
+            cx.send_request(AuthenticateRequest::new(method))
+                .block_task()
+                .await?;
+            Ok(())
+        },
+    );
+    let result = match tokio::time::timeout(Duration::from_secs(600), login).await {
+        Ok(result) => result.map_err(|e| friendly(kind, e)),
+        Err(_) => Err("The sign-in timed out. Try again.".into()),
+    };
+    let _ = child.kill();
+    result
+}
+
 use crate::prefs::{ConfigChoice, ConfigRow, PrefStore};
 pub(crate) use events::ChatEvent;
 use events::{forward, permission_choice, permission_title, wire_string};
@@ -209,6 +254,11 @@ async fn agent_sessions(
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
+    }
+    if kind == AgentKind::Gemini {
+        if let Ok(key) = crate::agents::gemini_api_key() {
+            config = config.env("GEMINI_API_KEY", key);
+        }
     }
     let agent = AcpAgent::new(config);
     let (stdin, stdout, stderr, child) = agent
@@ -640,6 +690,11 @@ async fn run_chat(
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
+    }
+    if kind == AgentKind::Gemini {
+        if let Ok(key) = crate::agents::gemini_api_key() {
+            config = config.env("GEMINI_API_KEY", key);
+        }
     }
     let agent = AcpAgent::new(config);
     let (stdin, stdout, stderr, child) = match agent.spawn_process() {

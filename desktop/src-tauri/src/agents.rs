@@ -4,9 +4,9 @@
 //!
 //! Claude and Codex run through npm adapters the app provisions; each bundles
 //! its agent's real CLI (claude-agent-acp carries the native Claude Code
-//! binary, codex-acp carries @openai/codex), so nothing has to be on the
-//! user's PATH except node/npx. Cursor and Grok ship CLIs that speak ACP
-//! natively, so the app never installs those: it finds the binary the
+//! binary, codex-acp carries @openai/codex). Gemini's official CLI speaks ACP
+//! itself and is provisioned beside them, so nothing has to be on the user's
+//! PATH except node/npx. Cursor and Grok ship CLIs that speak ACP natively, so the app never installs those: it finds the binary the
 //! vendor's own installer put on the machine. Signing in through the app
 //! shares credentials with any terminal install either way, because every
 //! agent reads its own store (~/.claude, ~/.codex, Cursor's, ~/.grok).
@@ -20,13 +20,15 @@ use std::time::Duration;
 pub enum AgentKind {
     Claude,
     Codex,
+    Gemini,
     Cursor,
     Grok,
 }
 
-pub const ALL: [AgentKind; 4] = [
+pub const ALL: [AgentKind; 5] = [
     AgentKind::Claude,
     AgentKind::Codex,
+    AgentKind::Gemini,
     AgentKind::Cursor,
     AgentKind::Grok,
 ];
@@ -36,6 +38,7 @@ impl AgentKind {
         match id {
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
+            "gemini" => Ok(Self::Gemini),
             "cursor" => Ok(Self::Cursor),
             "grok" => Ok(Self::Grok),
             other => Err(format!("unknown agent: {other}")),
@@ -46,6 +49,7 @@ impl AgentKind {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Gemini => "gemini",
             Self::Cursor => "cursor",
             Self::Grok => "grok",
         }
@@ -57,6 +61,7 @@ impl AgentKind {
         match self {
             Self::Claude => "Claude",
             Self::Codex => "Codex",
+            Self::Gemini => "Gemini",
             Self::Cursor => "Cursor",
             Self::Grok => "Grok",
         }
@@ -68,6 +73,7 @@ impl AgentKind {
         match self {
             Self::Claude => Some("@agentclientprotocol/claude-agent-acp@0.64.2"),
             Self::Codex => Some("@agentclientprotocol/codex-acp@1.1.9"),
+            Self::Gemini => Some("@google/gemini-cli@0.55.1"),
             Self::Cursor | Self::Grok => None,
         }
     }
@@ -78,6 +84,7 @@ impl AgentKind {
         match self {
             Self::Claude => Some("claude-agent-acp"),
             Self::Codex => Some("codex-acp"),
+            Self::Gemini => Some("gemini"),
             Self::Cursor | Self::Grok => None,
         }
     }
@@ -88,7 +95,7 @@ impl AgentKind {
         match self {
             Self::Cursor => Some(("agent", &["acp"])),
             Self::Grok => Some(("grok", &["agent", "stdio"])),
-            Self::Claude | Self::Codex => None,
+            Self::Claude | Self::Codex | Self::Gemini => None,
         }
     }
 
@@ -100,7 +107,7 @@ impl AgentKind {
         let install_dir = match self {
             Self::Cursor => ".local/bin",
             Self::Grok => ".grok/bin",
-            Self::Claude | Self::Codex => return None,
+            Self::Claude | Self::Codex | Self::Gemini => return None,
         };
         let home = PathBuf::from(std::env::var("HOME").ok()?);
         let default = home.join(install_dir).join(name);
@@ -117,6 +124,7 @@ impl AgentKind {
         match self {
             Self::Claude => "works with a Claude subscription (Pro, from $20/month)",
             Self::Codex => "works with a ChatGPT subscription (Go, from $8/month)",
+            Self::Gemini => "works with a Gemini API key from Google AI Studio",
             Self::Cursor => "works with a Cursor subscription (Pro, from $20/month)",
             Self::Grok => "works with an xAI subscription (SuperGrok, from $30/month)",
         }
@@ -129,7 +137,7 @@ impl AgentKind {
         match self {
             Self::Cursor => Some("curl https://cursor.com/install -fsSL | bash"),
             Self::Grok => Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
-            Self::Claude | Self::Codex => None,
+            Self::Claude | Self::Codex | Self::Gemini => None,
         }
     }
 }
@@ -164,6 +172,7 @@ pub async fn agent_statuses(app: tauri::AppHandle) -> Vec<AgentStatus> {
                 match agent {
                     AgentKind::Claude => claude_auth_status(&launcher),
                     AgentKind::Codex => (Some(auth_file(".codex").is_file()), None),
+                    AgentKind::Gemini => (Some(gemini_api_key().is_ok()), None),
                     AgentKind::Cursor => cursor_auth_status(agent),
                     AgentKind::Grok => (Some(auth_file(".grok").is_file()), None),
                 }
@@ -238,6 +247,55 @@ fn auth_file(dir: &str) -> PathBuf {
         .join("auth.json")
 }
 
+const GEMINI_KEYCHAIN_SERVICE: &str = "dev.nurb.desktop.gemini-api-key";
+const GEMINI_KEYCHAIN_ACCOUNT: &str = "gemini";
+
+pub(crate) fn gemini_api_key() -> Result<String, String> {
+    let output = Command::new("/usr/bin/security")
+        .args([
+            "find-generic-password",
+            "-a",
+            GEMINI_KEYCHAIN_ACCOUNT,
+            "-s",
+            GEMINI_KEYCHAIN_SERVICE,
+            "-w",
+        ])
+        .output()
+        .map_err(|error| format!("could not read the Gemini API key: {error}"))?;
+    if !output.status.success() {
+        return Err("Gemini API key not found".into());
+    }
+    let key = String::from_utf8(output.stdout)
+        .map_err(|_| "the Gemini API key is not valid text".to_string())?
+        .trim()
+        .to_string();
+    if key.is_empty() {
+        Err("Gemini API key is empty".into())
+    } else {
+        Ok(key)
+    }
+}
+
+fn save_gemini_api_key(key: &str) -> Result<(), String> {
+    let status = Command::new("/usr/bin/security")
+        .args([
+            "add-generic-password",
+            "-a",
+            GEMINI_KEYCHAIN_ACCOUNT,
+            "-s",
+            GEMINI_KEYCHAIN_SERVICE,
+            "-w",
+            key,
+            "-U",
+        ])
+        .status()
+        .map_err(|error| format!("could not save the Gemini API key: {error}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| "macOS Keychain did not save the Gemini API key".into())
+}
+
 /// `agent status` prints "Not logged in" signed out and account details
 /// signed in, with no JSON form, so the text is the signal and anything
 /// unrecognizable is honestly unknown rather than guessed.
@@ -281,9 +339,20 @@ impl Logins {
 /// store. Driving those beats holding an ACP `authenticate` request pending
 /// for however long a human takes in a browser.
 #[tauri::command]
-pub async fn agent_login(app: tauri::AppHandle, agent: String) -> Result<(), String> {
+pub async fn agent_login(
+    app: tauri::AppHandle,
+    agent: String,
+    api_key: Option<String>,
+) -> Result<(), String> {
     use tauri::Manager;
     let kind = AgentKind::parse(&agent)?;
+    if kind == AgentKind::Gemini {
+        let key = api_key
+            .filter(|key| !key.trim().is_empty())
+            .ok_or("Enter a Gemini API key from Google AI Studio.")?;
+        crate::acp::authenticate(app, kind, "gemini-api-key", Some(&key)).await?;
+        return save_gemini_api_key(&key);
+    }
     let launcher = app.state::<crate::env::Launcher>();
     let (program, mut args) = launcher.adapter(kind);
     let adapter_path = launcher.adapter_path();
@@ -306,6 +375,7 @@ pub async fn agent_login(app: tauri::AppHandle, agent: String) -> Result<(), Str
         // Native CLIs: drop the ACP args the launcher put on, login is its
         // own subcommand.
         AgentKind::Cursor | AgentKind::Grok => args = vec!["login".into()],
+        AgentKind::Gemini => unreachable!(),
     }
     let (pgid_tx, pgid_rx) = std::sync::mpsc::channel::<i32>();
     let done = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
@@ -364,7 +434,7 @@ mod tests {
         for agent in super::ALL {
             assert_eq!(AgentKind::parse(agent.id()), Ok(agent));
         }
-        assert!(AgentKind::parse("gemini").is_err());
+        assert!(AgentKind::parse("unknown").is_err());
     }
 
     /// Every agent starts one way or the other, never both: an npm adapter
