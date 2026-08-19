@@ -24,7 +24,10 @@ use crate::env::{uv_sidecar, Launcher, Paths, NODE_VERSION};
 
 const PYTHON_VERSION: &str = "3.13";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
-const NATIVE_CLI_HEALTH_TIMEOUT: Duration = Duration::from_secs(10);
+// Generous because the first exec of a freshly written binary can stall for
+// many seconds while macOS assesses it (Gatekeeper/XProtect), and these CLIs
+// are large.
+const NATIVE_CLI_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const NPM_CI_ARGS: &[&str] = &["ci", "--include=optional", "--no-fund", "--no-audit"];
 static PROBE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -176,27 +179,31 @@ fn chat_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
 }
 
 fn chat_runtime_ok(paths: &Paths) -> bool {
+    chat_runtime_check(paths).is_ok()
+}
+
+/// Says which component failed and why, so a broken install surfaces as an
+/// actionable message on the setup screen instead of a dead end (issue #157).
+fn chat_runtime_check(paths: &Paths) -> Result<(), String> {
     let mut node = Command::new(paths.node_bin());
     node.arg("--version");
-    if !probe_version(node, paths.data(), NODE_VERSION, HEALTH_TIMEOUT) {
-        return false;
-    }
+    probe_version(node, paths.data(), NODE_VERSION, HEALTH_TIMEOUT)
+        .map_err(|why| format!("the chat runtime check failed: {why}"))?;
 
     // Only the adapter-hosted agents; Cursor and Grok are not provisioned.
-    if !agents::ALL.iter().all(|kind| {
+    for kind in &agents::ALL {
         let Some(adapter_pin) = kind.adapter() else {
-            return true;
+            continue;
         };
         let script = paths.adapter_script(*kind);
         if !script.is_file() {
-            return false;
+            return Err(format!("the {} adapter is missing", kind.label()));
         }
         let mut adapter = Command::new(paths.node_bin());
         adapter.arg(script).arg("--version");
         let version = adapter_pin.rsplit_once('@').unwrap().1;
         probe_version(adapter, paths.data(), version, HEALTH_TIMEOUT)
-    }) {
-        return false;
+            .map_err(|why| format!("the {} adapter check failed: {why}", kind.label()))?;
     }
 
     // Adapter --version never loads the native CLIs supplied as optional npm
@@ -206,13 +213,14 @@ fn chat_runtime_ok(paths: &Paths) -> bool {
     claude
         .arg(paths.adapter_script(crate::agents::AgentKind::Claude))
         .args(["--cli", "--version"]);
-    if !probe_success(claude, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT) {
-        return false;
-    }
+    probe_output(claude, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
+        .map_err(|why| format!("the Claude CLI check failed: {why}"))?;
 
     let mut codex = Command::new(paths.node_bin());
     codex.arg(paths.codex_cli()).arg("--version");
-    probe_success(codex, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
+    probe_output(codex, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
+        .map_err(|why| format!("the Codex CLI check failed: {why}"))?;
+    Ok(())
 }
 
 /// Run a tiny version command without trusting that a corrupt executable will
@@ -223,47 +231,64 @@ fn probe_version(
     output_dir: &std::path::Path,
     expected: &str,
     timeout: Duration,
-) -> bool {
-    probe_output(command, output_dir, timeout)
-        .and_then(|text| text.split_whitespace().last().map(str::to_string))
-        .is_some_and(|version| version == expected)
-}
-
-fn probe_success(command: Command, output_dir: &std::path::Path, timeout: Duration) -> bool {
-    probe_output(command, output_dir, timeout).is_some()
+) -> Result<(), String> {
+    let text = probe_output(command, output_dir, timeout)?;
+    match text.split_whitespace().last() {
+        Some(version) if version == expected => Ok(()),
+        Some(version) => Err(format!("it reported {version} instead of {expected}")),
+        None => Err("it reported nothing".into()),
+    }
 }
 
 fn probe_output(
     mut command: Command,
     output_dir: &std::path::Path,
     timeout: Duration,
-) -> Option<String> {
-    let output_path = output_dir.join(format!(
+) -> Result<String, String> {
+    let base = output_dir.join(format!(
         ".health-{}-{}",
         std::process::id(),
         PROBE_ID.fetch_add(1, Ordering::Relaxed)
     ));
-    let Ok(output) = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&output_path)
-    else {
-        return None;
+    let output_path = base.with_extension("out");
+    // stderr goes to its own file: it is only quoted in failure messages, so
+    // a stray warning can never corrupt the version parsed from stdout.
+    let errors_path = base.with_extension("err");
+    let open = |path: &std::path::Path| {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| format!("could not capture its output: {e}"))
+    };
+    let output = open(&output_path)?;
+    let errors = match open(&errors_path) {
+        Ok(errors) => errors,
+        Err(e) => {
+            let _ = std::fs::remove_file(&output_path);
+            return Err(e);
+        }
     };
     command
         .stdin(Stdio::null())
         .stdout(Stdio::from(output))
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(errors))
         .process_group(0);
-    let Ok(mut child) = command.spawn() else {
-        let _ = std::fs::remove_file(output_path);
-        return None;
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            let _ = std::fs::remove_file(&output_path);
+            let _ = std::fs::remove_file(&errors_path);
+            return Err(format!("it did not start: {e}"));
+        }
     };
     let pgid = child.id() as i32;
     let deadline = Instant::now() + timeout;
-    let success = loop {
+    // Ok(()) ran clean, Err(Some(status)) exited badly, Err(None) timed out.
+    let result: Result<(), Option<std::process::ExitStatus>> = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
+            Ok(Some(status)) if status.success() => break Ok(()),
+            Ok(Some(status)) => break Err(Some(status)),
             Ok(None) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(25));
             }
@@ -272,15 +297,43 @@ fn probe_output(
                     libc::killpg(pgid, libc::SIGKILL);
                 }
                 let _ = child.wait();
-                break false;
+                break Err(None);
             }
         }
     };
-    let output = success
-        .then(|| std::fs::read_to_string(&output_path).ok())
-        .flatten();
+    let text = std::fs::read_to_string(&output_path).unwrap_or_default();
+    let errors = std::fs::read_to_string(&errors_path).unwrap_or_default();
     let _ = std::fs::remove_file(output_path);
-    output
+    let _ = std::fs::remove_file(errors_path);
+    match result {
+        Ok(()) => Ok(text),
+        Err(None) => Err(format!("it did not finish within {}s", timeout.as_secs())),
+        Err(Some(status)) => {
+            // The last few lines, because loader errors like dyld's spread the
+            // useful part (library, referenced from, reason) across lines.
+            // stderr first: that is where CLIs put the failure.
+            let tail = |stream: &str| {
+                let mut lines: Vec<&str> = stream
+                    .lines()
+                    .map(str::trim)
+                    .filter(|line| !line.is_empty())
+                    .rev()
+                    .take(3)
+                    .collect();
+                lines.reverse();
+                lines.join(" / ")
+            };
+            let said = Some(tail(&errors))
+                .filter(|t| !t.is_empty())
+                .or_else(|| Some(tail(&text)).filter(|t| !t.is_empty()))
+                .map(|t| format!(" saying {t:?}"))
+                .unwrap_or_default();
+            match status.code() {
+                Some(code) => Err(format!("it exited with status {code}{said}")),
+                None => Err(format!("it was killed{said}")),
+            }
+        }
+    }
 }
 
 fn adapter_pins() -> Vec<String> {
@@ -544,10 +597,7 @@ fn provision_chat(
     // The npm cache is ~250 MB that only helps a reinstall, and adapter pins
     // change with app updates, not day to day.
     let _ = std::fs::remove_dir_all(paths.adapters().join("npm-cache"));
-    if !chat_runtime_ok(paths) {
-        return Err("the agent install is missing a platform-native CLI".into());
-    }
-    Ok(())
+    chat_runtime_check(paths).map_err(|why| format!("the agent install finished, but {why}"))
 }
 
 fn stage(channel: &Channel<ProvisionEvent>, stage: &'static str) {
@@ -647,8 +697,8 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        chat_runtime_ok, file_hash, occt_version, probe_version, wheel_version, NPM_CI_ARGS,
-        PROBE_ID,
+        chat_runtime_check, chat_runtime_ok, file_hash, occt_version, probe_version, wheel_version,
+        NPM_CI_ARGS, PROBE_ID,
     };
     use crate::env::{Paths, NODE_VERSION};
 
@@ -688,20 +738,36 @@ mod tests {
         let dir = std::env::temp_dir();
         let mut good = Command::new("/bin/sh");
         good.args(["-c", "printf 'adapter 1.2.3\\n'"]);
-        assert!(probe_version(good, &dir, "1.2.3", Duration::from_secs(1)));
+        assert!(probe_version(good, &dir, "1.2.3", Duration::from_secs(1)).is_ok());
 
         let mut wrong = Command::new("/bin/sh");
         wrong.args(["-c", "printf '9.9.9\\n'"]);
-        assert!(!probe_version(wrong, &dir, "1.2.3", Duration::from_secs(1)));
+        let mismatch = probe_version(wrong, &dir, "1.2.3", Duration::from_secs(1));
+        assert_eq!(mismatch.unwrap_err(), "it reported 9.9.9 instead of 1.2.3");
+
+        let mut failing = Command::new("/bin/sh");
+        failing.args(["-c", "echo 'no such device'; exit 3"]);
+        let failed = probe_version(failing, &dir, "1.2.3", Duration::from_secs(1));
+        assert_eq!(
+            failed.unwrap_err(),
+            "it exited with status 3 saying \"no such device\""
+        );
+
+        let mut loud = Command::new("/bin/sh");
+        loud.args([
+            "-c",
+            "printf 'dyld: Library not loaded\\nReferenced from: claude\\nReason: image not found\\n' >&2; exit 134",
+        ]);
+        let crashed = probe_version(loud, &dir, "1.2.3", Duration::from_secs(1));
+        assert_eq!(
+            crashed.unwrap_err(),
+            "it exited with status 134 saying \"dyld: Library not loaded / Referenced from: claude / Reason: image not found\""
+        );
 
         let mut hung = Command::new("/bin/sh");
         hung.args(["-c", "sleep 5"]);
-        assert!(!probe_version(
-            hung,
-            &dir,
-            "1.2.3",
-            Duration::from_millis(50)
-        ));
+        let timed_out = probe_version(hung, &dir, "1.2.3", Duration::from_millis(50));
+        assert_eq!(timed_out.unwrap_err(), "it did not finish within 0s");
     }
 
     #[test]
@@ -759,10 +825,12 @@ esac
         std::fs::remove_file(slow_claude).unwrap();
         let missing_claude = format!("{}.missing-claude", node.display());
         std::fs::write(&missing_claude, b"").unwrap();
-        assert!(!chat_runtime_ok(&paths));
+        let why = chat_runtime_check(&paths).unwrap_err();
+        assert!(why.starts_with("the Claude CLI check failed:"), "{why}");
         std::fs::remove_file(missing_claude).unwrap();
         std::fs::write(format!("{}.missing-codex", node.display()), b"").unwrap();
-        assert!(!chat_runtime_ok(&paths));
+        let why = chat_runtime_check(&paths).unwrap_err();
+        assert!(why.starts_with("the Codex CLI check failed:"), "{why}");
 
         std::fs::remove_dir_all(dir).unwrap();
     }

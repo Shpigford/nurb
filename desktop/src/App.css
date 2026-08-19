@@ -1467,6 +1467,11 @@ textarea {
   max-width: 46ch;
 }
 
+.setup-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .setup-retry {
   border: 1px solid rgba(110, 231, 168, 0.35);
   border-radius: 6px;

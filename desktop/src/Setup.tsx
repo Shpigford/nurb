@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import Logo from "./Logo";
+import { setupReportUrl } from "./setupReport";
 
 type ProvisionEvent =
   | { kind: "stage"; stage: string }
@@ -42,6 +44,33 @@ export default function Setup({ onDone }: { onDone: () => void }) {
     }
   };
 
+  // Opens a bug report with the error, app version, macOS version, and
+  // architecture already filled in, so a failed setup never sends anyone
+  // hunting through logs.
+  const report = async () => {
+    let version = "";
+    try {
+      const about = await invoke<{
+        appVersion: string;
+        nurbVersion: string;
+        occtVersion: string | null;
+        osVersion: string;
+        arch: string;
+      }>("about_info");
+      version = [
+        `app ${about.appVersion}`,
+        `CAD engine ${about.nurbVersion}`,
+        about.occtVersion ? `OCCT ${about.occtVersion}` : null,
+        `macOS ${about.osVersion} (${about.arch})`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+    } catch {
+      // The report is still useful without version info.
+    }
+    openUrl(setupReportUrl(version, error ?? ""));
+  };
+
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -59,9 +88,14 @@ export default function Setup({ onDone }: { onDone: () => void }) {
         {error ? (
           <>
             <div className="setup-error">{error}</div>
-            <button className="setup-retry" onClick={start}>
-              try again
-            </button>
+            <div className="setup-actions">
+              <button className="setup-retry" onClick={start}>
+                try again
+              </button>
+              <button className="setup-retry" onClick={report}>
+                report this
+              </button>
+            </div>
           </>
         ) : (
           <>
