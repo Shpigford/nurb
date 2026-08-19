@@ -62,6 +62,7 @@ type ConfigRow = {
 export const AGENT_LABEL: Record<string, string> = {
   claude: "Claude",
   codex: "Codex",
+  gemini: "Gemini",
   cursor: "Cursor",
   grok: "Grok",
 };
@@ -140,7 +141,7 @@ function Chat({
   onFresh,
   onAgent,
   onBusy,
-  onSignedIn,
+  onSignIn,
 }: {
   path: string;
   // The column's identity: this is the part's conversation, whatever the
@@ -163,7 +164,7 @@ function Chat({
   // stores, so it starts a fresh one on the agent picked.
   onAgent: (id: string) => void;
   onBusy: (busy: boolean) => void;
-  onSignedIn: () => Promise<void>;
+  onSignIn: (agent: string) => Promise<boolean>;
 }) {
   const label = AGENT_LABEL[agent] ?? agent;
   // The sentinel never reaches copy: everywhere the column says its name, the
@@ -577,8 +578,7 @@ function Chat({
   const signIn = async () => {
     setSigningIn(true);
     try {
-      await invoke("agent_login", { agent });
-      await onSignedIn();
+      if (!(await onSignIn(agent))) return;
       setAuthNeeded(false);
       setItems((list) => [
         ...list,
@@ -780,7 +780,7 @@ function Chat({
               disabled={signingIn}
               onClick={signIn}
             >
-              {signingIn ? "finish signing in in your browser…" : "sign in"}
+              {signingIn ? "signing in…" : "sign in"}
             </button>
           </div>
         )}

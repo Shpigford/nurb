@@ -117,8 +117,8 @@ export default function About({
           </details>
           <p>
             Also downloaded at first launch, not shipped in the app: Node.js (MIT), the
-            Claude Code and Codex chat adapters from npm under their publishers' own terms,
-            a standalone CPython (PSF), and nurb's Python dependencies, including trimesh
+            Claude Code and Codex chat adapters and the Gemini CLI from npm under their
+            publishers' own terms, a standalone CPython (PSF), and nurb's Python dependencies, including trimesh
             (MIT), watchdog (Apache-2.0), websockets (BSD-3-Clause), and numpy
             (BSD-3-Clause).
           </p>

@@ -200,7 +200,7 @@ fn chat_runtime_ok(paths: &Paths) -> bool {
     }
 
     // Adapter --version never loads the native CLIs supplied as optional npm
-    // packages. Exercise both real binaries so a skipped platform package
+    // packages. Exercise the two platform-specific binaries so a skipped package
     // cannot be stamped healthy and surface later as a misleading auth error.
     let mut claude = Command::new(paths.node_bin());
     claude
@@ -736,6 +736,7 @@ case "$*" in
     ;;
   *"claude-agent-acp --version"*) echo "claude-agent-acp 0.64.2" ;;
   *"codex-acp --version"*) echo "codex-acp 1.1.9" ;;
+    *"gemini --version"*) echo "0.55.1" ;;
   *"/codex --version"*)
     [ ! -f "$0.missing-codex" ] || exit 1
     echo "codex-cli 0.145.0"
@@ -747,7 +748,7 @@ esac
         )
         .unwrap();
         std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
-        for agent in ["claude-agent-acp", "codex-acp", "codex"] {
+        for agent in ["claude-agent-acp", "codex-acp", "gemini", "codex"] {
             std::fs::write(paths.adapters().join("node_modules/.bin").join(agent), b"").unwrap();
         }
 

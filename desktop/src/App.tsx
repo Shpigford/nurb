@@ -9,6 +9,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
+import GeminiKeyDialog from "./GeminiKeyDialog";
 import {
   chatKey,
   markChatSeen,
@@ -248,6 +249,8 @@ function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const geminiKeyResolver = useRef<((key: string | null) => void) | null>(null);
   const [defaultProjectsFolder, setDefaultProjectsFolder] = useState<string | null>(null);
   const [projectsFolder, setProjectsFolder] = useState<string | null>(
     () => localStorage.getItem(PROJECTS_FOLDER_KEY),
@@ -393,14 +396,30 @@ function App() {
     localStorage.setItem("nurb-default-agent", id);
   };
 
-  const signInAgent = async (id: string) => {
+  const requestGeminiKey = () =>
+    new Promise<string | null>((resolve) => {
+      geminiKeyResolver.current = resolve;
+      setShowGeminiKey(true);
+    });
+
+  const finishGeminiKey = (key: string | null) => {
+    setShowGeminiKey(false);
+    geminiKeyResolver.current?.(key);
+    geminiKeyResolver.current = null;
+  };
+
+  const signInAgent = async (id: string): Promise<boolean> => {
+    const apiKey = id === "gemini" ? await requestGeminiKey() : null;
+    if (id === "gemini" && apiKey === null) return false;
     setSigningIn(id);
     setError(null);
     try {
-      await invoke("agent_login", { agent: id });
+      await invoke("agent_login", { agent: id, apiKey });
       await refreshAgents();
+      return true;
     } catch (e) {
       setError(String(e));
+      throw e;
     } finally {
       setSigningIn(null);
     }
@@ -1163,7 +1182,7 @@ function App() {
                     disabled={signingIn !== null}
                     onClick={(e) => {
                       e.stopPropagation();
-                      signInAgent(status.id);
+                      signInAgent(status.id).catch(() => {});
                     }}
                   >
                     {signingIn === status.id ? "signing in…" : "sign in"}
@@ -1266,6 +1285,12 @@ function App() {
           onClose={() => setShowSettings(false)}
         />
       )}
+      {showGeminiKey ? (
+        <GeminiKeyDialog
+          onSubmit={(key) => finishGeminiKey(key)}
+          onClose={() => finishGeminiKey(null)}
+        />
+      ) : null}
       {showAbout && about && (
         <About
           appVersion={about.appVersion}
@@ -1318,7 +1343,7 @@ function App() {
             onBusy={(busy) =>
               chatBusy(col.path, col.part, agent, busy, columnVisible(col))
             }
-            onSignedIn={refreshAgents}
+            onSignIn={signInAgent}
           />
         );
       })}
