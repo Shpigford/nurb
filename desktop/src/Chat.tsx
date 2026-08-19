@@ -841,7 +841,7 @@ function Chat({
               disabled={signingIn}
               onClick={signIn}
             >
-              {signingIn ? 'finish signing in in your browser…' : 'sign in'}
+              {signingIn ? 'signing in…' : 'sign in'}
             </button>
           </div>
         )}

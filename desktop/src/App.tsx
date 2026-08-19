@@ -26,7 +26,15 @@ import {
   updateChatActivity,
   type ChatColumn,
 } from './chatColumns';
-import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus, IconGear, IconVariant } from './Icons';
+import {
+  IconCheck,
+  IconCube,
+  IconCubes,
+  IconFolder,
+  IconFolderPlus,
+  IconGear,
+  IconVariant,
+} from './Icons';
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from './layout';
 import Logo from './Logo';
 import type { Column } from './layout';
@@ -46,7 +54,11 @@ type Project = {
 type Server = { url: string; port: number };
 // `assembly` and `uses` are the placed-parts pair: an assembly is not one printable
 // solid, and the rail says so rather than letting it pass as another part.
-type Variant = { name: string; params: Record<string, unknown>; note?: string | null };
+type Variant = {
+  name: string;
+  params: Record<string, unknown>;
+  note?: string | null;
+};
 type Part = {
   name: string;
   error: string | null;
@@ -369,7 +381,7 @@ function App() {
   // Two things the embedded viewer cannot do for itself. It forwards mousedowns
   // from its own top strip (the titlebar area lives inside the iframe, out of
   // data-tauri-drag-region's reach) and the shell starts the native window drag.
-  // And its export buttons write into the project's build folder, then hand
+  // And its STL/STEP buttons write into the project's build folder, then hand
   // over the path: a webview ignores an <a download>, so the file is revealed in
   // Finder instead of downloaded.
   const focusProjectChat = useCallback((seed?: string) => {
@@ -544,7 +556,25 @@ function App() {
         setPartState({
           path: active,
           parts: entries
-            .map(({ name, error, refused, assembly, uses, variants, variant }) => ({ name, error, refused, assembly, uses, variants, variant }))
+            .map(
+              ({
+                name,
+                error,
+                refused,
+                assembly,
+                uses,
+                variants,
+                variant,
+              }) => ({
+                name,
+                error,
+                refused,
+                assembly,
+                uses,
+                variants,
+                variant,
+              }),
+            )
             .sort((a, b) => a.name.localeCompare(b.name)),
         });
       } catch {
@@ -785,7 +815,11 @@ function App() {
   const selectPart = (name: string, variant?: string) => {
     if (!active) return;
     setProjectChatFocused(false);
-    variantRequest.current = { path: active, part: name, variant: variant ?? null };
+    variantRequest.current = {
+      path: active,
+      part: name,
+      variant: variant ?? null,
+    };
     setVariantRequestVersion((version) => version + 1);
     setProjects((list) =>
       list.map((p) => (p.path === active ? { ...p, selectedPart: name } : p)),
@@ -804,7 +838,15 @@ function App() {
     for (let attempt = 0; ; attempt++) {
       const entries = await invoke<Part[]>('list_parts', { path });
       const listed = entries
-        .map(({ name, error, refused, assembly, uses, variants, variant }) => ({ name, error, refused, assembly, uses, variants, variant }))
+        .map(({ name, error, refused, assembly, uses, variants, variant }) => ({
+          name,
+          error,
+          refused,
+          assembly,
+          uses,
+          variants,
+          variant,
+        }))
         .sort((a, b) => a.name.localeCompare(b.name));
       if (settled(listed) || attempt >= 19) {
         setPartState({ path, parts: listed });
@@ -941,7 +983,10 @@ function App() {
   // once per server and part switches travel by postMessage instead.
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [frame, setFrame] = useState<{ key: string; src: string } | null>(null);
-  const [loadedFrame, setLoadedFrame] = useState<{ key: string; token: number } | null>(null);
+  const [loadedFrame, setLoadedFrame] = useState<{
+    key: string;
+    token: number;
+  } | null>(null);
   useEffect(() => {
     if (!activeServer || !partsReady) {
       setFrame(null);
@@ -966,18 +1011,19 @@ function App() {
   }, [active]);
 
   const postPart = useCallback(() => {
-    if (!frame || loadedFrame?.key !== frame.key || !active || !selectedPart) return;
+    if (!frame || loadedFrame?.key !== frame.key || !active || !selectedPart)
+      return;
     const request = variantRequest.current;
     const { message, consumed } = partMessage(active, selectedPart, request);
     // Any other current selection makes an older request stale. Consume before
     // posting so React's development effect replay cannot send it twice.
-    if (request && (consumed || request.path !== active || request.part !== selectedPart)) {
+    if (
+      request &&
+      (consumed || request.path !== active || request.part !== selectedPart)
+    ) {
       variantRequest.current = null;
     }
-    frameRef.current?.contentWindow?.postMessage(
-      message,
-      frame.key,
-    );
+    frameRef.current?.contentWindow?.postMessage(message, frame.key);
   }, [frame, loadedFrame, selectedPart, active, variantRequestVersion]);
   useEffect(postPart, [postPart]);
 
@@ -1164,11 +1210,11 @@ function App() {
                       {part.variants.map((v) => {
                         const how = Object.entries(v.params)
                           .map(([k, val]) => `${k} = ${val}`)
-                          .join("\n");
+                          .join('\n');
                         return (
                           <li
                             key={`${part.name}:${v.name}`}
-                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""}`}
+                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? 'selected' : ''}`}
                             title={v.note ? `${v.note}\n\n${how}` : how}
                             onClick={() => selectPart(part.name, v.name)}
                           >
@@ -1326,7 +1372,6 @@ function App() {
         )}
         {error && <div className="rail-error">{error}</div>}
         <div className="rail-foot">
-
           {update && (
             <button
               className="rail-update"
@@ -1338,7 +1383,10 @@ function App() {
           )}
           <div className="rail-foot-row">
             {about && (
-              <button className="rail-version" onClick={() => setShowAbout(true)}>
+              <button
+                className="rail-version"
+                onClick={() => setShowAbout(true)}
+              >
                 nurb {about.appVersion}
               </button>
             )}
@@ -1497,8 +1545,12 @@ function App() {
                   spellCheck={false}
                   disabled={creating}
                 />
-                <button className="rail-button welcome-create" type="submit" disabled={creating}>
-                  {creating ? "creating…" : "create"}
+                <button
+                  className="rail-button welcome-create"
+                  type="submit"
+                  disabled={creating}
+                >
+                  {creating ? 'creating…' : 'create'}
                 </button>
               </form>
               <button className="welcome-existing" onClick={addExisting}>
@@ -1532,8 +1584,8 @@ function App() {
         ) : (
           <div className="viewer-status">
             {projectsLoaded && projects.length === 0
-              ? "create a project to start"
-              : "open a project to start"}
+              ? 'create a project to start'
+              : 'open a project to start'}
           </div>
         )}
       </main>

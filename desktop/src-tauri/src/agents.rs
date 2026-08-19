@@ -11,8 +11,9 @@
 //! shares credentials with any terminal install either way, because every
 //! agent reads its own store (~/.claude, ~/.codex, Cursor's, ~/.grok).
 
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -277,23 +278,38 @@ pub(crate) fn gemini_api_key() -> Result<String, String> {
 }
 
 fn save_gemini_api_key(key: &str) -> Result<(), String> {
-    let status = Command::new("/usr/bin/security")
-        .args([
-            "add-generic-password",
-            "-a",
-            GEMINI_KEYCHAIN_ACCOUNT,
-            "-s",
-            GEMINI_KEYCHAIN_SERVICE,
-            "-w",
-            key,
-            "-U",
-        ])
-        .status()
+    let key = security_interactive_argument(key)?;
+    let command = format!(
+        "add-generic-password -a \"{GEMINI_KEYCHAIN_ACCOUNT}\" -s \"{GEMINI_KEYCHAIN_SERVICE}\" -w {key} -U\n"
+    );
+    let mut child = Command::new("/usr/bin/security")
+        .arg("-i")
+        .stdin(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("could not save the Gemini API key: {error}"))?;
+    let write_result = child
+        .stdin
+        .take()
+        .ok_or_else(|| "could not open macOS Keychain input".to_string())?
+        .write_all(command.as_bytes());
+    let status = child
+        .wait()
+        .map_err(|error| format!("could not save the Gemini API key: {error}"))?;
+    write_result.map_err(|error| format!("could not save the Gemini API key: {error}"))?;
     status
         .success()
         .then_some(())
         .ok_or_else(|| "macOS Keychain did not save the Gemini API key".into())
+}
+
+fn security_interactive_argument(value: &str) -> Result<String, String> {
+    if value.contains(['\r', '\n']) {
+        return Err("Gemini API key contains an invalid line break".into());
+    }
+    Ok(format!(
+        "\"{}\"",
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    ))
 }
 
 /// `agent status` prints "Not logged in" signed out and account details
@@ -428,6 +444,15 @@ pub async fn agent_login(
 #[cfg(test)]
 mod tests {
     use super::AgentKind;
+
+    #[test]
+    fn keychain_input_quotes_the_key_as_one_interactive_argument() {
+        assert_eq!(
+            super::security_interactive_argument("dummy \\\"key"),
+            Ok("\"dummy \\\\\\\"key\"".into())
+        );
+        assert!(super::security_interactive_argument("dummy\ncommand").is_err());
+    }
 
     #[test]
     fn agent_ids_roundtrip() {
