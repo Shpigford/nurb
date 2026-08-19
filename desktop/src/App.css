@@ -1709,7 +1709,7 @@ textarea {
 }
 
 .about-card.api-key-dialog {
-  width: min(440px, calc(100vw - 80px));
+  width: min(500px, calc(100vw - 80px));
 }
 
 .api-key-label {
@@ -1740,10 +1740,15 @@ textarea {
 .api-key-meta {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
   gap: 16px;
   margin-top: 8px;
   color: var(--dimmer);
   font: 11px var(--mono);
+}
+
+.api-key-meta .about-copy {
+  text-align: left;
 }
 
 .settings-toggle {
