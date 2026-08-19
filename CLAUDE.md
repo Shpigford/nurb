@@ -117,6 +117,14 @@ Nearly always that surface belongs in `src/nurb/viewer.html`, not in `desktop/sr
 
 Two things a surface owes the user that a command does not. It must not dead-end: when a feature needs something the project has not chosen yet, offer the choice in place rather than printing what the user should have configured. And a result that outlived its geometry is worse than no result, so anything cached from a build clears when that part rebuilds.
 
+### No change is done until the desktop is accounted for
+
+The recurring failure mode in this repo: a change lands in the Python engine or the viewer, works in a browser, and ships with the desktop app never considered. That is backwards. The desktop app is the primary UI, so every change ends with an explicit desktop pass: what does `desktop/src` need for this, and if the honest answer is nothing, say that in the summary rather than leaving it unexamined.
+
+The shell duplicates viewer state on purpose, and that duplication is where changes go silently missing. Its rail draws its own part and variant rows from `list_parts` polling, not from the viewer's sidebar; selection flows through `nurb:part` postMessages; viewer state the shell must react to travels over `nurb:*` messages (`nurb:saved`, `nurb:shared`, `nurb:variant`). So check each seam: new server fields the rail should reflect need `list_parts` plumbing, new viewer state the rail mirrors needs a message, and anything that lives in the sidebar or footer is invisible in the app, because `?embed` hides both. Labels too: embed mode speaks to hobbyists, so a button that names a `.py` or `.md` file in the browser needs an embed variant that does not.
+
+The check is cheap: grep `desktop/src` for the concept you touched, and run `./node_modules/.bin/tsc --noEmit` plus `npm test` in `desktop/` whenever it changed.
+
 ### Command names stay boring
 
 The CLI's user is a language model, while the app's user is a person; both surfaces are real and neither substitutes for the other. An agent that has never seen this tool can guess `build`, `check`, `export`. It cannot guess a themed alias. Every clever name is an indirection that degrades in a fresh context. The brand can be distinctive; the interface cannot.

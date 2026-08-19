@@ -1153,6 +1153,26 @@ class Server:
                 }
             )
 
+        elif msg.get("type") == "apply_variant":
+            from . import edit
+
+            variant = msg.get("variant")
+            if not isinstance(variant, str):
+                return
+            held = {k: v for k, v in (self.overrides.get(name) or {}).items() if v is not None}
+            try:
+                written = edit.apply_variant(path, variant, held)
+            except Exception as exc:
+                await self.send({"type": "applied", "name": name, "variant": variant, "error": str(exc)})
+                return
+            # The overrides stay: they are what differs from the file's defaults, which
+            # is exactly what the variant now says. The watcher sees the card write and
+            # rebuilds, and that build is the one that re-matches the variant.
+            print(f"  {name}: updated variant {variant} ({', '.join(written) or 'no overrides'})", flush=True)
+            await self.send(
+                {"type": "applied", "name": name, "variant": variant, "written": written, "skipped": []}
+            )
+
     async def upgrade(self):
         """Run the install's own upgrade, then exec ourselves so the new code serves.
 

@@ -140,6 +140,9 @@ function App() {
   // the selected part itself did not change.
   const variantRequest = useRef<PartConfigurationRequest | null>(null);
   const [variantRequestVersion, setVariantRequestVersion] = useState(0);
+  // The viewer's report of which variant the sliders started from, and whether they
+  // have drifted off it. It is what keeps a drifted variant's rail row pinned.
+  const [variantOrigin, setVariantOrigin] = useState<{ part: string; variant: string; drifted: boolean } | null>(null);
   const [naming, setNaming] = useState(false);
   const [creating, setCreating] = useState(false);
   const [partNaming, setPartNaming] = useState(false);
@@ -352,6 +355,14 @@ function App() {
       if (event.data === "nurb:drag") getCurrentWindow().startDragging().catch(() => {});
       if (event.data?.type === "nurb:saved" && typeof event.data.path === "string")
         revealItemInDir(event.data.path).catch(() => {});
+      // The viewer's variant pin: the sliders started from a variant and may have
+      // left it, and the rail draws its own variant rows, so it needs to know.
+      if (event.data?.type === "nurb:variant")
+        setVariantOrigin(
+          typeof event.data.part === "string" && typeof event.data.variant === "string"
+            ? { part: event.data.part, variant: event.data.variant, drifted: !!event.data.drifted }
+            : null,
+        );
       // The viewer's "unify in chat" nudge: parts repeating the same construction
       // are a project-wide matter, so it lands in the project conversation.
       if (
@@ -505,6 +516,7 @@ function App() {
   // an agent without session listing), just mean fresh chats.
   useEffect(() => {
     setResumeState(null);
+    setVariantOrigin(null);   // the pin belongs to the viewer this project just left
     // Leaving a project keeps busy columns and hidden results. Ordinary idle
     // columns go now; an unseen one goes after its exact chat has been shown.
     setColumns((list) => retainChatColumns(list, active, busyRef.current));
@@ -1033,10 +1045,18 @@ function App() {
                         const how = Object.entries(v.params)
                           .map(([k, val]) => `${k} = ${val}`)
                           .join("\n");
+                        // Drifted off this variant: no longer resolved by the server,
+                        // but still where the work is, so the row stays pinned.
+                        const modified =
+                          part.name === selectedPart &&
+                          part.variant !== v.name &&
+                          variantOrigin?.drifted === true &&
+                          variantOrigin.part === part.name &&
+                          variantOrigin.variant === v.name;
                         return (
                           <li
                             key={`${part.name}:${v.name}`}
-                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""}`}
+                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""} ${modified ? "modified" : ""}`}
                             title={v.note ? `${v.note}\n\n${how}` : how}
                             onClick={() => selectPart(part.name, v.name)}
                           >

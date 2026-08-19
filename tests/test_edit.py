@@ -129,6 +129,111 @@ def test_the_temp_file_does_not_survive(part_file):
     assert [p.name for p in part_file.parent.iterdir()] == ["thing.py"]
 
 
+CARD = '''# thing
+
+Ported by hand.
+
+```toml
+[part]
+min_wall = 0.7
+
+# Why the wide one exists.
+[variants.wide.params]
+count = 6
+chamfer = 2.0
+
+[variants.wide.accepted]
+sliver = 4
+
+[variants.bare.accepted]
+sliver = 2
+```
+
+## Notes
+
+More prose after the block.
+'''
+
+
+@pytest.fixture
+def carded(part_file):
+    (part_file.parent / "thing.md").write_text(CARD)
+    return part_file
+
+
+def read_variants(card):
+    import tomllib
+
+    block = card.read_text(encoding="utf-8").split("```toml", 1)[1].split("```", 1)[0]
+    return tomllib.loads(block)["variants"]
+
+
+def test_updates_only_the_variant_it_was_given(carded):
+    written = edit.apply_variant(carded, "wide", {"count": 8, "height": 50})
+    assert written == ["count", "height"]
+    card = carded.parent / "thing.md"
+    variants = read_variants(card)
+    # chamfer went back to the default at some point, so it is no longer an override.
+    assert variants["wide"]["params"] == {"count": 8, "height": 50}
+    assert variants["wide"]["accepted"] == {"sliver": 4}
+    text = card.read_text()
+    assert "# Why the wide one exists." in text
+    assert "min_wall = 0.7" in text
+    assert "More prose after the block." in text
+
+
+def test_variant_values_keep_the_signature_types(carded):
+    edit.apply_variant(carded, "wide", {"count": 8.0, "chamfer": 2, "flag": True, "label": "x"})
+    text = (carded.parent / "thing.md").read_text()
+    assert "count = 8\n" in text
+    assert "chamfer = 2.0\n" in text
+    assert "flag = true\n" in text
+    assert 'label = "x"\n' in text
+
+
+def test_variant_strings_keep_non_bmp_unicode(carded):
+    edit.apply_variant(carded, "wide", {"label": "fixture 😀"})
+    variants = read_variants(carded.parent / "thing.md")
+    assert variants["wide"]["params"] == {"label": "fixture 😀"}
+
+
+def test_a_quoted_variant_name_is_updated(carded):
+    card = carded.parent / "thing.md"
+    card.write_text(CARD.replace("variants.wide", 'variants."wide one"'))
+    edit.apply_variant(carded, "wide one", {"count": 8})
+    assert read_variants(card)["wide one"]["params"] == {"count": 8}
+
+
+def test_a_quoted_variant_name_gets_a_params_section(carded):
+    card = carded.parent / "thing.md"
+    card.write_text(CARD.replace("variants.bare", 'variants."bare one"'))
+    edit.apply_variant(carded, "bare one", {"height": 30})
+    assert read_variants(card)["bare one"] == {
+        "params": {"height": 30}, "accepted": {"sliver": 2}
+    }
+
+
+def test_a_variant_without_a_params_section_gets_one(carded):
+    edit.apply_variant(carded, "bare", {"height": 30})
+    variants = read_variants(carded.parent / "thing.md")
+    assert variants["bare"] == {"params": {"height": 30}, "accepted": {"sliver": 2}}
+
+
+def test_a_variant_the_card_never_mentions_is_an_error(carded):
+    with pytest.raises(edit.EditError, match="no variant named tall"):
+        edit.apply_variant(carded, "tall", {"count": 8})
+
+
+def test_a_part_without_a_card_says_so(part_file):
+    with pytest.raises(edit.EditError, match="no card"):
+        edit.apply_variant(part_file, "wide", {"count": 8})
+
+
+def test_the_variant_temp_file_does_not_survive(carded):
+    edit.apply_variant(carded, "wide", {"count": 8})
+    assert sorted(p.name for p in carded.parent.iterdir()) == ["thing.md", "thing.py"]
+
+
 def test_non_ascii_earlier_on_the_line_does_not_shift_the_offsets(tmp_path):
     """col_offset counts utf-8 bytes, not characters.
 

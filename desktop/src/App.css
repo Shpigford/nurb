@@ -374,6 +374,14 @@ textarea {
   border-left-color: var(--accent);
 }
 
+/* Drifted off a variant: still where the work is, so the row stays lit, and the
+   accent name says these are its values plus some drag. */
+.part-var.modified {
+  color: var(--accent);
+  background: var(--active);
+  border-left-color: var(--accent);
+}
+
 .part-add {
   display: flex;
   align-items: center;

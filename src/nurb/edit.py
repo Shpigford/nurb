@@ -4,12 +4,15 @@ The keyword defaults are the parameters, so an exploration that ends up in the f
 to end up in the signature. This is the only module that writes to a part file, and it
 rewrites exactly the default it was asked to and nothing else: the source is edited as
 text at the offsets the parser reports, so comments, formatting and every other line
-survive untouched.
+survive untouched. The same care extends to the card: a variant lives in its
+`[variants.<name>.params]` block, and updating one replaces that block alone.
 """
 
 import ast
+import json
 import os
 import pathlib
+import tomllib
 
 
 class EditError(Exception):
@@ -121,3 +124,125 @@ def apply(path, values):
     tmp.write_text(out, encoding="utf-8")
     os.replace(tmp, path)
     return sorted(name for name, _, _ in edits), skipped
+
+
+def _header(line):
+    """The key path a TOML section header line declares, or None."""
+    s = line.strip()
+    if not s.startswith("["):
+        return None
+
+    # Let TOML itself split dotted and quoted keys. Appending a marker makes the
+    # otherwise-empty table discoverable without reimplementing TOML's key grammar.
+    marker = "__nurb_header_marker__"
+    try:
+        parsed = tomllib.loads(f"{s}\n{marker} = true")
+    except tomllib.TOMLDecodeError:
+        return None
+
+    def marked_path(value, path=()):
+        if isinstance(value, dict):
+            if value.get(marker) is True:
+                return path
+            for key, child in value.items():
+                found = marked_path(child, path + (key,))
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for child in value:
+                found = marked_path(child, path)
+                if found is not None:
+                    return found
+        return None
+
+    return marked_path(parsed)
+
+
+def _toml_key(value):
+    """One TOML key, bare when possible and quoted otherwise."""
+    bare = value and all(c.isascii() and (c.isalnum() or c in "_-") for c in value)
+    return value if bare else json.dumps(value, ensure_ascii=False)
+
+
+def apply_variant(path, variant, values):
+    """Write `values` into one variant's params block in the part's card.
+
+    A variant is its overrides, so the whole `[variants.<name>.params]` section is
+    replaced with what is on screen: a value dragged back to the part's default is no
+    longer an override and drops out. Everything else in the card survives untouched.
+    Returns the sorted parameter names written.
+    """
+    from .checks import CARD_SETTINGS
+
+    path = pathlib.Path(path)
+    card = path.with_suffix(".md")
+    if not card.is_file():
+        raise EditError(f"{path.stem} has no card to hold the variant")
+
+    src = path.read_text(encoding="utf-8")
+    defaults = _defaults(_part_function(ast.parse(src, filename=str(path)), path))
+
+    def formatted(name, new):
+        if isinstance(new, bool):
+            return "true" if new else "false"
+        if isinstance(new, str):
+            # JSON and TOML share the escapes used here, but JSON's default surrogate
+            # pairs are not valid TOML Unicode escapes. Write scalar values directly.
+            return json.dumps(new, ensure_ascii=False)
+        node = defaults.get(name)
+        if node is None:
+            raise EditError(f"{path.name} has no parameter named {name}")
+        # The default says whether this dimension is an int or a float, exactly as
+        # `apply` keeps for the signature itself. A default written as an expression
+        # says nothing, so the value's own type decides.
+        old = _number(node)
+        return _format(old if old is not None else new, new)
+
+    text = card.read_text(encoding="utf-8")
+    opening = f"```{CARD_SETTINGS}"
+    if opening not in text:
+        raise EditError(f"{card.name} has no settings block declaring variants")
+    head, _, rest = text.partition(opening)
+    block, closing, tail = rest.partition("```")
+    if not closing:
+        raise EditError(f"{card.name}: the settings block never closes")
+
+    lines = block.split("\n")
+    target = ("variants", variant, "params")
+    target_text = f"variants.{_toml_key(variant)}.params"
+    body = [f"{k} = {formatted(k, v)}" for k, v in sorted(values.items())]
+    start = next((i for i, l in enumerate(lines) if _header(l) == target), None)
+    if start is None:
+        # The variant exists in some other form, [variants.<name>] alone or a dotted
+        # sibling like [variants.<name>.accepted]; a fresh params section goes in
+        # front of the first of them. A name the card never mentions is not a variant.
+        anchor = next(
+            (i for i, l in enumerate(lines)
+             if (h := _header(l)) and len(h) >= 2 and h[:2] == ("variants", variant)),
+            None,
+        )
+        if anchor is None:
+            raise EditError(f"{card.name} has no variant named {variant}")
+        lines[anchor:anchor] = [f"[{target_text}]", *body, ""]
+    else:
+        end = next((j for j in range(start + 1, len(lines)) if _header(lines[j])), len(lines))
+        # Blank lines before the next header are the gap between sections, not ours.
+        while end - 1 > start and not lines[end - 1].strip():
+            end -= 1
+        lines[start + 1 : end] = body
+    new_block = "\n".join(lines)
+
+    # This rewrites someone's card, so it checks its own work before saving: the block
+    # still parses, and the variant reads back as exactly the values it was given.
+    try:
+        parsed = tomllib.loads(new_block)
+    except tomllib.TOMLDecodeError as exc:
+        raise EditError(f"updating {variant} in {card.name} did not come out right ({exc})") from exc
+    if parsed.get("variants", {}).get(variant, {}).get("params") != values:
+        raise EditError(f"updating {variant} in {card.name} did not come out right")
+
+    # Atomic for the same reason `apply` is: the watcher rebuilds on this write.
+    tmp = card.with_name(f"_{card.name}.tmp")
+    tmp.write_text(head + opening + new_block + "```" + tail, encoding="utf-8")
+    os.replace(tmp, card)
+    return sorted(values)

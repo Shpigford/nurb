@@ -64,6 +64,10 @@
   /* The sliders glyph says what a variant is: the same part at other values. */
   .item.var .vic { width: 10px; height: 10px; flex: none; color: var(--dim); }
   .item.var.active .vic { color: var(--accent); }
+  /* Drifted off a variant: still where the work is, so the row stays lit, and the
+     accent on the name says these are its values plus some drag. */
+  .item.var.mod { background: #2c313b; }
+  .item.var.mod .name, .item.var.mod .vic { color: var(--accent); }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
   .dot.bad { background: var(--bad); }
   /* Amber for a refusal: the part declined these values on purpose, nothing broke. */
@@ -422,6 +426,8 @@
   }
   #write { display: none; width: 100%; margin-top: 10px; text-align: left; line-height: 1.4; }
   body.dirty #write { display: block; }
+  #writevar { display: none; width: 100%; margin-top: 10px; text-align: left; line-height: 1.4; }
+  #writevar.on { display: block; }
   #note { font-size: 11px; color: var(--dim); margin-top: 8px; white-space: pre-wrap; }
   #note.bad { color: var(--bad); }
   /* ?bare hides the chrome so a render is geometry on the plate and nothing else.
@@ -648,10 +654,12 @@ if (embed) {
     // newer, so an explicit click must supersede it even when the entry appears
     // to already show the requested configuration.
     const changing = inflight === name || (pending !== null && pendingFor === name);
-    const needsApply = changing || (v ? !variantActive(entry, v) : !!activeVariant(entry));
+    const needsApply = changing || (v ? !variantActive(entry, v)
+      : !!activeVariant(entry) || !!(origin && origin.part === name));
     if (!switching && !needsApply) return;
     current = name;
     if (needsApply) applyVariant(name, v || { params: {} });
+    else origin = v ? { part: name, variant: v.name } : null;
     render();
     if (switching) show(name, { keepCamera: false });
     setURL(v && v.name);
@@ -2047,12 +2055,30 @@ let panelSig = null;
 // throw away the note saying what was written. Held here so it survives that, which
 // matters most when the answer was "left side_clearance alone, and here is why".
 let lastNote = null;
+// The variant the sliders started from, as {part, variant}. The server only names a
+// variant while the values match it exactly, so once a slider moves this is the only
+// record of where the drag began, and it is what the update button writes back to.
+let origin = null;
+let postedDrift = null;   // the last nurb:variant message, so the shell hears changes once
 
 function adjustable(p) { return p.kind === 'int' || p.kind === 'float'; }
 
 function dirty() {
   const out = {};
   for (const [k, v] of values) if (v !== defaults.get(k)) out[k] = v;
+  return out;
+}
+
+// Bool and string parameters have no controls, but they can still be part of the
+// variant being adjusted. Keep those origin overrides in every slider payload: the
+// server treats a params message as the whole configuration, so omission resets them.
+function held() {
+  const out = dirty();
+  const v = origin && origin.part === current
+    && ((parts.get(current) || {}).variants || []).find(x => x.name === origin.variant);
+  if (v) for (const [name, value] of Object.entries(v.params)) {
+    if (!values.has(name)) out[name] = value;
+  }
   return out;
 }
 
@@ -2069,6 +2095,30 @@ function markDirty() {
     write.textContent = document.body.classList.contains('embed')
       ? 'save changes'
       : `write ${changed.length} default${changed.length === 1 ? '' : 's'} to ${current}.py`;
+  }
+  // The update offer appears once the values have left the origin variant, and not
+  // while a rebuild is away: applying a variant moves the sliders only when its build
+  // lands, and the offer must not flash during that gap.
+  const v = origin && origin.part === current
+    && ((parts.get(current) || {}).variants || []).find(x => x.name === origin.variant);
+  const drifted = !!v && pending === null && inflight === null
+    && [...values].some(([k, val]) => val !== (k in v.params ? v.params[k] : defaults.get(k)));
+  const update = document.getElementById('writevar');
+  if (update) {
+    update.classList.toggle('on', drifted);
+    if (drifted) update.textContent = document.body.classList.contains('embed')
+      ? `update ${origin.variant}`
+      : `update ${origin.variant} in ${current}.md`;
+  }
+  // The app's rail draws its own variant rows, so it needs the same pin the sidebar
+  // gets: which variant the sliders started from, and whether they have left it.
+  if (embed) {
+    const state = JSON.stringify({
+      type: 'nurb:variant', part: current,
+      variant: origin && origin.part === current ? origin.variant : null,
+      drifted,
+    });
+    if (state !== postedDrift) { postedDrift = state; window.parent.postMessage(JSON.parse(state), '*'); }
   }
 }
 
@@ -2230,6 +2280,14 @@ function params(e) {
     (fold && p.family ? fold : box).appendChild(row);
   }
   if (fold) box.appendChild(fold);
+  // Drifted off a variant, the values have two homes, so there are two write-backs:
+  // this one updates the variant in the card, the one below rewrites the defaults.
+  const writeVar = document.createElement('button');
+  writeVar.id = 'writevar';
+  writeVar.title = "replaces the variant's values in the card";
+  writeVar.onclick = () => origin && sock
+    && sock.send(JSON.stringify({ type: 'apply_variant', name: current, variant: origin.variant }));
+  box.appendChild(writeVar);
   const write = document.createElement('button');
   write.id = 'write';
   write.title = 'replaces the keyword defaults in the part file';
@@ -2246,6 +2304,7 @@ function params(e) {
   // the values back off the entry, which still holds the overrides being discarded, and
   // put every slider straight back where it was.
   document.getElementById('resetall').onclick = () => {
+    origin = null;   // reset means the defaults, not a variant to keep updating
     for (const [name, set] of setters) set(defaults.get(name), false);
     push(true);
   };
@@ -2313,7 +2372,7 @@ function push(commit) {
   lastNote = null;                      // moving a slider answers the last write
   const note = document.getElementById('note');
   if (note) note.textContent = '';
-  pending = dirty();
+  pending = held();
   pendingFor = current;
   pendingCommitted = commit;
   clearTimeout(timer);
@@ -2366,6 +2425,7 @@ function activeVariant(e) {
 // push per parameter; sync() moves the sliders when the rebuild lands.
 function applyVariant(name, v) {
   if (!sock || sock.readyState !== WebSocket.OPEN) return;
+  origin = v.name ? { part: name, variant: v.name } : null;
   // Join the sliders' one-flight queue. If an older build is away, `settled`
   // sends these values after its response instead of mistaking that response
   // for this newer request and letting the older configuration win.
@@ -2410,15 +2470,21 @@ function render() {
       // A click supersedes a deep link whose part is still waiting to build.
       want = null; wantVariant = null; wantConfiguration = false;
       current = e.name;
-      // The part row is the defaults configuration. With a variant active it is also
-      // the only way back: a variant that flips a bool has no slider to drag home.
-      if (activeVariant(e)) applyVariant(e.name, { params: {} });
+      // The part row is the defaults configuration. With a variant active, or drifted
+      // off one, it is also the only way back: a variant that flips a bool has no
+      // slider to drag home.
+      if (activeVariant(e) || (origin && origin.part === e.name)) applyVariant(e.name, { params: {} });
       render(); show(e.name, { keepCamera: false }); setURL();
     };
     list.appendChild(row);
     for (const v of e.variants || []) {
       const vr = document.createElement('div');
-      vr.className = 'item var' + (e.name === current && variantActive(e, v) ? ' active' : '');
+      // Drifted off a variant: no longer active, but still where the work is, so the
+      // row stays pinned and its accent says these are its values plus some drag.
+      const mod = e.name === current && !variantActive(e, v)
+        && origin && origin.part === e.name && origin.variant === v.name;
+      vr.className = 'item var' + (e.name === current && variantActive(e, v) ? ' active' : '')
+        + (mod ? ' mod' : '');
       vr.innerHTML = `<svg class="vic"><title>variant</title><use href="#i-variant"/></svg>`
         + `<span class="name">${v.name}</span>`;
       // The note is the why, the params are the how; a hover gets both, why first.
@@ -2611,6 +2677,11 @@ function connect() {
     }
     if (msg.type === 'rebuilt') {
       parts.set(msg.name, msg);
+      // The build is the authority on which variant the values are: landing on one
+      // adopts it as the origin, and a variant deleted from the card stops pinning.
+      if (msg.name === current && !msg.error && msg.variant) origin = { part: msg.name, variant: msg.variant };
+      else if (origin && origin.part === msg.name
+               && !(msg.variants || []).some(v => v.name === origin.variant)) origin = null;
       let linked = null;
       if (msg.name === want) {
         current = want;
@@ -2691,8 +2762,10 @@ function connect() {
         bad: !!msg.error,
         text: msg.error
           ? msg.error
-          : [`wrote ${msg.written.join(', ') || 'nothing'}`,
-             ...(msg.skipped || []).map(s => `left ${s.name} alone: ${s.why}`)].join('\n'),
+          : msg.variant
+            ? `updated ${msg.variant} (${msg.written.join(', ') || 'no overrides left'})`
+            : [`wrote ${msg.written.join(', ') || 'nothing'}`,
+               ...(msg.skipped || []).map(s => `left ${s.name} alone: ${s.why}`)].join('\n'),
       };
       const note = document.getElementById('note');
       if (note) { note.classList.toggle('bad', lastNote.bad); note.textContent = lastNote.text; }
