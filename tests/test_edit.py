@@ -219,6 +219,48 @@ def test_a_variant_without_a_params_section_gets_one(carded):
     assert variants["bare"] == {"params": {"height": 30}, "accepted": {"sliver": 2}}
 
 
+INLINE_CARD = '''# thing
+
+```toml
+[part]
+min_wall = 1.6
+
+[variants.30230]
+note = "for the 10-7/8 inch bin: 3 fill the floor, 2 stack"
+params = { count = 5, chamfer = 2.0 }
+
+[variants.30250]
+note = "for the big bin"
+params = { count = 7 }
+```
+'''
+
+
+def test_an_inline_params_table_is_replaced_in_place(part_file):
+    """Agent-written cards hold the overrides as `params = {...}` on one line. Adding
+    a [variants.<name>.params] section next to that would define params twice, which
+    is exactly the write the validation refused in the field."""
+    card = part_file.parent / "thing.md"
+    card.write_text(INLINE_CARD)
+    written = edit.apply_variant(part_file, "30230", {"count": 6, "height": 50})
+    assert written == ["count", "height"]
+    variants = read_variants(card)
+    assert variants["30230"] == {
+        "note": "for the 10-7/8 inch bin: 3 fill the floor, 2 stack",
+        "params": {"count": 6, "height": 50},
+    }
+    # The sibling variant and its inline table survive untouched.
+    assert 'params = { count = 7 }' in card.read_text()
+
+
+def test_an_inline_params_table_can_empty_out(part_file):
+    """Dragged back to the part's defaults, the variant keeps its row but no overrides."""
+    card = part_file.parent / "thing.md"
+    card.write_text(INLINE_CARD)
+    edit.apply_variant(part_file, "30230", {})
+    assert read_variants(card)["30230"]["params"] == {}
+
+
 def test_a_variant_the_card_never_mentions_is_an_error(carded):
     with pytest.raises(edit.EditError, match="no variant named tall"):
         edit.apply_variant(carded, "tall", {"count": 8})

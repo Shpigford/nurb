@@ -164,6 +164,18 @@ def _toml_key(value):
     return value if bare else json.dumps(value, ensure_ascii=False)
 
 
+def _key(line):
+    """The top-level key a single-line `key = value` assignment declares, or None."""
+    s = line.strip()
+    if not s or s.startswith(("#", "[")):
+        return None
+    try:
+        parsed = tomllib.loads(s)
+    except tomllib.TOMLDecodeError:
+        return None
+    return next(iter(parsed), None)
+
+
 def apply_variant(path, variant, values):
     """Write `values` into one variant's params block in the part's card.
 
@@ -213,17 +225,30 @@ def apply_variant(path, variant, values):
     body = [f"{k} = {formatted(k, v)}" for k, v in sorted(values.items())]
     start = next((i for i, l in enumerate(lines) if _header(l) == target), None)
     if start is None:
-        # The variant exists in some other form, [variants.<name>] alone or a dotted
-        # sibling like [variants.<name>.accepted]; a fresh params section goes in
-        # front of the first of them. A name the card never mentions is not a variant.
-        anchor = next(
-            (i for i, l in enumerate(lines)
-             if (h := _header(l)) and len(h) >= 2 and h[:2] == ("variants", variant)),
-            None,
-        )
-        if anchor is None:
-            raise EditError(f"{card.name} has no variant named {variant}")
-        lines[anchor:anchor] = [f"[{target_text}]", *body, ""]
+        # Cards also write the overrides as an inline table, `params = {...}` on one
+        # line under [variants.<name>]. That line is the params, so it is what gets
+        # replaced; adding a [variants.<name>.params] section next to it would define
+        # params twice and no longer parse.
+        head_i = next((i for i, l in enumerate(lines) if _header(l) == ("variants", variant)), None)
+        inline = None
+        if head_i is not None:
+            end_i = next((j for j in range(head_i + 1, len(lines)) if _header(lines[j])), len(lines))
+            inline = next((j for j in range(head_i + 1, end_i) if _key(lines[j]) == "params"), None)
+        if inline is not None:
+            lines[inline] = ("params = { " + ", ".join(body) + " }") if body else "params = {}"
+        else:
+            # The variant exists in some other form, [variants.<name>] alone or a
+            # dotted sibling like [variants.<name>.accepted]; a fresh params section
+            # goes in front of the first of them. A name the card never mentions is
+            # not a variant.
+            anchor = next(
+                (i for i, l in enumerate(lines)
+                 if (h := _header(l)) and len(h) >= 2 and h[:2] == ("variants", variant)),
+                None,
+            )
+            if anchor is None:
+                raise EditError(f"{card.name} has no variant named {variant}")
+            lines[anchor:anchor] = [f"[{target_text}]", *body, ""]
     else:
         end = next((j for j in range(start + 1, len(lines)) if _header(lines[j])), len(lines))
         # Blank lines before the next header are the gap between sections, not ours.
