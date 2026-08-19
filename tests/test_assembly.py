@@ -239,11 +239,11 @@ def test_the_viewer_export_route_zips_an_assemblys_placed_parts(project):
     srv.root = project
     srv.overrides = {}
 
-    body, attach, mime = srv._export("carrier", "stl")
+    body, attach, mime, _ = srv._export("carrier", "stl")
     assert (attach, mime) == ("carrier-stl.zip", "application/zip")
     assert zipfile.ZipFile(io.BytesIO(body)).namelist() == ["plate.stl"]
 
-    body, attach, mime = srv._export("plate", "stl")
+    body, attach, mime, _ = srv._export("plate", "stl")
     assert (attach, mime) == ("plate.stl", "model/stl")
     assert body[:80]  # a real file, not a wrapper
 

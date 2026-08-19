@@ -447,3 +447,54 @@ def test_a_weight_reads_against_a_spool_not_a_micrometer():
     assert slicing.weighed(145.32) == "145g"
     assert slicing.weighed(2.34) == "2.3g"  # a fit coupon must not round to nothing
     assert slicing.weighed(None) == "unknown"
+
+
+# --- the settings a part justifies ----------------------------------------------
+# The one exception to leaving settings to the slicer, drawn on a line: what follows
+# from the geometry nurb built is nurb's knowledge, flow and temperature are not.
+
+
+def test_every_part_gets_the_functional_defaults():
+    from build123d import Box
+
+    settings, notes = slicing.tuned(Box(20, 20, 10))
+    assert settings["sparse_infill_pattern"] == "gyroid"
+    assert settings["sparse_infill_density"] == "10%"
+    assert settings["wall_loops"] == "3"
+    assert "brim_type" not in settings  # a well-footed part keeps the profile's own
+    assert notes == ["gyroid 10%", "3 walls"]
+
+
+def test_a_part_that_earns_a_warp_finding_earns_a_brim():
+    from build123d import Box
+
+    settings, notes = slicing.tuned(Box(200, 200, 2))
+    assert settings["brim_type"] == "outer_only"
+    assert any("corners lift" in note for note in notes)
+
+
+def test_the_overrides_land_in_the_process_profile_alone(tmp_path):
+    profiles = vendor(
+        tmp_path,
+        processes=(("0.20mm Standard @BBL A1M", ["Bambu Lab A1 mini 0.4 nozzle"]),),
+        filaments=(("Bambu PLA Basic @BBL A1M", ["Bambu Lab A1 mini 0.4 nozzle"]),),
+    )
+    machine = profiles / "BBL" / "machine" / "Bambu Lab A1 mini 0.4 nozzle.json"
+    process = profiles / "BBL" / "process" / "0.20mm Standard @BBL A1M.json"
+    filament = profiles / "BBL" / "filament" / "Bambu PLA Basic @BBL A1M.json"
+    out = tmp_path / "out"
+    out.mkdir()
+    slicing._preset_args(out, machine, process, filament, settings={"sparse_infill_pattern": "gyroid"})
+    assert json.loads((out / "process.json").read_text())["sparse_infill_pattern"] == "gyroid"
+    assert "sparse_infill_pattern" not in json.loads((out / "machine.json").read_text())
+    assert "sparse_infill_pattern" not in json.loads((out / "filament.json").read_text())
+
+
+def test_the_kit_says_what_a_bare_3mf_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(slicing, "app", lambda search=None: None)
+    kit, why = slicing.kit(tmp_path)
+    assert kit is None and "no slicer" in why
+
+    monkeypatch.setattr(slicing, "app", lambda search=None: tmp_path / "slicer")
+    kit, why = slicing.kit(tmp_path)  # a slicer but no printer named anywhere
+    assert kit is None and "no printer" in why

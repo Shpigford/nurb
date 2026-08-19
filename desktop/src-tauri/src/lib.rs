@@ -338,7 +338,17 @@ fn part_views(project: &std::path::Path, body: &str) -> Result<serde_json::Value
                     .and_then(|entry| entry.get("uses"))
                     .cloned()
                     .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
-                serde_json::json!({ "name": name, "error": error, "refused": refused, "assembly": assembly, "uses": uses })
+                // The card's variants, plus which one the server resolved as active,
+                // so the rail can nest them the way the browser viewer does.
+                let variants = entry
+                    .and_then(|entry| entry.get("variants"))
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::Array(Vec::new()));
+                let variant = entry
+                    .and_then(|entry| entry.get("variant"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                serde_json::json!({ "name": name, "error": error, "refused": refused, "assembly": assembly, "uses": uses, "variants": variants, "variant": variant })
             })
             .collect(),
     ))
@@ -609,6 +619,8 @@ mod tests {
             &root,
             r#"[{"name":"broken","error":"trace"},{"name":"gone","error":null},
                 {"name":"held","error":"hole too small","refused":"hole"},
+                {"name":"alpha","error":null,"variant":"tall",
+                 "variants":[{"name":"tall","params":{"height":200.0},"note":"the pantry"}]},
                 {"name":"rig","error":null,"joints":[],"uses":["alpha"]}]"#,
         )
         .unwrap();
@@ -616,10 +628,12 @@ mod tests {
         assert_eq!(
             views,
             serde_json::json!([
-                { "name": "alpha", "error": null, "refused": false, "assembly": false, "uses": [] },
-                { "name": "broken", "error": "trace", "refused": false, "assembly": false, "uses": [] },
-                { "name": "held", "error": "hole too small", "refused": true, "assembly": false, "uses": [] },
-                { "name": "rig", "error": null, "refused": false, "assembly": true, "uses": ["alpha"] }
+                { "name": "alpha", "error": null, "refused": false, "assembly": false, "uses": [],
+                  "variants": [{ "name": "tall", "params": { "height": 200.0 }, "note": "the pantry" }],
+                  "variant": "tall" },
+                { "name": "broken", "error": "trace", "refused": false, "assembly": false, "uses": [], "variants": [], "variant": null },
+                { "name": "held", "error": "hole too small", "refused": true, "assembly": false, "uses": [], "variants": [], "variant": null },
+                { "name": "rig", "error": null, "refused": false, "assembly": true, "uses": ["alpha"], "variants": [], "variant": null }
             ])
         );
         std::fs::remove_dir_all(root).unwrap();

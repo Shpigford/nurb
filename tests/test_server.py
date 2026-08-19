@@ -594,6 +594,20 @@ def test_viewer_keeps_a_deep_link_pending_until_that_part_builds():
     assert "vr.onclick = () => {\n        want = null; wantVariant = null;" in viewer
 
 
+def test_embed_part_messages_separate_selection_from_configuration():
+    """Frame-load synchronization must not reset a variant, while the latest
+    explicit rail click must beat slider or variant work still rebuilding."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    assert "hasOwnProperty.call(e.data, 'variant')" in viewer
+    assert "if (!hasConfiguration)" in viewer
+    assert "inflight === name || (pending !== null && pendingFor === name)" in viewer
+    assert "const needsApply = changing ||" in viewer
+    assert "pending = { ...v.params };\n  pendingFor = name;" in viewer
+    assert "pendingCommitted = true;\n  flush();" in viewer
+
+
 def test_viewer_frames_the_first_geometry_a_page_paints():
     """A deep link's build lands as a `rebuilt`, which keeps the camera. On the
     page's first paint there is no camera to keep, and keeping the one at the

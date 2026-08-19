@@ -351,6 +351,32 @@ textarea {
   color: var(--dim);
 }
 
+/* A card variant: the same part flexed to other values, so it nests under its
+   part the way the viewer's list draws it, indented past the icon column. */
+.part-var {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 9px;
+  padding: 2px 7px 2px 9px;
+  border-left: 1px solid var(--line);
+  border-radius: 0 5px 5px 0;
+  font-size: 11px;
+  color: var(--dimmer);
+  cursor: pointer;
+}
+
+.part-var:hover {
+  background: var(--hover);
+  color: var(--dim);
+}
+
+.part-var.selected {
+  color: var(--text);
+  background: var(--active);
+  border-left-color: var(--accent);
+}
+
 .part-add {
   display: flex;
   align-items: center;
@@ -1288,6 +1314,53 @@ textarea {
   font-size: 12px;
 }
 
+.welcome {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  max-width: 34ch;
+  padding: 0 16px;
+  text-align: center;
+}
+
+.welcome-title {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.welcome-copy {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.welcome-form {
+  width: 100%;
+  margin: 4px 0 0;
+}
+
+.welcome-create {
+  font-size: 12px;
+  padding: 5px 10px;
+  border: 1px solid rgba(110, 231, 168, 0.45);
+  color: var(--accent);
+}
+
+.welcome-existing {
+  font: inherit;
+  font-size: 11px;
+  color: var(--dimmer);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.welcome-existing:hover {
+  color: var(--dim);
+}
+
 .viewer {
   min-width: 0;
   display: flex;
@@ -1413,6 +1486,27 @@ textarea {
   flex-direction: column;
   gap: 6px;
   align-items: flex-start;
+}
+
+.rail-foot-row {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rail-settings {
+  background: none;
+  border: none;
+  color: var(--dimmer);
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+}
+
+/* .row-icon pins its own color, so the hover has to land on the icon, not the button. */
+.rail-settings:hover .row-icon {
+  color: var(--text);
 }
 
 .rail-version {

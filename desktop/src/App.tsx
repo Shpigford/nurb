@@ -26,15 +26,11 @@ import {
   updateChatActivity,
   type ChatColumn,
 } from './chatColumns';
-import {
-  IconCheck,
-  IconCube,
-  IconCubes,
-  IconFolder,
-  IconFolderPlus,
-} from './Icons';
+import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus, IconGear, IconVariant } from './Icons';
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from './layout';
+import Logo from './Logo';
 import type { Column } from './layout';
+import { partMessage, type PartConfigurationRequest } from './partMessages';
 import Setup from './Setup';
 import Settings from './Settings';
 import './App.css';
@@ -50,12 +46,18 @@ type Project = {
 type Server = { url: string; port: number };
 // `assembly` and `uses` are the placed-parts pair: an assembly is not one printable
 // solid, and the rail says so rather than letting it pass as another part.
+type Variant = { name: string; params: Record<string, unknown>; note?: string | null };
 type Part = {
   name: string;
   error: string | null;
   refused: boolean;
   assembly: boolean;
   uses: string[];
+  variants: Variant[];
+  // The variant the server resolved from the last successful build, so the rail's
+  // active mark tracks truth (an agent or a slider drag can move it) rather than
+  // the last click.
+  variant: string | null;
 };
 type PartState = { path: string; parts: Part[] };
 type ChatInfo = {
@@ -140,10 +142,16 @@ const viewportWidth = () => document.documentElement.clientWidth;
 
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [servers, setServers] = useState<Record<string, Server>>({});
   const [opening, setOpening] = useState<Record<string, boolean>>({});
   const [active, setActive] = useState<string | null>(null);
   const [partState, setPartState] = useState<PartState | null>(null);
+  // One explicit configuration click waiting for the loaded viewer. Kept out of
+  // render state because delivery consumes it; the version wakes the effect when
+  // the selected part itself did not change.
+  const variantRequest = useRef<PartConfigurationRequest | null>(null);
+  const [variantRequestVersion, setVariantRequestVersion] = useState(0);
   const [naming, setNaming] = useState(false);
   const [creating, setCreating] = useState(false);
   const [partNaming, setPartNaming] = useState(false);
@@ -445,6 +453,7 @@ function App() {
   const refreshProjects = useCallback(async () => {
     const list = await invoke<Project[]>('list_projects');
     setProjects(list);
+    setProjectsLoaded(true);
     return list;
   }, []);
 
@@ -535,13 +544,7 @@ function App() {
         setPartState({
           path: active,
           parts: entries
-            .map(({ name, error, refused, assembly, uses }) => ({
-              name,
-              error,
-              refused,
-              assembly,
-              uses,
-            }))
+            .map(({ name, error, refused, assembly, uses, variants, variant }) => ({ name, error, refused, assembly, uses, variants, variant }))
             .sort((a, b) => a.name.localeCompare(b.name)),
         });
       } catch {
@@ -777,9 +780,13 @@ function App() {
     if (projectChatFocused) openChat(PROJECT_CHAT);
   }, [openChat, projectChatFocused]);
 
-  const selectPart = (name: string) => {
+  // The part row is the defaults configuration, so selecting it clears any
+  // variant; a variant row passes its name and the viewer loads its overrides.
+  const selectPart = (name: string, variant?: string) => {
     if (!active) return;
     setProjectChatFocused(false);
+    variantRequest.current = { path: active, part: name, variant: variant ?? null };
+    setVariantRequestVersion((version) => version + 1);
     setProjects((list) =>
       list.map((p) => (p.path === active ? { ...p, selectedPart: name } : p)),
     );
@@ -797,13 +804,7 @@ function App() {
     for (let attempt = 0; ; attempt++) {
       const entries = await invoke<Part[]>('list_parts', { path });
       const listed = entries
-        .map(({ name, error, refused, assembly, uses }) => ({
-          name,
-          error,
-          refused,
-          assembly,
-          uses,
-        }))
+        .map(({ name, error, refused, assembly, uses, variants, variant }) => ({ name, error, refused, assembly, uses, variants, variant }))
         .sort((a, b) => a.name.localeCompare(b.name));
       if (settled(listed) || attempt >= 19) {
         setPartState({ path, parts: listed });
@@ -940,6 +941,7 @@ function App() {
   // once per server and part switches travel by postMessage instead.
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [frame, setFrame] = useState<{ key: string; src: string } | null>(null);
+  const [loadedFrame, setLoadedFrame] = useState<{ key: string; token: number } | null>(null);
   useEffect(() => {
     if (!activeServer || !partsReady) {
       setFrame(null);
@@ -957,13 +959,26 @@ function App() {
     );
   }, [activeServer, partsReady, selectedPart]);
 
+  // A request belongs to the project where it was clicked. Do not carry it out
+  // and back across a project switch, where it would overwrite newer viewer state.
+  useEffect(() => {
+    if (variantRequest.current?.path !== active) variantRequest.current = null;
+  }, [active]);
+
   const postPart = useCallback(() => {
-    if (!frame || !selectedPart) return;
+    if (!frame || loadedFrame?.key !== frame.key || !active || !selectedPart) return;
+    const request = variantRequest.current;
+    const { message, consumed } = partMessage(active, selectedPart, request);
+    // Any other current selection makes an older request stale. Consume before
+    // posting so React's development effect replay cannot send it twice.
+    if (request && (consumed || request.path !== active || request.part !== selectedPart)) {
+      variantRequest.current = null;
+    }
     frameRef.current?.contentWindow?.postMessage(
-      { type: 'nurb:part', name: selectedPart },
+      message,
       frame.key,
     );
-  }, [frame, selectedPart]);
+  }, [frame, loadedFrame, selectedPart, active, variantRequestVersion]);
   useEffect(postPart, [postPart]);
 
   if (ready !== true) {
@@ -1141,6 +1156,27 @@ function App() {
                           </span>
                         )}
                       </li>
+                      {/* The card's variants nest under their part the way the
+                          browser viewer draws them: the same part at other values,
+                          wearing the sliders glyph. The active mark follows the
+                          server's resolved variant, so it tracks slider drags and
+                          agent edits too, one poll behind. */}
+                      {part.variants.map((v) => {
+                        const how = Object.entries(v.params)
+                          .map(([k, val]) => `${k} = ${val}`)
+                          .join("\n");
+                        return (
+                          <li
+                            key={`${part.name}:${v.name}`}
+                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""}`}
+                            title={v.note ? `${v.note}\n\n${how}` : how}
+                            onClick={() => selectPart(part.name, v.name)}
+                          >
+                            <IconVariant />
+                            <span className="part-name">{v.name}</span>
+                          </li>
+                        );
+                      })}
                       {/* The selection expands to its counterparts: the assemblies
                           that place this part, or the parts this assembly places.
                           Only under the selection, because the relationship is what
@@ -1290,17 +1326,7 @@ function App() {
         )}
         {error && <div className="rail-error">{error}</div>}
         <div className="rail-foot">
-          <button
-            className="rail-version"
-            onClick={() => setShowSettings(true)}
-          >
-            settings
-          </button>
-          {about && (
-            <button className="rail-version" onClick={() => setShowAbout(true)}>
-              nurb {about.appVersion}
-            </button>
-          )}
+
           {update && (
             <button
               className="rail-update"
@@ -1310,6 +1336,21 @@ function App() {
               {updating ? 'updating…' : `update to ${update.version}`}
             </button>
           )}
+          <div className="rail-foot-row">
+            {about && (
+              <button className="rail-version" onClick={() => setShowAbout(true)}>
+                nurb {about.appVersion}
+              </button>
+            )}
+            <button
+              className="rail-settings"
+              title="settings"
+              aria-label="settings"
+              onClick={() => setShowSettings(true)}
+            >
+              <IconGear />
+            </button>
+          </div>
         </div>
       </aside>
       {menu && (
@@ -1436,7 +1477,37 @@ function App() {
       {!columns.some(columnVisible) && (
         <section className="chat">
           <div className="chat-header" data-tauri-drag-region />
-          <div className="placeholder">chat</div>
+          {projectsLoaded && projects.length === 0 ? (
+            // The zero-project welcome: the one moment the app has to explain
+            // itself, so the create form lives here, not behind the rail's +.
+            <div className="welcome">
+              <Logo size={36} />
+              <div className="welcome-title">Design your first part</div>
+              <p className="welcome-copy">
+                A project holds the parts you design. Name it, then describe
+                what you want to make.
+              </p>
+              <form className="name-form welcome-form" onSubmit={createProject}>
+                <input
+                  className="name-input"
+                  name="name"
+                  placeholder="project name"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  disabled={creating}
+                />
+                <button className="rail-button welcome-create" type="submit" disabled={creating}>
+                  {creating ? "creating…" : "create"}
+                </button>
+              </form>
+              <button className="welcome-existing" onClick={addExisting}>
+                or add an existing folder…
+              </button>
+            </div>
+          ) : (
+            <div className="placeholder">chat</div>
+          )}
         </section>
       )}
       <main className="viewer">
@@ -1449,12 +1520,21 @@ function App() {
             title="nurb viewer"
             // The selection can move while the document is still loading and a
             // message posted into a loading frame is dropped; repeat it on load.
-            onLoad={postPart}
+            onLoad={() =>
+              setLoadedFrame((loaded) => ({
+                key: frame.key,
+                token: (loaded?.token ?? 0) + 1,
+              }))
+            }
           />
         ) : active && opening[active] ? (
           <div className="viewer-status">starting the CAD engine…</div>
         ) : (
-          <div className="viewer-status">open a project to start</div>
+          <div className="viewer-status">
+            {projectsLoaded && projects.length === 0
+              ? "create a project to start"
+              : "open a project to start"}
+          </div>
         )}
       </main>
       <div

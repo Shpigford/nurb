@@ -270,13 +270,22 @@ def _artifact_size(path):
 def cmd_export(args):
     from build123d import export_step
 
-    from . import builder, checks
+    from . import builder, checks, slicing
 
     root = project_root()
     formats = args.formats or _standing_formats(root) or list(DEFAULT_FORMATS)
     configs = _collect_exports(_resolve(root, args.part))
     out = root / "build"
     out.mkdir(exist_ok=True)
+    # A 3MF can carry the print settings the part justifies, but only a slicer knows
+    # this release's full config schema, so the upgrade needs one installed and a
+    # printer named. Missing either is not an error: the bare file is still correct,
+    # and one line says what the export is not carrying.
+    kit, bare_because = None, None
+    if "3mf" in formats:
+        kit, bare_because = slicing.kit(root)
+    if bare_because:
+        print(f"  3MF will carry geometry only: {bare_because}")
     queue = list(configs)
     while queue:
         path, name, overrides, ctx = queue.pop(0)
@@ -298,11 +307,20 @@ def cmd_export(args):
             continue
         for fmt in formats:
             target = out / f"{name}.{fmt}"
+            said = ""
             if fmt == "3mf":
                 try:
                     builder.write_3mf(shape, target)
                 except builder.BuildError as exc:
                     sys.exit(f"  {exc}")
+                if kit:
+                    settings, notes = slicing.tuned(shape, ctx)
+                    machine, process, filament, exe = kit
+                    try:
+                        slicing.write_project(target, target, machine, process, filament, exe, settings=settings)
+                        said = f"  {', '.join(notes)}"
+                    except slicing.Unavailable as exc:
+                        print(f"  {name}.3mf carries geometry only: {exc}")
             elif fmt == "stl":
                 builder.write_stl(shape, target)
             elif fmt == "step":
@@ -316,7 +334,7 @@ def cmd_export(args):
             note = _artifact_size(target)
             if fmt == "stl":
                 note += f", {builder.stl_triangles(target):,} triangles"
-            print(f"  {target.relative_to(root)}  {note}")
+            print(f"  {target.relative_to(root)}  {note}{said}")
         # A file this export did not rewrite still sits in build/ looking current,
         # and a stale STEP shared as fresh is worse than a missing one.
         for fmt in (f for f in FORMATS if f not in formats):
@@ -780,7 +798,7 @@ def cmd_skill(args):
             state = "updated"
         print(f"  ~/{target.relative_to(home)}: {state}")
     if not found:
-        print("  no installed skill found. install one: npx skills add shpigford/nurb")
+        print("  no installed skill found. install one: npx skills add shpigford/nurb --skill nurb")
 
 
 def cmd_update(args):
@@ -874,11 +892,12 @@ def cmd_slice(args):
             "so there is nothing to slice against"
         )
 
-    # No ctx: a slice is the machine's profile and the geometry, and the per-part check
-    # settings a card carries say nothing a slicer would read.
-    queue = [entry[:3] for entry in configs]
+    # The ctx rides along because `tuned` reads it: the same warp and stability
+    # thresholds that decide a brim in the exported 3MF decide it here, so the
+    # prediction describes the file `nurb export` hands out rather than a stock slice.
+    queue = list(configs)
     while queue:
-        path, name, overrides = queue.pop(0)
+        path, name, overrides, ctx = queue.pop(0)
         gcode_target = out / f"{name}.gcode"
         # Clear it before the build, profile lookup, or assembly branch: any of those
         # can fail or skip, and yesterday's printable file must not survive as current.
@@ -897,23 +916,24 @@ def cmd_slice(args):
             if not placed:
                 sys.exit(f"  {name} is an assembly that places no parts; nothing to slice")
             print(f"  {name}: slicing the {len(placed)} part(s) it places")
-            queue = [(p, p.stem, None) for p in placed] + queue
+            queue = [(p, p.stem, None, checks.from_card(p)) for p in placed] + queue
             continue
         out.mkdir(exist_ok=True)
         model = out / f"{name}.stl"
         builder.write_stl(shape, model)
+        settings, notes = slicing.tuned(shape, ctx)
         try:
             machine = slicing.machine(vendors, wanted, args.nozzle or slicing.NOZZLE)
             process, filament = slicing.profiles_for(machine, args.layer, args.filament)
             (seconds, grams), gcode = slicing.run(
-                model, gcode_target, machine, process, filament, exe, plate=args.plate
+                model, gcode_target, machine, process, filament, exe, plate=args.plate, settings=settings
             )
         except slicing.Unavailable as exc:
             print(f"  {name}: {exc}")
             worst = 1
             continue
         print(f"  {name}: {slicing.spoken(seconds)}, {slicing.weighed(grams)} of filament")
-        print(f"      {profile} / {process.stem} / {filament.stem} / {args.plate}")
+        print(f"      {profile} / {process.stem} / {filament.stem} / {args.plate} / {', '.join(notes)}")
         print(f"      {gcode.relative_to(root)}")
     if worst:
         sys.exit(worst)

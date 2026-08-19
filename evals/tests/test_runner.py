@@ -6,6 +6,7 @@ materialized, part graded, row written, transcript kept — not any real model.
 """
 
 import contextlib
+import concurrent.futures
 import json
 import pathlib
 import sys
@@ -38,12 +39,12 @@ class Stub:
     def command(self, prompt, model=None, effort=None, instructions=None):
         assert instructions and instructions.startswith("#")
         if self.source is None:
-            return [sys.executable, "-c", "pass"]
-        write = (
-            "import pathlib, shutil;"
-            f"shutil.copy({str(self.source)!r}, 'parts/{self.part}.py')"
-        )
-        return [sys.executable, "-c", write]
+            return ["python", "-c", "pass"]
+        # Embed the solution's text rather than its path: the "agent" subprocess runs
+        # with only the isolated nurb installation on its import and executable paths.
+        text = pathlib.Path(self.source).read_text(encoding="utf-8")
+        write = f"import pathlib; pathlib.Path('parts/{self.part}.py').write_text({text!r})"
+        return ["python", "-c", write]
 
     def usage(self, stdout):
         return {"stub": True}
@@ -75,18 +76,104 @@ def test_the_agent_project_is_not_inside_the_benchmark_checkout(tmp_path, monkey
 
         def command(self, prompt, model=None, effort=None, instructions=None):
             script = (
-                "import pathlib,shutil;"
+                "import pathlib;"
                 "here=pathlib.Path.cwd();"
                 "print(any((p/'grader-secret').exists() for p in (here,*here.parents)));"
-                f"shutil.copy({str(GOOD)!r}, 'parts/cable_clip.py')"
+                f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})"
             )
-            return [sys.executable, "-c", script]
+            return ["python", "-c", script]
 
     row = runner.trial(AncestorProbe(GOOD), TASK, SEED, 1, out)
     assert row["score"] == 1.0
     slot = out / "cable_clip" / "trial_1"
     assert (slot / "transcript.txt").read_text(encoding="utf-8").strip() == "False"
     assert (slot / "project" / "parts" / "cable_clip.py").is_file()
+
+
+def test_the_answer_key_checkout_is_not_discoverable_while_the_agent_runs(tmp_path):
+    """The agent's nurb executable, Python, import path, and install metadata all
+    belong to its throwaway runtime rather than the benchmark checkout."""
+
+    class Peeker(Stub):
+        def command(self, prompt, model=None, effort=None, instructions=None):
+            script = (
+                "import importlib.metadata, importlib.util, os, shutil, sys\n"
+                f"checkout = {str(EVALS.parent)!r}\n"
+                "dist = importlib.metadata.distribution('nurb')\n"
+                "breadcrumbs = [shutil.which('nurb'), sys.executable, *sys.path, "
+                "*os.environ['PATH'].split(os.pathsep), "
+                "importlib.util.find_spec('nurb').origin, "
+                "dist.read_text('direct_url.json')]\n"
+                "print('LEAKED' if any(checkout in (p or '') for p in breadcrumbs) "
+                "else 'hidden')\n"
+                f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})\n"
+            )
+            return ["python", "-c", "import pathlib\n" + script]
+
+    row = runner.trial(Peeker(GOOD), TASK, SEED, 1, tmp_path)
+    assert row["score"] == 1.0
+    transcript = (tmp_path / "cable_clip" / "trial_1" / "transcript.txt").read_text()
+    assert "LEAKED" not in transcript
+    assert transcript.strip() == "hidden"
+
+
+def test_the_isolated_nurb_cli_builds_the_agent_project(tmp_path):
+    class Builds(Stub):
+        def command(self, prompt, model=None, effort=None, instructions=None):
+            script = (
+                "import pathlib,subprocess\n"
+                f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})\n"
+                "subprocess.run(['nurb', 'build', 'cable_clip'], check=True)\n"
+            )
+            return ["python", "-c", script]
+
+    row = runner.trial(Builds(GOOD), TASK, SEED, 1, tmp_path)
+    assert row["score"] == 1.0
+    assert row["error"] is None
+
+
+def test_trials_never_change_checkout_permissions(tmp_path, monkeypatch):
+    chmod = runner.os.chmod
+
+    def guarded(path, *args, **kwargs):
+        if pathlib.Path(path).resolve().is_relative_to(EVALS.resolve()):
+            raise AssertionError("a trial must not mutate shared checkout permissions")
+        return chmod(path, *args, **kwargs)
+
+    monkeypatch.setattr(runner.os, "chmod", guarded)
+    assert runner.trial(Stub(GOOD), TASK, SEED, 1, tmp_path)["score"] == 1.0
+
+
+def test_two_trials_can_run_concurrently(tmp_path):
+    rendezvous = tmp_path / "rendezvous"
+    rendezvous.mkdir()
+
+    class Overlap(Stub):
+        def __init__(self, marker):
+            super().__init__(GOOD)
+            self.marker = marker
+
+        def command(self, prompt, model=None, effort=None, instructions=None):
+            script = (
+                "import pathlib,time\n"
+                f"shared=pathlib.Path({str(rendezvous)!r})\n"
+                f"(shared/{self.marker!r}).write_text('ready')\n"
+                "deadline=time.monotonic()+20\n"
+                "while len(list(shared.iterdir())) < 2 and time.monotonic() < deadline:\n"
+                "    time.sleep(0.01)\n"
+                "assert len(list(shared.iterdir())) == 2\n"
+                f"pathlib.Path('parts/cable_clip.py').write_text({GOOD.read_text()!r})\n"
+            )
+            return ["python", "-c", script]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        rows = list(
+            pool.map(
+                lambda pair: runner.trial(pair[0], TASK, SEED, pair[1], tmp_path),
+                ((Overlap("one"), 1), (Overlap("two"), 2)),
+            )
+        )
+    assert [row["score"] for row in rows] == [1.0, 1.0]
 
 
 def test_the_part_path_follows_the_task(tmp_path):
@@ -168,7 +255,7 @@ def test_timeout_kills_harness_descendants(tmp_path):
                 "while not pathlib.Path('child_started').exists(): time.sleep(0.01)\n"
                 "time.sleep(60)"
             )
-            return [sys.executable, "-c", parent]
+            return ["python", "-c", parent]
 
     runner.trial(SpawnsChild(), TASK, SEED, 1, tmp_path, timeout=1.0)
     project = tmp_path / "cable_clip" / "trial_1" / "project"
@@ -183,6 +270,7 @@ def test_usage_parsers_swallow_json_that_is_not_an_object():
     for garbage in ("[]", "null", "3", '"quoted"', "[]\nnull\n3"):
         assert HARNESSES["claude"].usage(garbage) == {}
         assert HARNESSES["codex"].usage(garbage) == {}
+        assert HARNESSES["grok"].usage(garbage) == {}
 
 
 def test_the_preamble_forbids_the_interactive_directives():
@@ -212,6 +300,18 @@ def test_real_adapters_build_the_documented_commands():
     assert "--ephemeral" in codex
     assert ["-s", "workspace-write"] == codex[codex.index("-s"):codex.index("-s") + 2]
 
+    grok = HARNESSES["grok"].command("do it", model="grok-4.6", effort="high")
+    assert grok[:2] == ["grok", "-p"] and "do it" in grok
+    assert "--always-approve" in grok and "--no-plan" in grok
+    assert "--no-ask-user" in grok and "--no-memory" in grok
+    assert ["--output-format", "streaming-json"] == grok[
+        grok.index("--output-format"):grok.index("--output-format") + 2
+    ]
+    assert ["-m", "grok-4.6"] == grok[grok.index("-m"):grok.index("-m") + 2]
+    assert ["--reasoning-effort", "high"] == grok[
+        grok.index("--reasoning-effort"):grok.index("--reasoning-effort") + 2
+    ]
+
 
 def test_codex_runs_with_only_subscription_auth_in_its_home(tmp_path):
     from nurb_evals.harness import HARNESSES
@@ -228,6 +328,43 @@ def test_codex_runs_with_only_subscription_auth_in_its_home(tmp_path):
         assert {path.name for path in clean.iterdir()} == {"auth.json"}
         assert (clean / "auth.json").read_text(encoding="utf-8") == '{"token": "test"}'
     assert not clean.exists()
+
+
+def test_grok_runs_with_only_subscription_auth_in_its_home(tmp_path):
+    import pytest
+    from nurb_evals.harness import HARNESSES
+
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "auth.json").write_text('{"token": "test"}', encoding="utf-8")
+    (source / "rules").mkdir()
+    (source / "config.toml").write_text("personal = true", encoding="utf-8")
+
+    inherited = {
+        "GROK_HOME": str(source),
+        "GROK_CLAUDE_SKILLS_ENABLED": "true",
+        "GROK_CURSOR_RULES_ENABLED": "true",
+        "GROK_AGENT": "personal",
+        "PATH": "/usr/bin",
+    }
+    with HARNESSES["grok"].environment(inherited) as env:
+        clean = pathlib.Path(env["GROK_HOME"])
+        assert clean != source
+        assert {path.name for path in clean.iterdir()} == {"auth.json", "config.toml"}
+        assert (clean / "auth.json").read_text(encoding="utf-8") == '{"token": "test"}'
+        written = (clean / "config.toml").read_text(encoding="utf-8")
+        assert "skills = false" in written and "[compat.claude]" in written
+        assert "GROK_CLAUDE_SKILLS_ENABLED" not in env
+        assert "GROK_CURSOR_RULES_ENABLED" not in env
+        assert "GROK_AGENT" not in env
+        assert env["PATH"] == "/usr/bin"
+    assert not clean.exists()
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with pytest.raises(RuntimeError, match="grok subscription auth"):
+        with HARNESSES["grok"].environment({"GROK_HOME": str(empty)}):
+            pass
 
 
 def test_claude_usage_parses_the_result_json():
@@ -264,6 +401,42 @@ def test_claude_usage_parses_the_final_stream_event():
         "input_tokens": 50,
         "output_tokens": 80,
     }
+
+
+def test_grok_usage_parses_the_end_event():
+    from nurb_evals.harness import HARNESSES
+
+    stdout = "\n".join(
+        (
+            json.dumps({"type": "text", "data": "working"}),
+            json.dumps(
+                {
+                    "type": "usage",
+                    "usage": {"input_tokens": 10, "output_tokens": 4},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "end",
+                    "stopReason": "end_turn",
+                    "total_cost_usd": 0.007,
+                    "num_turns": 3,
+                    "usage": {
+                        "input_tokens": 21020,
+                        "output_tokens": 30,
+                        "reasoning_tokens": 25,
+                    },
+                }
+            ),
+        )
+    )
+    assert HARNESSES["grok"].usage(stdout) == {
+        "total_cost_usd": 0.007,
+        "num_turns": 3,
+        "input_tokens": 21020,
+        "output_tokens": 30,
+    }
+    assert HARNESSES["grok"].usage("not json") == {}
 
 
 def test_runner_requires_the_complete_row_identity():

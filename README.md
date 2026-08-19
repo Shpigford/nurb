@@ -1,12 +1,34 @@
 # nurb
 
-Agentic CAD for 3D printing. The user is a language model: your agent writes parts as Python functions, nurb builds them into real solids, checks them against print physics, and shows you the result live. You judge, drag sliders, download the 3MF.
+Tell your AI what you need printed. Watch the part take shape live. Print it.
 
-<img width="2062" height="1232" alt="Viewer" src="https://github.com/user-attachments/assets/77c7c392-3454-42a0-aaf6-159b81e7dcff" />
+nurb turns the AI you already pay for into a CAD partner for 3D printing. You describe the part in plain words, the AI models it, and nurb checks it against print physics and shows you the result in a live viewer. You judge, drag sliders, click `3mf`, print.
+
+<img width="1609" height="950" alt="The nurb app: project rail, agent chat, and the live viewer" src="https://raw.githubusercontent.com/Shpigford/nurb/main/.github/app.png" />
+
+## What you get
+
+**A live view of every change.** Every edit updates the viewer without moving your camera. Cut the part open with a section plane, orbit it, watch it evolve as you talk.
+
+**Sliders for every dimension.** Each parameter of the part gets a slider. Drag until it looks right, click `write`, and the change is saved where the AI sees it too.
+
+**Print problems caught before the printer.** Thirteen printability rules run against the exact solid, not an approximation: overhangs, thin walls, floating islands, warp-prone first layers, parts that tip over. Findings pin themselves to the exact faces they fired on, so a "wall too thin" warning points at the exact spot on the model.
+
+**Print time and filament cost up front.** The viewer's print time row drives the slicer you already have (OrcaSlicer or Bambu Studio) and answers with minutes and grams, so a design change that doubles the print time is caught while the design can still move.
+
+**A 3MF that opens ready to print.** Exports default to 3MF with the print settings the part justifies already embedded: infill, walls, and a brim when the checks say the corners will lift. Your slicer opens it tuned. STL, STEP, and GLB are one flag away.
+
+**"Will it hold?" gets a number.** Click the stress button, and a voxel simulation shows where the load concentrates, how far the part sags, and the weight it breaks at, quoted against layer adhesion because that is where FDM prints actually fail.
+
+**Parts that fit the real world.** Scan a real object with your phone or measure a downloaded model, record the dimensions that matter, and nurb refuses to let the AI guess them. A card with a target mesh gets deviation reports in both directions, so added material is caught as loudly as missing material.
+
+**Real CAD underneath.** Parts are true B-rep solids on the OCCT kernel, the same math as commercial CAD, not meshes. Chamfers and fillets are real operations, and STEP export means the part opens in Fusion or FreeCAD.
+
+**Works offline.** Modelling, checking, the viewer, and export all run locally, with no account and no cloud, so it works on a plane or in a workshop with bad wifi.
 
 ## Install
 
-The easiest way in is the Mac app: [**Download nurb for Mac**](https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg). Your projects, your AI, and the live viewer in one window; it sets everything up the first time you open it and updates itself. Apple silicon.
+The easiest way in is the Mac app. Download it for [**Apple silicon**](https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg) or [**Intel Macs**](https://github.com/Shpigford/nurb/releases/latest/download/nurb-intel.dmg). Your projects, your AI, and the live viewer in one window; it sets everything up the first time you open it and updates itself.
 
 For the command line:
 
@@ -14,7 +36,7 @@ For the command line:
 curl -fsSL https://nurb.dev/install.sh | sh
 ```
 
-One line, installs everything below: uv if you don't have it, nurb, and the skill. Prefer your own package manager? `uv tool install nurb` (or `pip install nurb`) does the first half.
+One line, installs everything: uv if you don't have it, nurb, and the agent skill. Prefer your own package manager? `uv tool install nurb` (or `pip install nurb`) does the first half, and `npx skills add shpigford/nurb --skill nurb` teaches whatever AI harnesses you have. Later, `nurb update` upgrades nurb and the installed skill together.
 
 ## Which model should you use?
 
@@ -24,69 +46,35 @@ nurb works with whatever AI subscription you already pay for, and they are not e
 curl -fsSL https://nurb.dev/bench.sh | sh
 ```
 
-## Teach your agent
-
-Install the nurb skill once and your agent reaches for nurb on its own whenever you ask for a printable part. The installer above already did this; by hand, [skills.sh](https://www.skills.sh/) detects whatever harnesses you have and installs into each:
-
-```bash
-npx skills add shpigford/nurb
-```
-
-Or `nurb skill` prints the same skill file out for you. Later, `nurb update` upgrades nurb and rewrites the installed skill to match, so the two move together.
-
 ## Make something
 
-Open your agent in the directory where the project should live, and talk:
+Open the app (or your agent in a terminal) and talk:
 
 > Make an adapter that connects my shop vac hose to the dust port on my table saw
 
-The agent does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and starts `nurb dev` so you get a link to watch. Every save updates the browser without moving your camera, and check findings pin themselves to the geometry. When it looks right: drag the sliders if you want, click `3mf`, print. A `write` button saves your slider values back into the file's defaults, where the agent will see them.
+The AI does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and opens the live viewer. When it looks right: drag the sliders if you want, click `3mf`, print.
 
-## A part
+A project is any directory with a `parts/` folder. No init step. New projects are born double-clickable: `viewer.command` opens the viewer from Finder.
+
+## How a part works
+
+Under the hood, a part is a small Python function the AI writes and you never have to read:
 
 ```python
 from nurb import *
 
 @part
-def hose_adapter(vac_end=57.6, tool_end=35.0, wall=2.4, draft=False):
+def hose_adapter(vac_end=57.6, tool_end=35.0, wall=2.4):
     ...
 ```
 
-The keyword defaults are the parameters. That one declaration drives the CLI, the viewer's sliders, and the tests; there is no schema to keep in sync. A float is a dimension, an int is a count (its slider steps by one). `draft` is passed by the runtime, not callers: when true, skip the polish pass.
+The defaults are the parameters, and that one line is where the viewer's sliders, the tests, and the CLI all come from. The body is [build123d](https://build123d.readthedocs.io) on the OCCT kernel, plus nurb's own vocabulary for the printing-specific moves: `polish` for the chamfer pass, `stand` for a diagonal print stance, `measured` for real-world dimensions, `assembly` for multi-part builds. `nurb api` prints the whole list with signatures.
 
-The body of a part is [build123d](https://build123d.readthedocs.io) code on the OCCT kernel. That is why the solids are real B-reps with working chamfers, fillets, and STEP export rather than meshes, and why your model already knows the modelling API.
+Because a part is a function, the same part flexes into variants: a card can declare `shelf_3x2` as the shelf with `grid_x = 3`, and every command walks variants like parts, each with its own 3MF and baselines.
 
-## Commands
+## The checks
 
-```
-nurb new <name>     create parts/<name>.py and its card
-nurb dev            watch, rebuild, serve the viewer
-nurb build [part]   build once and report size
-nurb check [part]   run the printability rules, --strict for CI
-nurb inspect [part] faces, normals, concave edges, each finding on its face; --render for stills
-nurb scan <file>    measure a mesh in mm, a phone scan or a downloaded model (STL/OBJ/GLB or triangulated PLY); --section for a profile polyline
-nurb rules          print the design doctrine
-nurb api            the vocabulary a part file gets, with signatures
-nurb skill          print an agent skill file for your AI harness, --sync rewrites installed copies
-nurb update         upgrade nurb, then re-sync the installed skill to match
-nurb card [part]    regenerate a card's AUTO block
-nurb diff [part]    what moved since the card was written: size, volume, faces, verdict
-nurb slice [part]   print time and grams of filament, from the slicer you already have
-                    (the viewer's print time row is the same answer, on the part you are looking at)
-nurb stress [part]  where a load stresses the part: peak MPa, sag, margin to breaking
-                    (the viewer's stress button is the same answer, aimed by clicking the part)
-nurb verify [part]  run the doctrine's verification list; --report bundles it with renders
-nurb render [part]  write a PNG into build/renders/; --section cuts it open
-nurb export [part]  write 3MF into build/, --formats for STL, STEP or GLB
-nurb extract        find duplication across parts
-nurb launcher       write viewer.command, a double-clickable `nurb dev`
-```
-
-A project is any directory with a `parts/` folder. No init step. The first `nurb new` in a fresh directory also drops `viewer.command`, so a project can be opened from Finder by double-click from day one; delete it and it stays deleted, `nurb launcher` brings it back on purpose.
-
-## Checks
-
-The agent cannot see, so `nurb check` is its eyes. Rules run against the exact solid, not a mesh, and findings come back as text with coordinates:
+The AI cannot see, so `nurb check` is its eyes. Rules run against the exact solid and findings come back with coordinates:
 
 ```
 solids            more than one body, or none: a part that came apart
@@ -104,64 +92,72 @@ projection_ratio  reach over height, for a part cantilevered off a wall
 build_volume      does it fit the printer at all
 ```
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`), or try another with `nurb check --printer prusa_mk4s`. The viewer's print time row will also ask you for it the first time you use it, and write the answer here. Better: a printer is a fact about your workshop, not your project, so `~/.config/nurb/config.toml` takes the same schema and answers for every project on the machine; `printer.toml` wins where they disagree, and `nurb check` says which file supplied the profile. Either file can also name what you print in (`material = "abs"`), and `warp_risk` tightens to match how hard that plastic shrinks. Either file carries the export preference too: an `[export]` table with `formats = ["3mf", "step"]` adds STEP to every `nurb export`, and `--formats` still wins for one run. A part records what it has already justified on its card, so known findings stay silent and new ones are regressions:
+`nurb check` reports and exits 0 by default, so findings never block iteration. `--strict` makes findings fail the build, and is what CI runs.
+
+## Your printer, your plastic
+
+Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`) and every check, slice, and export knows your build volume and nozzle. The viewer asks for your printer the first time it needs one and writes the answer down for you. Name your material (`material = "abs"`) and the warp rules tighten to match how hard that plastic shrinks.
+
+The same file carries preferences like extra export formats:
 
 ```toml
-[part]
-min_wall = 1.0
-
-[accepted]
-sliver = 6
+[export]
+formats = ["3mf", "step"]
 ```
 
-When text is not enough, `nurb render <part>` screenshots the viewer so the agent can look at its own work (`uv sync --extra render && uv run playwright install chromium`, the only part of nurb that wants a browser).
+A machine-wide `~/.config/nurb/config.toml` takes the same settings for every project. There is no `.env` and there are no environment variables.
 
-## Cards and measurements
+## Memory between sessions
 
-Agents forget everything between sessions, so each part gets a card (`parts/<name>.md`): what it is, why, and a `## Don't` section for what was tried and rejected. `nurb card` regenerates its one machine-written block with what only a build can tell you.
+AIs forget everything between sessions, so each part gets a card (`parts/<name>.md`): what it is, why, and what was tried and rejected. Dimensions that came from the real world go in `measurements.toml` with how they were obtained, and asking for one that is not there raises instead of letting the model guess. No geometry check can catch a wrong guess; that failure only shows up when the printed part meets the real object.
 
-Dimensions an agent cannot derive go in `measurements.toml` with how they were obtained; `measured("bracket_pitch")` returns them, and asking for one that is not there raises instead of letting the model guess. A guessed dimension builds, checks clean, prints, and does not fit.
+## The commands
 
-## Variants
-
-The same function flexed is a variant on the card, not a copy of the file:
-
-```toml
-[variants.shelf_3x2.params]
-grid_x = 3
-```
-
-`build`, `check`, `card` and `export` walk variants like parts, so each gets its own 3MF and baselines.
-
-## Layout
+Everything the app and the AI drive is also a plain CLI:
 
 ```
-parts/<name>.py     the part
-parts/<name>.md     its card
-system.py           optional: shared constants and geometry
-measurements.toml   optional: real-world dimensions with provenance
-printer.toml        optional: which machine this project prints on
-build/              generated exports, gitignored
-build/renders/      generated PNGs and verification reports
+nurb new <name>      create parts/<name>.py and its card
+nurb dev             watch, rebuild, serve the viewer
+nurb build [part]    build once and report size
+nurb check [part]    run the printability rules, --strict for CI
+nurb inspect [part]  faces, normals, concave edges, each finding on its face
+nurb scan <file>     measure a phone scan or a downloaded model (STL/OBJ/GLB/PLY) in mm
+nurb compare [part]  deviation from the card's target mesh, both directions
+nurb slice [part]    print time and grams of filament, from the slicer you already have
+nurb stress [part]   where a load stresses the part: peak MPa, sag, margin to breaking
+nurb render [part]   write a PNG, --section cuts it open
+nurb export [part]   write a print-ready 3MF, --formats for STL, STEP or GLB
+nurb rules           print the design doctrine
+nurb api             the vocabulary a part file gets, with signatures
+nurb card [part]     regenerate a card's AUTO block
+nurb diff [part]     what moved since the card was written
+nurb verify [part]   the doctrine's verification list, --report bundles it with renders
+nurb extract         find duplication across parts
+nurb skill           print the agent skill file, --sync rewrites installed copies
+nurb update          upgrade nurb, then re-sync the installed skill to match
+nurb launcher        write viewer.command, a double-clickable `nurb dev`
 ```
 
-## Speed
+Commands that take `[part]` default to every part in the project.
 
-`nurb dev` is a long-lived process because importing the kernel costs 45s cold. After that, rebuilds run 30 to 400ms depending on the part, which matters because an agent iterates in save-check cycles, dozens per part.
+## Troubleshooting
 
-## Tests
+**The first build takes about 45 seconds.** That is the CAD kernel loading cold. It stays loaded, and every change after that lands in well under a second.
 
-`uv run pytest`. The parts in `examples/` are the calibration set, asserted against dimensions from really-printed parts. Fit tests use literal numbers, never the part's own constants: a model's tests love to agree with its code.
+**`nurb slice` finds no slicer.** It drives an installed OrcaSlicer or Bambu Studio; install either and it is found automatically. Export still writes the 3MF either way.
+
+**`nurb render` says it needs a browser.** It is the one command that does: `uv sync --extra render && uv run playwright install chromium`.
+
+**A check passed but the print failed on a thin wall.** `min_wall` samples faces, so a pinch nothing lands near can be missed. A clean result means "no thin walls found", not "no thin walls".
 
 ## Not built yet
 
 - A hosted configurator. `nurb dev` already is one for anybody who can reach it, but publishing without a running kernel is a different problem.
 - Measurement tools in the viewer.
-- `min_wall` probes sample faces, so a pinch nothing lands near is still missed. A clean result means "no thin walls found", not "no thin walls".
 
-## Debugging the viewer
+## Contributing
 
-`window.__nurb` exposes `{ THREE, scene, camera, controls, mesh, ready }`. The URL takes `?part=<name>`, `?view=iso|front|back|left|right|top`, and `?bare`. three.js is vendored in `src/nurb/vendor/three`, so the viewer needs no network; see the README beside it before changing versions.
+Architecture, dev setup, testing, and the release process live in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

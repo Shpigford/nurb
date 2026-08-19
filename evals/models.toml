@@ -32,3 +32,9 @@ id = "gpt-5.5"
 label = "GPT-5.5 (Codex)"
 efforts = ["low", "medium", "high"]
 default_effort = "medium"
+
+[[grok]]
+id = "grok-4.6"
+label = "Grok 4.6"
+efforts = ["low", "medium", "high", "xhigh"]
+default_effort = "high"
