@@ -36,7 +36,12 @@ jobs:
 
       - run: uv sync --locked --dev
         working-directory: evals
-      - run: uv run pytest -q
+
+      # Every grade() builds parts in its own subprocess and temp dir, so the suite
+      # parallelizes cleanly: 6:11 serial to 1:42 on four cores. loadscope keeps each
+      # module's expensive module-scoped grades fixture on one worker instead of
+      # rebuilding it per worker.
+      - run: uv run pytest -q -n auto --dist loadscope
         working-directory: evals
 
   # The rules against the real library, on a machine that is not the one they were
