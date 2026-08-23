@@ -13,6 +13,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { IconChevronDown, IconMessagePlus, IconPaperclip } from "./Icons";
 import Markdown from "./Markdown";
 import { playChime, shouldPlayCompletionChime } from "./chime";
+import { restoreDraftFiles, restoreDraftText } from "./chatDraft";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
@@ -513,13 +514,15 @@ function Chat({
       } catch (e) {
         const message = String(e);
         if (message.includes("auth_required")) {
-          // Nothing was sent. Put the exact draft back instead of leaving a
-          // false sent bubble and making the user reconstruct attachments.
+          // Nothing was sent. Restore it ahead of any next draft composed
+          // during the turn, and keep both turns' attachments.
           setItems((list) =>
             list.filter((item) => item.kind !== "user" || item.localId !== localId),
           );
-          if (inputRef.current) inputRef.current.value = text;
-          setAttachments(files);
+          if (inputRef.current) {
+            inputRef.current.value = restoreDraftText(text, inputRef.current.value);
+          }
+          setAttachments((draftFiles) => restoreDraftFiles(files, draftFiles));
           setAuthNeeded(true);
         } else {
           setItems((list) => [...list, { kind: "note", text: message }]);
@@ -848,7 +851,7 @@ function Chat({
                 : `Describe or change ${isProject ? "the project" : part}…`
           }
           rows={2}
-          disabled={busy || starting}
+          disabled={starting}
           onKeyDown={keydown}
         />
         <div className="chat-composer-controls">
@@ -857,7 +860,7 @@ function Chat({
             className="chat-attach"
             title="attach photos or files"
             aria-label="attach photos or files"
-            disabled={busy || starting}
+            disabled={starting}
             onClick={attach}
           >
             <IconPaperclip />
