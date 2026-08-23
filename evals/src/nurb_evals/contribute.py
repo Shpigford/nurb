@@ -74,7 +74,13 @@ def replacements(project_root):
     return sorted(pairs, key=lambda p: -len(p[0]))
 
 
+# grok's transcript repeats every tool result as a raw byte array next to the
+# sanitized text, and paths hide from string replacement inside the integers.
+_BYTE_ARRAY = re.compile(r'"output":\[[0-9,]+\]')
+
+
 def sanitize(text, pairs):
+    text = _BYTE_ARRAY.sub('"output":[]', text)
     for needle, token in pairs:
         text = text.replace(needle, token)
     return text

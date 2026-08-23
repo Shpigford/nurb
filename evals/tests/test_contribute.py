@@ -35,6 +35,14 @@ def test_sanitize_scrubs_longest_first(tmp_path):
     assert str(pathlib.Path.home()) not in clean and "<workspace>" in clean
 
 
+def test_sanitize_drops_byte_arrays_that_hide_paths(tmp_path):
+    home = str(pathlib.Path.home())
+    encoded = ",".join(str(b) for b in home.encode())
+    dirty = '{"output":[%s],"output_for_prompt":"%s"}' % (encoded, home)
+    clean = contribute.sanitize(dirty, contribute.replacements(tmp_path / "project"))
+    assert clean == '{"output":[],"output_for_prompt":"<home>"}'
+
+
 def test_next_trial_continues_numbering(tmp_path):
     (tmp_path / "cable_clip" / "trial_1").mkdir(parents=True)
     (tmp_path / "cable_clip" / "trial_2").mkdir()

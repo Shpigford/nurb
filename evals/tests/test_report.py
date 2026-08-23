@@ -1,6 +1,7 @@
 """The report is arithmetic over rows; every column has to be checkable by hand."""
 
 import json
+import re
 import pathlib
 
 import pytest
@@ -119,6 +120,8 @@ def test_committed_submission_artifacts_are_complete_and_sanitized():
             assert source.is_file() and source.read_text(encoding="utf-8").strip()
             for artifact in (transcript, source):
                 text = artifact.read_text(encoding="utf-8")
+                for arr in re.findall(r'"output":\[([0-9,]+)\]', text):
+                    text += bytes(int(b) for b in arr.split(",")).decode("utf-8", "replace")
                 assert "/Users/" not in text and "/home/" not in text
                 assert "joshpigford" not in text.lower() and "shpigford" not in text.lower()
     # rows == 0 is a legal state: the board was reset before first deploy and fills
