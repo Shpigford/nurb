@@ -8,8 +8,8 @@ The current leaderboard is in [REPORT.md](REPORT.md).
 
 Tasks come in classes, because the benchmark measures two different abilities:
 
-- **Spec tasks** (`tasks/cable_clip`): every dimension stated, zero interpretation. They measure execution fidelity, the floor.
-- **Function tasks** (`tasks/bundle_holder`): the problem, the measured interfaces, and the printer are stated, the geometry is not. Scoring is functional gates that are mechanical facts of the B-rep (the bundle has a retained place to sit, the screw has a bore, a seat, and driver access) plus a material-economy gradient, so a cleverer design legitimately wins without a human deciding it was clever. This is where models that can interpret outmaneuver models that can only follow.
+- **Spec tasks** (`tasks/cable_clip`, `tasks/bit_block`): every dimension stated, zero interpretation. They measure execution fidelity, the floor. bit_block raises that floor to where the kernel pushes back: a grid of chamfered pocket mouths with 2.0 webs sits close to OCCT's adjacent-chamfer limit, so a wrong chamfer order, a selector resolved before the pockets were cut, or a grid slid half a millimetre does not lose points, it does not build. Its grid is driven by an int parameter and the flex probes rebuild it at other counts, which catches a grid written out by hand.
+- **Function tasks** (`tasks/bundle_holder`, `tasks/pole_rest`, `tasks/valve_knob`): the problem, the measured interfaces, and the printer are stated, the geometry is not. Scoring is functional gates that are mechanical facts of the B-rep (the bundle has a retained place to sit, the screw has a bore, a seat, and driver access) plus a material-economy gradient, so a cleverer design legitimately wins without a human deciding it was clever. This is where models that can interpret outmaneuver models that can only follow. pole_rest is the class's curvature test: the support gate demands one continuous 120 degree arc of backed contact around a measured pole, which a V-block or a square channel mechanically cannot own, so only geometry sized to the measured curve passes. valve_knob is the class's mating-fit test: the grader drives a virtual D-stem into the candidate's bore and grades the tolerance band from both sides (grown by the stated clearance it must pass, grown by the stated slop it must jam) and then turns it 20 degrees, which a lazy round bore survives freely and therefore fails.
 - **Judgment tasks** (`tasks/leg_cup`): the geometry is stated, but one real-world dimension is deliberately not on file and nobody can measure it right now. What is scored, beyond the geometry, is measurement discipline the way nurb's doctrine defines it: the part derives from `measured()` values (the scorer rebuilds it against a rewritten `measurements.toml` and the geometry must track), and the missing dimension is recorded as a provisional guess with provenance instead of baked into the code. A silent plausible number works tonight and is exactly what loses points. Because the graded artifact is the part plus the measurements entry next to it, this task is always graded inside a materialized project.
 
 Every scored check is stated in the task instruction; nothing unstated is ever graded.
@@ -38,7 +38,10 @@ The manual way needs `uv` and the `claude` or `codex` CLI installed and logged i
 cd evals
 uv sync --locked
 uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/cable_clip
+uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/bit_block
 uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/bundle_holder
+uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/pole_rest
+uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/valve_knob
 uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/leg_cup
 uv run python -m nurb_evals.report results/claude-opus-high
 ```

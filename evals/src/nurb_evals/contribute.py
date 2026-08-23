@@ -25,7 +25,7 @@ from . import harness as harnesses
 from .run import trial
 
 EVALS = pathlib.Path(__file__).parents[2]
-TASKS = ("cable_clip", "bundle_holder", "leg_cup")
+TASKS = ("cable_clip", "bit_block", "bundle_holder", "pole_rest", "valve_knob", "leg_cup")
 SEED = 13
 
 

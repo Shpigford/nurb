@@ -26,9 +26,21 @@ JOBS = {
         "Follow the spec",
         "A cable clip with every dimension stated. Can it build exactly what you asked?",
     ),
+    "bit_block": (
+        "Survive the kernel",
+        "A bit block dense with chamfers, right at the CAD kernel's limits. One wrong move and the part never builds.",
+    ),
     "bundle_holder": (
         "Design from a problem",
         "“Hold this cable bundle on the wall with one screw.” No shape given: it has to design one that works and prints.",
+    ),
+    "pole_rest": (
+        "Design a curve",
+        "A rest that must cradle a measured pole along a real arc. Flat answers touch at lines and lose; only curvature passes.",
+    ),
+    "valve_knob": (
+        "Make it fit",
+        "A knob for a measured D-shaft. The grader drives the real stem: too tight jams, too loose rattles, a round bore spins.",
     ),
     "leg_cup": (
         "Handle a missing measurement",
