@@ -1,0 +1,9 @@
+[shaft_diameter]
+value = 8.0
+unit = "mm"
+how = "calipers across the stem, 2026-08-21"
+
+[shaft_across_flat]
+value = 6.5
+unit = "mm"
+how = "calipers from the flat to the round side, 2026-08-21"
