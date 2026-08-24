@@ -13,6 +13,7 @@ that remain. Every question has a flag, so an agent can run it non-interactively
 import argparse
 import getpass
 import json
+import os
 import pathlib
 import re
 import secrets
@@ -27,6 +28,15 @@ from .run import completed_trial
 EVALS = pathlib.Path(__file__).parents[2]
 TASKS = ("cable_clip", "bit_block", "bundle_holder", "pole_rest", "valve_knob", "leg_cup")
 SEED = 13
+
+# Color only when a person is watching: piped output and NO_COLOR stay plain.
+BOLD, DIM, CYAN, GREEN, YELLOW, RED = "1", "2", "36", "32", "33", "31"
+
+
+def style(text, *codes):
+    if not (sys.stdout.isatty() and "NO_COLOR" not in os.environ):
+        return text
+    return "".join(f"\033[{c}m" for c in codes) + text + "\033[0m"
 
 
 def catalog():
@@ -112,11 +122,11 @@ def ask(prompt, options, default=None):
     """A numbered menu. Options are (value, label); returns the value."""
     print()
     for i, (_, label) in enumerate(options, 1):
-        print(f"  {i}. {label}")
-    hint = f" [{default}]" if default else ""
+        print(f"  {style(f'{i}.', CYAN, BOLD)} {label}")
+    hint = style(f" [{default}]", DIM) if default else ""
     while True:
         try:
-            raw = input(f"{prompt}{hint}: ").strip()
+            raw = input(f"{style(prompt, BOLD)}{hint}: ").strip()
         except EOFError:
             sys.exit(
                 "\nNo terminal to ask on. Pass flags instead: "
@@ -126,7 +136,7 @@ def ask(prompt, options, default=None):
             return default
         if raw.isdigit() and 1 <= int(raw) <= len(options):
             return options[int(raw) - 1][0]
-        print(f"  pick a number between 1 and {len(options)}")
+        print(style(f"  pick a number between 1 and {len(options)}", YELLOW))
 
 
 def replacements(project_root):
@@ -203,7 +213,8 @@ def main():
     )
     args = ap.parse_args()
 
-    print("\nnurb benchmark contribution\n———————————————————————————")
+    print("\n" + style("nurb benchmark contribution", BOLD) + "\n"
+          + style("———————————————————————————", DIM))
     counts = board_counts()
     picked = None  # a most-needed pick answers harness, model, and effort at once
     if args.harness:
@@ -217,12 +228,13 @@ def main():
                 "or grok (https://x.ai), sign in, and rerun."
             )
         needed = most_needed(catalog(), counts, [n for n, _ in have])
-        options = [(n, f"{n} ({v})") for n, v in have]
+        options = [(n, f"{style(n, BOLD)} {style(f'({v})', DIM)}") for n, v in have]
         if needed:
             nname, nentry, ncount = needed
             options.insert(0, ("needed", (
-                f"whatever helps the board most: {nentry['label']} on {nname} "
-                f"at {nentry['default_effort']} effort ({runs_note(ncount)})"
+                f"whatever helps the board most: "
+                f"{style(f'{nentry['label']} on {nname}', GREEN, BOLD)} "
+                f"at {nentry['default_effort']} effort {style(f'({runs_note(ncount)})', DIM)}"
             )))
         name = ask(
             "Which AI do you want to benchmark", options,
@@ -236,9 +248,10 @@ def main():
     menu = catalog().get(name, [])
     newest = flagship(name)
     if newest and newest not in {m["id"] for m in menu}:
-        print(f"\n  note: {name} now lists {newest}, which models.toml does not "
-              f"offer yet; pick \"another model\" to run it, and consider a PR "
-              f"updating the menu.")
+        print(style(
+            f"\n  note: {name} now lists {newest}, which models.toml does not "
+            f"offer yet; pick \"another model\" to run it, and consider a PR "
+            f"updating the menu.", YELLOW))
     if args.model:
         model, efforts, default_effort = args.model, [], args.effort or "high"
         entry = next((m for m in menu if m["id"] == args.model), None)
@@ -249,7 +262,7 @@ def main():
     else:
         def label(m):
             total = sum(v for (h, i, _), v in counts.items() if (h, i) == (name, m["id"]))
-            return f"{m['label']} ({runs_note(total)})"
+            return f"{style(m['label'], BOLD)} {style(f'({runs_note(total)})', DIM)}"
         options = [(m, label(m)) for m in menu] + [(None, "another model (type its id)")]
         entry = ask("Which model", options)
         if entry is None:
@@ -277,17 +290,18 @@ def main():
         trials = 1
     elif args.trials is None:
         print(
-            "\nEach round is one fresh attempt at every job. Scores vary between"
-            "\nattempts, so more rounds mean a steadier average on the leaderboard;"
-            "\none round is still a valid contribution, and later runs pool with it."
-            f"\nBallpark {len(tasks) * 8} minutes of agent time per round."
-            "\n  1 round: a quick single sample"
-            "\n  3 rounds: a steady average"
-            "\n  5 rounds: tight error bars"
+            "\n" + style(
+                "Each round is one fresh attempt at every job. Scores vary between"
+                "\nattempts, so more rounds mean a steadier average on the leaderboard;"
+                "\none round is still a valid contribution, and later runs pool with it."
+                f"\nBallpark {len(tasks) * 8} minutes of agent time per round.", DIM)
+            + f"\n  {style('1 round:', CYAN, BOLD)} a quick single sample"
+            + f"\n  {style('3 rounds:', CYAN, BOLD)} a steady average"
+            + f"\n  {style('5 rounds:', CYAN, BOLD)} tight error bars"
         )
         while True:
             try:
-                raw = input("How many rounds [1]: ").strip()
+                raw = input(f"{style('How many rounds', BOLD)}{style(' [1]', DIM)}: ").strip()
             except EOFError:
                 sys.exit("\nCould not read a number; pass --trials instead.")
             if not raw:
@@ -296,7 +310,7 @@ def main():
             if raw.isdigit() and int(raw) >= 1:
                 trials = int(raw)
                 break
-            print("  type a number of rounds, 1 or more")
+            print(style("  type a number of rounds, 1 or more", YELLOW))
     else:
         trials = args.trials
     if trials < 1:
@@ -312,9 +326,10 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     minutes = len(tasks) * trials * 8
     print(
-        f"\nRunning {model} at {effort} effort: {trials} round(s) on "
-        f"{len(tasks)} job(s), on your own {name} subscription. Ballpark "
-        f"{minutes} minutes of agent time; slow models can take much longer.\n"
+        f"\nRunning {style(model, BOLD, GREEN)} at {style(effort, BOLD)} effort: "
+        f"{trials} round(s) on {len(tasks)} job(s), on your own {name} subscription. "
+        + style(f"Ballpark {minutes} minutes of agent time; slow models can take much longer.", DIM)
+        + "\n"
     )
 
     h = harnesses.HARNESSES[name]
@@ -323,15 +338,17 @@ def main():
         for task in tasks:
             for _ in range(trials):
                 n = next_trial(out, task)
-                print(f"[{task} trial {n}] running...", flush=True)
+                tag = style(f"[{task} trial {n}]", CYAN)
+                print(f"{tag} {style('running...', DIM)}", flush=True)
                 row = completed_trial(
                     h, EVALS / "tasks" / task, args.seed, n, out,
                     model=model, effort=effort, timeout=args.timeout,
                 )
                 sink.write(json.dumps(row) + "\n")
                 sink.flush()
-                note = f"  ({row['error']})" if row["error"] else ""
-                print(f"[{task} trial {n}] score {row['score']:.3f}{note}", flush=True)
+                note = style(f"  ({row['error']})", RED) if row["error"] else ""
+                score = style(f"{row['score']:.3f}", RED if row["error"] else GREEN, BOLD)
+                print(f"{tag} score {score}{note}", flush=True)
                 staged.append(stage_submission(out, run_name, task, n))
 
     # The staged submission needs the matching rows; sanitize the whole file so a
@@ -355,7 +372,7 @@ def main():
     # leaderboard workflow), so any number of open submission PRs merge in any
     # order without a conflict.
     repo = EVALS.parent
-    print(f"\nDone. Staged in this checkout ({repo}):\n  {sub}\n")
+    print(f"\n{style('Done.', GREEN, BOLD)} Staged in this checkout ({repo}):\n  {sub}\n")
 
     # Handing a contributor five git commands is where two dogfooding runs died
     # (wrong checkout, stale branch, accidental nested-repo add). The wizard owns
@@ -364,7 +381,7 @@ def main():
     if want == "ask":
         if _gh_ready(repo):
             try:
-                raw = input("Open the pull request now? [Y/n]: ").strip().lower()
+                raw = input(f"{style('Open the pull request now?', BOLD)}{style(' [Y/n]', DIM)}: ").strip().lower()
                 want = "no" if raw in ("n", "no") else "yes"
             except EOFError:
                 want = "no"
@@ -375,13 +392,14 @@ def main():
         url, problem = open_pr(run_name, repo)
         if url:
             print(
-                f"\nSubmitted: {url}\n\n"
-                f"Every run counts, including a single one: matching rows pool on the "
-                f"leaderboard, and a bad score is data, not an embarrassment. Run it "
-                f"again whenever you like; every run is its own PR."
+                f"\n{style('Submitted:', GREEN, BOLD)} {style(url, BOLD)}\n\n"
+                + style(
+                    "Every run counts, including a single one: matching rows pool on the "
+                    "leaderboard, and a bad score is data, not an embarrassment. Run it "
+                    "again whenever you like; every run is its own PR.", DIM)
             )
             return
-        print(f"\nCould not open the PR automatically ({problem}); the manual steps:")
+        print(style(f"\nCould not open the PR automatically ({problem}); the manual steps:", YELLOW))
     _manual_steps(run_name, repo)
 
 

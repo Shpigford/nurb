@@ -7,21 +7,30 @@
 # contribution; runs pool on the leaderboard.
 set -u
 
+# Color only for a terminal, and never when NO_COLOR asks for plain output.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  BOLD="$(printf '\033[1m')"; CYAN="$(printf '\033[36m')"
+  RED="$(printf '\033[31m')"; RESET="$(printf '\033[0m')"
+else
+  BOLD=""; CYAN=""; RED=""; RESET=""
+fi
+
 say() { printf '%s\n' "$1"; }
-fail() { printf '\nnurb bench: %s\n' "$1" >&2; exit 1; }
+step() { printf '%s %s\n' "${CYAN}[$1/3]${RESET}" "$2"; }
+fail() { printf '\n%snurb bench: %s%s\n' "$RED" "$1" "$RESET" >&2; exit 1; }
 
 main() {
   command -v git >/dev/null 2>&1 || fail "git is required and was not found"
   command -v curl >/dev/null 2>&1 || fail "curl is required and was not found"
 
   say ""
-  say "  nurb benchmarks: your subscription, your row on the leaderboard"
+  say "  ${BOLD}nurb benchmarks:${RESET} your subscription, your row on the leaderboard"
   say ""
 
   if command -v uv >/dev/null 2>&1; then
-    say "[1/3] uv is already here, moving on"
+    step 1 "uv is already here, moving on"
   else
-    say "[1/3] installing uv, the tool manager that carries the benchmark..."
+    step 1 "installing uv, the tool manager that carries the benchmark..."
     curl -LsSf https://astral.sh/uv/install.sh | sh || fail "could not install uv"
     export PATH="$HOME/.local/bin:$PATH"
     command -v uv >/dev/null 2>&1 || fail "uv installed but did not land on PATH; open a new terminal and rerun"
@@ -34,24 +43,24 @@ main() {
   # tool's cache, and re-runs and concurrent sessions all share it. Standing
   # inside a nurb checkout already? That checkout is used as it is.
   if [ -f "evals/src/nurb_evals/contribute.py" ]; then
-    say "[2/3] already inside a nurb checkout; using it as it is"
+    step 2 "already inside a nurb checkout; using it as it is"
   elif [ -f "../evals/src/nurb_evals/contribute.py" ]; then
-    say "[2/3] already inside a nurb checkout; using it as it is"
+    step 2 "already inside a nurb checkout; using it as it is"
     cd ..
   else
     dir="${NURB_BENCH_HOME:-$HOME/.nurb/bench}"
     if [ -d "$dir/evals" ]; then
-      say "[2/3] updating the benchmark checkout at $dir"
+      step 2 "updating the benchmark checkout at $dir"
       git -C "$dir" pull --ff-only >/dev/null 2>&1 || say "      (pull skipped; using the checkout as it is)"
     else
-      say "[2/3] cloning the benchmark into $dir"
+      step 2 "cloning the benchmark into $dir"
       mkdir -p "$(dirname "$dir")"
       git clone --depth 1 https://github.com/Shpigford/nurb "$dir" || fail "clone failed"
     fi
     cd "$dir" || fail "checkout is missing"
   fi
 
-  say "[3/3] preparing and starting the wizard"
+  step 3 "preparing and starting the wizard"
   cd evals || fail "checkout is missing evals/"
   uv sync >/dev/null || fail "uv sync failed"
 
