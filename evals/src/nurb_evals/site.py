@@ -63,11 +63,19 @@ SUBSCRIPTIONS = {
 # update alongside them. Combos without an entry render numbers-only. The plan label
 # always comes from SUBSCRIPTIONS, never from here, so rows stay consistent.
 VERDICTS = {
-    ("claude", "fable", "high"): "Flawless so far: every part, every job, right the first time. When a measurement was missing, it did the honest thing unprompted. The premium pick.",
-    ("claude", "opus", "high"): "Flawless on everything it has rows for, a notch slower than fable. Its design-job row is being re-run under a longer session limit after the old limit cut its trials short; the numbers here are only from completed sessions.",
-    ("codex", "gpt-5.5", "medium"): "Excellent and fast, and honest about the unmeasured dimension. One design quietly stopped fitting when the cable bundle grew, which is the kind of flaw you find after printing.",
-    ("claude", "sonnet", "high"): "Perfect on instructions and honest about the unmeasured dimension, but slow. Its design-job trials all ran past the old session limit and were graded mid-thought, which is not a fair grade in either direction, so that row was thrown out and is being re-run with a longer limit.",
-    ("claude", "haiku", "low"): "Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round. And it wrote its guess for the unmeasured dimension down as if it had measured it, the mistake that ruins a print six months later.",
+    ("claude", "claude-fable-5", "high"): "Eighteen attempts, eighteen parts worth printing, both fit jobs included. It checked its own work in every one of them: it cuts the part open, measures what it just built, and fixes what it finds before it stops. The most expensive row on the board.",
+    ("claude", "sonnet", "xhigh"): "Right on all six jobs, and the slowest route there by a wide margin. One design job ran past forty minutes. Pick it when the part matters more than the wait.",
+    ("grok", "grok-4.6", "high"): "Only three of the six jobs have been run at this effort, so this is an unfinished row rather than a clean sweep. It got those three right. The low-effort Grok row has the full set and is four times faster.",
+    ("claude", "sonnet", "high"): "Right on eleven of twelve tries and honest about the unmeasured dimension. The one miss was a wall clip that came out slightly off its stated sizes, not a part that fails to print. Around thirteen minutes a part is the real cost here.",
+    ("grok", "grok-4.6", "low"): "The value pick, and it is not close: seventeen of eighteen parts right, about two minutes each, for pennies. Both of the hard fit jobs came out right every time. Its one miss was a wall clip you could not get a screwdriver into.",
+    ("claude", "opus", "low"): "One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.",
+    ("claude", "sonnet", "medium"): "The same result as high effort, for about the same money and no faster, down to the same cable clip that stopped tracking its own dimensions. One design job ran fifty minutes. If you want Sonnet perfect, xhigh is the row that gets there.",
+    ("claude", "fable", "high"): "An older six-attempt run recorded under a floating model name, so which build of Fable actually ran is not on file. Its one miss was the D-shaft knob. The pinned Fable row at the top of this board is the current one, on three times the attempts.",
+    ("claude", "sonnet", "low"): "Fast and cheap for a Claude plan, and it slips exactly where the jobs stop handing over dimensions: a wall clip with no way in for the screwdriver, a rest the pole could not drop into, a knob too narrow to turn. Fine for parts you spell out in full.",
+    ("codex", "gpt-5.6-terra", "low"): "Everything it made built, and about half were worth printing. The pattern is a part that works at the size you stated and nowhere else: all three of its wall clips stopped fitting when the cable bundle changed, and one pole rest came out flat where the job needed a curve. It never once went back to measure what it had made.",
+    ("codex", "gpt-5.6-luna", "low"): "Cheap, fast, and right five times out of eighteen. It wrote the pole's size straight into the file and still built a rest the pole would not drop into, at that size or any other. Elsewhere it left a 0.3mm wall no printer will lay down, and once wrote its guess at the unmeasured dimension down as though it had measured it.",
+    ("claude", "haiku", "low"): "Fine when you spell every dimension out, and cheap. Asked to design, it produced parts you would not print: it came apart on all three design jobs, with walls and sockets that break the printability rules outright. It did handle the missing measurement honestly.",
+    ("claude", "haiku", "high"): "The weakest row here, and the extra effort did not help. Two parts of twelve came out right. It also wrote its guess at the unmeasured dimension down as though it had measured it, which is the mistake nobody catches until the print is wrong six months later.",
 }
 
 HEAD = """\
@@ -397,11 +405,16 @@ def _time_note(minutes, capped):
 def _answers(combos):
     """One card per subscription: the best combo for the plan the visitor already
     pays for, because the subscription is a constraint, not a tradeoff axis."""
+    # A combo that has not run every job cannot be recommended over one that has:
+    # a perfect score on half the board is a thinner claim than a near-perfect one
+    # on all of it. Completeness sorts first, so a partial row wins only when it is
+    # the sole row for that subscription.
+    jobs = len(JOBS)
     best = {}
     for key, tasks in combos:
         harness = key[0]
         firsts, total, minutes, capped, dollars = _stats(tasks)
-        rank = (firsts / total if total else 0, -minutes)
+        rank = (len(tasks) >= jobs, firsts / total if total else 0, -minutes)
         if harness not in best or rank > best[harness][0]:
             best[harness] = (rank, key, (firsts, total, minutes, capped, dollars))
     cards = []
@@ -504,7 +517,18 @@ def _chart(combos):
             and 0 < sx(q["minutes"]) - x < 170
             for q in points
         )
-        flip = crowd or x > width - right - 140
+        # An effort line to a same-model point on the right runs through the label's
+        # own row when it leaves at a shallow angle, and it does that at any
+        # distance, so the crowd rule's reach does not catch it. The label moves to
+        # the other side of the dot instead; a steep line clears the row on its own.
+        undercut = any(
+            q is not p
+            and (q["harness"], q["model"]) == (p["harness"], p["model"])
+            and abs(sy(q["rate"]) - y) < 20
+            and sx(q["minutes"]) > x
+            for q in points
+        )
+        flip = crowd or undercut or x > width - right - 140
         # A capped point owns the space to its right (the floor arrow lives there),
         # so its label starts past the arrowhead.
         anchor, lx = ("end", x - 12) if flip else ("start", x + (34 if p["capped"] else 12))
@@ -521,7 +545,10 @@ def _chart(combos):
         parts.append(
             f'<circle class="dot" cx="{x:.0f}" cy="{y:.0f}" r="6" fill="{color}" stroke="var(--panel)" stroke-width="2">'
             f"<title>{html.escape(title)}</title></circle>"
-            f'<text x="{lx:.0f}" y="{y + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)">'
+            # An effort line runs between two dots of the same model and would
+            # otherwise strike through the left one's label; the halo masks it.
+            f'<text x="{lx:.0f}" y="{y + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)"'
+            f' stroke="var(--panel)" stroke-width="3.5" paint-order="stroke" stroke-linejoin="round">'
             f'{html.escape(p["model"])} <tspan fill="var(--dimmer)">&middot; {html.escape(p["effort"])}</tspan></text>'
         )
 
