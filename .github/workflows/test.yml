@@ -39,8 +39,6 @@ jobs:
         with:
           filters: |
             scorer:
-              - 'evals/src/**'
-              - '!evals/src/nurb_evals/site.py'
               - 'evals/tasks/**'
               - 'evals/tests/**'
               - 'evals/pyproject.toml'
@@ -48,6 +46,20 @@ jobs:
               - 'src/nurb/**'
               - 'pyproject.toml'
               - 'uv.lock'
+
+      # The src-minus-site.py test needs its own step: a negation pattern only
+      # works under the `every` quantifier, and under the default `some` it
+      # matches every file in the repo, which ran the full suite on every PR.
+      # `every` in turn would break the plain list above, since no file can
+      # match two different globs at once.
+      - uses: dorny/paths-filter@v3
+        id: scorer_src
+        with:
+          predicate-quantifier: every
+          filters: |
+            code:
+              - 'evals/src/**'
+              - '!evals/src/nurb_evals/site.py'
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -60,11 +72,11 @@ jobs:
       # parallelizes cleanly: 6:11 serial to 1:42 on four cores. loadscope keeps each
       # module's expensive module-scoped grades fixture on one worker instead of
       # rebuilding it per worker.
-      - if: steps.changed.outputs.scorer == 'true'
+      - if: steps.changed.outputs.scorer == 'true' || steps.scorer_src.outputs.code == 'true'
         run: uv run pytest -q -n auto --dist loadscope
         working-directory: evals
 
-      - if: steps.changed.outputs.scorer != 'true'
+      - if: steps.changed.outputs.scorer != 'true' && steps.scorer_src.outputs.code != 'true'
         run: uv run pytest -q tests/test_report.py tests/test_pricing.py tests/test_contribute.py
         working-directory: evals
 
