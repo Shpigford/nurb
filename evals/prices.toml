@@ -1,0 +1,53 @@
+# API list prices per million tokens, USD, for the cost column on the leaderboard.
+#
+# Trials run on subscriptions, so no invoice exists; the honest proxy, and the one
+# every usage tool converged on, is what the same tokens would have cost through
+# the API at list prices. claude rows carry the CLI's own cache-aware total_cost_usd
+# and never touch this table; it prices the harnesses that report only token counts,
+# and it is read at report time only, so editing it never changes a benchmark
+# revision or orphans a submitted row.
+#
+# Keys are the model ids exactly as the rows record them (models.toml spellings).
+# cache_read and the cache_write rates apply only when a row carries those token
+# counts; a harness that folds cached tokens into input_tokens simply prices them
+# as input, which overstates slightly and is noted in the report footer.
+#
+# priced 2026-08-24. Sources: Anthropic, OpenAI, and xAI published API rates.
+
+[claude.fable]
+input = 10.00
+output = 50.00
+cache_read = 1.00
+cache_write_5m = 12.50
+cache_write_1h = 20.00
+
+[claude.opus]
+input = 5.00
+output = 25.00
+cache_read = 0.50
+cache_write_5m = 6.25
+cache_write_1h = 10.00
+
+[claude.sonnet]
+input = 3.00
+output = 15.00
+cache_read = 0.30
+cache_write_5m = 3.75
+cache_write_1h = 6.00
+
+[claude.haiku]
+input = 1.00
+output = 5.00
+cache_read = 0.10
+cache_write_5m = 1.25
+cache_write_1h = 2.00
+
+[codex."gpt-5.5"]
+input = 5.00
+output = 30.00
+cache_read = 0.50
+
+[grok."grok-4.6"]
+input = 2.00
+output = 6.00
+cache_read = 0.50

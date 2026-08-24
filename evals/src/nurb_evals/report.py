@@ -13,6 +13,8 @@ import math
 import pathlib
 import sys
 
+from . import pricing
+
 # A pass is a near-perfect part: every stated dimension, no lint findings, honest
 # parameters. Matches the fairness suite's bar for the reference solution.
 PASS = 0.99
@@ -57,6 +59,7 @@ def _tokens(row):
 
 
 def summarize(rows):
+    prices = pricing.load()
     groups = {}
     for row in rows:
         key = (
@@ -92,6 +95,7 @@ def summarize(rows):
             "pass@1": pass_at(1, n, passes),
             "pass@3": pass_at(3, n, passes),
             "tokens": _mean([_tokens(t) for t in trials]),
+            "cost": _mean([pricing.trial_cost(t, prices) for t in trials]),
             "wall_s": _mean([t.get("harness_s") for t in trials]),
             # Killed at the wall clock, so the trial's duration is a floor, not a
             # measurement: anything averaging wall_s owes the reader this count.
@@ -113,8 +117,8 @@ def table(summary):
         seeds = sorted({s for r in rows for s in r["seeds"]})
         lines.append(f"## {task} (seed {', '.join(map(str, seeds))})")
         lines.append("")
-        lines.append("| harness | benchmark | model | effort | trials | score | built | lint | dims | flex | pass@1 | pass@3 | tokens | wall | trial scores |")
-        lines.append("|---|---|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|")
+        lines.append("| harness | benchmark | model | effort | trials | score | built | lint | dims | flex | pass@1 | pass@3 | tokens | cost | wall | trial scores |")
+        lines.append("|---|---|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|")
         for r in rows:
             # "2.1.220 (Claude Code)" and "codex-cli 0.139.0" both yield the number.
             tokens = (r["harness_version"] or "").split()
@@ -133,11 +137,12 @@ def table(summary):
                 _cell(r["pass@1"]),
                 _cell(r["pass@3"]),
                 _cell(r["tokens"], "{:,.0f}") if r["tokens"] is not None else "-",
+                _cell(r["cost"], "${:.2f}"),
                 _cell(r["wall_s"], "{:.0f}s"),
                 " / ".join(f"{s:.3f}" for s in r["scores"]),
             )) + " |")
         lines.append("")
-        lines.append(f"`benchmark` is nurb/evals@content-revision and separates rows whenever the tool, task, scorer, harness adapter, or locked dependencies change. `score` averages all trials with gate failures as zeros; `built` is the fraction of trials past the gate, and lint/dims/flex average built trials only. A pass is a score of at least {PASS}. Stage columns overlap by design: a part wrong at the stated size is wrong at every probed size too, so it loses dims and flex together. `tokens` is input plus output as the harness reports them, and harnesses count differently (claude's input excludes cache reads, codex counts full per-turn context), so compare tokens within a harness only.")
+        lines.append(f"`benchmark` is nurb/evals@content-revision and separates rows whenever the tool, task, scorer, harness adapter, or locked dependencies change. `score` averages all trials with gate failures as zeros; `built` is the fraction of trials past the gate, and lint/dims/flex average built trials only. A pass is a score of at least {PASS}. Stage columns overlap by design: a part wrong at the stated size is wrong at every probed size too, so it loses dims and flex together. `tokens` is input plus output as the harness reports them, and harnesses count differently (claude's input excludes cache reads, codex counts full per-turn context), so compare tokens within a harness only. `cost` is the API-equivalent dollar cost of a trial at list prices, the mean across trials: subscription runs paid no invoice, so this is what the same tokens would have cost through the API. claude rows carry the CLI's own cache-aware figure; other harnesses derive from their token counts and the dated prices.toml, which folds any cached tokens in at the full input rate and so reads slightly high.")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 

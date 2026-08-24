@@ -264,12 +264,24 @@ def _bar(score, scores):
 
 
 def _stats(tasks):
-    """The three numbers a combo is judged by, shared by every layer of the page."""
+    """The numbers a combo is judged by, shared by every layer of the page."""
     total = sum(r["trials"] for r in tasks.values())
     firsts = sum(sum(s >= PASS for s in r["scores"]) for r in tasks.values())
     minutes = sum(r["wall_s"] for r in tasks.values()) / len(tasks) / 60
     capped = sum(r.get("capped", 0) for r in tasks.values())
-    return firsts, total, minutes, capped
+    costs = [r.get("cost") for r in tasks.values()]
+    dollars = sum(costs) / len(costs) if all(c is not None for c in costs) else None
+    return firsts, total, minutes, capped, dollars
+
+
+def _cost_note(dollars):
+    """Dollars per part, or nothing when a harness never reported enough to price.
+    API-equivalent at list prices: the subscription paid no invoice, this is what
+    the same tokens would have cost through the API."""
+    if dollars is None:
+        return ""
+    figure = f"${dollars:.2f}" if dollars >= 0.10 else f"${dollars:.3f}"
+    return f" &middot; ~{figure}/part at API rates"
 
 
 def _time_note(minutes, capped):
@@ -286,20 +298,21 @@ def _answers(combos):
     best = {}
     for key, tasks in combos:
         harness = key[0]
-        firsts, total, minutes, capped = _stats(tasks)
+        firsts, total, minutes, capped, dollars = _stats(tasks)
         rank = (firsts / total if total else 0, -minutes)
         if harness not in best or rank > best[harness][0]:
-            best[harness] = (rank, key, (firsts, total, minutes, capped))
+            best[harness] = (rank, key, (firsts, total, minutes, capped, dollars))
     cards = []
     for harness, (label, color) in SUBSCRIPTIONS.items():
         if harness not in best:
             continue
-        _, (h, model, effort), (firsts, total, minutes, capped) = best[harness]
+        _, (h, model, effort), (firsts, total, minutes, capped, dollars) = best[harness]
         cards.append(
             f'<div class="answer" style="border-top-color:{color}">\n'
             f'  <div class="have">Have {html.escape(label)}?</div>\n'
             f'  <div class="pick">run {html.escape(model)} <small>at {html.escape(effort)} effort</small></div>\n'
-            f'  <div class="why">{firsts}/{total} first-try prints &middot; {_time_note(minutes, capped)}</div>\n'
+            f'  <div class="why">{firsts}/{total} first-try prints &middot; '
+            f"{_time_note(minutes, capped)}{_cost_note(dollars)}</div>\n"
             f"</div>"
         )
     return "\n".join(cards)
@@ -317,7 +330,7 @@ def _chart(combos):
 
     points = []
     for (harness, model, effort), tasks in combos:
-        firsts, total, minutes, capped = _stats(tasks)
+        firsts, total, minutes, capped, dollars = _stats(tasks)
         points.append(
             {
                 "harness": harness,
@@ -326,6 +339,7 @@ def _chart(combos):
                 "rate": firsts / total if total else 0.0,
                 "minutes": minutes,
                 "capped": capped,
+                "dollars": dollars,
                 "firsts": firsts,
                 "total": total,
             }
@@ -394,6 +408,7 @@ def _chart(combos):
         title = (
             f"{p['model']} ({p['effort']} effort): {p['firsts']}/{p['total']} first-try, "
             f"{_time_note(p['minutes'], p['capped'])}"
+            f"{_cost_note(p['dollars']).replace('&middot;', '·')}"
         )
         if p["capped"]:
             parts.append(
@@ -427,7 +442,7 @@ def _chart(combos):
 def _card(key, tasks):
     harness, model, effort = key
     runs_on, verdict = VERDICTS.get(key, (f"{harness} harness", ""))
-    firsts, total, minutes, capped = _stats(tasks)
+    firsts, total, minutes, capped, dollars = _stats(tasks)
     bars = []
     for task in JOBS:
         name = html.escape(JOBS[task][0])
@@ -444,7 +459,7 @@ def _card(key, tasks):
   <summary><div class="top">
     <span class="model">{html.escape(model)} <small>({html.escape(effort)} effort)</small></span>
     <span class="runs">{html.escape(runs_on)}</span>
-    <span class="first">first-try prints <b>{firsts}/{total}</b> &middot; {_time_note(minutes, capped)}</span>
+    <span class="first">first-try prints <b>{firsts}/{total}</b> &middot; {_time_note(minutes, capped)}{_cost_note(dollars)}</span>
   </div></summary>
   <div class="body">{verdict_html}
   <div class="bars">
