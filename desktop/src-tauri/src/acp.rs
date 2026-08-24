@@ -111,7 +111,7 @@ struct ChatSession {
     /// model rebuilds the effort list, and `session/set_model` does not return
     /// the new menus.
     grok_models: Vec<GrokModelMenu>,
-    pgid: i32,
+    tree: crate::proc::ProcessTree,
     /// Dropped (with the whole entry) to end the connection task, which kills
     /// the adapter's process group.
     _close: oneshot::Sender<()>,
@@ -129,9 +129,7 @@ impl Chats {
     pub fn shutdown(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock().unwrap());
         for session in sessions.values() {
-            unsafe {
-                libc::killpg(session.pgid, libc::SIGTERM);
-            }
+            session.tree.terminate();
         }
     }
 }
@@ -290,7 +288,7 @@ async fn agent_sessions(
     let (stdin, stdout, stderr, child) = agent
         .spawn_process()
         .map_err(|error| friendly(kind, error))?;
-    let pgid = child.id() as i32;
+    let tree = crate::proc::ProcessTree::attach_pid(child.id());
     drain_stderr(kind, stderr);
     let listed = tokio::time::timeout(
         Duration::from_secs(60),
@@ -348,7 +346,7 @@ async fn agent_sessions(
             ),
     )
     .await;
-    reap(pgid, child).await;
+    reap(tree, child).await;
     listed
         .map_err(|_| "timed out listing conversations".to_string())?
         .map_err(|error| friendly(kind, error))
@@ -474,7 +472,7 @@ fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
     let Some(mime) = mime else {
         return Ok(ContentBlock::ResourceLink(ResourceLink::new(
             name,
-            format!("file://{}", path.display()),
+            file_uri(path),
         )));
     };
     let data = std::fs::read(path).map_err(|e| format!("cannot read {name}: {e}"))?;
@@ -486,6 +484,18 @@ fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
         base64::engine::general_purpose::STANDARD.encode(data),
         mime,
     )))
+}
+
+/// A file:// URI the agent can read back. Windows paths need their
+/// backslashes folded and an extra slash before the drive letter
+/// (file:///C:/...); unix paths already start with the slash.
+fn file_uri(path: &std::path::Path) -> String {
+    let text = path.display().to_string().replace('\\', "/");
+    if text.starts_with('/') {
+        format!("file://{text}")
+    } else {
+        format!("file:///{text}")
+    }
 }
 
 #[tauri::command]
@@ -1189,7 +1199,7 @@ async fn run_chat(
             return;
         }
     };
-    let pgid = child.id() as i32;
+    let tree = crate::proc::ProcessTree::attach_pid(child.id());
     drain_stderr(kind, stderr);
 
     let counter = AtomicU32::new(1);
@@ -1207,6 +1217,7 @@ async fn run_chat(
     let chat_project = project.clone();
     let chat_pending = pending.clone();
     let chat_channel = channel.clone();
+    let session_tree = tree.clone();
     let mut ready_tx = Some(ready_tx);
     let mut close_tx = Some(close_tx);
 
@@ -1408,7 +1419,7 @@ async fn run_chat(
                                     channel: chat_channel,
                                     config: Mutex::new(config),
                                     grok_models: menus,
-                                    pgid,
+                                    tree: session_tree.clone(),
                                     _close: close_tx,
                                 },
                             );
@@ -1440,7 +1451,7 @@ async fn run_chat(
         .await;
 
     // Whichever way the connection ended, take the process tree with it.
-    reap(pgid, child).await;
+    reap(tree, child).await;
 
     if let Err(error) = &result {
         let _ = writeln!(
@@ -1479,19 +1490,15 @@ pub(crate) fn session_to_remove(
     }
 }
 
-/// SIGTERM the adapter's process group and reap the child, escalating to
-/// SIGKILL if it lingers.
-async fn reap(pgid: i32, mut child: async_process::Child) {
-    unsafe {
-        libc::killpg(pgid, libc::SIGTERM);
-    }
+/// Terminate the adapter's process tree and reap the child, escalating to a
+/// hard kill if it lingers.
+async fn reap(tree: crate::proc::ProcessTree, mut child: async_process::Child) {
+    tree.terminate();
     if tokio::time::timeout(Duration::from_secs(5), child.status())
         .await
         .is_err()
     {
-        unsafe {
-            libc::killpg(pgid, libc::SIGKILL);
-        }
+        tree.kill();
         let _ = child.status().await;
     }
 }
@@ -1522,7 +1529,7 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
 fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
     if error.code == ErrorCode::AuthRequired || error.message.contains("Failed to authenticate") {
         format!(
-            "auth_required: {} is not signed in on this Mac",
+            "auth_required: {} is not signed in on this computer",
             kind.label()
         )
     } else {

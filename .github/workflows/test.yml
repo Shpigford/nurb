@@ -25,6 +25,44 @@ jobs:
       # cut it 3x on a laptop and the runner has four cores.
       - run: uv run pytest -q -n auto
 
+  # The engine on Windows: the desktop app ships there too, and the suite is
+  # where its platform branches (launcher, slicer discovery, port probe,
+  # watcher paths) are exercised.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked --all-extras --dev
+
+      - run: uv run playwright install chromium
+
+      - run: uv run pytest -q -n auto
+
+  # The desktop crate's Rust tests on the platform whose process plumbing
+  # (Job Objects, path shapes) they cover. Staging first, because the build
+  # script refuses to compile without the uv sidecar and bundled resources.
+  desktop-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Stage the bundled resources
+        shell: bash
+        run: sh desktop/scripts/stage.sh
+
+      - name: cargo test
+        working-directory: desktop/src-tauri
+        run: cargo test
+
   # The rules against the real library, on a machine that is not the one they were
   # calibrated on. --strict is what makes a finding fail the build; the command
   # reports and exits 0 without it, because a warning that blocks work gets switched

@@ -81,7 +81,7 @@ nurb verify [part]   the doctrine's verification list, --report bundles it with 
 nurb render [part]   write build/renders/<part>.png, --section cuts it open, needs the render extra
 nurb export [part]   write 3MF with tuned print settings into build/, --formats for STL, STEP or GLB
 nurb extract         find duplication across sibling parts
-nurb launcher        write viewer.command, a double-clickable `nurb dev`
+nurb launcher        write viewer.command (viewer.cmd on Windows), a double-clickable `nurb dev`
 ```
 
 `uv run pytest` runs the suite, which includes the parts in `examples/`.

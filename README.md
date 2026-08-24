@@ -54,7 +54,7 @@ Open the app (or your agent in a terminal) and talk:
 
 The AI does the rest: reads the design doctrine, creates the project, models the part, runs the printability checks, and opens the live viewer. When it looks right: drag the sliders if you want, click `3mf`, print.
 
-A project is any directory with a `parts/` folder. No init step. New projects are born double-clickable: `viewer.command` opens the viewer from Finder.
+A project is any directory with a `parts/` folder. No init step. New projects are born double-clickable: `viewer.command` opens the viewer from Finder (`viewer.cmd` from Explorer on Windows).
 
 ## How a part works
 
@@ -135,7 +135,7 @@ nurb verify [part]   the doctrine's verification list, --report bundles it with 
 nurb extract         find duplication across parts
 nurb skill           print the agent skill file, --sync rewrites installed copies
 nurb update          upgrade nurb, then re-sync the installed skill to match
-nurb launcher        write viewer.command, a double-clickable `nurb dev`
+nurb launcher        write viewer.command (viewer.cmd on Windows), a double-clickable `nurb dev`
 ```
 
 Commands that take `[part]` default to every part in the project.
