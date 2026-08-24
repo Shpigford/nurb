@@ -174,8 +174,8 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
 
 def test_wizard_asks_for_rounds_and_says_why(tmp_path, monkeypatch, capsys):
     """With a terminal and no --trials, the wizard asks how many rounds and gives
-    the reason (more rounds, steadier average). Typing past the menu into 'another
-    number' runs exactly that many rounds."""
+    the reason (more rounds, steadier average). The typed number IS the round
+    count: answering 2 runs exactly two rounds."""
     root = tmp_path / "evals"
     (root / "tasks").mkdir(parents=True)
     real = contribute.EVALS
@@ -191,7 +191,7 @@ def test_wizard_asks_for_rounds_and_says_why(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.setitem(harnesses.HARNESSES, "stub", Stub(GOOD))
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    answers = iter(["4", "2"])  # menu: another number; then the number itself
+    answers = iter(["2"])  # the answer is the round count itself
     asked = []
 
     def scripted(prompt=""):
@@ -217,7 +217,6 @@ def test_wizard_asks_for_rounds_and_says_why(tmp_path, monkeypatch, capsys):
     printed = capsys.readouterr().out
     assert any("How many rounds" in prompt for prompt in asked)
     assert "steadier average" in printed, "the wizard explains why rounds matter"
-    assert "another number" in printed, "an exact count is always available"
     sub = next((root / "submissions").glob("stub-stub-model-low-*"))
     rows = [
         json.loads(line)

@@ -281,22 +281,22 @@ def main():
             "\nattempts, so more rounds mean a steadier average on the leaderboard;"
             "\none round is still a valid contribution, and later runs pool with it."
             f"\nBallpark {len(tasks) * 8} minutes of agent time per round."
+            "\n  1 round: a quick single sample"
+            "\n  3 rounds: a steady average"
+            "\n  5 rounds: tight error bars"
         )
-        trials = ask(
-            "How many rounds",
-            [
-                (1, "1 round: a quick single sample"),
-                (3, "3 rounds: a steady average"),
-                (5, "5 rounds: tight error bars"),
-                (None, "another number (type it)"),
-            ],
-            default=1,
-        )
-        if trials is None:
+        while True:
             try:
-                trials = int(input("rounds: ").strip() or "1")
-            except (EOFError, ValueError):
+                raw = input("How many rounds [1]: ").strip()
+            except EOFError:
                 sys.exit("\nCould not read a number; pass --trials instead.")
+            if not raw:
+                trials = 1
+                break
+            if raw.isdigit() and int(raw) >= 1:
+                trials = int(raw)
+                break
+            print("  type a number of rounds, 1 or more")
     else:
         trials = args.trials
     if trials < 1:
