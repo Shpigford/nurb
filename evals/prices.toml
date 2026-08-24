@@ -43,9 +43,9 @@ cache_write_5m = 1.25
 cache_write_1h = 2.00
 
 [codex."gpt-5.6-sol"]
-input = 5.00
-output = 30.00
-cache_read = 0.50
+input = 4.00
+output = 20.00
+cache_read = 0.40
 
 [codex."gpt-5.6-terra"]
 input = 2.00
