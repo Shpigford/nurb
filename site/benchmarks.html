@@ -106,24 +106,141 @@
 
 <h2>The short answer</h2>
 <div class="answers">
-<div class="answer"><div class="have">No rows on file yet</div><div class="pick">be the first</div><div class="why">the one-liner below runs the benchmark on your own subscription and stages a submission</div></div>
+<div class="answer" style="border-top-color:#2f9fb5">
+  <div class="have">Have Claude?</div>
+  <div class="pick">run sonnet <small>at xhigh effort</small></div>
+  <div class="why">12/12 first-try prints &middot; ~17 min/part &middot; ~$2.89/part at API rates</div>
 </div>
-<p class="gap"></p>
+</div>
+<p class="gap">In a hurry on a Claude plan? No fast Claude option has been benchmarked yet: every Claude row so far ran at its usual effort. Lower-effort rows are next, and the chart below will grow a line per model as they land.</p>
 
 <h2>The tradeoff</h2>
 <p class="chart-lead">Every benchmarked model and effort level, placed by how often its parts print right the first time against how long it takes per part. Up and to the left is better.</p>
-<p class="chart-lead">The chart appears with the first submitted rows.</p>
+<div class="chart"><svg viewBox="0 0 840 380" role="img" aria-label="First-try prints against minutes per part for every benchmarked model"><line x1="56" y1="334" x2="816" y2="334" stroke="var(--line)" stroke-width="1"/><text x="48" y="338" text-anchor="end" font-size="11" fill="var(--dimmer)">0%</text><line x1="56" y1="257" x2="816" y2="257" stroke="var(--line)" stroke-width="1"/><text x="48" y="261" text-anchor="end" font-size="11" fill="var(--dimmer)">25%</text><line x1="56" y1="180" x2="816" y2="180" stroke="var(--line)" stroke-width="1"/><text x="48" y="184" text-anchor="end" font-size="11" fill="var(--dimmer)">50%</text><line x1="56" y1="103" x2="816" y2="103" stroke="var(--line)" stroke-width="1"/><text x="48" y="107" text-anchor="end" font-size="11" fill="var(--dimmer)">75%</text><line x1="56" y1="26" x2="816" y2="26" stroke="var(--line)" stroke-width="1"/><text x="48" y="30" text-anchor="end" font-size="11" fill="var(--dimmer)">100%</text><line x1="165" y1="26" x2="165" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="165" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">3</text><line x1="273" y1="26" x2="273" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="273" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">6</text><line x1="382" y1="26" x2="382" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="382" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">9</text><line x1="490" y1="26" x2="490" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="490" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">12</text><line x1="599" y1="26" x2="599" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="599" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">15</text><line x1="707" y1="26" x2="707" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="707" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">18</text><line x1="816" y1="26" x2="816" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="816" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">21</text><text x="816" y="372" text-anchor="end" font-size="11" fill="var(--dim)">minutes per part &rarr;</text><text x="14" y="16" font-size="11" fill="var(--dim)">printed right first try</text><path d="M 260 103 L 510 52 L 538 52 L 686 26" fill="none" stroke="#2f9fb5" stroke-width="2" opacity=".35"/><path d="M 305 272 L 328 283" fill="none" stroke="#2f9fb5" stroke-width="2" opacity=".35"/><circle class="dot" cx="686" cy="26" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (xhigh effort): 12/12 first-try, ~17 min/part · ~$2.89/part at API rates</title></circle><text x="674" y="30" text-anchor="end" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; xhigh</tspan></text><circle class="dot" cx="409" cy="26" r="6" fill="var(--dim)" stroke="var(--panel)" stroke-width="2"><title>grok-4.6 (high effort): 3/3 first-try, ~10 min/part · ~$0.18/part at API rates</title></circle><text x="421" y="30" text-anchor="start" font-size="12" fill="var(--text)">grok-4.6 <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="510" cy="52" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (high effort): 11/12 first-try, ~13 min/part · ~$2.19/part at API rates</title></circle><text x="498" y="56" text-anchor="end" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="208" cy="77" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>opus (low effort): 5/6 first-try, ~4 min/part · ~$0.88/part at API rates</title></circle><text x="196" y="81" text-anchor="end" font-size="12" fill="var(--text)">opus <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="538" cy="52" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (medium effort): 11/12 first-try, ~13 min/part · ~$2.10/part at API rates</title></circle><text x="550" y="56" text-anchor="start" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; medium</tspan></text><circle class="dot" cx="276" cy="77" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>fable (high effort): 5/6 first-try, ~6 min/part · ~$3.05/part at API rates</title></circle><text x="288" y="81" text-anchor="start" font-size="12" fill="var(--text)">fable <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="260" cy="103" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (low effort): 9/12 first-try, ~6 min/part · ~$0.84/part at API rates</title></circle><text x="272" y="107" text-anchor="start" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="305" cy="272" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>haiku (low effort): 3/15 first-try, ~7 min/part · ~$0.43/part at API rates</title></circle><text x="293" y="276" text-anchor="end" font-size="12" fill="var(--text)">haiku <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="328" cy="283" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>haiku (high effort): 2/12 first-try, ~8 min/part · ~$0.46/part at API rates</title></circle><text x="340" y="287" text-anchor="start" font-size="12" fill="var(--text)">haiku <tspan fill="var(--dimmer)">&middot; high</tspan></text></svg><div class="chart-legend"><span><i style="background:#2f9fb5"></i>Claude</span><span><i style="background:#8f75e0"></i>ChatGPT (Codex)</span></div></div>
 
 <h2>The jobs</h2>
 <div class="jobs">
 <div class="job"><b>Follow the spec</b><span>A cable clip with every dimension stated. Can it build exactly what you asked?</span></div>
+<div class="job"><b>Survive the kernel</b><span>A bit block dense with chamfers, right at the CAD kernel&#x27;s limits. One wrong move and the part never builds.</span></div>
 <div class="job"><b>Design from a problem</b><span>“Hold this cable bundle on the wall with one screw.” No shape given: it has to design one that works and prints.</span></div>
+<div class="job"><b>Design a curve</b><span>A rest that must cradle a measured pole along a real arc. Flat answers touch at lines and lose; only curvature passes.</span></div>
+<div class="job"><b>Make it fit</b><span>A knob for a measured D-shaft. The grader drives the real stem: too tight jams, too loose rattles, a round bore spins.</span></div>
 <div class="job"><b>Handle a missing measurement</b><span>One dimension nobody measured. Does it guess silently, or handle the unknown the honest way?</span></div>
 </div>
 
 <h2>The receipts</h2>
 <p class="chart-lead">Per-model detail: the verdict, and every job's score with a tick per attempt. Click a model to open it.</p>
-<p class="chart-lead">Nothing yet.</p>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">sonnet <small>(xhigh effort)</small></span>
+    <span class="runs">claude harness</span>
+    <span class="first">first-try prints <b>12/12</b> &middot; ~17 min/part &middot; ~$2.89/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+  </div>
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">grok-4.6 <small>(high effort)</small></span>
+    <span class="runs">grok harness</span>
+    <span class="first">first-try prints <b>3/3</b> &middot; ~10 min/part &middot; ~$0.18/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"></div><div class="pct na">not yet run</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design a curve</div><div class="bar"></div><div class="pct na">not yet run</div><div class="name">Make it fit</div><div class="bar"></div><div class="pct na">not yet run</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+  </div>
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">sonnet <small>(high effort)</small></span>
+    <span class="runs">Claude subscription</span>
+    <span class="first">first-try prints <b>11/12</b> &middot; ~13 min/part &middot; ~$2.19/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <p class="verdict">Perfect on instructions and honest about the unmeasured dimension, but slow. Its design-job trials all ran past the old session limit and were graded mid-thought, which is not a fair grade in either direction, so that row was thrown out and is being re-run with a longer limit.</p>
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:97%"></i><u style="left:calc(96.7% - 1px)" title="attempt: 0.967"></u></div><div class="pct">97%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+  </div>
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">opus <small>(low effort)</small></span>
+    <span class="runs">claude harness</span>
+    <span class="first">first-try prints <b>5/6</b> &middot; ~4 min/part &middot; ~$0.88/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i class="mid" style="width:74%"></i><u style="left:calc(74.5% - 1px)" title="attempt: 0.745"></u></div><div class="pct">74%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+  </div>
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">sonnet <small>(medium effort)</small></span>
+    <span class="runs">claude harness</span>
+    <span class="first">first-try prints <b>11/12</b> &middot; ~13 min/part &middot; ~$2.10/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i class="mid" style="width:74%"></i><u style="left:calc(74.5% - 1px)" title="attempt: 0.745"></u></div><div class="pct">74%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+  </div>
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">fable <small>(high effort)</small></span>
+    <span class="runs">Claude subscription</span>
+    <span class="first">first-try prints <b>5/6</b> &middot; ~6 min/part &middot; ~$3.05/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <p class="verdict">Flawless so far: every part, every job, right the first time. When a measurement was missing, it did the honest thing unprompted. The premium pick.</p>
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i class="mid" style="width:68%"></i><u style="left:calc(67.5% - 1px)" title="attempt: 0.675"></u></div><div class="pct">68%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+  </div>
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">sonnet <small>(low effort)</small></span>
+    <span class="runs">claude harness</span>
+    <span class="first">first-try prints <b>9/12</b> &middot; ~6 min/part &middot; ~$0.84/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i class="low" style="width:57%"></i><u style="left:calc(56.7% - 1px)" title="attempt: 0.567"></u></div><div class="pct">57%</div><div class="name">Design a curve</div><div class="bar"><i class="mid" style="width:83%"></i><u style="left:calc(49.2% - 1px)" title="attempt: 0.492"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">83%</div><div class="name">Make it fit</div><div class="bar"><i class="mid" style="width:89%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(67.5% - 1px)" title="attempt: 0.675"></u></div><div class="pct">89%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+  </div>
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">haiku <small>(low effort)</small></span>
+    <span class="runs">Claude subscription (budget model)</span>
+    <span class="first">first-try prints <b>3/15</b> &middot; ~7 min/part &middot; ~$0.43/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <p class="verdict">Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round. And it wrote its guess for the unmeasured dimension down as if it had measured it, the mistake that ruins a print six months later.</p>
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"><i class="mid" style="width:64%"></i><u style="left:calc(50.0% - 1px)" title="attempt: 0.500"></u><u style="left:calc(86.7% - 1px)" title="attempt: 0.867"></u><u style="left:calc(55.0% - 1px)" title="attempt: 0.550"></u></div><div class="pct">64%</div><div class="name">Design from a problem</div><div class="bar"><i class="low" style="width:43%"></i><u style="left:calc(46.7% - 1px)" title="attempt: 0.467"></u><u style="left:calc(39.2% - 1px)" title="attempt: 0.392"></u></div><div class="pct">43%</div><div class="name">Design a curve</div><div class="bar"><i class="low" style="width:45%"></i><u style="left:calc(41.7% - 1px)" title="attempt: 0.417"></u><u style="left:calc(49.2% - 1px)" title="attempt: 0.492"></u><u style="left:calc(45.4% - 1px)" title="attempt: 0.454"></u></div><div class="pct">45%</div><div class="name">Make it fit</div><div class="bar"><i class="low" style="width:56%"></i><u style="left:calc(64.4% - 1px)" title="attempt: 0.644"></u><u style="left:calc(40.6% - 1px)" title="attempt: 0.406"></u><u style="left:calc(64.4% - 1px)" title="attempt: 0.644"></u></div><div class="pct">56%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:95%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(90.0% - 1px)" title="attempt: 0.900"></u></div><div class="pct">95%</div>
+  </div>
+  </div>
+</details>
+<details class="card">
+  <summary><div class="top">
+    <span class="model">haiku <small>(high effort)</small></span>
+    <span class="runs">claude harness</span>
+    <span class="first">first-try prints <b>2/12</b> &middot; ~8 min/part &middot; ~$0.46/part at API rates</span>
+  </div></summary>
+  <div class="body">
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"><i class="mid" style="width:81%"></i><u style="left:calc(86.7% - 1px)" title="attempt: 0.867"></u><u style="left:calc(55.0% - 1px)" title="attempt: 0.550"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">81%</div><div class="name">Design from a problem</div><div class="bar"><i class="low" style="width:47%"></i><u style="left:calc(46.7% - 1px)" title="attempt: 0.467"></u></div><div class="pct">47%</div><div class="name">Design a curve</div><div class="bar"><i class="low" style="width:47%"></i><u style="left:calc(49.2% - 1px)" title="attempt: 0.492"></u><u style="left:calc(49.2% - 1px)" title="attempt: 0.492"></u><u style="left:calc(41.5% - 1px)" title="attempt: 0.415"></u></div><div class="pct">47%</div><div class="name">Make it fit</div><div class="bar"><i class="low" style="width:49%"></i><u style="left:calc(49.4% - 1px)" title="attempt: 0.494"></u><u style="left:calc(64.4% - 1px)" title="attempt: 0.644"></u><u style="left:calc(34.4% - 1px)" title="attempt: 0.344"></u></div><div class="pct">49%</div><div class="name">Handle a missing measurement</div><div class="bar"><i class="low" style="width:50%"></i><u style="left:calc(50.0% - 1px)" title="attempt: 0.500"></u></div><div class="pct">50%</div>
+  </div>
+  </div>
+</details>
 
 <div class="contribute">
   <b>Add your model to this page.</b>
@@ -132,7 +249,7 @@
   <span>Or paste that line to your AI and let it drive.</span>
 </div>
 
-<p class="fine">Early days: 0 graded parts across 0 jobs. Each bar averages every attempt on file, and the ticks are the attempts themselves; a small sample should look like one.</p>
+<p class="fine">Early days: 90 graded parts across 6 jobs. Each bar averages every attempt on file, and the ticks are the attempts themselves; a small sample should look like one.</p>
 <p class="fine">Grading is a fixed rubric measured on the part's actual geometry, so the only randomness is the model's. Raw results, full transcripts, and the grading code are <a href="https://github.com/Shpigford/nurb/blob/main/evals/REPORT.md">on GitHub</a>.</p>
 </main>
 <footer>
