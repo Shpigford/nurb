@@ -23,6 +23,11 @@ import pathlib
 import re
 import shutil
 import subprocess
+import sys
+
+# Keep slicer subprocesses from opening console windows when nurb itself runs
+# without one (the desktop app); a plain 0 is ignored off Windows.
+_QUIET = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 # Slicers that share the one CLI grammar this module speaks: `--load-settings`,
 # `--load-filaments`, `--slice`, `--outputdir`, and a bundled tree of vendor profiles
@@ -93,31 +98,57 @@ def tuned(shape, ctx=None):
 def app(search=None):
     """The installed slicer's executable, or None.
 
-    macOS keeps it in a bundle. Linux uses a command, an AppImage on PATH, or one of
-    the two official Flatpaks. A Flatpak is returned as its command prefix; `run`
-    appends the slicing arguments in exactly the same way it does for an executable.
+    macOS keeps it in a bundle. Windows installs into Program Files (or the
+    per-user Programs folder). Linux uses a command, an AppImage on PATH, or one
+    of the two official Flatpaks. A Flatpak is returned as its command prefix;
+    `run` appends the slicing arguments in exactly the same way it does for an
+    executable.
     """
     for name in search or SLICERS:
         bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
         if bundle.is_file():
             return bundle
+        for folder in _windows_install_dirs(name):
+            for command in COMMANDS.get(name, (name, name.lower())):
+                found = folder / f"{command}.exe"
+                if found.is_file():
+                    return found
         for command in COMMANDS.get(name, (name, name.lower())):
             found = shutil.which(command)
             if found:
                 return pathlib.Path(found)
-        # AppImage filenames carry a version, so `which` cannot name one exactly.
-        # Looking only on PATH keeps discovery explicit and bounded.
-        patterns = (f"{name}*.AppImage", f"{name.replace('Studio', '_Studio')}*.AppImage")
-        for folder in os.get_exec_path():
-            for pattern in patterns:
-                for found in sorted(pathlib.Path(folder).glob(pattern)):
-                    if found.is_file() and os.access(found, os.X_OK):
-                        return found
+        if sys.platform != "win32":
+            # AppImage filenames carry a version, so `which` cannot name one
+            # exactly. Looking only on PATH keeps discovery explicit and bounded.
+            patterns = (f"{name}*.AppImage", f"{name.replace('Studio', '_Studio')}*.AppImage")
+            for folder in os.get_exec_path():
+                for pattern in patterns:
+                    for found in sorted(pathlib.Path(folder).glob(pattern)):
+                        if found.is_file() and os.access(found, os.X_OK):
+                            return found
         app_id = FLATPAKS.get(name)
         flatpak = shutil.which("flatpak")
         if app_id and flatpak and any(root.is_dir() for root in _flatpak_roots(app_id)):
             return (flatpak, "run", app_id)
     return None
+
+
+def _windows_install_dirs(name):
+    """Where the Windows installers put a slicer, machine-wide and per-user.
+
+    Both installer titles space out the camel case ("Bambu Studio"), but the
+    Orca folder keeps it joined, so both spellings are tried.
+    """
+    if sys.platform != "win32":
+        return []
+    folders = dict.fromkeys((name, re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name)))
+    dirs = []
+    for env in ("ProgramFiles", "ProgramFiles(x86)"):
+        if base := os.environ.get(env):
+            dirs += [pathlib.Path(base) / folder for folder in folders]
+    if local := os.environ.get("LOCALAPPDATA"):
+        dirs += [pathlib.Path(local) / "Programs" / folder for folder in folders]
+    return dirs
 
 
 def vendors(exe):
@@ -178,14 +209,17 @@ def _flatpak_roots(app_id):
 
 
 def _user_profile_roots(flavor):
-    """Profile caches written after an AppImage or Flatpak has run once."""
+    """Profile caches written after the slicer has run once."""
     home = pathlib.Path.home()
     config = pathlib.Path(os.environ.get("XDG_CONFIG_HOME", home / ".config"))
     app_id = FLATPAKS[flavor]
-    return [
+    roots = [
         config / flavor / "system",
         home / ".var" / "app" / app_id / "config" / flavor / "system",
     ]
+    if appdata := os.environ.get("APPDATA"):
+        roots.insert(0, pathlib.Path(appdata) / flavor / "system")
+    return roots
 
 
 def _readable(path):
@@ -338,6 +372,7 @@ def run(model, target, machine_path, process, filament, exe=None, plate=PLATE, s
             ],
             capture_output=True,
             text=True,
+            creationflags=_QUIET,
         )
         gcode = out_dir / "plate_1.gcode"
         if done.returncode != 0 or not gcode.is_file():
@@ -413,6 +448,7 @@ def write_project(model, target, machine_path, process, filament, exe=None, sett
             ],
             capture_output=True,
             text=True,
+            creationflags=_QUIET,
         )
         written = out_dir / "project.3mf"
         if done.returncode != 0 or not written.is_file():

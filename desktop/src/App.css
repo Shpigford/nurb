@@ -123,13 +123,18 @@ textarea {
   overflow: hidden;
 }
 
-/* The window titlebar is an overlay: this empty strip hosts the traffic
-   lights and doubles as the drag region. The brand lives in the dock icon
-   and the setup screen, not the chrome. */
+/* The window titlebar is an overlay on macOS: this empty strip hosts the
+   traffic lights and doubles as the drag region. The brand lives in the dock
+   icon and the setup screen, not the chrome. Windows has a real titlebar, so
+   the strip collapses there. */
 .rail-title {
   flex: none;
   height: 36px;
   margin: 0 -12px;
+}
+
+body[data-platform="windows"] .rail-title {
+  height: 0;
 }
 
 .rail-heading {
