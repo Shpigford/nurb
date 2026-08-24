@@ -56,38 +56,18 @@ JOBS = {
 SUBSCRIPTIONS = {
     "claude": ("Claude", "#2f9fb5"),
     "codex": ("ChatGPT (Codex)", "#8f75e0"),
+    "grok": ("Grok", "#b8bec9"),
 }
 
-# One line of honest nuance under the answer cards; editorial, updated with the data.
-GAP_NOTE = (
-    "In a hurry on a Claude plan? No fast Claude option has been benchmarked yet: "
-    "every Claude row so far ran at its usual effort. Lower-effort rows are next, "
-    "and the chart below will grow a line per model as they land."
-)
-
 # Editorial layer, keyed by (harness, model, effort). Grounded in the committed rows;
-# update alongside them. Combos without an entry render numbers-only.
+# update alongside them. Combos without an entry render numbers-only. The plan label
+# always comes from SUBSCRIPTIONS, never from here, so rows stay consistent.
 VERDICTS = {
-    ("claude", "fable", "high"): (
-        "Claude subscription",
-        "Flawless so far: every part, every job, right the first time. When a measurement was missing, it did the honest thing unprompted. The premium pick.",
-    ),
-    ("claude", "opus", "high"): (
-        "Claude subscription",
-        "Flawless on everything it has rows for, a notch slower than fable. Its design-job row is being re-run under a longer session limit after the old limit cut its trials short; the numbers here are only from completed sessions.",
-    ),
-    ("codex", "gpt-5.5", "medium"): (
-        "ChatGPT subscription (Codex)",
-        "Excellent and fast, and honest about the unmeasured dimension. One design quietly stopped fitting when the cable bundle grew, which is the kind of flaw you find after printing.",
-    ),
-    ("claude", "sonnet", "high"): (
-        "Claude subscription",
-        "Perfect on instructions and honest about the unmeasured dimension, but slow. Its design-job trials all ran past the old session limit and were graded mid-thought, which is not a fair grade in either direction, so that row was thrown out and is being re-run with a longer limit.",
-    ),
-    ("claude", "haiku", "low"): (
-        "Claude subscription (budget model)",
-        "Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round. And it wrote its guess for the unmeasured dimension down as if it had measured it, the mistake that ruins a print six months later.",
-    ),
+    ("claude", "fable", "high"): "Flawless so far: every part, every job, right the first time. When a measurement was missing, it did the honest thing unprompted. The premium pick.",
+    ("claude", "opus", "high"): "Flawless on everything it has rows for, a notch slower than fable. Its design-job row is being re-run under a longer session limit after the old limit cut its trials short; the numbers here are only from completed sessions.",
+    ("codex", "gpt-5.5", "medium"): "Excellent and fast, and honest about the unmeasured dimension. One design quietly stopped fitting when the cable bundle grew, which is the kind of flaw you find after printing.",
+    ("claude", "sonnet", "high"): "Perfect on instructions and honest about the unmeasured dimension, but slow. Its design-job trials all ran past the old session limit and were graded mid-thought, which is not a fair grade in either direction, so that row was thrown out and is being re-run with a longer limit.",
+    ("claude", "haiku", "low"): "Fine when you spell everything out, and cheap. Asked to design, it produced parts you would not print: paper-thin walls, screw holes that are not round. And it wrote its guess for the unmeasured dimension down as if it had measured it, the mistake that ruins a print six months later.",
 }
 
 HEAD = """\
@@ -98,6 +78,10 @@ HEAD = """\
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>nurb &middot; which AI designs the best parts?</title>
 <meta name="description" content="The popular AI models, given the same real part-design jobs, graded by machine against print physics. Pick the one that fits your subscription.">
+<meta property="og:title" content="nurb &middot; which AI designs the best parts?">
+<meta property="og:description" content="The popular AI models, given the same real part-design jobs, graded by machine against print physics. Pick the one that fits your subscription.">
+<meta property="og:url" content="https://nurb.dev/benchmarks.html">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cg stroke='%236ee7a8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' fill='none'%3E%3Cpath d='m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z' fill='%236ee7a8' fill-opacity='.3' stroke-width='0'/%3E%3Cpath d='m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z'/%3E%3Cpolyline points='12.251 7.1035 9 9 5.75 7.1035'/%3E%3Cline x1='9.0005' y1='12.7817' x2='9' y2='9'/%3E%3C/g%3E%3C/svg%3E">
 <style>
   @font-face {
     font-family: "JetBrains Mono";
@@ -109,6 +93,8 @@ HEAD = """\
     --bg: #16181d; --panel: #1d2027; --panel2: #191c22; --line: #2b2f38;
     --text: #e6e8ec; --dim: #868d9b; --dimmer: #565d6b;
     --accent: #6ee7a8; --amber: #f0c274; --bad: #f87171;
+    /* Mono is the machine's voice; prose gets a human one. */
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -121,31 +107,65 @@ HEAD = """\
   body::before {
     content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
     background:
-      linear-gradient(rgba(110,231,168,.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(110,231,168,.035) 1px, transparent 1px);
-    background-size: 44px 44px;
+      linear-gradient(rgba(110,231,168,.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(110,231,168,.022) 1px, transparent 1px);
+    background-size: 56px 56px;
   }
-  header { display: flex; align-items: baseline; gap: 1.5rem; padding: 1.4rem 2rem; border-bottom: 1px solid var(--line); }
-  header b { color: var(--accent); }
-  header nav { margin-left: auto; display: flex; gap: 1.2rem; }
+  body::after {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background: radial-gradient(1100px 520px at 50% -80px, rgba(110,231,168,.055), transparent 70%);
+  }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+  header { position: sticky; top: 0; z-index: 10;
+           background: rgba(22,24,29,.82); backdrop-filter: blur(12px);
+           border-bottom: 1px solid var(--line); }
+  header .wrap { display: flex; align-items: center; gap: 8px; height: 54px; }
+  header .logo { display: flex; align-items: center; gap: 8px; color: var(--text);
+                 font-weight: 700; letter-spacing: .06em; }
+  header .logo:hover { text-decoration: none; }
+  header .logo svg { width: 17px; height: 17px; color: var(--accent); }
+  header nav { margin-left: auto; display: flex; gap: 22px; font-size: 13px; }
   header nav a { color: var(--dim); }
-  main { max-width: 880px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
-  h1 { font-size: 1.7rem; line-height: 1.3; margin-bottom: .8rem; }
-  .lead { color: var(--dim); margin-bottom: 2.5rem; }
-  h2 { font-size: 1.05rem; margin: 2.8rem 0 1rem; color: var(--accent); }
-  .jobs { display: grid; gap: .7rem; margin-bottom: .4rem; }
+  header nav a:hover { color: var(--text); text-decoration: none; }
+  header nav a.here { color: var(--text); }
+  header nav a.gh { color: var(--text); }
+  header .menu-btn { display: none; margin-left: auto; padding: 8px; background: none;
+                     border: 0; color: var(--text); cursor: pointer; }
+  header .menu-btn svg { display: block; width: 20px; height: 20px; }
+  header .menu-btn .x, header.open .menu-btn .bars { display: none; }
+  header.open .menu-btn .x { display: block; }
+  @media (max-width: 860px) {
+    header .menu-btn { display: block; }
+    header nav { display: none; position: absolute; top: 54px; left: 0; right: 0;
+                 flex-direction: column; gap: 0; padding: 4px 24px 12px;
+                 background: var(--bg); border-bottom: 1px solid var(--line);
+                 box-shadow: 0 30px 80px rgba(0,0,0,.45); }
+    header.open nav { display: flex; }
+    header nav a { padding: 11px 0; font-size: 15px; }
+  }
+  main { max-width: 920px; margin: 0 auto; padding: 72px 24px 72px; }
+  h1 { font-size: clamp(28px, 4.5vw, 42px); font-weight: 800; line-height: 1.15;
+       letter-spacing: -.02em; margin-bottom: 16px; }
+  .lead { color: var(--dim); margin-bottom: 8px; font: 16px/1.6 var(--sans); }
+  .sec-label { color: var(--dimmer); font-size: 12px; letter-spacing: .12em;
+               margin: 72px 0 8px; }
+  .sec-label b { color: var(--accent); font-weight: 400; }
+  h2 { font-size: clamp(20px, 2.6vw, 26px); font-weight: 700; letter-spacing: -.01em;
+       margin-bottom: 14px; }
+  .jobs { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin-bottom: .4rem; }
+  @media (max-width: 640px) { .jobs { grid-template-columns: 1fr; } }
   .job { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; }
   .job b { display: block; }
-  .job span { color: var(--dim); font-size: .88rem; }
+  .job span { color: var(--dim); font: 13.5px/1.5 var(--sans); }
   .answers { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
   @media (max-width: 640px) { .answers { grid-template-columns: 1fr; } }
-  .answer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; border-top: 3px solid var(--line); }
-  .answer .have { font-size: .85rem; color: var(--dim); }
+  .answer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; }
+  .answer .have { font-size: .85rem; color: var(--dim); display: flex; align-items: center; gap: .5rem; }
+  .answer .have i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .answer .pick { font-size: 1.15rem; font-weight: 700; margin: .15rem 0; }
   .answer .pick small { color: var(--dim); font-weight: 400; font-size: .8em; }
   .answer .why { color: var(--dim); font-size: .88rem; }
-  .gap { color: var(--dimmer); font-size: .82rem; margin-top: .8rem; }
-  .chart-lead { color: var(--dim); font-size: .88rem; margin-bottom: .8rem; }
+  .chart-lead { color: var(--dim); font: 15px/1.6 var(--sans); margin-bottom: 16px; }
   .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .6rem; }
   .chart svg { display: block; width: 100%; height: auto; }
   .chart-legend { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; padding: .55rem .6rem .3rem; border-top: 1px solid var(--line); margin-top: .4rem; font-size: .8rem; color: var(--dim); }
@@ -154,18 +174,42 @@ HEAD = """\
   .chart-legend b { font-weight: 400; color: var(--text); }
   .chart .dot { transition: r .1s; }
   .chart .dot:hover { r: 8; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 0 1.4rem; margin-bottom: .7rem; }
-  .card summary { cursor: pointer; list-style: none; padding: 1rem 0; }
-  .card summary::-webkit-details-marker { display: none; }
-  .card summary::after { content: "+"; float: right; color: var(--dimmer); }
-  .card[open] summary::after { content: "\\2212"; }
-  .card .body { padding-bottom: 1.2rem; }
-  .card .top { display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1rem; }
-  .card .top .model { font-size: 1.15rem; font-weight: 700; }
-  .card .top .runs { color: var(--dim); font-size: .85rem; }
-  .card .top .first { margin-left: auto; font-size: .85rem; color: var(--dim); }
-  .card .top .first b { color: var(--text); }
-  .verdict { color: var(--dim); font-size: .92rem; margin-bottom: .9rem; }
+  .board { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .board .hd, .board summary { display: grid; grid-template-columns: 2rem minmax(0,1.3fr) minmax(7.5rem,1fr) 7.5rem 5.2rem 5.8rem; gap: 1rem; align-items: center; padding: .7rem 1.1rem; }
+  .board .hd { font-size: .72rem; color: var(--dimmer); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line); }
+  .board .hd .r { text-align: right; }
+  .board details { border-bottom: 1px solid var(--line); }
+  .board details:last-child { border-bottom: 0; }
+  .board summary { cursor: pointer; list-style: none; }
+  .board summary::-webkit-details-marker { display: none; }
+  .board summary:hover { background: var(--panel2); }
+  .board details.top summary { box-shadow: inset 3px 0 0 var(--accent); }
+  .rank { color: var(--dimmer); font-size: .85rem; }
+  .top .rank { color: var(--accent); font-weight: 700; }
+  .who .model { font-weight: 700; }
+  .who .model small { color: var(--dim); font-weight: 400; font-size: .82em; }
+  .who .plan { font-size: .78rem; color: var(--dim); display: flex; align-items: center; gap: .4rem; }
+  .who .plan i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .rate .rbar { display: block; height: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; margin-bottom: .3rem; }
+  .rate .rbar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+  .rate .rbar i.mid { background: var(--amber); }
+  .rate .rbar i.low { background: var(--bad); }
+  .rate span { font-size: .8rem; color: var(--dim); }
+  .rate span b { color: var(--text); }
+  .cells { display: flex; gap: 4px; }
+  .cells i { width: 13px; height: 13px; border-radius: 3px; flex: none; }
+  .cells i.ok { background: var(--accent); }
+  .cells i.mid { background: var(--amber); }
+  .cells i.low { background: var(--bad); }
+  .cells i.off { background: transparent; border: 1px dashed var(--dimmer); }
+  .time, .cost { font-size: .85rem; color: var(--dim); text-align: right; white-space: nowrap; }
+  .board .body { padding: .2rem 1.1rem 1.2rem 4.1rem; }
+  @media (max-width: 720px) {
+    .board .hd, .board summary { grid-template-columns: 2rem minmax(0,1fr) minmax(6rem,1fr) 4.6rem; }
+    .cells, .cost, .board .hd .c4, .board .hd .c6 { display: none; }
+    .board .body { padding-left: 1.1rem; }
+  }
+  .verdict { color: var(--dim); font: 14.5px/1.55 var(--sans); margin-bottom: .9rem; max-width: 680px; }
   .bars { display: grid; grid-template-columns: max-content 1fr max-content; gap: .35rem .8rem; align-items: center; font-size: .85rem; }
   .bars .name { color: var(--dim); white-space: nowrap; }
   .bar { position: relative; height: 8px; background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; }
@@ -175,62 +219,117 @@ HEAD = """\
   .bar i.low { background: var(--bad); }
   .pct { text-align: right; min-width: 6.5ch; }
   .pct.na { color: var(--dimmer); }
-  .fine { color: var(--dimmer); font-size: .82rem; margin-top: 1.1rem; }
+  .fine { color: var(--dimmer); font: 13px/1.55 var(--sans); max-width: 680px; margin-top: 1.1rem; }
   .fine:first-of-type { margin-top: 2.4rem; }
   .fine a { color: var(--dim); }
   .contribute { margin-top: 2.4rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.3rem; }
   .contribute b { color: var(--accent); }
-  .contribute code { display: block; margin-top: .6rem; background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: .55rem .8rem; overflow-x: auto; white-space: nowrap; }
-  .contribute span { color: var(--dim); font-size: .88rem; }
-  footer { border-top: 1px solid var(--line); padding: 1.4rem 2rem; display: flex; gap: 1.4rem; color: var(--dimmer); font-size: .85rem; }
+  .contribute span { color: var(--dim); font: 14px/1.55 var(--sans); }
+  .cmd { display: flex; align-items: center; gap: 12px; margin: .7rem 0;
+         background: var(--panel2); border: 1px solid var(--line); border-radius: 9px;
+         padding: 11px 16px; font-size: 14px; overflow-x: auto; white-space: nowrap; }
+  .cmd .d { color: var(--dimmer); user-select: none; }
+  .cmd button { background: none; border: none; color: var(--dim); cursor: pointer;
+                font: inherit; font-size: 12px; padding: 2px 4px; border-radius: 5px;
+                margin-left: auto; }
+  .cmd button:hover { color: var(--accent); }
+  footer { border-top: 1px solid var(--line); padding: 34px 0 44px;
+           color: var(--dimmer); font-size: 12px; }
+  footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; }
+  footer a { color: var(--dim); }
+  footer .spacer { flex: 1; }
 </style>
 </head>
 <body>
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none">
+  <symbol id="i-cube" viewBox="0 0 18 18"><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="currentColor" opacity=".3" stroke-width="0"/><path d="m7.997,2.332l-4.25,2.465c-.617.358-.997,1.017-.997,1.73v4.946c0,.713.38,1.372.997,1.73l4.25,2.465c.621.36,1.386.36,2.007,0l4.25-2.465c.617-.358.997-1.017.997-1.73v-4.946c0-.713-.38-1.372-.997-1.73l-4.25-2.465c-.621-.36-1.386-.36-2.007,0Z" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><polyline points="12.251 7.1035 9 9 5.75 7.1035" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><line x1="9.0005" y1="12.7817" x2="9" y2="9" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></symbol>
+</svg>
+
 <header>
-  <a href="index.html"><b>nurb</b></a>
-  <nav>
-    <a href="index.html">home</a>
-    <a href="https://github.com/Shpigford/nurb">github &nearr;</a>
-  </nav>
+  <div class="wrap">
+    <a class="logo" href="index.html"><svg><use href="#i-cube"/></svg>nurb</a>
+    <button class="menu-btn" aria-label="menu" aria-expanded="false">
+      <svg class="bars" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2.5" y1="5.5" x2="17.5" y2="5.5"/><line x1="2.5" y1="10" x2="17.5" y2="10"/><line x1="2.5" y1="14.5" x2="17.5" y2="14.5"/></svg>
+      <svg class="x" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="4.5" y1="4.5" x2="15.5" y2="15.5"/><line x1="15.5" y1="4.5" x2="4.5" y2="15.5"/></svg>
+    </button>
+    <nav>
+      <a href="index.html#demo">the app</a>
+      <a href="index.html#how">how it works</a>
+      <a href="index.html#start">get started</a>
+      <a class="here" href="benchmarks.html">benchmarks</a>
+      <a href="/changelog">changelog</a>
+      <a class="gh" href="https://github.com/Shpigford/nurb">github &nearr;</a>
+    </nav>
+  </div>
 </header>
+<script>
+  const hdr = document.querySelector('header');
+  const menuBtn = hdr.querySelector('.menu-btn');
+  menuBtn.addEventListener('click', () =>
+    menuBtn.setAttribute('aria-expanded', hdr.classList.toggle('open')));
+  hdr.querySelector('nav').addEventListener('click', () => {
+    hdr.classList.remove('open');
+    menuBtn.setAttribute('aria-expanded', 'false');
+  });
+</script>
 <main>
 <h1>Which AI designs the best parts?</h1>
-<p class="lead">nurb works with the AI subscription you already have. We give each model the same real part-design jobs and grade the parts by machine: the actual geometry, checked against what was asked and against print physics. No cherry-picking, no vibes. Start from what you subscribe to.</p>
+<p class="lead">nurb works with the AI subscription you already have. Every model gets the same real part-design jobs, and a machine grades the actual geometry against what was asked and against print physics.</p>
 
-<h2>The short answer</h2>
+<div class="sec-label"><b>// 01</b> &nbsp;the short answer</div>
+<h2>Start from what you subscribe to.</h2>
 <div class="answers">
 {answers}
 </div>
-<p class="gap">{gap_note}</p>
 
-<h2>The tradeoff</h2>
-<p class="chart-lead">Every benchmarked model and effort level, placed by how often its parts print right the first time against how long it takes per part. Up and to the left is better.</p>
+<div class="sec-label"><b>// 02</b> &nbsp;the leaderboard</div>
+<h2>Every model, ranked.</h2>
+<p class="chart-lead">Ranked by how often parts print right the first time. The six squares are the six jobs below, green to red; a dashed square is a job not yet run. Click a row for the per-attempt detail.</p>
+{cards}
+
+<div class="sec-label"><b>// 03</b> &nbsp;the tradeoff</div>
+<h2>Quality against speed.</h2>
+<p class="chart-lead">First-try print rate against minutes per part. Up and to the left is better.</p>
 {chart}
 
-<h2>The jobs</h2>
+<div class="sec-label"><b>// 04</b> &nbsp;the jobs</div>
+<h2>Six jobs, graded on geometry.</h2>
 <div class="jobs">
 {jobs}
 </div>
 
-<h2>The receipts</h2>
-<p class="chart-lead">Per-model detail: the verdict, and every job's score with a tick per attempt. Click a model to open it.</p>
-{cards}
-
 <div class="contribute">
   <b>Add your model to this page.</b>
-  <span> One line, your own subscription, a wizard for the rest. A single run counts; it pools with everyone else's.</span>
-  <code>curl -fsSL https://nurb.dev/bench.sh | sh</code>
+  <span> One line, your own subscription, a wizard for the rest. Every run pools with everyone else's.</span>
+  <span class="cmd"><span class="d">$</span><span>curl -fsSL https://nurb.dev/bench.sh | sh</span><button data-copy="curl -fsSL https://nurb.dev/bench.sh | sh" title="copy">copy</button></span>
   <span>Or paste that line to your AI and let it drive.</span>
 </div>
 
-<p class="fine">Early days: {trial_count} graded parts across {job_count} jobs. Each bar averages every attempt on file, and the ticks are the attempts themselves; a small sample should look like one.</p>
+<p class="fine">$/part is what the same tokens would cost at API list prices; on a subscription it comes out of your plan.</p>
+<p class="fine">Early days: {trial_count} graded parts across {job_count} jobs so far. Each bar averages every attempt on file, and the ticks are the attempts themselves.</p>
 <p class="fine">Grading is a fixed rubric measured on the part's actual geometry, so the only randomness is the model's. Raw results, full transcripts, and the grading code are <a href="https://github.com/Shpigford/nurb/blob/main/evals/REPORT.md">on GitHub</a>.</p>
 </main>
 <footer>
-  <a href="index.html">nurb.dev</a>
-  <a href="https://github.com/Shpigford/nurb/blob/main/evals/REPORT.md">full results</a>
-  <a href="https://github.com/Shpigford/nurb/issues/new">send feedback</a>
+  <div class="wrap">
+    <span>&copy; 2026 Ordinary Systems LLC</span>
+    <a href="https://github.com/Shpigford/nurb/blob/main/LICENSE">FSL-1.1-MIT</a>
+    <span class="spacer"></span>
+    <a href="https://github.com/Shpigford/nurb/blob/main/evals/REPORT.md">full results</a>
+    <a href="/changelog">changelog</a>
+    <a href="https://github.com/Shpigford/nurb">github</a>
+    <a href="https://x.com/Shpigford">@shpigford</a>
+    <a href="https://github.com/Shpigford/nurb/issues/new">send feedback</a>
+  </div>
 </footer>
+<script>
+for (const b of document.querySelectorAll('[data-copy]')) {
+  b.onclick = async () => {
+    try { await navigator.clipboard.writeText(b.dataset.copy); } catch {}
+    b.textContent = 'copied';
+    setTimeout(() => { b.textContent = 'copy'; }, 1200);
+  };
+}
+</script>
 </body>
 </html>
 """
@@ -308,8 +407,8 @@ def _answers(combos):
             continue
         _, (h, model, effort), (firsts, total, minutes, capped, dollars) = best[harness]
         cards.append(
-            f'<div class="answer" style="border-top-color:{color}">\n'
-            f'  <div class="have">Have {html.escape(label)}?</div>\n'
+            f'<div class="answer">\n'
+            f'  <div class="have"><i style="background:{color}"></i>Have {html.escape(label)}?</div>\n'
             f'  <div class="pick">run {html.escape(model)} <small>at {html.escape(effort)} effort</small></div>\n'
             f'  <div class="why">{firsts}/{total} first-try prints &middot; '
             f"{_time_note(minutes, capped)}{_cost_note(dollars)}</div>\n"
@@ -439,10 +538,32 @@ def _chart(combos):
     return '<div class="chart">' + "".join(parts) + legend + "</div>"
 
 
-def _card(key, tasks):
+def _tone(score):
+    return "ok" if score >= 0.9 else "mid" if score >= 0.6 else "low"
+
+
+def _cells(tasks):
+    """Six squares, one per job in a fixed order, so every row's squares line up
+    into a scannable matrix; the tooltip names the job and its score."""
+    cells = []
+    for task, (title, _) in JOBS.items():
+        row = tasks.get(task)
+        if row is None:
+            cells.append(f'<i class="off" title="{html.escape(title)}: not yet run"></i>')
+        else:
+            pct = round(row["score"] * 100)
+            cells.append(
+                f'<i class="{_tone(row["score"])}" title="{html.escape(title)}: {pct}%"></i>'
+            )
+    return "".join(cells)
+
+
+def _row(rank, key, tasks):
     harness, model, effort = key
-    runs_on, verdict = VERDICTS.get(key, (f"{harness} harness", ""))
+    verdict = VERDICTS.get(key, "")
     firsts, total, minutes, capped, dollars = _stats(tasks)
+    rate = firsts / total if total else 0.0
+    plan, color = SUBSCRIPTIONS.get(harness, (harness, "var(--dim)"))
     bars = []
     for task in JOBS:
         name = html.escape(JOBS[task][0])
@@ -455,12 +576,22 @@ def _card(key, tasks):
         else:
             bars.append(f'<div class="name">{name}</div>{_bar(row["score"], row["scores"])}')
     verdict_html = f'\n  <p class="verdict">{html.escape(verdict)}</p>' if verdict else ""
-    return f"""<details class="card">
-  <summary><div class="top">
-    <span class="model">{html.escape(model)} <small>({html.escape(effort)} effort)</small></span>
-    <span class="runs">{html.escape(runs_on)}</span>
-    <span class="first">first-try prints <b>{firsts}/{total}</b> &middot; {_time_note(minutes, capped)}{_cost_note(dollars)}</span>
-  </div></summary>
+    tone = "" if rate >= 0.9 else ' class="mid"' if rate >= 0.6 else ' class="low"'
+    if dollars is None:
+        cost = "&mdash;"
+    else:
+        cost = f"~${dollars:.2f}" if dollars >= 0.10 else f"~${dollars:.3f}"
+    return f"""<details{' class="top"' if rank == 1 else ""}>
+  <summary>
+    <span class="rank">{rank}</span>
+    <span class="who"><span class="model">{html.escape(model)} <small>&middot; {html.escape(effort)}</small></span>
+      <span class="plan"><i style="background:{color}"></i>{html.escape(plan)}</span></span>
+    <span class="rate"><span class="rbar"><i{tone} style="width:{rate * 100:.0f}%"></i></span>
+      <span><b>{firsts}/{total}</b> &middot; {rate * 100:.0f}%</span></span>
+    <span class="cells">{_cells(tasks)}</span>
+    <span class="time" title="{html.escape(_time_note(minutes, capped))}">~{minutes:.0f}{"+" if capped else ""} min</span>
+    <span class="cost">{cost}</span>
+  </summary>
   <div class="body">{verdict_html}
   <div class="bars">
     {"".join(bars)}
@@ -477,22 +608,25 @@ def render(summary):
     combos = _combos(summary)
     if combos:
         answers = _answers(combos)
-        gap = html.escape(GAP_NOTE)
         chart = _chart(combos)
-        cards = "\n".join(_card(key, tasks) for key, tasks in combos)
+        rows = "\n".join(_row(i, key, tasks) for i, (key, tasks) in enumerate(combos, 1))
+        cards = (
+            '<div class="board">\n'
+            '<div class="hd"><span></span><span>model</span><span>first-try prints</span>'
+            '<span class="c4">jobs</span><span class="r">time</span><span class="r c6">$/part</span></div>\n'
+            f"{rows}\n</div>"
+        )
     else:
         answers = (
             '<div class="answer"><div class="have">No rows on file yet</div>'
             '<div class="pick">be the first</div>'
             '<div class="why">the one-liner below runs the benchmark on your own subscription and stages a submission</div></div>'
         )
-        gap = ""
         chart = '<p class="chart-lead">The chart appears with the first submitted rows.</p>'
         cards = '<p class="chart-lead">Nothing yet.</p>'
     page = HEAD  # plain token replacement: the CSS is full of braces str.format would eat
     for token, value in (
         ("{answers}", answers),
-        ("{gap_note}", gap),
         ("{chart}", chart),
         ("{jobs}", jobs),
         ("{cards}", cards),
