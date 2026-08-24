@@ -67,6 +67,12 @@ class ClaudeCode:
         for key in ("total_cost_usd", "num_turns", "duration_ms"):
             if key in result:
                 keep[key] = result[key]
+        # The models that actually served the session. --model accepts floating
+        # aliases ("opus"), and rows pool on the model string, so the resolved ids
+        # are what keeps two runs of an alias from pooling across a model release.
+        served = result.get("modelUsage")
+        if isinstance(served, dict) and served:
+            keep["models"] = sorted(served)
         tokens = result.get("usage") or {}
         if not isinstance(tokens, dict):
             return keep

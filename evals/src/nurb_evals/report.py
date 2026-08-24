@@ -62,16 +62,22 @@ def summarize(rows):
     prices = pricing.load()
     groups = {}
     for row in rows:
+        # The resolved ids are part of the identity: --model accepts floating
+        # aliases, and two runs of "opus" months apart can be different models.
+        # Rows recorded before the runner captured them carry an empty tuple and
+        # pool by label alone, as they always did.
         key = (
             row["task"], row["harness"], row.get("harness_version"),
             row["nurb_version"], row["benchmark_version"], row["benchmark_revision"],
             row["model"], row["effort"],
+            tuple((row.get("usage") or {}).get("models") or ()),
         )
         groups.setdefault(key, []).append(row)
 
     out = []
     for key, trials in groups.items():
-        task, harness, version, nurb_version, benchmark_version, revision, model, effort = key
+        (task, harness, version, nurb_version, benchmark_version, revision,
+         model, effort, resolved) = key
         scores = [t["score"] for t in trials]
         ok = [t for t in trials if built(t)]
         passes = sum(s >= PASS for s in scores)
@@ -85,6 +91,7 @@ def summarize(rows):
             "benchmark_version": benchmark_version,
             "benchmark_revision": revision,
             "model": model,
+            "resolved": list(resolved),
             "effort": effort,
             "trials": n,
             "score": _mean(scores),

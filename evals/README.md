@@ -30,19 +30,19 @@ The easy way is the wizard, from anywhere (or paste the line to your AI and let 
 curl -fsSL https://nurb.dev/bench.sh | sh
 ```
 
-It detects which agent CLIs you have, offers the models from a menu so you never guess a spelling, asks how many rounds to run and says why more rounds mean a steadier number, runs them on your subscription, sanitizes the artifacts, and then offers to open the pull request itself with the GitHub CLI: branch, commit, push, fork only if you lack push access, PR URL printed. Every run is its own uniquely named directory, branch, and PR, so run it as many times as you like, even concurrently: more runs mean tighter numbers, and matching rows pool on the leaderboard no matter which PR they arrived in. Agents and scripts can skip every question with flags: `uv run python -m nurb_evals.contribute --harness claude --model sonnet --effort medium --pr yes`.
+It detects which agent CLIs you have, offers the models from a menu so you never guess a spelling, asks how many rounds to run and says why more rounds mean a steadier number, runs them on your subscription, sanitizes the artifacts, and then offers to open the pull request itself with the GitHub CLI: branch, commit, push, fork only if you lack push access, PR URL printed. Every run is its own uniquely named directory, branch, and PR, so run it as many times as you like, even concurrently: more runs mean tighter numbers, and matching rows pool on the leaderboard no matter which PR they arrived in. Agents and scripts can skip every question with flags: `uv run python -m nurb_evals.contribute --harness claude --model claude-sonnet-5 --effort medium --pr yes`.
 
 The manual way needs `uv` and the `claude` or `codex` CLI installed and logged in to your own subscription. Then:
 
 ```
 cd evals
 uv sync --locked
-uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/cable_clip
-uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/bit_block
-uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/bundle_holder
-uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/pole_rest
-uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/valve_knob
-uv run python -m nurb_evals.run --harness claude --model opus --effort high --seed 13 --trials 3 --task tasks/leg_cup
+uv run python -m nurb_evals.run --harness claude --model claude-opus-5 --effort high --seed 13 --trials 3 --task tasks/cable_clip
+uv run python -m nurb_evals.run --harness claude --model claude-opus-5 --effort high --seed 13 --trials 3 --task tasks/bit_block
+uv run python -m nurb_evals.run --harness claude --model claude-opus-5 --effort high --seed 13 --trials 3 --task tasks/bundle_holder
+uv run python -m nurb_evals.run --harness claude --model claude-opus-5 --effort high --seed 13 --trials 3 --task tasks/pole_rest
+uv run python -m nurb_evals.run --harness claude --model claude-opus-5 --effort high --seed 13 --trials 3 --task tasks/valve_knob
+uv run python -m nurb_evals.run --harness claude --model claude-opus-5 --effort high --seed 13 --trials 3 --task tasks/leg_cup
 uv run python -m nurb_evals.report results/claude-opus-high
 ```
 

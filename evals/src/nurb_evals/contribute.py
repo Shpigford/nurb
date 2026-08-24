@@ -7,7 +7,7 @@ menu from the curated models.toml, runs the trials, sanitizes machine-specific p
 out of everything, stages the result under submissions/, and prints the two steps
 that remain. Every question has a flag, so an agent can run it non-interactively:
 
-    uv run python -m nurb_evals.contribute --harness claude --model fable --effort high
+    uv run python -m nurb_evals.contribute --harness claude --model claude-fable-5 --effort high
 """
 
 import argparse
@@ -40,6 +40,35 @@ def detected():
         if shutil.which(name):
             out.append((name, harnesses.version(name)))
     return out
+
+
+def flagship(name):
+    """The harness CLI's own top-listed model, for the staleness nudge: catalogs
+    list newest first, so a curated menu missing the top entry is out of date.
+    Older tiers we deliberately leave off the menu never trigger it. Best-effort:
+    claude has no list command, and any failure just skips the nudge."""
+    probes = {"codex": ["codex", "debug", "models"], "grok": ["grok", "models"]}
+    cmd = probes.get(name)
+    if not cmd:
+        return None
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if name == "codex":
+        try:
+            data = json.loads(out[out.index("{"):])
+        except ValueError:
+            return None
+        for m in data.get("models", []):
+            if m.get("visibility") == "list" and m.get("slug"):
+                return m["slug"]
+        return None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith(("*", "-")):
+            return line.lstrip("*- ").split()[0]
+    return None
 
 
 def ask(prompt, options, default=None):
@@ -156,6 +185,11 @@ def main():
         sys.exit(f"{name} is not on PATH on this machine.")
 
     menu = catalog().get(name, [])
+    newest = flagship(name)
+    if newest and newest not in {m["id"] for m in menu}:
+        print(f"\n  note: {name} now lists {newest}, which models.toml does not "
+              f"offer yet; pick \"another model\" to run it, and consider a PR "
+              f"updating the menu.")
     if args.model:
         model, efforts, default_effort = args.model, [], args.effort or "high"
         entry = next((m for m in menu if m["id"] == args.model), None)

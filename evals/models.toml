@@ -2,39 +2,69 @@
 # spelling. One entry per model a harness currently ships; the id is what the
 # harness CLI actually accepts, the label is what a person sees. Add a model here
 # when a harness ships it, and prune ids the CLI stops accepting.
+#
+# Ids are pinned, never floating aliases: the claude CLI accepts "opus" but that
+# alias resolves to a different model after every release, and rows pool on the id,
+# so an alias would silently mix models in one leaderboard row. The codex and grok
+# menus come from their CLIs' own catalogs (`codex debug models`, `grok models`),
+# which the wizard cross-checks at startup to catch this file going stale.
 
 [[claude]]
-id = "fable"
-label = "Claude Fable (flagship)"
+id = "claude-fable-5"
+label = "Claude Fable 5 (flagship)"
 efforts = ["low", "medium", "high", "xhigh", "max"]
 default_effort = "high"
 
 [[claude]]
-id = "opus"
-label = "Claude Opus"
+id = "claude-opus-5"
+label = "Claude Opus 5"
 efforts = ["low", "medium", "high", "xhigh", "max"]
 default_effort = "high"
 
 [[claude]]
-id = "sonnet"
-label = "Claude Sonnet"
+id = "claude-sonnet-5"
+label = "Claude Sonnet 5"
 efforts = ["low", "medium", "high", "xhigh", "max"]
 default_effort = "high"
 
 [[claude]]
-id = "haiku"
-label = "Claude Haiku (budget)"
+id = "claude-haiku-4-5-20251001"
+label = "Claude Haiku 4.5 (budget)"
 efforts = ["low", "medium", "high"]
 default_effort = "low"
 
 [[codex]]
+id = "gpt-5.6-sol"
+label = "GPT-5.6-Sol (frontier)"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "low"
+
+[[codex]]
+id = "gpt-5.6-terra"
+label = "GPT-5.6-Terra (balanced)"
+efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+default_effort = "medium"
+
+[[codex]]
+id = "gpt-5.6-luna"
+label = "GPT-5.6-Luna (budget)"
+efforts = ["low", "medium", "high", "xhigh", "max"]
+default_effort = "medium"
+
+[[codex]]
 id = "gpt-5.5"
-label = "GPT-5.5 (Codex)"
-efforts = ["low", "medium", "high"]
+label = "GPT-5.5"
+efforts = ["low", "medium", "high", "xhigh"]
 default_effort = "medium"
 
 [[grok]]
 id = "grok-4.6"
 label = "Grok 4.6"
+efforts = ["low", "medium", "high", "xhigh"]
+default_effort = "high"
+
+[[grok]]
+id = "grok-4.5"
+label = "Grok 4.5"
 efforts = ["low", "medium", "high", "xhigh"]
 default_effort = "high"

@@ -22,7 +22,10 @@ from test_runner import GOOD, SEED, Stub
 
 def test_catalog_offers_real_ids():
     book = contribute.catalog()
-    assert {m["id"] for m in book["claude"]} >= {"fable", "opus", "sonnet", "haiku"}
+    claude_ids = {m["id"] for m in book["claude"]}
+    assert {"claude-fable-5", "claude-opus-5", "claude-sonnet-5"} <= claude_ids
+    # Floating aliases would pool different models into one leaderboard row.
+    assert not claude_ids & {"fable", "opus", "sonnet", "haiku"}
     for entries in book.values():
         for entry in entries:
             assert entry["default_effort"] in entry["efforts"]

@@ -336,10 +336,13 @@ for (const b of document.querySelectorAll('[data-copy]')) {
 
 
 def _combos(summary):
-    """Fold per-task rows into one entry per harness+model+effort, best score first."""
+    """Fold per-task rows into one entry per harness+model+effort, best score first.
+    The resolved ids ride along in the key so two same-label groups (a floating
+    alias that served different models) never silently overwrite each other."""
     combos = {}
     for row in summary:
-        key = (row["harness"], row["model"], row["effort"])
+        key = (row["harness"], row["model"], row["effort"],
+               tuple(row.get("resolved") or ()))
         combos.setdefault(key, {})[row["task"]] = row
     order = []
     for key, tasks in combos.items():
@@ -405,7 +408,8 @@ def _answers(combos):
     for harness, (label, color) in SUBSCRIPTIONS.items():
         if harness not in best:
             continue
-        _, (h, model, effort), (firsts, total, minutes, capped, dollars) = best[harness]
+        _, key, (firsts, total, minutes, capped, dollars) = best[harness]
+        model, effort = key[1], key[2]
         cards.append(
             f'<div class="answer">\n'
             f'  <div class="have"><i style="background:{color}"></i>Have {html.escape(label)}?</div>\n'
@@ -428,7 +432,7 @@ def _chart(combos):
     pw, ph = width - left - right, height - top - bottom
 
     points = []
-    for (harness, model, effort), tasks in combos:
+    for (harness, model, effort, _), tasks in combos:
         firsts, total, minutes, capped, dollars = _stats(tasks)
         points.append(
             {
@@ -559,8 +563,8 @@ def _cells(tasks):
 
 
 def _row(rank, key, tasks):
-    harness, model, effort = key
-    verdict = VERDICTS.get(key, "")
+    harness, model, effort = key[:3]
+    verdict = VERDICTS.get(key[:3], "")
     firsts, total, minutes, capped, dollars = _stats(tasks)
     rate = firsts / total if total else 0.0
     plan, color = SUBSCRIPTIONS.get(harness, (harness, "var(--dim)"))
