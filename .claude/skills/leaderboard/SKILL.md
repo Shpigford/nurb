@@ -42,6 +42,6 @@ uv run python -m nurb_evals.report --write
 uv run python -m nurb_evals.site
 ```
 
-Open `site/benchmarks.html` in a browser and look at it before publishing: label collisions on the chart, a card wrapping badly, an empty state showing when rows exist. Screenshot, not DOM-query. Then a PR (never straight to main): the regenerated pair, any verdict edits, and a body that lists which runs were published and which were rejected with reasons. `uv run pytest -q` from `evals/` must be green.
+Open `site/benchmarks.html` in a browser and look at it before publishing: label collisions on the chart, a card wrapping badly, an empty state showing when rows exist. Screenshot, not DOM-query. Then a PR (never straight to main): the regenerated pair, any verdict edits, and a body that lists which runs were published and which were rejected with reasons. `uv run pytest -q tests/test_report.py tests/test_pricing.py tests/test_contribute.py` from `evals/` must be green; the full grading suite only guards scorer code, which this skill never touches.
 
 The page deploys with `site/` however the site deploys; this skill's job ends at the merged PR.
