@@ -63,14 +63,13 @@ SUBSCRIPTIONS = {
 # update alongside them. Combos without an entry render numbers-only. The plan label
 # always comes from SUBSCRIPTIONS, never from here, so rows stay consistent.
 VERDICTS = {
-    ("claude", "claude-fable-5", "high"): "Eighteen attempts, eighteen parts worth printing, both fit jobs included. It checked its own work in every one of them: it cuts the part open, measures what it just built, and fixes what it finds before it stops. The most expensive row on the board.",
+    ("claude", "claude-fable-5", "high"): "Twenty-four attempts, twenty-three parts worth printing. It checked its own work in every one of them: it cuts the part open, measures what it just built, and fixes what it finds before it stops. The one miss was a D-shaft knob with a socket that did not hold the stem. The most expensive row on the board.",
     ("claude", "sonnet", "xhigh"): "Right on all six jobs, and the slowest route there by a wide margin. One design job ran past forty minutes. Pick it when the part matters more than the wait.",
     ("grok", "grok-4.6", "high"): "Only three of the six jobs have been run at this effort, so this is an unfinished row rather than a clean sweep. It got those three right. The low-effort Grok row has the full set and is four times faster.",
     ("claude", "sonnet", "high"): "Right on eleven of twelve tries and honest about the unmeasured dimension. The one miss was a wall clip that came out slightly off its stated sizes, not a part that fails to print. Around thirteen minutes a part is the real cost here.",
     ("grok", "grok-4.6", "low"): "The value pick, and it is not close: seventeen of eighteen parts right, about two minutes each, for pennies. Both of the hard fit jobs came out right every time. Its one miss was a wall clip you could not get a screwdriver into.",
     ("claude", "opus", "low"): "One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.",
     ("claude", "sonnet", "medium"): "The same result as high effort, for about the same money and no faster, down to the same cable clip that stopped tracking its own dimensions. One design job ran fifty minutes. If you want Sonnet perfect, xhigh is the row that gets there.",
-    ("claude", "fable", "high"): "An older six-attempt run recorded under a floating model name, so which build of Fable actually ran is not on file. Its one miss was the D-shaft knob. The pinned Fable row at the top of this board is the current one, on three times the attempts.",
     ("claude", "sonnet", "low"): "Fast and cheap for a Claude plan, and it slips exactly where the jobs stop handing over dimensions: a wall clip with no way in for the screwdriver, a rest the pole could not drop into, a knob too narrow to turn. Fine for parts you spell out in full.",
     ("codex", "gpt-5.6-terra", "low"): "Everything it made built, and about half were worth printing. The pattern is a part that works at the size you stated and nowhere else: all three of its wall clips stopped fitting when the cable bundle changed, and one pole rest came out flat where the job needed a curve. It never once went back to measure what it had made.",
     ("codex", "gpt-5.6-luna", "low"): "Cheap, fast, and right five times out of eighteen. It wrote the pole's size straight into the file and still built a rest the pole would not drop into, at that size or any other. Elsewhere it left a 0.3mm wall no printer will lay down, and once wrote its guess at the unmeasured dimension down as though it had measured it.",
@@ -434,6 +433,85 @@ def _answers(combos):
     return "\n".join(cards)
 
 
+# 12px JetBrains Mono is monospace, so a label's width is its character count. Close
+# enough to reserve space with, which is all the placement below needs.
+_LABEL_ADVANCE = 7.05
+_DOT_GAP = 12
+_ARROW_GAP = 34
+
+
+def _label_sides(points, sx, sy, plot_left, plot_right):
+    """Which side of its dot each label sits on.
+
+    Three things want the space beside a dot: the label, its neighbours' labels, and
+    the effort line joining a model's own variants, which runs through the label's
+    row when it leaves at a shallow angle. Preference first, then the plot edges get
+    a veto, then one sweep resolves whatever still overlaps. A label that cannot go
+    anywhere clean keeps its preferred side, because a collision inside the plot
+    still reads better than a label hanging over the axis.
+    """
+    placed = {}
+    boxes = []
+    for p in points:
+        x, y = sx(p["minutes"]), sy(p["rate"])
+        width = len(f"{p['model']} \u00b7 {p['effort']}") * _LABEL_ADVANCE
+        crowd = any(
+            q is not p and abs(sy(q["rate"]) - y) < 16 and 0 < sx(q["minutes"]) - x < 170
+            for q in points
+        )
+        # The crowd rule only reaches 170px, and an effort line undercuts its label
+        # from any distance, so a same-model point to the right counts at any gap.
+        undercut = any(
+            q is not p
+            and (q["harness"], q["model"]) == (p["harness"], p["model"])
+            and abs(sy(q["rate"]) - y) < 20
+            and sx(q["minutes"]) > x
+            for q in points
+        )
+        boxes.append(
+            {
+                "point": p, "x": x, "y": y, "width": width,
+                "flip": crowd or undercut or x > plot_right - 140,
+            }
+        )
+
+    def span(box, flip):
+        if flip:
+            return box["x"] - _DOT_GAP - box["width"], box["x"] - _DOT_GAP
+        start = box["x"] + (_ARROW_GAP if box["point"]["capped"] else _DOT_GAP)
+        return start, start + box["width"]
+
+    def fits(box, flip):
+        lo, hi = span(box, flip)
+        return lo >= plot_left and hi <= plot_right
+
+    for box in boxes:
+        if not fits(box, box["flip"]) and fits(box, not box["flip"]):
+            box["flip"] = not box["flip"]
+
+    def collides(box, flip):
+        lo, hi = span(box, flip)
+        for other in boxes:
+            if other is box or abs(other["y"] - box["y"]) >= 11:
+                continue
+            if lo - 7 < other["x"] < hi + 7:  # someone else's dot inside this label
+                return True
+            olo, ohi = span(other, other["flip"])
+            if lo < ohi and olo < hi:
+                return True
+        return False
+
+    for box in boxes:
+        if collides(box, box["flip"]) and fits(box, not box["flip"]) \
+                and not collides(box, not box["flip"]):
+            box["flip"] = not box["flip"]
+
+    for box in boxes:
+        lo, hi = span(box, box["flip"])
+        placed[id(box["point"])] = (("end", hi) if box["flip"] else ("start", lo)) + (lo, hi)
+    return placed
+
+
 def _chart(combos):
     """One inline SVG: first-try rate against minutes per part, a labeled dot per
     combo, colored by subscription. Effort variants of the same model connect into
@@ -506,32 +584,12 @@ def _chart(combos):
                 f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2" opacity=".35"/>'
             )
 
+    sides = _label_sides(points, sx, sy, left, width - right)
+
     for p in points:
         x, y = sx(p["minutes"]), sy(p["rate"])
         color = SUBSCRIPTIONS.get(p["harness"], ("", "var(--dim)"))[1]
-        # Label side: flip left near the right edge or when a same-height neighbor
-        # sits close to the right; ink color, never the series color.
-        crowd = any(
-            q is not p
-            and abs(sy(q["rate"]) - y) < 16
-            and 0 < sx(q["minutes"]) - x < 170
-            for q in points
-        )
-        # An effort line to a same-model point on the right runs through the label's
-        # own row when it leaves at a shallow angle, and it does that at any
-        # distance, so the crowd rule's reach does not catch it. The label moves to
-        # the other side of the dot instead; a steep line clears the row on its own.
-        undercut = any(
-            q is not p
-            and (q["harness"], q["model"]) == (p["harness"], p["model"])
-            and abs(sy(q["rate"]) - y) < 20
-            and sx(q["minutes"]) > x
-            for q in points
-        )
-        flip = crowd or undercut or x > width - right - 140
-        # A capped point owns the space to its right (the floor arrow lives there),
-        # so its label starts past the arrowhead.
-        anchor, lx = ("end", x - 12) if flip else ("start", x + (34 if p["capped"] else 12))
+        anchor, lx, label_lo, label_hi = sides[id(p)]
         title = (
             f"{p['model']} ({p['effort']} effort): {p['firsts']}/{p['total']} first-try, "
             f"{_time_note(p['minutes'], p['capped'])}"
@@ -545,10 +603,13 @@ def _chart(combos):
         parts.append(
             f'<circle class="dot" cx="{x:.0f}" cy="{y:.0f}" r="6" fill="{color}" stroke="var(--panel)" stroke-width="2">'
             f"<title>{html.escape(title)}</title></circle>"
-            # An effort line runs between two dots of the same model and would
-            # otherwise strike through the left one's label; the halo masks it.
-            f'<text x="{lx:.0f}" y="{y + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)"'
-            f' stroke="var(--panel)" stroke-width="3.5" paint-order="stroke" stroke-linejoin="round">'
+            # An effort line runs between two dots of the same model and passes
+            # through the row of one of their labels. A glyph-hugging halo only masks
+            # it at the strokes and leaves it showing between letters, so the label
+            # gets a backing rect and reads as text on the panel, not text on a rule.
+            f'<rect x="{label_lo - 3:.0f}" y="{y - 7:.0f}" width="{label_hi - label_lo + 6:.0f}"'
+            f' height="14" fill="var(--panel)"/>'
+            f'<text x="{lx:.0f}" y="{y + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)">'
             f'{html.escape(p["model"])} <tspan fill="var(--dimmer)">&middot; {html.escape(p["effort"])}</tspan></text>'
         )
 
