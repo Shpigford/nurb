@@ -1,0 +1,4 @@
+[shank_diameter]
+value = 6.0
+unit = "mm"
+how = "calipers across a bit shank, 2026-08-20"
