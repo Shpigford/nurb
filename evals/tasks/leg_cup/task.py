@@ -155,11 +155,15 @@ def _missing(shape, probe):
     samples, and the whole class of cheats this task's verification pass found lived in
     exactly the space between one probe point and the next.
     """
+    # A probe built from a boolean can come back empty when the part is smaller than
+    # the region it describes, and build123d turns a moved empty Compound into a bare
+    # list. An empty probe region has no material to miss.
+    probe_volume = getattr(probe, "volume", 0.0)
     try:
         kept = shape & probe
-        return probe.volume - (kept.volume if kept is not None else 0.0)
+        return probe_volume - (kept.volume if kept is not None else 0.0)
     except Exception:
-        return probe.volume
+        return probe_volume
 
 
 def misfits(shape, dims):

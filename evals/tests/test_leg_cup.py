@@ -221,6 +221,29 @@ def test_measurement_probes_preserve_project_helpers(tmp_path):
     assert changed["shape"].bounding_box().size.Z == pytest.approx(4.0)
 
 
+def test_undersized_part_grades_instead_of_crashing():
+    """A cup with 1.0mm walls makes the wall-ring probe's outer box smaller than its
+    inner cutter. The subtraction comes back empty, and build123d turns the moved
+    empty Compound into a bare list; the grader once crashed on it (a real
+    gpt-5.6-luna submission). It must grade as a misfit, not a crash."""
+    from build123d import Align, Box, Pos
+
+    task = scoring.load_task(TASK)
+    inst = task.instance(SEED)
+    dims = inst.dims
+    outer = Box(
+        dims["leg_width"] + 2.4,
+        dims["leg_depth"] + 2.4,
+        11.5,
+        align=(Align.CENTER, Align.CENTER, Align.MIN),
+    )
+    pocket = Pos(0, 0, 3.5) * Box(
+        dims["pocket_x"], dims["pocket_y"], 8.0, align=(Align.CENTER, Align.CENTER, Align.MIN)
+    )
+    problems, _ = task.misfits(outer - pocket, dims)
+    assert any("bounding box" in text for text, _ in problems)
+
+
 def test_audit_judges_the_entry():
     from build123d import Box
 
