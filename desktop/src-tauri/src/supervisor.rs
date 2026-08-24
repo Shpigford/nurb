@@ -271,7 +271,7 @@ fn spawn_server(
     let process = command
         .spawn()
         .map_err(|e| format!("could not start nurb dev: {e}"))?;
-    let tree = ProcessTree::attach(&process);
+    let tree = ProcessTree::attach_owned(&process);
     let server = Arc::new(ProjectServer {
         child: Mutex::new(ManagedChild {
             process,
@@ -306,7 +306,7 @@ fn monitor_restarts(server: Arc<ProjectServer>, project: PathBuf, launcher: crat
                     .stderr(Stdio::inherit());
                 crate::proc::configure(&mut command);
                 let Ok(process) = command.spawn() else { return };
-                child.tree = ProcessTree::attach(&process);
+                child.tree = ProcessTree::attach_owned(&process);
                 child.process = process;
                 // Drain the replacement's stdout so the pipe never fills; the
                 // ready signal goes nowhere because nobody is waiting on it.
