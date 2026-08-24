@@ -102,7 +102,10 @@
   .chart .dot { transition: r .1s; }
   .chart .dot:hover { r: 8; }
   .board { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .board .hd, .board summary { display: grid; grid-template-columns: 2rem minmax(0,1.3fr) minmax(7.5rem,1fr) 7.5rem 5.2rem 5.8rem; gap: 1rem; align-items: center; padding: .7rem 1.1rem; }
+  /* The model column sizes to the longest pinned id, which is a dated one like
+     claude-haiku-4-5-20251001; wrap its effort onto a second line and that row
+     stands taller than every other. */
+  .board .hd, .board summary { display: grid; grid-template-columns: 2rem minmax(0,1.7fr) minmax(6.5rem,1fr) 7.5rem 5.2rem 5.8rem; gap: 1rem; align-items: center; padding: .7rem 1.1rem; }
   .board .hd { font-size: .72rem; color: var(--dimmer); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line); }
   .board .hd .r { text-align: right; }
   .board details { border-bottom: 1px solid var(--line); }
@@ -113,7 +116,7 @@
   .board details.top summary { box-shadow: inset 3px 0 0 var(--accent); }
   .rank { color: var(--dimmer); font-size: .85rem; }
   .top .rank { color: var(--accent); font-weight: 700; }
-  .who .model { font-weight: 700; }
+  .who .model { font-weight: 700; white-space: nowrap; }
   .who .model small { color: var(--dim); font-weight: 400; font-size: .82em; }
   .who .plan { font-size: .78rem; color: var(--dim); display: flex; align-items: center; gap: .4rem; }
   .who .plan i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
@@ -132,8 +135,18 @@
   .time, .cost { font-size: .85rem; color: var(--dim); text-align: right; white-space: nowrap; }
   .board .body { padding: .2rem 1.1rem 1.2rem 4.1rem; }
   @media (max-width: 720px) {
-    .board .hd, .board summary { grid-template-columns: 2rem minmax(0,1fr) minmax(6rem,1fr) 4.6rem; }
-    .cells, .cost, .board .hd .c4, .board .hd .c6 { display: none; }
+    /* A phone fits the rank, the model, and the number the board ranks on. Pinned
+       ids are long enough that keeping a fourth column here costs the model name
+       two extra wrapped lines, and every verdict that turns on speed says so in
+       words anyway. */
+    .board .hd, .board summary { grid-template-columns: 1.6rem minmax(0,1.5fr) minmax(4.5rem,1fr); gap: .6rem; padding: .7rem .8rem; }
+    /* Narrow enough that a dated model id cannot fit on one line, and holding it
+       there would scroll the page sideways. A taller row is the cheaper trade. */
+    .who .model { white-space: normal; }
+    /* Break before the separator, never after it: a line ending in a lone middot
+       reads as something the renderer dropped. */
+    .who .model small { white-space: nowrap; }
+    .cells, .cost, .time, .board .hd .c4, .board .hd .c5, .board .hd .c6 { display: none; }
     .board .body { padding-left: 1.1rem; }
   }
   .verdict { color: var(--dim); font: 14.5px/1.55 var(--sans); margin-bottom: .9rem; max-width: 680px; }
@@ -208,7 +221,7 @@
 <div class="answers">
 <div class="answer">
   <div class="have"><i style="background:#2f9fb5"></i>Have Claude?</div>
-  <div class="pick">run sonnet <small>at xhigh effort</small></div>
+  <div class="pick">run claude-sonnet-5 <small>at xhigh effort</small></div>
   <div class="why">12/12 first-try prints &middot; ~17 min/part &middot; ~$2.89/part at API rates</div>
 </div>
 <div class="answer">
@@ -227,11 +240,11 @@
 <h2>Every model, ranked.</h2>
 <p class="chart-lead">Ranked by how often parts print right the first time. The six squares are the six jobs below, green to red; a dashed square is a job not yet run. Click a row for the per-attempt detail.</p>
 <div class="board">
-<div class="hd"><span></span><span>model</span><span>first-try prints</span><span class="c4">jobs</span><span class="r">time</span><span class="r c6">$/part</span></div>
+<div class="hd"><span></span><span>model</span><span>first-try prints</span><span class="c4">jobs</span><span class="r c5">time</span><span class="r c6">$/part</span></div>
 <details class="top">
   <summary>
     <span class="rank">1</span>
-    <span class="who"><span class="model">sonnet <small>&middot; xhigh</small></span>
+    <span class="who"><span class="model">claude-sonnet-5 <small>&middot; xhigh</small></span>
       <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
     <span class="rate"><span class="rbar"><i style="width:100%"></i></span>
       <span><b>12/12</b> &middot; 100%</span></span>
@@ -267,24 +280,6 @@
 <details>
   <summary>
     <span class="rank">3</span>
-    <span class="who"><span class="model">sonnet <small>&middot; high</small></span>
-      <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
-    <span class="rate"><span class="rbar"><i style="width:92%"></i></span>
-      <span><b>11/12</b> &middot; 92%</span></span>
-    <span class="cells"><i class="ok" title="Follow the spec: 100%"></i><i class="ok" title="Survive the kernel: 100%"></i><i class="ok" title="Design from a problem: 97%"></i><i class="ok" title="Design a curve: 100%"></i><i class="ok" title="Make it fit: 100%"></i><i class="ok" title="Handle a missing measurement: 100%"></i></span>
-    <span class="time" title="~13 min/part">~13 min</span>
-    <span class="cost">~$2.19</span>
-  </summary>
-  <div class="body">
-  <p class="verdict">Right on eleven of twelve tries and honest about the unmeasured dimension. The one miss was a wall clip that came out slightly off its stated sizes, not a part that fails to print. Around thirteen minutes a part is the real cost here.</p>
-  <div class="bars">
-    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:97%"></i><u style="left:calc(96.7% - 1px)" title="attempt: 0.967"></u></div><div class="pct">97%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
-  </div>
-  </div>
-</details>
-<details>
-  <summary>
-    <span class="rank">4</span>
     <span class="who"><span class="model">claude-fable-5 <small>&middot; high</small></span>
       <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
     <span class="rate"><span class="rbar"><i style="width:96%"></i></span>
@@ -302,7 +297,7 @@
 </details>
 <details>
   <summary>
-    <span class="rank">5</span>
+    <span class="rank">4</span>
     <span class="who"><span class="model">grok-4.6 <small>&middot; low</small></span>
       <span class="plan"><i style="background:#b8bec9"></i>Grok</span></span>
     <span class="rate"><span class="rbar"><i style="width:94%"></i></span>
@@ -320,26 +315,26 @@
 </details>
 <details>
   <summary>
-    <span class="rank">6</span>
-    <span class="who"><span class="model">opus <small>&middot; low</small></span>
+    <span class="rank">5</span>
+    <span class="who"><span class="model">claude-sonnet-5 <small>&middot; high</small></span>
       <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
-    <span class="rate"><span class="rbar"><i class="mid" style="width:83%"></i></span>
-      <span><b>5/6</b> &middot; 83%</span></span>
-    <span class="cells"><i class="mid" title="Follow the spec: 74%"></i><i class="ok" title="Survive the kernel: 100%"></i><i class="ok" title="Design from a problem: 100%"></i><i class="ok" title="Design a curve: 100%"></i><i class="ok" title="Make it fit: 100%"></i><i class="ok" title="Handle a missing measurement: 100%"></i></span>
-    <span class="time" title="~4 min/part">~4 min</span>
-    <span class="cost">~$0.88</span>
+    <span class="rate"><span class="rbar"><i style="width:92%"></i></span>
+      <span><b>11/12</b> &middot; 92%</span></span>
+    <span class="cells"><i class="ok" title="Follow the spec: 100%"></i><i class="ok" title="Survive the kernel: 100%"></i><i class="ok" title="Design from a problem: 97%"></i><i class="ok" title="Design a curve: 100%"></i><i class="ok" title="Make it fit: 100%"></i><i class="ok" title="Handle a missing measurement: 100%"></i></span>
+    <span class="time" title="~13 min/part">~13 min</span>
+    <span class="cost">~$2.19</span>
   </summary>
   <div class="body">
-  <p class="verdict">One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.</p>
+  <p class="verdict">Right on eleven of twelve tries and honest about the unmeasured dimension. The one miss was a wall clip that came out slightly off its stated sizes, not a part that fails to print. Around thirteen minutes a part is the real cost here.</p>
   <div class="bars">
-    <div class="name">Follow the spec</div><div class="bar"><i class="mid" style="width:74%"></i><u style="left:calc(74.5% - 1px)" title="attempt: 0.745"></u></div><div class="pct">74%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+    <div class="name">Follow the spec</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:97%"></i><u style="left:calc(96.7% - 1px)" title="attempt: 0.967"></u></div><div class="pct">97%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
   </div>
   </div>
 </details>
 <details>
   <summary>
-    <span class="rank">7</span>
-    <span class="who"><span class="model">sonnet <small>&middot; medium</small></span>
+    <span class="rank">6</span>
+    <span class="who"><span class="model">claude-sonnet-5 <small>&middot; medium</small></span>
       <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
     <span class="rate"><span class="rbar"><i style="width:92%"></i></span>
       <span><b>11/12</b> &middot; 92%</span></span>
@@ -356,8 +351,26 @@
 </details>
 <details>
   <summary>
+    <span class="rank">7</span>
+    <span class="who"><span class="model">claude-opus-5 <small>&middot; low</small></span>
+      <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
+    <span class="rate"><span class="rbar"><i class="mid" style="width:83%"></i></span>
+      <span><b>5/6</b> &middot; 83%</span></span>
+    <span class="cells"><i class="mid" title="Follow the spec: 74%"></i><i class="ok" title="Survive the kernel: 100%"></i><i class="ok" title="Design from a problem: 100%"></i><i class="ok" title="Design a curve: 100%"></i><i class="ok" title="Make it fit: 100%"></i><i class="ok" title="Handle a missing measurement: 100%"></i></span>
+    <span class="time" title="~4 min/part">~4 min</span>
+    <span class="cost">~$0.88</span>
+  </summary>
+  <div class="body">
+  <p class="verdict">One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.</p>
+  <div class="bars">
+    <div class="name">Follow the spec</div><div class="bar"><i class="mid" style="width:74%"></i><u style="left:calc(74.5% - 1px)" title="attempt: 0.745"></u></div><div class="pct">74%</div><div class="name">Survive the kernel</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design from a problem</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Design a curve</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Make it fit</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div><div class="name">Handle a missing measurement</div><div class="bar"><i style="width:100%"></i><u style="left:calc(99.0% - 1px)" title="attempt: 1.000"></u></div><div class="pct">100%</div>
+  </div>
+  </div>
+</details>
+<details>
+  <summary>
     <span class="rank">8</span>
-    <span class="who"><span class="model">sonnet <small>&middot; low</small></span>
+    <span class="who"><span class="model">claude-sonnet-5 <small>&middot; low</small></span>
       <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
     <span class="rate"><span class="rbar"><i class="mid" style="width:75%"></i></span>
       <span><b>9/12</b> &middot; 75%</span></span>
@@ -411,7 +424,7 @@
 <details>
   <summary>
     <span class="rank">11</span>
-    <span class="who"><span class="model">haiku <small>&middot; low</small></span>
+    <span class="who"><span class="model">claude-haiku-4-5-20251001 <small>&middot; low</small></span>
       <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
     <span class="rate"><span class="rbar"><i class="low" style="width:20%"></i></span>
       <span><b>3/15</b> &middot; 20%</span></span>
@@ -429,7 +442,7 @@
 <details>
   <summary>
     <span class="rank">12</span>
-    <span class="who"><span class="model">haiku <small>&middot; high</small></span>
+    <span class="who"><span class="model">claude-haiku-4-5-20251001 <small>&middot; high</small></span>
       <span class="plan"><i style="background:#2f9fb5"></i>Claude</span></span>
     <span class="rate"><span class="rbar"><i class="low" style="width:17%"></i></span>
       <span><b>2/12</b> &middot; 17%</span></span>
@@ -449,7 +462,7 @@
 <div class="sec-label"><b>// 03</b> &nbsp;the tradeoff</div>
 <h2>Quality against speed.</h2>
 <p class="chart-lead">First-try print rate against minutes per part. Up and to the left is better.</p>
-<div class="chart"><svg viewBox="0 0 840 380" role="img" aria-label="First-try prints against minutes per part for every benchmarked model"><line x1="56" y1="334" x2="816" y2="334" stroke="var(--line)" stroke-width="1"/><text x="48" y="338" text-anchor="end" font-size="11" fill="var(--dimmer)">0%</text><line x1="56" y1="257" x2="816" y2="257" stroke="var(--line)" stroke-width="1"/><text x="48" y="261" text-anchor="end" font-size="11" fill="var(--dimmer)">25%</text><line x1="56" y1="180" x2="816" y2="180" stroke="var(--line)" stroke-width="1"/><text x="48" y="184" text-anchor="end" font-size="11" fill="var(--dimmer)">50%</text><line x1="56" y1="103" x2="816" y2="103" stroke="var(--line)" stroke-width="1"/><text x="48" y="107" text-anchor="end" font-size="11" fill="var(--dimmer)">75%</text><line x1="56" y1="26" x2="816" y2="26" stroke="var(--line)" stroke-width="1"/><text x="48" y="30" text-anchor="end" font-size="11" fill="var(--dimmer)">100%</text><line x1="165" y1="26" x2="165" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="165" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">3</text><line x1="273" y1="26" x2="273" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="273" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">6</text><line x1="382" y1="26" x2="382" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="382" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">9</text><line x1="490" y1="26" x2="490" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="490" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">12</text><line x1="599" y1="26" x2="599" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="599" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">15</text><line x1="707" y1="26" x2="707" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="707" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">18</text><line x1="816" y1="26" x2="816" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="816" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">21</text><text x="816" y="372" text-anchor="end" font-size="11" fill="var(--dim)">minutes per part &rarr;</text><text x="14" y="16" font-size="11" fill="var(--dim)">printed right first try</text><path d="M 260 103 L 510 52 L 538 52 L 686 26" fill="none" stroke="#2f9fb5" stroke-width="2" opacity=".35"/><path d="M 138 43 L 409 26" fill="none" stroke="#b8bec9" stroke-width="2" opacity=".35"/><path d="M 305 272 L 328 283" fill="none" stroke="#2f9fb5" stroke-width="2" opacity=".35"/><circle class="dot" cx="686" cy="26" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (xhigh effort): 12/12 first-try, ~17 min/part · ~$2.89/part at API rates</title></circle><rect x="572" y="19" width="105" height="14" fill="var(--panel)"/><text x="674" y="30" text-anchor="end" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; xhigh</tspan></text><circle class="dot" cx="409" cy="26" r="6" fill="#b8bec9" stroke="var(--panel)" stroke-width="2"><title>grok-4.6 (high effort): 3/3 first-try, ~10 min/part · ~$0.18/part at API rates</title></circle><rect x="418" y="19" width="112" height="14" fill="var(--panel)"/><text x="421" y="30" text-anchor="start" font-size="12" fill="var(--text)">grok-4.6 <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="510" cy="52" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (high effort): 11/12 first-try, ~13 min/part · ~$2.19/part at API rates</title></circle><rect x="404" y="45" width="98" height="14" fill="var(--panel)"/><text x="498" y="56" text-anchor="end" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="304" cy="39" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-fable-5 (high effort): 23/24 first-try, ~7 min/part · ~$3.20/part at API rates</title></circle><rect x="313" y="32" width="154" height="14" fill="var(--panel)"/><text x="316" y="43" text-anchor="start" font-size="12" fill="var(--text)">claude-fable-5 <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="138" cy="43" r="6" fill="#b8bec9" stroke="var(--panel)" stroke-width="2"><title>grok-4.6 (low effort): 17/18 first-try, ~2 min/part · ~$0.073/part at API rates</title></circle><rect x="147" y="36" width="105" height="14" fill="var(--panel)"/><text x="150" y="47" text-anchor="start" font-size="12" fill="var(--text)">grok-4.6 <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="208" cy="77" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>opus (low effort): 5/6 first-try, ~4 min/part · ~$0.88/part at API rates</title></circle><rect x="217" y="70" width="76" height="14" fill="var(--panel)"/><text x="220" y="81" text-anchor="start" font-size="12" fill="var(--text)">opus <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="538" cy="52" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (medium effort): 11/12 first-try, ~13 min/part · ~$2.10/part at API rates</title></circle><rect x="547" y="45" width="112" height="14" fill="var(--panel)"/><text x="550" y="56" text-anchor="start" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; medium</tspan></text><circle class="dot" cx="260" cy="103" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>sonnet (low effort): 9/12 first-try, ~6 min/part · ~$0.84/part at API rates</title></circle><rect x="269" y="96" width="91" height="14" fill="var(--panel)"/><text x="272" y="107" text-anchor="start" font-size="12" fill="var(--text)">sonnet <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="140" cy="163" r="6" fill="#8f75e0" stroke="var(--panel)" stroke-width="2"><title>gpt-5.6-terra (low effort): 10/18 first-try, ~2 min/part · ~$0.74/part at API rates</title></circle><rect x="149" y="156" width="140" height="14" fill="var(--panel)"/><text x="152" y="167" text-anchor="start" font-size="12" fill="var(--text)">gpt-5.6-terra <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="147" cy="248" r="6" fill="#8f75e0" stroke="var(--panel)" stroke-width="2"><title>gpt-5.6-luna (low effort): 5/18 first-try, ~3 min/part · ~$0.077/part at API rates</title></circle><rect x="156" y="241" width="133" height="14" fill="var(--panel)"/><text x="159" y="252" text-anchor="start" font-size="12" fill="var(--text)">gpt-5.6-luna <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="305" cy="272" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>haiku (low effort): 3/15 first-try, ~7 min/part · ~$0.43/part at API rates</title></circle><rect x="212" y="265" width="84" height="14" fill="var(--panel)"/><text x="293" y="276" text-anchor="end" font-size="12" fill="var(--text)">haiku <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="328" cy="283" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>haiku (high effort): 2/12 first-try, ~8 min/part · ~$0.46/part at API rates</title></circle><rect x="337" y="276" width="91" height="14" fill="var(--panel)"/><text x="340" y="287" text-anchor="start" font-size="12" fill="var(--text)">haiku <tspan fill="var(--dimmer)">&middot; high</tspan></text></svg><div class="chart-legend"><span><i style="background:#2f9fb5"></i>Claude</span><span><i style="background:#8f75e0"></i>ChatGPT (Codex)</span><span><i style="background:#b8bec9"></i>Grok</span></div></div>
+<div class="chart"><svg viewBox="0 0 840 380" role="img" aria-label="First-try prints against minutes per part for every benchmarked model"><line x1="56" y1="334" x2="816" y2="334" stroke="var(--line)" stroke-width="1"/><text x="48" y="338" text-anchor="end" font-size="11" fill="var(--dimmer)">0%</text><line x1="56" y1="257" x2="816" y2="257" stroke="var(--line)" stroke-width="1"/><text x="48" y="261" text-anchor="end" font-size="11" fill="var(--dimmer)">25%</text><line x1="56" y1="180" x2="816" y2="180" stroke="var(--line)" stroke-width="1"/><text x="48" y="184" text-anchor="end" font-size="11" fill="var(--dimmer)">50%</text><line x1="56" y1="103" x2="816" y2="103" stroke="var(--line)" stroke-width="1"/><text x="48" y="107" text-anchor="end" font-size="11" fill="var(--dimmer)">75%</text><line x1="56" y1="26" x2="816" y2="26" stroke="var(--line)" stroke-width="1"/><text x="48" y="30" text-anchor="end" font-size="11" fill="var(--dimmer)">100%</text><line x1="165" y1="26" x2="165" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="165" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">3</text><line x1="273" y1="26" x2="273" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="273" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">6</text><line x1="382" y1="26" x2="382" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="382" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">9</text><line x1="490" y1="26" x2="490" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="490" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">12</text><line x1="599" y1="26" x2="599" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="599" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">15</text><line x1="707" y1="26" x2="707" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="707" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">18</text><line x1="816" y1="26" x2="816" y2="334" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/><text x="816" y="352" text-anchor="middle" font-size="11" fill="var(--dimmer)">21</text><text x="816" y="372" text-anchor="end" font-size="11" fill="var(--dim)">minutes per part &rarr;</text><text x="14" y="16" font-size="11" fill="var(--dim)">printed right first try</text><path d="M 260 103 L 510 52 L 538 52 L 686 26" fill="none" stroke="#2f9fb5" stroke-width="2" opacity=".35"/><path d="M 138 43 L 409 26" fill="none" stroke="#b8bec9" stroke-width="2" opacity=".35"/><path d="M 305 272 L 328 283" fill="none" stroke="#2f9fb5" stroke-width="2" opacity=".35"/><circle class="dot" cx="686" cy="26" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-sonnet-5 (xhigh effort): 12/12 first-try, ~17 min/part · ~$2.89/part at API rates</title></circle><rect x="508" y="19" width="168" height="14" fill="var(--panel)"/><text x="674" y="30" text-anchor="end" font-size="12" fill="var(--text)">claude-sonnet-5 <tspan fill="var(--dimmer)">&middot; xhigh</tspan></text><circle class="dot" cx="409" cy="26" r="6" fill="#b8bec9" stroke="var(--panel)" stroke-width="2"><title>grok-4.6 (high effort): 3/3 first-try, ~10 min/part · ~$0.18/part at API rates</title></circle><rect x="289" y="19" width="112" height="14" fill="var(--panel)"/><text x="397" y="30" text-anchor="end" font-size="12" fill="var(--text)">grok-4.6 <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="304" cy="39" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-fable-5 (high effort): 23/24 first-try, ~7 min/part · ~$3.20/part at API rates</title></circle><rect x="313" y="32" width="154" height="14" fill="var(--panel)"/><text x="316" y="43" text-anchor="start" font-size="12" fill="var(--text)">claude-fable-5 <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="138" cy="43" r="6" fill="#b8bec9" stroke="var(--panel)" stroke-width="2"><title>grok-4.6 (low effort): 17/18 first-try, ~2 min/part · ~$0.073/part at API rates</title></circle><rect x="147" y="36" width="105" height="14" fill="var(--panel)"/><text x="150" y="47" text-anchor="start" font-size="12" fill="var(--text)">grok-4.6 <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="510" cy="52" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-sonnet-5 (high effort): 11/12 first-try, ~13 min/part · ~$2.19/part at API rates</title></circle><rect x="340" y="45" width="161" height="14" fill="var(--panel)"/><text x="498" y="56" text-anchor="end" font-size="12" fill="var(--text)">claude-sonnet-5 <tspan fill="var(--dimmer)">&middot; high</tspan></text><circle class="dot" cx="538" cy="52" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-sonnet-5 (medium effort): 11/12 first-try, ~13 min/part · ~$2.10/part at API rates</title></circle><rect x="547" y="45" width="175" height="14" fill="var(--panel)"/><text x="550" y="56" text-anchor="start" font-size="12" fill="var(--text)">claude-sonnet-5 <tspan fill="var(--dimmer)">&middot; medium</tspan></text><circle class="dot" cx="208" cy="77" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-opus-5 (low effort): 5/6 first-try, ~4 min/part · ~$0.88/part at API rates</title></circle><rect x="217" y="70" width="140" height="14" fill="var(--panel)"/><text x="220" y="81" text-anchor="start" font-size="12" fill="var(--text)">claude-opus-5 <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="260" cy="103" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-sonnet-5 (low effort): 9/12 first-try, ~6 min/part · ~$0.84/part at API rates</title></circle><rect x="269" y="96" width="154" height="14" fill="var(--panel)"/><text x="272" y="107" text-anchor="start" font-size="12" fill="var(--text)">claude-sonnet-5 <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="140" cy="163" r="6" fill="#8f75e0" stroke="var(--panel)" stroke-width="2"><title>gpt-5.6-terra (low effort): 10/18 first-try, ~2 min/part · ~$0.74/part at API rates</title></circle><rect x="149" y="156" width="140" height="14" fill="var(--panel)"/><text x="152" y="167" text-anchor="start" font-size="12" fill="var(--text)">gpt-5.6-terra <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="147" cy="248" r="6" fill="#8f75e0" stroke="var(--panel)" stroke-width="2"><title>gpt-5.6-luna (low effort): 5/18 first-try, ~3 min/part · ~$0.077/part at API rates</title></circle><rect x="156" y="241" width="133" height="14" fill="var(--panel)"/><text x="159" y="252" text-anchor="start" font-size="12" fill="var(--text)">gpt-5.6-luna <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="305" cy="272" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-haiku-4-5-20251001 (low effort): 3/15 first-try, ~7 min/part · ~$0.43/part at API rates</title></circle><rect x="71" y="265" width="225" height="14" fill="var(--panel)"/><text x="293" y="276" text-anchor="end" font-size="12" fill="var(--text)">claude-haiku-4-5-20251001 <tspan fill="var(--dimmer)">&middot; low</tspan></text><circle class="dot" cx="328" cy="283" r="6" fill="#2f9fb5" stroke="var(--panel)" stroke-width="2"><title>claude-haiku-4-5-20251001 (high effort): 2/12 first-try, ~8 min/part · ~$0.46/part at API rates</title></circle><rect x="337" y="276" width="232" height="14" fill="var(--panel)"/><text x="340" y="287" text-anchor="start" font-size="12" fill="var(--text)">claude-haiku-4-5-20251001 <tspan fill="var(--dimmer)">&middot; high</tspan></text></svg><div class="chart-legend"><span><i style="background:#2f9fb5"></i>Claude</span><span><i style="background:#8f75e0"></i>ChatGPT (Codex)</span><span><i style="background:#b8bec9"></i>Grok</span></div></div>
 
 <div class="sec-label"><b>// 04</b> &nbsp;the jobs</div>
 <h2>Six jobs, graded on geometry.</h2>

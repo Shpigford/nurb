@@ -64,17 +64,17 @@ SUBSCRIPTIONS = {
 # always comes from SUBSCRIPTIONS, never from here, so rows stay consistent.
 VERDICTS = {
     ("claude", "claude-fable-5", "high"): "Twenty-four attempts, twenty-three parts worth printing. It checked its own work in every one of them: it cuts the part open, measures what it just built, and fixes what it finds before it stops. The one miss was a D-shaft knob with a socket that did not hold the stem. The most expensive row on the board.",
-    ("claude", "sonnet", "xhigh"): "Right on all six jobs, and the slowest route there by a wide margin. One design job ran past forty minutes. Pick it when the part matters more than the wait.",
+    ("claude", "claude-sonnet-5", "xhigh"): "Right on all six jobs, and the slowest route there by a wide margin. One design job ran past forty minutes. Pick it when the part matters more than the wait.",
     ("grok", "grok-4.6", "high"): "Only three of the six jobs have been run at this effort, so this is an unfinished row rather than a clean sweep. It got those three right. The low-effort Grok row has the full set and is four times faster.",
-    ("claude", "sonnet", "high"): "Right on eleven of twelve tries and honest about the unmeasured dimension. The one miss was a wall clip that came out slightly off its stated sizes, not a part that fails to print. Around thirteen minutes a part is the real cost here.",
+    ("claude", "claude-sonnet-5", "high"): "Right on eleven of twelve tries and honest about the unmeasured dimension. The one miss was a wall clip that came out slightly off its stated sizes, not a part that fails to print. Around thirteen minutes a part is the real cost here.",
     ("grok", "grok-4.6", "low"): "The value pick, and it is not close: seventeen of eighteen parts right, about two minutes each, for pennies. Both of the hard fit jobs came out right every time. Its one miss was a wall clip you could not get a screwdriver into.",
-    ("claude", "opus", "low"): "One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.",
-    ("claude", "sonnet", "medium"): "The same result as high effort, for about the same money and no faster, down to the same cable clip that stopped tracking its own dimensions. One design job ran fifty minutes. If you want Sonnet perfect, xhigh is the row that gets there.",
-    ("claude", "sonnet", "low"): "Fast and cheap for a Claude plan, and it slips exactly where the jobs stop handing over dimensions: a wall clip with no way in for the screwdriver, a rest the pole could not drop into, a knob too narrow to turn. Fine for parts you spell out in full.",
+    ("claude", "claude-opus-5", "low"): "One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.",
+    ("claude", "claude-sonnet-5", "medium"): "The same result as high effort, for about the same money and no faster, down to the same cable clip that stopped tracking its own dimensions. One design job ran fifty minutes. If you want Sonnet perfect, xhigh is the row that gets there.",
+    ("claude", "claude-sonnet-5", "low"): "Fast and cheap for a Claude plan, and it slips exactly where the jobs stop handing over dimensions: a wall clip with no way in for the screwdriver, a rest the pole could not drop into, a knob too narrow to turn. Fine for parts you spell out in full.",
     ("codex", "gpt-5.6-terra", "low"): "Everything it made built, and about half were worth printing. The pattern is a part that works at the size you stated and nowhere else: all three of its wall clips stopped fitting when the cable bundle changed, and one pole rest came out flat where the job needed a curve. It never once went back to measure what it had made.",
     ("codex", "gpt-5.6-luna", "low"): "Cheap, fast, and right five times out of eighteen. It wrote the pole's size straight into the file and still built a rest the pole would not drop into, at that size or any other. Elsewhere it left a 0.3mm wall no printer will lay down, and once wrote its guess at the unmeasured dimension down as though it had measured it.",
-    ("claude", "haiku", "low"): "Fine when you spell every dimension out, and cheap. Asked to design, it produced parts you would not print: it came apart on all three design jobs, with walls and sockets that break the printability rules outright. It did handle the missing measurement honestly.",
-    ("claude", "haiku", "high"): "The weakest row here, and the extra effort did not help. Two parts of twelve came out right. It also wrote its guess at the unmeasured dimension down as though it had measured it, which is the mistake nobody catches until the print is wrong six months later.",
+    ("claude", "claude-haiku-4-5-20251001", "low"): "Fine when you spell every dimension out, and cheap. Asked to design, it produced parts you would not print: it came apart on all three design jobs, with walls and sockets that break the printability rules outright. It did handle the missing measurement honestly.",
+    ("claude", "claude-haiku-4-5-20251001", "high"): "The weakest row here, and the extra effort did not help. Two parts of twelve came out right. It also wrote its guess at the unmeasured dimension down as though it had measured it, which is the mistake nobody catches until the print is wrong six months later.",
 }
 
 HEAD = """\
@@ -182,7 +182,10 @@ HEAD = """\
   .chart .dot { transition: r .1s; }
   .chart .dot:hover { r: 8; }
   .board { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  .board .hd, .board summary { display: grid; grid-template-columns: 2rem minmax(0,1.3fr) minmax(7.5rem,1fr) 7.5rem 5.2rem 5.8rem; gap: 1rem; align-items: center; padding: .7rem 1.1rem; }
+  /* The model column sizes to the longest pinned id, which is a dated one like
+     claude-haiku-4-5-20251001; wrap its effort onto a second line and that row
+     stands taller than every other. */
+  .board .hd, .board summary { display: grid; grid-template-columns: 2rem minmax(0,1.7fr) minmax(6.5rem,1fr) 7.5rem 5.2rem 5.8rem; gap: 1rem; align-items: center; padding: .7rem 1.1rem; }
   .board .hd { font-size: .72rem; color: var(--dimmer); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line); }
   .board .hd .r { text-align: right; }
   .board details { border-bottom: 1px solid var(--line); }
@@ -193,7 +196,7 @@ HEAD = """\
   .board details.top summary { box-shadow: inset 3px 0 0 var(--accent); }
   .rank { color: var(--dimmer); font-size: .85rem; }
   .top .rank { color: var(--accent); font-weight: 700; }
-  .who .model { font-weight: 700; }
+  .who .model { font-weight: 700; white-space: nowrap; }
   .who .model small { color: var(--dim); font-weight: 400; font-size: .82em; }
   .who .plan { font-size: .78rem; color: var(--dim); display: flex; align-items: center; gap: .4rem; }
   .who .plan i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
@@ -212,8 +215,18 @@ HEAD = """\
   .time, .cost { font-size: .85rem; color: var(--dim); text-align: right; white-space: nowrap; }
   .board .body { padding: .2rem 1.1rem 1.2rem 4.1rem; }
   @media (max-width: 720px) {
-    .board .hd, .board summary { grid-template-columns: 2rem minmax(0,1fr) minmax(6rem,1fr) 4.6rem; }
-    .cells, .cost, .board .hd .c4, .board .hd .c6 { display: none; }
+    /* A phone fits the rank, the model, and the number the board ranks on. Pinned
+       ids are long enough that keeping a fourth column here costs the model name
+       two extra wrapped lines, and every verdict that turns on speed says so in
+       words anyway. */
+    .board .hd, .board summary { grid-template-columns: 1.6rem minmax(0,1.5fr) minmax(4.5rem,1fr); gap: .6rem; padding: .7rem .8rem; }
+    /* Narrow enough that a dated model id cannot fit on one line, and holding it
+       there would scroll the page sideways. A taller row is the cheaper trade. */
+    .who .model { white-space: normal; }
+    /* Break before the separator, never after it: a line ending in a lone middot
+       reads as something the renderer dropped. */
+    .who .model small { white-space: nowrap; }
+    .cells, .cost, .time, .board .hd .c4, .board .hd .c5, .board .hd .c6 { display: none; }
     .board .body { padding-left: 1.1rem; }
   }
   .verdict { color: var(--dim); font: 14.5px/1.55 var(--sans); margin-bottom: .9rem; max-width: 680px; }
@@ -343,9 +356,14 @@ for (const b of document.querySelectorAll('[data-copy]')) {
 
 
 def _combos(summary):
-    """Fold per-task rows into one entry per harness+model+effort, best score first.
-    The resolved ids ride along in the key so two same-label groups (a floating
-    alias that served different models) never silently overwrite each other."""
+    """Fold per-task rows into one entry per harness+model+effort, best first.
+
+    Ordered by first-try rate, because that is the number the board leads with and
+    what the page tells the reader the ranking means. Mean score breaks ties, so two
+    models that print the same fraction of parts first time are separated by how
+    close the misses came. The resolved ids ride along in the key so two same-label
+    groups (a floating alias that served different models) never silently overwrite
+    each other."""
     combos = {}
     for row in summary:
         key = (row["harness"], row["model"], row["effort"],
@@ -353,9 +371,10 @@ def _combos(summary):
         combos.setdefault(key, {})[row["task"]] = row
     order = []
     for key, tasks in combos.items():
+        firsts, total, _, _, _ = _stats(tasks)
         mean = sum(r["score"] for r in tasks.values()) / len(tasks)
-        order.append((mean, key, tasks))
-    order.sort(key=lambda item: -item[0])
+        order.append(((firsts / total if total else 0.0, mean), key, tasks))
+    order.sort(key=lambda item: (-item[0][0], -item[0][1]))
     return [(key, tasks) for _, key, tasks in order]
 
 
@@ -705,7 +724,7 @@ def render(summary):
         cards = (
             '<div class="board">\n'
             '<div class="hd"><span></span><span>model</span><span>first-try prints</span>'
-            '<span class="c4">jobs</span><span class="r">time</span><span class="r c6">$/part</span></div>\n'
+            '<span class="c4">jobs</span><span class="r c5">time</span><span class="r c6">$/part</span></div>\n'
             f"{rows}\n</div>"
         )
     else:
