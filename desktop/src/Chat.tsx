@@ -1,4 +1,5 @@
 import {
+  ClipboardEvent,
   FormEvent,
   KeyboardEvent,
   useCallback,
@@ -13,7 +14,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { IconChevronDown, IconMessagePlus, IconPaperclip } from "./Icons";
 import Markdown from "./Markdown";
 import { playChime, shouldPlayCompletionChime } from "./chime";
-import { restoreDraftFiles, restoreDraftText } from "./chatDraft";
+import { AttachmentDraft, restoreDraftText } from "./chatDraft";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
@@ -181,6 +182,11 @@ function Chat({
   const [permissions, setPermissions] = useState<Permission[]>([]);
   // Absolute paths; the Rust side reads them at send time.
   const [attachments, setAttachments] = useState<string[]>([]);
+  const attachmentDraftRef = useRef<AttachmentDraft | null>(null);
+  if (!attachmentDraftRef.current) {
+    attachmentDraftRef.current = new AttachmentDraft(setAttachments);
+  }
+  const attachmentDraft = attachmentDraftRef.current;
   const [dropping, setDropping] = useState(false);
   // The model and effort this conversation runs on. Empty before the agent has
   // ever reported its lists, which is only ever the first chat on this Mac.
@@ -282,13 +288,13 @@ function Chat({
       if (event.payload.type === "drop") {
         setDropping(false);
         const paths = event.payload.paths;
-        setAttachments((list) => [...new Set([...list, ...paths])]);
+        attachmentDraft.add(paths);
       }
     });
     return () => {
       unlisten.then((stop) => stop());
     };
-  }, [hidden]);
+  }, [hidden, attachmentDraft]);
 
   const applyEvent = useCallback((event: ChatEvent) => {
     switch (event.type) {
@@ -522,7 +528,7 @@ function Chat({
           if (inputRef.current) {
             inputRef.current.value = restoreDraftText(text, inputRef.current.value);
           }
-          setAttachments((draftFiles) => restoreDraftFiles(files, draftFiles));
+          attachmentDraft.restore(files);
           setAuthNeeded(true);
         } else {
           setItems((list) => [...list, { kind: "note", text: message }]);
@@ -537,10 +543,10 @@ function Chat({
         if (shouldPlayCompletionChime(completed, Date.now() - startedAt)) playChime();
       }
     },
-    [ensureSession, part],
+    [ensureSession, part, attachmentDraft],
   );
 
-  const submit = (event: FormEvent<HTMLFormElement>) => {
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const box = inputRef.current;
     const text = box?.value.trim() ?? "";
@@ -548,22 +554,53 @@ function Chat({
     // and a double send would spawn a second adapter. A photo alone is a
     // legitimate message ("model this"), so attachments count as content.
     if (
-      (!text && attachments.length === 0) ||
+      (!text && !attachmentDraft.hasContent) ||
       sendingRef.current ||
       starting ||
       startRef.current
     )
       return;
+    // Reserve the turn before waiting: a second Enter must not queue another
+    // send while a pasted image is still crossing the IPC boundary.
+    sendingRef.current = true;
     if (box) box.value = "";
-    setAttachments([]);
-    send(text, attachments);
+    const files = await attachmentDraft.take();
+    if (!text && files.length === 0) {
+      sendingRef.current = false;
+      return;
+    }
+    send(text, files);
   };
 
   const attach = async () => {
     const picked = await open({ multiple: true, title: "Attach files" });
     if (!picked) return;
     const paths = Array.isArray(picked) ? picked : [picked];
-    setAttachments((list) => [...new Set([...list, ...paths])]);
+    attachmentDraft.add(paths);
+  };
+
+  // A pasted image (a screenshot, or an image copied from another app) has no
+  // path, so the backend writes it to a temporary file that attaches like a
+  // dropped one. Consuming the paste keeps a copied file's name out of the text.
+  const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const images = Array.from(event.clipboardData.items)
+      .filter((item) => item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((blob): blob is File => blob !== null);
+    if (images.length === 0) return;
+    event.preventDefault();
+    const saved = Promise.all(
+      images.map((blob) =>
+        blob.arrayBuffer().then((bytes) =>
+          invoke<string>("save_pasted_image", new Uint8Array(bytes), {
+            headers: { mime: blob.type },
+          }),
+        ),
+      ),
+    );
+    attachmentDraft.track(saved).catch((e) =>
+      setItems((list) => [...list, { kind: "note", text: String(e) }]),
+    );
   };
 
   const keydown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -828,9 +865,7 @@ function Chat({
                   type="button"
                   className="chat-attachment-remove"
                   aria-label={`remove ${basename(path)}`}
-                  onClick={() =>
-                    setAttachments((list) => list.filter((p) => p !== path))
-                  }
+                  onClick={() => attachmentDraft.remove(path)}
                 >
                   ×
                 </button>
@@ -853,6 +888,7 @@ function Chat({
           rows={2}
           disabled={starting}
           onKeyDown={keydown}
+          onPaste={paste}
         />
         <div className="chat-composer-controls">
           <button

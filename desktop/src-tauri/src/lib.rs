@@ -279,6 +279,53 @@ async fn create_part(app: AppHandle, path: String, name: String) -> Result<Strin
     Ok(part.replace('-', "_"))
 }
 
+/// A pasted image has no path for the attachment list, so it lands in a
+/// temporary file first. Each paste gets its own directory so the friendly
+/// filename never collides across pastes.
+#[tauri::command]
+fn save_pasted_image(request: tauri::ipc::Request) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected raw image bytes".into());
+    };
+    let mime = request.headers().get("mime").and_then(|m| m.to_str().ok());
+    Ok(write_pasted_image(mime, bytes)?
+        .to_string_lossy()
+        .into_owned())
+}
+
+fn write_pasted_image(mime: Option<&str>, bytes: &[u8]) -> Result<PathBuf, String> {
+    // Keep the real type: attachment_block embeds the formats agents support
+    // and links everything else. Renaming TIFF or HEIC bytes to PNG makes an
+    // invalid embedded image instead of a readable file attachment.
+    let extension = match mime {
+        Some("image/png") => "png",
+        Some("image/jpeg") => "jpg",
+        Some("image/gif") => "gif",
+        Some("image/webp") => "webp",
+        Some("image/tiff") => "tiff",
+        Some("image/bmp") => "bmp",
+        Some("image/avif") => "avif",
+        Some("image/heic") => "heic",
+        Some("image/heif") => "heif",
+        Some("image/svg+xml") => "svg",
+        Some("image/x-icon") | Some("image/vnd.microsoft.icon") => "ico",
+        Some(other) => return Err(format!("cannot paste {other} images")),
+        None => return Err("pasted image has no type".into()),
+    };
+    let dir = std::env::temp_dir().join(format!(
+        "nurb-paste-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not save pasted image: {e}"))?;
+    let path = dir.join(format!("pasted-image.{extension}"));
+    std::fs::write(&path, bytes).map_err(|e| format!("could not save pasted image: {e}"))?;
+    Ok(path)
+}
+
 #[tauri::command]
 async fn list_parts(app: AppHandle, path: String) -> Result<serde_json::Value, String> {
     let project = PathBuf::from(path);
@@ -499,6 +546,7 @@ pub fn run() {
             create_part,
             delete_part,
             list_parts,
+            save_pasted_image,
             acp::start_chat,
             acp::list_sessions,
             acp::send_prompt,
@@ -528,8 +576,37 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::registry::Registry;
-    use super::{part_views, project_base, register_projects_in_folder, seed_part_name};
+    use super::{
+        part_views, project_base, register_projects_in_folder, seed_part_name, write_pasted_image,
+    };
     use std::path::PathBuf;
+
+    #[test]
+    fn pasted_images_land_in_unique_files_with_honest_extensions() {
+        let png = write_pasted_image(Some("image/png"), b"png bytes").unwrap();
+        assert_eq!(png.file_name().unwrap(), "pasted-image.png");
+        assert_eq!(std::fs::read(&png).unwrap(), b"png bytes");
+
+        let jpg = write_pasted_image(Some("image/jpeg"), b"jpg bytes").unwrap();
+        assert_eq!(jpg.file_name().unwrap(), "pasted-image.jpg");
+        // Two pastes in one session must not overwrite each other.
+        assert_ne!(png.parent(), jpg.parent());
+
+        // Finder preserves native image bytes, so non-embeddable types must
+        // retain an honest extension and travel as file links.
+        let odd = write_pasted_image(Some("image/tiff"), b"bytes").unwrap();
+        assert_eq!(odd.file_name().unwrap(), "pasted-image.tiff");
+        assert!(write_pasted_image(Some("image/vnd.unknown"), b"bytes")
+            .unwrap_err()
+            .contains("cannot paste"));
+        assert!(write_pasted_image(None, b"bytes")
+            .unwrap_err()
+            .contains("no type"));
+
+        for path in [png, jpg, odd] {
+            std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
 
     #[test]
     fn seed_part_names_survive_becoming_identifiers() {
