@@ -106,6 +106,61 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
     assert "skip if you have push access" in printed
 
 
+def test_wizard_asks_for_rounds_and_says_why(tmp_path, monkeypatch, capsys):
+    """With a terminal and no --trials, the wizard asks how many rounds and gives
+    the reason (more rounds, steadier average). Typing past the menu into 'another
+    number' runs exactly that many rounds."""
+    root = tmp_path / "evals"
+    (root / "tasks").mkdir(parents=True)
+    real = contribute.EVALS
+    shutil.copy(real / "models.toml", root / "models.toml")
+    os.symlink(real / "tasks" / "cable_clip", root / "tasks" / "cable_clip")
+
+    monkeypatch.setattr(contribute, "EVALS", root)
+    which = contribute.shutil.which
+    monkeypatch.setattr(
+        contribute.shutil,
+        "which",
+        lambda name: "/usr/bin/true" if name == "stub" else which(name),
+    )
+    monkeypatch.setitem(harnesses.HARNESSES, "stub", Stub(GOOD))
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    answers = iter(["4", "2"])  # menu: another number; then the number itself
+    asked = []
+
+    def scripted(prompt=""):
+        asked.append(prompt)
+        return next(answers)
+
+    monkeypatch.setattr("builtins.input", scripted)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "contribute",
+            "--harness", "stub",
+            "--model", "stub-model",
+            "--effort", "low",
+            "--tasks", "cable_clip",
+            "--seed", str(SEED),
+            "--pr", "no",
+        ],
+    )
+    contribute.main()
+
+    printed = capsys.readouterr().out
+    assert any("How many rounds" in prompt for prompt in asked)
+    assert "steadier average" in printed, "the wizard explains why rounds matter"
+    assert "another number" in printed, "an exact count is always available"
+    sub = next((root / "submissions").glob("stub-stub-model-low-*"))
+    rows = [
+        json.loads(line)
+        for line in (sub / "results.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(rows) == 2, "two rounds were asked for, two rows exist"
+
+
 def test_open_pr_drives_git_and_gh_end_to_end(tmp_path, monkeypatch):
     """The wizard owns the submission: branch from origin's main, commit only this
     run's directory, push, PR. Faked git/gh log every invocation and pr create

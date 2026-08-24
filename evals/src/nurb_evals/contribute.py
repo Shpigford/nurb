@@ -120,7 +120,12 @@ def main():
     ap.add_argument("--harness", choices=sorted(harnesses.HARNESSES))
     ap.add_argument("--model")
     ap.add_argument("--effort")
-    ap.add_argument("--trials", type=int, default=1)
+    ap.add_argument(
+        "--trials",
+        type=int,
+        default=None,
+        help="rounds per job; the wizard asks when omitted (default there: 1)",
+    )
     ap.add_argument("--tasks", default=",".join(TASKS), help="comma-separated, default all")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--timeout", type=float, default=3600.0)
@@ -175,6 +180,39 @@ def main():
     )
 
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
+
+    # Rounds are the sample size: scores vary run to run, and the leaderboard pools
+    # every submitted trial, so more rounds tighten this model's number. The wizard
+    # says why so the choice is informed, not a magic knob. Scripted runs (no
+    # terminal) keep the old behavior: one round unless --trials says otherwise.
+    if args.trials is None and not sys.stdin.isatty():
+        trials = 1
+    elif args.trials is None:
+        print(
+            "\nEach round is one fresh attempt at every job. Scores vary between"
+            "\nattempts, so more rounds mean a steadier average on the leaderboard;"
+            "\none round is still a valid contribution, and later runs pool with it."
+            f"\nBallpark {len(tasks) * 8} minutes of agent time per round."
+        )
+        trials = ask(
+            "How many rounds",
+            [
+                (1, "1 round: a quick single sample"),
+                (3, "3 rounds: a steady average"),
+                (5, "5 rounds: tight error bars"),
+                (None, "another number (type it)"),
+            ],
+            default=1,
+        )
+        if trials is None:
+            try:
+                trials = int(input("rounds: ").strip() or "1")
+            except (EOFError, ValueError):
+                sys.exit("\nCould not read a number; pass --trials instead.")
+    else:
+        trials = args.trials
+    if trials < 1:
+        sys.exit("--trials must be at least 1")
     # Every run gets its own directory, branch, and PR: the same person running the
     # same combo ten times, or in three sessions at once, produces ten independent
     # pure-addition PRs that merge in any order with zero conflicts. Matching rows
@@ -184,9 +222,9 @@ def main():
     run_name = f"{label}-{run_id}"
     out = EVALS / "results" / run_name
     out.mkdir(parents=True, exist_ok=True)
-    minutes = len(tasks) * args.trials * 8
+    minutes = len(tasks) * trials * 8
     print(
-        f"\nRunning {model} at {effort} effort: {args.trials} trial(s) on "
+        f"\nRunning {model} at {effort} effort: {trials} round(s) on "
         f"{len(tasks)} job(s), on your own {name} subscription. Ballpark "
         f"{minutes} minutes of agent time; slow models can take much longer.\n"
     )
@@ -195,7 +233,7 @@ def main():
     staged = []
     with open(out / "results.jsonl", "a", encoding="utf-8") as sink:
         for task in tasks:
-            for _ in range(args.trials):
+            for _ in range(trials):
                 n = next_trial(out, task)
                 print(f"[{task} trial {n}] running...", flush=True)
                 row = completed_trial(
