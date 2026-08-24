@@ -33,6 +33,43 @@ def catalog():
     return tomllib.loads((EVALS / "models.toml").read_text(encoding="utf-8"))
 
 
+def board_counts(root=None):
+    """Pooled trial counts per (harness, model, effort), read from the merged
+    submissions in this checkout. bench.sh pulls before running, so this is the
+    leaderboard's current state with no network and nothing separate to go stale."""
+    counts = {}
+    for path in sorted(((root or EVALS) / "submissions").glob("*/results.jsonl")):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            key = (row.get("harness"), row.get("model"), row.get("effort"))
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def most_needed(book, counts, installed):
+    """The menu entry the leaderboard needs most: fewest pooled trials at the
+    entry's default effort, among the harnesses on this machine. Ties fall to
+    menu order, which lists flagships first. Returns (harness, entry, count),
+    or None when nothing installed has a menu."""
+    best = None
+    for name in installed:
+        for position, entry in enumerate(book.get(name, [])):
+            count = counts.get((name, entry["id"], entry["default_effort"]), 0)
+            rank = (count, position)
+            if best is None or rank < best[0]:
+                best = (rank, name, entry)
+    return (best[1], best[2], best[0][0]) if best else None
+
+
+def runs_note(count):
+    return "no runs on the board yet" if count == 0 else f"{count} run{'s' if count != 1 else ''} on the board"
+
+
 def detected():
     """Harnesses actually on this machine, with versions."""
     out = []
@@ -167,6 +204,8 @@ def main():
     args = ap.parse_args()
 
     print("\nnurb benchmark contribution\n———————————————————————————")
+    counts = board_counts()
+    picked = None  # a most-needed pick answers harness, model, and effort at once
     if args.harness:
         name = args.harness
     else:
@@ -177,10 +216,20 @@ def main():
                 "(https://claude.com/claude-code), codex (https://openai.com/codex), "
                 "or grok (https://x.ai), sign in, and rerun."
             )
+        needed = most_needed(catalog(), counts, [n for n, _ in have])
+        options = [(n, f"{n} ({v})") for n, v in have]
+        if needed:
+            nname, nentry, ncount = needed
+            options.insert(0, ("needed", (
+                f"whatever helps the board most: {nentry['label']} on {nname} "
+                f"at {nentry['default_effort']} effort ({runs_note(ncount)})"
+            )))
         name = ask(
-            "Which AI do you want to benchmark", [(n, f"{n} ({v})") for n, v in have],
-            default=have[0][0] if len(have) == 1 else None,
+            "Which AI do you want to benchmark", options,
+            default="needed" if needed else (have[0][0] if len(have) == 1 else None),
         )
+        if name == "needed":
+            name, picked = nname, nentry
     if not shutil.which(name):
         sys.exit(f"{name} is not on PATH on this machine.")
 
@@ -195,8 +244,13 @@ def main():
         entry = next((m for m in menu if m["id"] == args.model), None)
         if entry:
             efforts, default_effort = entry["efforts"], entry["default_effort"]
+    elif picked:
+        model, efforts, default_effort = picked["id"], picked["efforts"], picked["default_effort"]
     else:
-        options = [(m, m["label"]) for m in menu] + [(None, "another model (type its id)")]
+        def label(m):
+            total = sum(v for (h, i, _), v in counts.items() if (h, i) == (name, m["id"]))
+            return f"{m['label']} ({runs_note(total)})"
+        options = [(m, label(m)) for m in menu] + [(None, "another model (type its id)")]
         entry = ask("Which model", options)
         if entry is None:
             try:
@@ -208,9 +262,9 @@ def main():
             model, efforts, default_effort = entry["id"], entry["efforts"], entry["default_effort"]
 
     effort = args.effort or (
-        ask("Thinking effort", [(e, e) for e in efforts], default=default_effort)
-        if efforts
-        else default_effort
+        default_effort
+        if picked or not efforts
+        else ask("Thinking effort", [(e, e) for e in efforts], default=default_effort)
     )
 
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]

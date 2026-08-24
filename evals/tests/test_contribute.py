@@ -31,6 +31,69 @@ def test_catalog_offers_real_ids():
             assert entry["default_effort"] in entry["efforts"]
 
 
+def test_most_needed_ranks_empty_rows_first(tmp_path):
+    sub = tmp_path / "submissions" / "claude-opus-high-abc123"
+    sub.mkdir(parents=True)
+    rows = [{"harness": "claude", "model": "claude-opus-5", "effort": "high"}] * 2
+    (sub / "results.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+
+    counts = contribute.board_counts(root=tmp_path)
+    assert counts == {("claude", "claude-opus-5", "high"): 2}
+
+    book = {
+        "claude": [
+            {"id": "claude-opus-5", "label": "Opus", "efforts": ["high"], "default_effort": "high"},
+            {"id": "claude-sonnet-5", "label": "Sonnet", "efforts": ["high"], "default_effort": "high"},
+        ],
+        "codex": [{"id": "gpt", "label": "GPT", "efforts": ["medium"], "default_effort": "medium"}],
+    }
+    # sonnet has no rows yet; codex is not installed, so its empty row cannot win
+    assert contribute.most_needed(book, counts, ["claude"])[1]["id"] == "claude-sonnet-5"
+    # ties fall to menu order, which lists flagships first
+    assert contribute.most_needed(book, {}, ["claude"])[1]["id"] == "claude-opus-5"
+    assert contribute.most_needed(book, counts, []) is None
+
+
+def test_wizard_offers_the_most_needed_pick(tmp_path, monkeypatch, capsys):
+    """The first menu option answers harness, model, and effort in one keystroke
+    with the combo holding the fewest pooled trials, so the paste-the-curl-line
+    path produces the row the leaderboard actually needs."""
+    root = tmp_path / "evals"
+    (root / "tasks").mkdir(parents=True)
+    real = contribute.EVALS
+    os.symlink(real / "tasks" / "cable_clip", root / "tasks" / "cable_clip")
+    (root / "models.toml").write_text(
+        '[[stub]]\nid = "stub-model"\nlabel = "Stub Model"\n'
+        'efforts = ["low", "high"]\ndefault_effort = "low"\n'
+    )
+
+    monkeypatch.setattr(contribute, "EVALS", root)
+    which = contribute.shutil.which
+    monkeypatch.setattr(
+        contribute.shutil,
+        "which",
+        lambda name: "/usr/bin/true" if name == "stub" else which(name),
+    )
+    monkeypatch.setitem(harnesses.HARNESSES, "stub", Stub(GOOD))
+    monkeypatch.setattr(contribute, "detected", lambda: [("stub", "1.0")])
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    answers = iter(["1", "1"])  # the most-needed pick; then one round
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["contribute", "--tasks", "cable_clip", "--seed", str(SEED), "--pr", "no"],
+    )
+    contribute.main()
+
+    printed = capsys.readouterr().out
+    assert "helps the board most" in printed
+    assert "no runs on the board yet" in printed
+    sub = next((root / "submissions").glob("stub-stub-model-low-*"))
+    row = json.loads((sub / "results.jsonl").read_text().splitlines()[0])
+    assert (row["model"], row["effort"]) == ("stub-model", "low")
+
+
 def test_sanitize_scrubs_longest_first(tmp_path):
     pairs = contribute.replacements(tmp_path / "project")
     dirty = f"built at {tmp_path}/project/parts/x.py in {pathlib.Path.home()}"
