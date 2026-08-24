@@ -288,7 +288,7 @@ async fn agent_sessions(
     let (stdin, stdout, stderr, child) = agent
         .spawn_process()
         .map_err(|error| friendly(kind, error))?;
-    let tree = crate::proc::ProcessTree::attach_pid(child.id());
+    let tree = crate::proc::ProcessTree::attach_pid_owned(child.id());
     drain_stderr(kind, stderr);
     let listed = tokio::time::timeout(
         Duration::from_secs(60),
@@ -1199,7 +1199,7 @@ async fn run_chat(
             return;
         }
     };
-    let tree = crate::proc::ProcessTree::attach_pid(child.id());
+    let tree = crate::proc::ProcessTree::attach_pid_owned(child.id());
     drain_stderr(kind, stderr);
 
     let counter = AtomicU32::new(1);

@@ -302,7 +302,7 @@ fn probe_output(
             return Err(format!("it did not start: {e}"));
         }
     };
-    let tree = ProcessTree::attach(&child);
+    let tree = ProcessTree::attach_owned(&child);
     let deadline = Instant::now() + timeout;
     // Ok(()) ran clean, Err(Some(status)) exited badly, Err(None) timed out.
     let result: Result<(), Option<std::process::ExitStatus>> = loop {
@@ -700,7 +700,7 @@ fn run_step(
     let mut child = command
         .spawn()
         .map_err(|e| format!("could not start {what}: {e}"))?;
-    let tree = ProcessTree::attach(&child);
+    let tree = ProcessTree::attach_owned(&child);
     *provisioner.tree.lock().unwrap() = Some(tree.clone());
     // A shutdown can land between the check above and the spawn; now that the
     // tree is published, re-check so that window cannot leak the child.
