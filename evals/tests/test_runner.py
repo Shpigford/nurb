@@ -196,6 +196,62 @@ def test_an_agent_that_writes_nothing_scores_zero(tmp_path):
     assert "no part file" in row["error"]
 
 
+class Mortal(Stub):
+    """An 'agent' the machine kills until a marker says enough sessions died.
+    Models the real failure this guards against: an updater or reaper sending
+    SIGTERM to a working session partway through a trial."""
+
+    def __init__(self, marker, deaths, source=GOOD):
+        super().__init__(source)
+        self.marker = marker
+        self.deaths = deaths
+
+    def command(self, prompt, model=None, effort=None, instructions=None):
+        plant = super().command(prompt, model=model, effort=effort, instructions=instructions)
+        script = (
+            "import pathlib, sys\n"
+            f"m = pathlib.Path({str(self.marker)!r})\n"
+            "count = int(m.read_text()) if m.exists() else 0\n"
+            f"if count < {self.deaths}:\n"
+            "    m.write_text(str(count + 1))\n"
+            "    sys.exit(143)\n"
+            f"exec({plant[-1]!r})\n"
+        )
+        return ["python", "-c", script]
+
+
+def test_a_killed_session_is_never_scored(tmp_path):
+    """SIGTERM mid-session produced real 0.0 rows that measured the machine, not
+    the model. A killed session must raise instead of scoring, keep its corpse for
+    audit, and leave the trial slot free for the retry."""
+    import pytest
+
+    with pytest.raises(runner.HarnessKilled):
+        runner.trial(Mortal(tmp_path / "deaths", deaths=99), TASK, SEED, 1, tmp_path)
+    assert not (tmp_path / "cable_clip" / "trial_1").exists()
+    grave = tmp_path / "cable_clip" / "trial_1_killed_1"
+    assert (grave / "transcript.txt").exists()
+    assert (grave / "project" / "measurements.toml").is_file()
+
+
+def test_a_killed_session_is_retried_fresh(tmp_path):
+    harness = Mortal(tmp_path / "deaths", deaths=1)
+    row = runner.completed_trial(harness, TASK, SEED, 1, tmp_path)
+    assert row["score"] == 1.0
+    assert (tmp_path / "cable_clip" / "trial_1_killed_1").exists()
+    assert (tmp_path / "cable_clip" / "trial_1" / "transcript.txt").exists()
+
+
+def test_persistent_kills_abort_the_run(tmp_path):
+    import pytest
+
+    with pytest.raises(RuntimeError, match="killed"):
+        runner.completed_trial(Mortal(tmp_path / "deaths", deaths=99), TASK, SEED, 1, tmp_path)
+    graves = sorted((tmp_path / "cable_clip").glob("trial_1_killed_*"))
+    assert len(graves) == runner.KILL_RETRIES + 1
+    assert not (tmp_path / "cable_clip" / "trial_1").exists()
+
+
 def test_rows_carry_the_matrix_identity(tmp_path):
     row = runner.trial(Stub(GOOD), TASK, SEED, 2, tmp_path, model="some-model", effort="high")
     assert (row["harness"], row["model"], row["effort"]) == ("stub", "some-model", "high")

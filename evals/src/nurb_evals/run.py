@@ -122,6 +122,43 @@ def _invoke(cmd, *, cwd, env, timeout):
         return process.returncode, stdout or "", stderr or "", True
 
 
+class HarnessKilled(RuntimeError):
+    """The agent process died by an external signal: no row exists for this trial."""
+
+
+KILL_RETRIES = 2  # fresh sessions to try after a killed one, before giving up
+
+
+def _grave(task_out, n):
+    """A unique resting place for a killed session, next to the trial slots but
+    never mistaken for one: the slot stays free for the retry, and the dead
+    session stays auditable."""
+    k = 1
+    while (task_out / f"trial_{n}_killed_{k}").exists():
+        k += 1
+    grave = task_out / f"trial_{n}_killed_{k}"
+    grave.mkdir(parents=True)
+    return grave
+
+
+def completed_trial(h, task_dir, seed, n, out, **kwargs):
+    """One row from one finished agent session. A killed session is never scored:
+    the trial reruns fresh, and persistent kills abort the run loudly instead of
+    writing rows that measure the machine."""
+    for attempt in range(KILL_RETRIES + 1):
+        try:
+            return trial(h, task_dir, seed, n, out, **kwargs)
+        except HarnessKilled as killed:
+            last = killed
+            if attempt < KILL_RETRIES:
+                print(f"trial {n}: {killed}; retrying with a fresh session", flush=True)
+    raise RuntimeError(
+        f"trial {n}: {KILL_RETRIES + 1} agent sessions in a row were killed "
+        f"({last}); something on this machine is terminating agents, fix that "
+        f"and rerun"
+    )
+
+
 def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=3600.0):
     task = scoring.load_task(task_dir)
     benchmark = scoring.benchmark_identity(task_dir)
@@ -164,6 +201,20 @@ def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=3600.0):
                     cmd, cwd=project, env=clean_env, timeout=timeout,
                 )
         harness_s = round(time.monotonic() - started, 1)
+
+        # A session the machine killed mid-run (an updater cycling instances, a
+        # process reaper, a closed shell) measures the environment, not the model,
+        # so it never becomes a row. Direct signal deaths report a negative code;
+        # CLIs that catch the signal exit 128 plus its number. The runner's own
+        # wall-clock kill is excluded: a timeout is deliberate and stays a row.
+        if not timed_out and (returncode < 0 or returncode >= 128):
+            grave = _grave(out / task_name, n)
+            shutil.move(str(project), grave / "project")
+            (grave / "transcript.txt").write_text(stdout, encoding="utf-8")
+            raise HarnessKilled(
+                f"{h.name} was killed mid-session (exit {returncode}); "
+                f"the dead session is kept at {grave} and was not scored"
+            )
 
         # The model must not run below the benchmark checkout, where walking to a
         # parent reveals the task scorer and reference solutions. Keep the resulting
@@ -235,7 +286,7 @@ def main():
     scores = []
     with open(out / "results.jsonl", "a", encoding="utf-8") as sink:
         for n in range(1, args.trials + 1):
-            row = trial(
+            row = completed_trial(
                 h, args.task, args.seed, n, out,
                 model=args.model, effort=args.effort, timeout=args.timeout,
             )

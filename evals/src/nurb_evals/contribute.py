@@ -22,7 +22,7 @@ import sys
 import tomllib
 
 from . import harness as harnesses
-from .run import trial
+from .run import completed_trial
 
 EVALS = pathlib.Path(__file__).parents[2]
 TASKS = ("cable_clip", "bit_block", "bundle_holder", "pole_rest", "valve_knob", "leg_cup")
@@ -198,7 +198,7 @@ def main():
             for _ in range(args.trials):
                 n = next_trial(out, task)
                 print(f"[{task} trial {n}] running...", flush=True)
-                row = trial(
+                row = completed_trial(
                     h, EVALS / "tasks" / task, args.seed, n, out,
                     model=model, effort=effort, timeout=args.timeout,
                 )
