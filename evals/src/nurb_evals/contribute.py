@@ -183,6 +183,15 @@ def stage_submission(out, label, task, n):
     return dst
 
 
+def progress(done, total, width=18):
+    """A bar plus a count, printed with every trial line so the last line on
+    screen always says how far along the run is, even when a single trial sits
+    silent for an hour."""
+    filled = round(width * done / total)
+    bar = style("█" * filled, GREEN) + style("░" * (width - filled), DIM)
+    return f"{bar} {style(f'{done}/{total}', BOLD)}"
+
+
 def next_trial(out, task):
     """Continue numbering after earlier local runs instead of refusing the slot."""
     n = 1
@@ -334,21 +343,24 @@ def main():
 
     h = harnesses.HARNESSES[name]
     staged = []
+    total = len(tasks) * trials
+    done = 0
     with open(out / "results.jsonl", "a", encoding="utf-8") as sink:
         for task in tasks:
             for _ in range(trials):
                 n = next_trial(out, task)
                 tag = style(f"[{task} trial {n}]", CYAN)
-                print(f"{tag} {style('running...', DIM)}", flush=True)
+                print(f"{progress(done, total)} {tag} {style('running...', DIM)}", flush=True)
                 row = completed_trial(
                     h, EVALS / "tasks" / task, args.seed, n, out,
                     model=model, effort=effort, timeout=args.timeout,
                 )
                 sink.write(json.dumps(row) + "\n")
                 sink.flush()
+                done += 1
                 note = style(f"  ({row['error']})", RED) if row["error"] else ""
                 score = style(f"{row['score']:.3f}", RED if row["error"] else GREEN, BOLD)
-                print(f"{tag} score {score}{note}", flush=True)
+                print(f"{progress(done, total)} {tag} score {score}{note}", flush=True)
                 staged.append(stage_submission(out, run_name, task, n))
 
     # The staged submission needs the matching rows; sanitize the whole file so a

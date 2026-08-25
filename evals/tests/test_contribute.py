@@ -166,6 +166,10 @@ def test_wizard_runs_and_stages_a_sanitized_submission(tmp_path, monkeypatch, ca
             assert str(pathlib.Path.home()) not in staged.read_text(errors="replace")
 
     printed = capsys.readouterr().out
+    # The last line on screen always carries the run's progress, so a person
+    # glancing at a long run never has to count finished trials by hand.
+    assert "░░░░░░░░░░░░░░░░░░ 0/1" in printed
+    assert "██████████████████ 1/1" in printed
     assert "Staged in this checkout" in printed and str(root) in printed
     assert f"benchmark run: {sub.name}" in printed
     assert f"git add evals/submissions/{sub.name}" in printed
