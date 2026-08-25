@@ -1,0 +1,15 @@
+[leg_width]
+value = 22.0
+unit = "mm"
+how = "calipers across the short leg, 2026-08-02"
+
+[leg_depth]
+value = 18.5
+unit = "mm"
+how = "calipers along the short leg, 2026-08-02"
+
+[lift]
+value = 3.5
+unit = "mm"
+how = "estimated from the shim that fell out; expected between 2.0 and 5.0 mm, 2026-08-24"
+provisional = true
