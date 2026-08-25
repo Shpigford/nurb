@@ -287,10 +287,13 @@ def main():
     if model in RETIRED:
         sys.exit(f"{model} is retired from the benchmark; the leaderboard no longer accepts its rows.")
 
+    def effort_label(e):
+        return f"{e} {style(f'({runs_note(counts.get((name, model, e), 0))})', DIM)}"
+
     effort = args.effort or (
         default_effort
         if picked or not efforts
-        else ask("Thinking effort", [(e, e) for e in efforts], default=default_effort)
+        else ask("Thinking effort", [(e, effort_label(e)) for e in efforts], default=default_effort)
     )
 
     tasks = [t.strip() for t in args.tasks.split(",") if t.strip()]
