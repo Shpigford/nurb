@@ -1,0 +1,15 @@
+[leg_width]
+value = 22.0
+unit = "mm"
+how = "calipers across the short leg, 2026-08-02"
+
+[leg_depth]
+value = 18.5
+unit = "mm"
+how = "calipers along the short leg, 2026-08-02"
+
+[lift]
+value = 3.5
+unit = "mm"
+how = "estimated from the fallen shim; exact wobble correction is unavailable until the bench can be checked"
+provisional = true

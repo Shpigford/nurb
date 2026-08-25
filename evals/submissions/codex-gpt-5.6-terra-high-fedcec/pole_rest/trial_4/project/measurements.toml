@@ -1,0 +1,4 @@
+[pole_diameter]
+value = 20.0
+unit = "mm"
+how = "calipers across the sanded pole, 2026-08-21"
