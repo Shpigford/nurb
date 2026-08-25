@@ -1,0 +1,9 @@
+[pole_diameter]
+value = 20.0
+unit = "mm"
+how = "calipers across the sanded pole, 2026-08-21"
+
+[pole_axis_height]
+value = 18.0
+unit = "mm"
+how = "the bench row's fixed interface: every rest sets the pole's axis this high, stated 2026-08-24"

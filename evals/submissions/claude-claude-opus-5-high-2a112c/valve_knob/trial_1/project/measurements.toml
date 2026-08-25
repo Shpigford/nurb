@@ -1,0 +1,14 @@
+[shaft_diameter]
+value = 8.0
+unit = "mm"
+how = "calipers across the stem, 2026-08-21"
+
+[shaft_across_flat]
+value = 6.5
+unit = "mm"
+how = "calipers from the flat to the round side, 2026-08-21"
+
+[stem_length]
+value = 12.0
+unit = "mm"
+how = "stated by the owner: the stem stands 12.0mm proud of the valve body, 2026-08-24"
