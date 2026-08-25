@@ -9,8 +9,10 @@ use std::thread;
 use std::time::Duration;
 
 const DEFAULT_PORT: u16 = 7373;
-// The first build absorbs the cold OCCT import, which alone takes ~45 seconds.
-const READY_TIMEOUT: Duration = Duration::from_secs(180);
+// The first build absorbs the cold OCCT import, which alone takes ~45 seconds on an
+// idle machine and stretched past two minutes on a loaded one (issue #202), so the
+// deadline leaves room for a busy machine rather than killing a nearly-ready server.
+const READY_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub struct Supervisor {
     state: Mutex<SupervisorState>,
@@ -113,22 +115,37 @@ impl Supervisor {
     }
 
     fn start(&self, project: &Path) -> Result<Arc<ProjectServer>, String> {
-        let mut attempt = self.spawn(project)?;
-        if let Err(first) = wait_ready(&attempt) {
-            // A port grabbed between our probe and the bind is a hard exit
-            // (cli.py treats an explicitly asked-for taken port as an error),
-            // so one respawn on a fresh port covers the race.
-            kill_tree(&attempt);
-            if self.is_shutting_down() {
-                return Err("app is shutting down".into());
-            }
-            attempt = self.spawn(project)?;
-            if let Err(second) = wait_ready(&attempt) {
+        let attempt = self.spawn(project)?;
+        let first = match wait_ready(&attempt) {
+            Ok(()) => return Ok(attempt),
+            // A timed-out server is almost always a slow one, not a dead one
+            // (issue #202: a loaded machine stretched the cold OCCT import past
+            // two minutes); killing it to start over just pays the same cost
+            // again, so a timeout is a plain error, never a respawn.
+            Err(NotReady::TimedOut) => {
                 kill_tree(&attempt);
-                return Err(format!("{first}; retry: {second}"));
+                return Err(format!(
+                    "nurb dev did not become ready within {}s",
+                    READY_TIMEOUT.as_secs()
+                ));
+            }
+            Err(NotReady::Exited(reason)) => reason,
+        };
+        // A port grabbed between our probe and the bind is a hard exit
+        // (cli.py treats an explicitly asked-for taken port as an error),
+        // so one respawn on a fresh port covers the race.
+        kill_tree(&attempt);
+        if self.is_shutting_down() {
+            return Err("app is shutting down".into());
+        }
+        let attempt = self.spawn(project)?;
+        match wait_ready(&attempt) {
+            Ok(()) => Ok(attempt),
+            Err(second) => {
+                kill_tree(&attempt);
+                Err(format!("{first}; retry: {}", second.message()))
             }
         }
-        Ok(attempt)
     }
 
     /// Claim a port and publish the child while holding the shared state lock.
@@ -256,7 +273,26 @@ fn spawn_server(
     }))
 }
 
-fn wait_ready(server: &ProjectServer) -> Result<(), String> {
+enum NotReady {
+    /// The child died before printing its URL: a port race or a broken env.
+    Exited(String),
+    /// Still alive, just not ready yet.
+    TimedOut,
+}
+
+impl NotReady {
+    fn message(&self) -> String {
+        match self {
+            Self::Exited(reason) => reason.clone(),
+            Self::TimedOut => format!(
+                "nurb dev did not become ready within {}s",
+                READY_TIMEOUT.as_secs()
+            ),
+        }
+    }
+}
+
+fn wait_ready(server: &ProjectServer) -> Result<(), NotReady> {
     let stdout = server
         .child
         .lock()
@@ -264,16 +300,13 @@ fn wait_ready(server: &ProjectServer) -> Result<(), String> {
         .process
         .stdout
         .take()
-        .ok_or("child stdout missing")?;
+        .ok_or_else(|| NotReady::Exited("child stdout missing".into()))?;
     let (tx, rx) = mpsc::channel();
     drain_stdout(stdout, server.port, tx);
     match rx.recv_timeout(READY_TIMEOUT) {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(_) => Err(format!(
-            "nurb dev did not become ready within {}s",
-            READY_TIMEOUT.as_secs()
-        )),
+        Ok(Err(e)) => Err(NotReady::Exited(e)),
+        Err(_) => Err(NotReady::TimedOut),
     }
 }
 

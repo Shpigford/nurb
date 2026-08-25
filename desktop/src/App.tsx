@@ -111,6 +111,28 @@ function DeleteHints({ places }: { places: string[] }) {
   );
 }
 
+// The engine's cold start runs a heavy geometry-kernel import that can take minutes
+// on a busy machine, and a static message over an empty window reads as a frozen app
+// (issue #202: killed and reopened three times while the engine was still starting).
+// A ticking count is the proof of life; the second line sets an honest expectation.
+function EngineStarting() {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="viewer-status">
+      starting the CAD engine…
+      {seconds >= 10 && (
+        <div className="viewer-status-detail">
+          {seconds}s — a cold start can take a few minutes when the computer is busy
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Which assemblies place each part. Every assembly already carries its `uses`, so
 // the other direction is a read of the list the rail has, not a second server call.
 function placedInMap(parts: Part[]) {
@@ -1401,7 +1423,7 @@ function App() {
             }
           />
         ) : active && opening[active] ? (
-          <div className="viewer-status">starting the CAD engine…</div>
+          <EngineStarting />
         ) : (
           <div className="viewer-status">
             {projectsLoaded && projects.length === 0
