@@ -19,6 +19,10 @@ from . import pricing
 # parameters. Matches the fairness suite's bar for the reference solution.
 PASS = 0.99
 
+# Models pulled from the board. Their submissions stay committed as the audit
+# trail, but no report, benchmarks page, or wizard run touches them again.
+RETIRED = {"grok-4.5", "gpt-5.5"}
+
 
 def rows_from(paths):
     for raw in paths:
@@ -28,7 +32,9 @@ def rows_from(paths):
         with open(path, encoding="utf-8") as source:
             for line in source:
                 if line.strip():
-                    yield json.loads(line)
+                    row = json.loads(line)
+                    if row["model"] not in RETIRED:
+                        yield row
 
 
 def built(row):

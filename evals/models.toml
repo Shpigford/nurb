@@ -51,20 +51,8 @@ label = "GPT-5.6-Luna (budget)"
 efforts = ["low", "medium", "high", "xhigh", "max"]
 default_effort = "medium"
 
-[[codex]]
-id = "gpt-5.5"
-label = "GPT-5.5"
-efforts = ["low", "medium", "high", "xhigh"]
-default_effort = "medium"
-
 [[grok]]
 id = "grok-4.6"
 label = "Grok 4.6"
-efforts = ["low", "medium", "high", "xhigh"]
-default_effort = "high"
-
-[[grok]]
-id = "grok-4.5"
-label = "Grok 4.5"
 efforts = ["low", "medium", "high", "xhigh"]
 default_effort = "high"

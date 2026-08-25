@@ -23,6 +23,7 @@ import sys
 import tomllib
 
 from . import harness as harnesses
+from .report import RETIRED
 from .run import completed_trial
 
 EVALS = pathlib.Path(__file__).parents[2]
@@ -282,6 +283,9 @@ def main():
             efforts, default_effort = [], "high"
         else:
             model, efforts, default_effort = entry["id"], entry["efforts"], entry["default_effort"]
+
+    if model in RETIRED:
+        sys.exit(f"{model} is retired from the benchmark; the leaderboard no longer accepts its rows.")
 
     effort = args.effort or (
         default_effort
