@@ -93,9 +93,9 @@ def test_every_submitted_trial_reaches_the_board():
 
 
 def _placed_labels(points):
-    """The chart's own geometry, so the check moves when the chart does."""
-    width, height = 840, 380
-    left, right, top, bottom = 56, 24, 26, 46
+    """The chart's own geometry, read from the chart, so the check moves when it does."""
+    width, height = site._CHART_BOX
+    left, right, top, bottom = site._CHART_MARGINS
     pw, ph = width - left - right, height - top - bottom
     xmax = math.ceil(max(12.0, max(p["minutes"] for p in points) * 1.2) / 3) * 3
 
@@ -105,7 +105,7 @@ def _placed_labels(points):
     def sy(rate):
         return top + (1 - rate) * ph
 
-    sides = site._label_sides(points, sx, sy, left, width - right)
+    sides = site._label_sides(points, sx, sy, left, width - right, top, height - bottom)
     for p in points:
         _, _, lo, hi, dy = sides[id(p)]
         yield p, lo, hi, sy(p["rate"]) + dy, sx(p["minutes"]), sy(p["rate"])
@@ -129,11 +129,15 @@ def test_no_two_labels_land_on_top_of_each_other():
         })
     labels = list(_placed_labels(points))
 
+    # What a reader sees is the backing rect, not the glyphs: a full label row tall
+    # and padded past the text on both sides. Measure that, or a label can clear its
+    # neighbour by a margin the renderer then spends on padding.
+    pad = site._LABEL_PAD
     overlaps = [
         (a["model"], a["effort"], b["model"], b["effort"])
         for i, (a, alo, ahi, ay, _, _) in enumerate(labels)
         for b, blo, bhi, by, _, _ in labels[i + 1:]
-        if abs(ay - by) < 11 and alo < bhi and blo < ahi
+        if abs(ay - by) < site._LABEL_ROW and alo - pad < bhi + pad and blo - pad < ahi + pad
     ]
     assert not overlaps, f"labels overlapping on the chart: {overlaps}"
 
@@ -141,6 +145,6 @@ def test_no_two_labels_land_on_top_of_each_other():
         (a["model"], a["effort"], b["model"], b["effort"])
         for a, alo, ahi, ay, _, _ in labels
         for b, _, _, _, bx, by in labels
-        if a is not b and abs(by - ay) < 11 and alo - 7 < bx < ahi + 7
+        if a is not b and abs(by - ay) < site._LABEL_ROW and alo - 7 < bx < ahi + 7
     ]
     assert not buried, f"labels sitting on someone else's dot: {buried}"

@@ -72,9 +72,12 @@ VERDICTS = {
     ("claude", "claude-opus-5", "low"): "One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.",
     ("claude", "claude-sonnet-5", "medium"): "The same result as high effort, for about the same money and no faster, down to the same cable clip that stopped tracking its own dimensions. One design job ran fifty minutes. If you want Sonnet perfect, xhigh is the row that gets there.",
     ("claude", "claude-sonnet-5", "low"): "Fast and cheap for a Claude plan, and it slips exactly where the jobs stop handing over dimensions: a wall clip with no way in for the screwdriver, a rest the pole could not drop into, a knob too narrow to turn. Fine for parts you spell out in full.",
-    ("codex", "gpt-5.6-sol", "low"): "The Codex row to use: fifteen of eighteen right where terra manages ten and luna five, at about two minutes a part. It got every stated dimension and the curved rest right every time. Its misses are about reaching the part rather than shaping it, two wall clips with no clear path in for the screw and its driver, and one knob bored too tight for the shaft.",
+    ("codex", "gpt-5.6-sol", "low"): "Fifteen of eighteen right at about two minutes a part, which was the best Codex row until the same model ran at high effort. It got every stated dimension and the curved rest right every time. Its misses are about reaching the part rather than shaping it, two wall clips with no clear path in for the screw and its driver, and one knob bored too tight for the shaft. High effort costs about the same and misses less, so start there.",
     ("codex", "gpt-5.6-terra", "low"): "Everything it made built, and about half were worth printing. The pattern is a part that works at the size you stated and nowhere else: all three of its wall clips stopped fitting when the cable bundle changed, and one pole rest came out flat where the job needed a curve. It never once went back to measure what it had made.",
-    ("codex", "gpt-5.6-luna", "low"): "Cheap, fast, and right five times out of eighteen. It wrote the pole's size straight into the file and still built a rest the pole would not drop into, at that size or any other. Elsewhere it left a 0.3mm wall no printer will lay down, and once wrote its guess at the unmeasured dimension down as though it had measured it.",
+    ("codex", "gpt-5.6-luna", "low"): "Cheap, fast, and right five times out of eighteen. It wrote the pole's size straight into the file and still built a rest the pole would not drop into, at that size or any other. Elsewhere it left a 0.3mm wall no printer will lay down, and once wrote its guess at the unmeasured dimension down as though it had measured it. The same model at xhigh is a different machine; run that instead.",
+    ("codex", "gpt-5.6-sol", "high"): "The Codex row to pick, and the best value on the board above ninety percent: twenty-eight of thirty parts right at about three and a half minutes each. Five of the six jobs came out right on every single attempt, the curved pole rest and the one-screw wall clip included. Both misses are the same mistake, a knob bored a shade too tight for the shaft to go in.",
+    ("codex", "gpt-5.6-luna", "xhigh"): "Eleven cents a part, and twenty-three of thirty right where the same model at low effort managed five. Effort is what luna was missing. It still slips when a part has to keep working at other sizes: two bit blocks stopped building once the bit got bigger, and a wall clip put the screw through the only place the bundle had to sit. One knob came out with a round bore that spins on the shaft, and once it filed its guess at the unmeasured dimension without marking it as a guess.",
+    ("codex", "gpt-5.6-terra", "medium"): "Thirteen of eighteen right at about two and a half minutes a part, and one job it never got: all three knobs came out too tight for the shaft and too narrow to turn it. The other two misses were a bit block whose bottom would not sit flat on the bed and a wall clip with no screw hole in it at all. At about a dollar a part it costs eight times what luna at full effort does and gets less right.",
     ("claude", "claude-haiku-4-5-20251001", "low"): "Fine when you spell every dimension out, and cheap. Asked to design, it produced parts you would not print: it came apart on all three design jobs, with walls and sockets that break the printability rules outright. It did handle the missing measurement honestly.",
     ("claude", "claude-haiku-4-5-20251001", "high"): "The weakest row here, and the extra effort did not help. Two parts of twelve came out right. It also wrote its guess at the unmeasured dimension down as though it had measured it, which is the mistake nobody catches until the print is wrong six months later.",
 }
@@ -509,9 +512,18 @@ def _answers(combos):
 _LABEL_ADVANCE = 7.05
 _DOT_GAP = 12
 _ARROW_GAP = 34
+# What actually gets drawn is the backing rect, not the glyphs: 14px tall and 3px
+# wider than the text on each side. The placer tests the drawn box, or it clears a
+# neighbour by a margin the renderer then spends on padding.
+_LABEL_ROW = 14
+_LABEL_PAD = 3
+# The plot's own box, named so the suite's overlap check reads the real numbers
+# instead of a copy that can drift away from them.
+_CHART_BOX = (840, 500)
+_CHART_MARGINS = (56, 24, 26, 46)
 
 
-def _label_sides(points, sx, sy, plot_left, plot_right):
+def _label_sides(points, sx, sy, plot_left, plot_right, plot_top, plot_bottom):
     """Which side of its dot each label sits on.
 
     Three things want the space beside a dot: the label, its neighbours' labels, and
@@ -521,11 +533,12 @@ def _label_sides(points, sx, sy, plot_left, plot_right):
 
     Left and right are only two slots, and the good models bunch into the top tenth
     of this chart, so the sweep runs out of room there long before the labels do. A
-    label with nowhere clean on either side steps off its dot's row instead, by a
-    line or two, keeping its edge against the dot so it still reads as that dot's
-    label. Only a label that cannot go anywhere at all keeps its preferred side and
-    overlaps, because a collision inside the plot still beats a label hanging over
-    the axis.
+    label with nowhere clean on either side steps off its dot's row instead, by up to
+    three lines, keeping its edge against the dot so it still reads as that dot's
+    label. A row that would leave the plot is not offered: the axis caption sits just
+    above the top rule and a label over it reads as part of it. Only a label that
+    cannot go anywhere at all keeps its preferred side and overlaps, because a
+    collision inside the plot still beats a label hanging over the axis.
     """
     placed = {}
     boxes = []
@@ -552,14 +565,21 @@ def _label_sides(points, sx, sy, plot_left, plot_right):
             }
         )
 
-    def span(box, flip):
+    def span(box, flip, dy=0):
         if flip:
-            return box["x"] - _DOT_GAP - box["width"], box["x"] - _DOT_GAP
+            lo, hi = box["x"] - _DOT_GAP - box["width"], box["x"] - _DOT_GAP
+            # The fast models bunch against the left edge, where a long label has no
+            # room to hang left of its dot at all. Once a label has left its row it
+            # already carries a leader, so it can slide along to the edge and keep
+            # reading as that dot's label; the leader is what ties them together.
+            if dy and lo < plot_left:
+                return plot_left, plot_left + box["width"]
+            return lo, hi
         start = box["x"] + (_ARROW_GAP if box["point"]["capped"] else _DOT_GAP)
         return start, start + box["width"]
 
-    def fits(box, flip):
-        lo, hi = span(box, flip)
+    def fits(box, flip, dy=0):
+        lo, hi = span(box, flip, dy)
         return lo >= plot_left and hi <= plot_right
 
     for box in boxes:
@@ -567,18 +587,18 @@ def _label_sides(points, sx, sy, plot_left, plot_right):
             box["flip"] = not box["flip"]
 
     def collides(box, flip, dy=0):
-        lo, hi = span(box, flip)
+        lo, hi = span(box, flip, dy)
         row = box["y"] + dy
         for other in boxes:
             if other is box:
                 continue
             # Dots never move, so a label clears one only by leaving its row.
-            if abs(other["y"] - row) < 11 and lo - 7 < other["x"] < hi + 7:
+            if abs(other["y"] - row) < _LABEL_ROW and lo - 7 < other["x"] < hi + 7:
                 return True
-            if abs(other["y"] + other["dy"] - row) >= 11:
+            if abs(other["y"] + other["dy"] - row) >= _LABEL_ROW:
                 continue
-            olo, ohi = span(other, other["flip"])
-            if lo < ohi and olo < hi:
+            olo, ohi = span(other, other["flip"], other["dy"])
+            if lo - _LABEL_PAD < ohi + _LABEL_PAD and olo - _LABEL_PAD < hi + _LABEL_PAD:
                 return True
         return False
 
@@ -587,21 +607,33 @@ def _label_sides(points, sx, sy, plot_left, plot_right):
                 and not collides(box, not box["flip"]):
             box["flip"] = not box["flip"]
 
-    for box in boxes:
-        if not collides(box, box["flip"]):
-            continue
-        moves = (
-            (flip, dy)
-            for dy in (-12, 12, -24, 24)
-            for flip in (box["flip"], not box["flip"])
-        )
-        for flip, dy in moves:
-            if fits(box, flip) and not collides(box, flip, dy):
-                box["flip"], box["dy"] = flip, dy
-                break
+    # One greedy sweep places each label against whatever its neighbours happen to
+    # hold at the time, so a box that had nowhere to go can open up once a later box
+    # moves. Repeat until nothing moves, which on this many points is two passes.
+    for _ in range(len(boxes)):
+        moved = False
+        for box in boxes:
+            if not collides(box, box["flip"], box["dy"]):
+                continue
+            moves = (
+                (flip, dy)
+                for dy in (0, -14, 14, -20, 20, -28, 28, -34, 34, -42, 42)
+                for flip in (box["flip"], not box["flip"])
+            )
+            for flip, dy in moves:
+                row = box["y"] + dy
+                if not plot_top <= row <= plot_bottom:
+                    continue
+                if fits(box, flip, dy) and not collides(box, flip, dy):
+                    if (box["flip"], box["dy"]) != (flip, dy):
+                        box["flip"], box["dy"] = flip, dy
+                        moved = True
+                    break
+        if not moved:
+            break
 
     for box in boxes:
-        lo, hi = span(box, box["flip"])
+        lo, hi = span(box, box["flip"], box["dy"])
         placed[id(box["point"])] = (
             (("end", hi) if box["flip"] else ("start", lo)) + (lo, hi, box["dy"])
         )
@@ -613,9 +645,15 @@ def _chart(combos):
     combo, colored by subscription. Effort variants of the same model connect into
     a line as they land, so the two knobs read as geometry: pick a model's line,
     slide along it for effort. Capped combos carry a right arrow: their time is a
-    floor, not a measurement."""
-    width, height = 840, 380
-    left, right, top, bottom = 56, 24, 26, 46
+    floor, not a measurement.
+
+    The box is sized for the labels, not the dots. Rate is the crowded axis, because
+    every model worth running lands in the top tenth of it, and a row of labels needs
+    a fixed 14px whatever the plot's height is. Every row added to the board tightens
+    that band, so the height is what buys the placer room to keep labels off each
+    other."""
+    width, height = _CHART_BOX
+    left, right, top, bottom = _CHART_MARGINS
     pw, ph = width - left - right, height - top - bottom
 
     points = []
@@ -680,7 +718,7 @@ def _chart(combos):
                 f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2" opacity=".35"/>'
             )
 
-    sides = _label_sides(points, sx, sy, left, width - right)
+    sides = _label_sides(points, sx, sy, left, width - right, top, height - bottom)
 
     for p in points:
         x, y = sx(p["minutes"]), sy(p["rate"])
