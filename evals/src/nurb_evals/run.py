@@ -39,8 +39,56 @@ done, the part file named below must exist at its stated path.
 """
 
 
+class TrialCancelled(RuntimeError):
+    """The contribution run stopped; this trial must stop with it."""
+
+
+def _kill_group(process):
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def _invoke(cmd, *, cwd, env, timeout=None, cancel_event=None):
+    """Run one isolated process, killing its whole group on timeout or cancellation."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise TrialCancelled("benchmark run cancelled")
+    process = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + timeout if timeout is not None else None
+    try:
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                raise TrialCancelled("benchmark run cancelled")
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            if remaining == 0.0:
+                _kill_group(process)
+                stdout, stderr = process.communicate()
+                return process.returncode, stdout or "", stderr or "", True
+            wait = remaining
+            if cancel_event is not None:
+                wait = 0.1 if remaining is None else min(0.1, remaining)
+            try:
+                stdout, stderr = process.communicate(timeout=wait)
+                return process.returncode, stdout or "", stderr or "", False
+            except subprocess.TimeoutExpired:
+                continue
+    except BaseException:
+        _kill_group(process)
+        process.communicate()
+        raise
+
+
 @contextlib.contextmanager
-def _isolated_nurb_environment(env, raw):
+def _isolated_nurb_environment(env, raw, cancel_event=None):
     """Install the locked nurb build outside the checkout for one agent run.
 
     The benchmark itself is editable, so handing its Python or nurb executable to an
@@ -74,9 +122,11 @@ def _isolated_nurb_environment(env, raw):
         ],
     )
     for command in commands:
-        done = subprocess.run(command, env=setup_env, capture_output=True, text=True)
-        if done.returncode != 0:
-            detail = (done.stderr or done.stdout).strip().splitlines()
+        returncode, stdout, stderr, _ = _invoke(
+            command, cwd=None, env=setup_env, cancel_event=cancel_event,
+        )
+        if returncode != 0:
+            detail = (stderr or stdout).strip().splitlines()
             raise RuntimeError(
                 "could not prepare isolated nurb runtime"
                 + (f": {detail[-1]}" if detail else "")
@@ -98,28 +148,6 @@ def _isolated_nurb_environment(env, raw):
     clean["PATH"] = os.pathsep.join((str(venv / "bin"), *inherited))
     clean["VIRTUAL_ENV"] = str(venv)
     yield clean
-
-
-def _invoke(cmd, *, cwd, env, timeout):
-    process = subprocess.Popen(
-        cmd,
-        cwd=cwd,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=True,
-    )
-    try:
-        stdout, stderr = process.communicate(timeout=timeout)
-        return process.returncode, stdout or "", stderr or "", False
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        stdout, stderr = process.communicate()
-        return process.returncode, stdout or "", stderr or "", True
 
 
 class HarnessKilled(RuntimeError):
@@ -146,6 +174,9 @@ def completed_trial(h, task_dir, seed, n, out, **kwargs):
     the trial reruns fresh, and persistent kills abort the run loudly instead of
     writing rows that measure the machine."""
     for attempt in range(KILL_RETRIES + 1):
+        cancel_event = kwargs.get("cancel_event")
+        if cancel_event is not None and cancel_event.is_set():
+            raise TrialCancelled("benchmark run cancelled")
         try:
             return trial(h, task_dir, seed, n, out, **kwargs)
         except HarnessKilled as killed:
@@ -159,7 +190,12 @@ def completed_trial(h, task_dir, seed, n, out, **kwargs):
     )
 
 
-def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=3600.0):
+def trial(
+    h, task_dir, seed, n, out, model=None, effort=None, timeout=3600.0,
+    cancel_event=None,
+):
+    if cancel_event is not None and cancel_event.is_set():
+        raise TrialCancelled("benchmark run cancelled")
     task = scoring.load_task(task_dir)
     benchmark = scoring.benchmark_identity(task_dir)
     task_name = pathlib.Path(task_dir).name
@@ -194,13 +230,16 @@ def trial(h, task_dir, seed, n, out, model=None, effort=None, timeout=3600.0):
             effort=effort,
             instructions=(project / "AGENTS.md").read_text(encoding="utf-8"),
         )
-        with _isolated_nurb_environment(env, raw) as isolated_env:
+        with _isolated_nurb_environment(env, raw, cancel_event) as isolated_env:
             started = time.monotonic()
             with h.environment(isolated_env) as clean_env:
                 returncode, stdout, stderr, timed_out = _invoke(
                     cmd, cwd=project, env=clean_env, timeout=timeout,
+                    cancel_event=cancel_event,
                 )
         harness_s = round(time.monotonic() - started, 1)
+        if cancel_event is not None and cancel_event.is_set():
+            raise TrialCancelled("benchmark run cancelled")
 
         # A session the machine killed mid-run (an updater cycling instances, a
         # process reaper, a closed shell) measures the environment, not the model,

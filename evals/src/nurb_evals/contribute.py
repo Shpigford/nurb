@@ -11,6 +11,7 @@ that remain. Every question has a flag, so an agent can run it non-interactively
 """
 
 import argparse
+import concurrent.futures
 import getpass
 import json
 import os
@@ -20,12 +21,13 @@ import secrets
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 
 from . import harness as harnesses
 from .report import RETIRED
-from .run import completed_trial
+from .run import _positive_int, completed_trial
 
 EVALS = pathlib.Path(__file__).parents[2]
 TASKS = ("cable_clip", "bit_block", "bundle_holder", "pole_rest", "valve_knob", "leg_cup")
@@ -213,6 +215,18 @@ def next_trial(out, task):
     return n
 
 
+def _wait_for_trials(futures, cancel_event):
+    """Surface the first completed failure and stop every trial still in flight."""
+    try:
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
+    except BaseException:
+        cancel_event.set()
+        for future in futures:
+            future.cancel()
+        raise
+
+
 def main():
     ap = argparse.ArgumentParser(description="run and stage a leaderboard contribution")
     ap.add_argument("--harness", choices=sorted(harnesses.HARNESSES))
@@ -225,6 +239,16 @@ def main():
         help="rounds per job; the wizard asks when omitted (default there: 1)",
     )
     ap.add_argument("--tasks", default=",".join(TASKS), help="comma-separated, default all")
+    # Trials are fully isolated from each other, so running a few at once divides the
+    # wall clock without changing what is measured. The default stays modest: heavy
+    # parallelism on one subscription can queue at the API, and that queueing would
+    # land in harness_s, a number the leaderboard shows.
+    ap.add_argument(
+        "--parallel",
+        type=_positive_int,
+        default=3,
+        help="trials run at once (default 3); agent time is unchanged, wall clock divides",
+    )
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--timeout", type=float, default=3600.0)
     ap.add_argument(
@@ -352,38 +376,59 @@ def main():
     run_name = f"{label}-{run_id}"
     out = EVALS / "results" / run_name
     out.mkdir(parents=True, exist_ok=True)
-    minutes = len(tasks) * trials * 8
+    total = len(tasks) * trials
+    workers = min(args.parallel, total)
+    minutes = total * 8
+    pace = f", {workers} at a time" if workers > 1 else ""
     print(
         f"\nRunning {style(model, BOLD, GREEN)} at {style(effort, BOLD)} effort: "
-        f"{trials} round(s) on {len(tasks)} job(s), on your own {name} subscription. "
+        f"{trials} round(s) on {len(tasks)} job(s){pace}, on your own {name} subscription. "
         + style(f"Ballpark {minutes} minutes of agent time; slow models can take much longer.", DIM)
         + "\n"
     )
 
     h = harnesses.HARNESSES[name]
     staged = []
-    total = len(tasks) * trials
+    # Trial numbers are assigned before anything runs: next_trial reads the
+    # filesystem, and two concurrent trials scanning it would claim the same slot.
+    jobs = []
+    next_numbers = {}
+    for task in tasks:
+        base = next_numbers.get(task)
+        if base is None:
+            base = next_trial(out, task)
+        jobs += [(task, base + k) for k in range(trials)]
+        next_numbers[task] = base + trials
     done = 0
     started = time.monotonic()
+    lock = threading.Lock()
+    cancel_event = threading.Event()
+
+    def run_job(task, n):
+        nonlocal done
+        tag = style(f"[{task} trial {n}]", CYAN)
+        with lock:
+            elapsed = time.monotonic() - started
+            print(f"{progress(done, total, elapsed)} {tag} {style('running...', DIM)}", flush=True)
+        row = completed_trial(
+            h, EVALS / "tasks" / task, args.seed, n, out,
+            model=model, effort=effort, timeout=args.timeout,
+            cancel_event=cancel_event,
+        )
+        with lock:
+            sink.write(json.dumps(row) + "\n")
+            sink.flush()
+            done += 1
+            note = style(f"  ({row['error']})", RED) if row["error"] else ""
+            score = style(f"{row['score']:.3f}", RED if row["error"] else GREEN, BOLD)
+            elapsed = time.monotonic() - started
+            print(f"{progress(done, total, elapsed)} {tag} score {score}{note}", flush=True)
+            staged.append(stage_submission(out, run_name, task, n))
+
     with open(out / "results.jsonl", "a", encoding="utf-8") as sink:
-        for task in tasks:
-            for _ in range(trials):
-                n = next_trial(out, task)
-                tag = style(f"[{task} trial {n}]", CYAN)
-                elapsed = time.monotonic() - started
-                print(f"{progress(done, total, elapsed)} {tag} {style('running...', DIM)}", flush=True)
-                row = completed_trial(
-                    h, EVALS / "tasks" / task, args.seed, n, out,
-                    model=model, effort=effort, timeout=args.timeout,
-                )
-                sink.write(json.dumps(row) + "\n")
-                sink.flush()
-                done += 1
-                note = style(f"  ({row['error']})", RED) if row["error"] else ""
-                score = style(f"{row['score']:.3f}", RED if row["error"] else GREEN, BOLD)
-                elapsed = time.monotonic() - started
-                print(f"{progress(done, total, elapsed)} {tag} score {score}{note}", flush=True)
-                staged.append(stage_submission(out, run_name, task, n))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(run_job, task, n) for task, n in jobs]
+            _wait_for_trials(futures, cancel_event)
 
     # The staged submission needs the matching rows; sanitize the whole file so a
     # custom --out or odd path never leaks through a row's error string.

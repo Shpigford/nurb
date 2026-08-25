@@ -6,6 +6,7 @@ drives the whole flow non-interactively the way an agent would, with the module'
 paths redirected into a scratch tree so nothing touches the real submissions/.
 """
 
+import concurrent.futures
 import json
 import os
 import pathlib
@@ -228,6 +229,91 @@ def test_wizard_asks_for_rounds_and_says_why(tmp_path, monkeypatch, capsys):
         if line.strip()
     ]
     assert len(rows) == 2, "two rounds were asked for, two rows exist"
+
+
+def test_wizard_runs_trials_in_parallel(tmp_path, monkeypatch):
+    """--parallel runs trials concurrently: a barrier that only releases when all
+    four trials are in flight at once would deadlock a sequential loop. Repeating a
+    task keeps allocating new slots instead of assigning two workers the same one."""
+    import threading
+
+    root = tmp_path / "evals"
+    (root / "tasks" / "cable_clip").mkdir(parents=True)
+    shutil.copy(contribute.EVALS / "models.toml", root / "models.toml")
+    monkeypatch.setattr(contribute, "EVALS", root)
+    monkeypatch.setitem(harnesses.HARNESSES, "stub", Stub(GOOD))
+    which = contribute.shutil.which
+    monkeypatch.setattr(
+        contribute.shutil,
+        "which",
+        lambda name: "/usr/bin/true" if name == "stub" else which(name),
+    )
+
+    barrier = threading.Barrier(4, timeout=30)
+
+    def fake_trial(
+        h, task_dir, seed, n, out, model=None, effort=None, timeout=None,
+        cancel_event=None,
+    ):
+        barrier.wait()
+        task = pathlib.Path(task_dir).name
+        slot = out / task / f"trial_{n}"
+        (slot / "project" / "parts").mkdir(parents=True)
+        (slot / "transcript.txt").write_text("ok", encoding="utf-8")
+        (slot / "project" / "parts" / f"{task}.py").write_text("# part", encoding="utf-8")
+        return {
+            "task": task, "seed": seed, "trial": n, "harness": h.name,
+            "model": model, "effort": effort, "score": 1.0,
+            "stages": {}, "error": None,
+        }
+
+    monkeypatch.setattr(contribute, "completed_trial", fake_trial)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "contribute",
+            "--harness", "stub",
+            "--model", "stub-model",
+            "--effort", "low",
+            "--trials", "2",
+            "--parallel", "4",
+            "--tasks", "cable_clip,cable_clip",
+            "--seed", str(SEED),
+            "--pr", "no",
+        ],
+    )
+    contribute.main()
+
+    sub = next((root / "submissions").glob("stub-stub-model-low-*"))
+    rows = [json.loads(line) for line in (sub / "results.jsonl").read_text().splitlines() if line.strip()]
+    assert sorted(r["trial"] for r in rows) == [1, 2, 3, 4]
+    for n in (1, 2, 3, 4):
+        assert (sub / "cable_clip" / f"trial_{n}" / "transcript.txt").is_file()
+
+
+def test_trial_failure_cancels_an_earlier_slow_future():
+    """Completion order matters: the first submitted job waits for cancellation,
+    while the second fails and must be observed immediately to release it."""
+    import threading
+
+    cancel_event = threading.Event()
+    first_started = threading.Event()
+
+    def waits_for_cancel():
+        first_started.set()
+        assert cancel_event.wait(timeout=2), "later failure was hidden behind this future"
+        raise concurrent.futures.CancelledError
+
+    def fails():
+        assert first_started.wait(timeout=2)
+        raise RuntimeError("trial failed")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(waits_for_cancel), pool.submit(fails)]
+        with pytest.raises(RuntimeError, match="trial failed"):
+            contribute._wait_for_trials(futures, cancel_event)
+    assert cancel_event.is_set()
 
 
 def test_open_pr_drives_git_and_gh_end_to_end(tmp_path, monkeypatch):

@@ -10,6 +10,7 @@ import concurrent.futures
 import json
 import pathlib
 import sys
+import threading
 import time
 
 from nurb_evals import run as runner
@@ -318,6 +319,37 @@ def test_timeout_kills_harness_descendants(tmp_path):
     assert (project / "child_started").is_file(), "the child ran before the timeout"
     time.sleep(0.8)
     assert not (project / "orphaned").exists(), "the timeout must kill the whole process group"
+
+
+def test_cancellation_kills_harness_descendants(tmp_path):
+    import pytest
+
+    orphaned = tmp_path / "orphaned"
+    child = (
+        "import pathlib,time;"
+        "time.sleep(1.0);"
+        f"pathlib.Path({str(orphaned)!r}).write_text('yes')"
+    )
+    parent = (
+        "import subprocess,sys,time;"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}]);"
+        "time.sleep(60)"
+    )
+    cancel_event = threading.Event()
+    timer = threading.Timer(0.2, cancel_event.set)
+    timer.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(runner.TrialCancelled):
+            runner._invoke(
+                [sys.executable, "-c", parent], cwd=tmp_path, env={}, timeout=30,
+                cancel_event=cancel_event,
+            )
+    finally:
+        timer.cancel()
+    assert time.monotonic() - started < 2
+    time.sleep(1.0)
+    assert not orphaned.exists(), "cancellation must kill the whole process group"
 
 
 def test_usage_parsers_swallow_json_that_is_not_an_object():
