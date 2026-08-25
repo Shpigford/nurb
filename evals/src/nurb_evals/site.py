@@ -267,16 +267,16 @@ HEAD = """\
 
 <header>
   <div class="wrap">
-    <a class="logo" href="index.html"><svg><use href="#i-cube"/></svg>nurb</a>
+    <a class="logo" href="/"><svg><use href="#i-cube"/></svg>nurb</a>
     <button class="menu-btn" aria-label="menu" aria-expanded="false">
       <svg class="bars" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="2.5" y1="5.5" x2="17.5" y2="5.5"/><line x1="2.5" y1="10" x2="17.5" y2="10"/><line x1="2.5" y1="14.5" x2="17.5" y2="14.5"/></svg>
       <svg class="x" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><line x1="4.5" y1="4.5" x2="15.5" y2="15.5"/><line x1="15.5" y1="4.5" x2="4.5" y2="15.5"/></svg>
     </button>
     <nav>
-      <a href="index.html#demo">the app</a>
-      <a href="index.html#how">how it works</a>
-      <a href="index.html#start">get started</a>
-      <a class="here" href="benchmarks.html">benchmarks</a>
+      <a href="/#demo">the app</a>
+      <a href="/#how">how it works</a>
+      <a href="/#start">get started</a>
+      <a class="here" href="/benchmarks">benchmarks</a>
       <a href="/changelog">changelog</a>
       <a class="gh" href="https://github.com/Shpigford/nurb">github &nearr;</a>
     </nav>
