@@ -1,0 +1,4 @@
+[bundle_diameter]
+value = 8.0
+unit = "mm"
+how = "calipers across the taped cable bundle, 2026-08-02"
