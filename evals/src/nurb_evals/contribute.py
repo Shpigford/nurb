@@ -20,6 +20,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+import time
 import tomllib
 
 from . import harness as harnesses
@@ -184,13 +185,24 @@ def stage_submission(out, label, task, n):
     return dst
 
 
-def progress(done, total, width=18):
+def progress(done, total, elapsed=None, width=18):
     """A bar plus a count, printed with every trial line so the last line on
     screen always says how far along the run is, even when a single trial sits
-    silent for an hour."""
+    silent for an hour. Once a trial has finished, the average pace so far
+    becomes a time-left estimate that firms up as the run goes."""
     filled = round(width * done / total)
     bar = style("█" * filled, GREEN) + style("░" * (width - filled), DIM)
-    return f"{bar} {style(f'{done}/{total}', BOLD)}"
+    line = f"{bar} {style(f'{done}/{total}', BOLD)}"
+    if elapsed and done and done < total:
+        line += " " + style(f"~{time_left(elapsed / done * (total - done))} left", DIM)
+    return line
+
+
+def time_left(seconds):
+    minutes = max(1, round(seconds / 60))
+    if minutes < 60:
+        return f"{minutes}m"
+    return f"{minutes // 60}h {minutes % 60:02d}m"
 
 
 def next_trial(out, task):
@@ -352,12 +364,14 @@ def main():
     staged = []
     total = len(tasks) * trials
     done = 0
+    started = time.monotonic()
     with open(out / "results.jsonl", "a", encoding="utf-8") as sink:
         for task in tasks:
             for _ in range(trials):
                 n = next_trial(out, task)
                 tag = style(f"[{task} trial {n}]", CYAN)
-                print(f"{progress(done, total)} {tag} {style('running...', DIM)}", flush=True)
+                elapsed = time.monotonic() - started
+                print(f"{progress(done, total, elapsed)} {tag} {style('running...', DIM)}", flush=True)
                 row = completed_trial(
                     h, EVALS / "tasks" / task, args.seed, n, out,
                     model=model, effort=effort, timeout=args.timeout,
@@ -367,7 +381,8 @@ def main():
                 done += 1
                 note = style(f"  ({row['error']})", RED) if row["error"] else ""
                 score = style(f"{row['score']:.3f}", RED if row["error"] else GREEN, BOLD)
-                print(f"{progress(done, total)} {tag} score {score}{note}", flush=True)
+                elapsed = time.monotonic() - started
+                print(f"{progress(done, total, elapsed)} {tag} score {score}{note}", flush=True)
                 staged.append(stage_submission(out, run_name, task, n))
 
     # The staged submission needs the matching rows; sanitize the whole file so a
