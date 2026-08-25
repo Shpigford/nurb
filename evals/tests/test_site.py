@@ -1,6 +1,8 @@
 """The page is editorial over the same rows the report uses, so what it can claim
 about a model is bounded by what that model actually ran."""
 
+import math
+
 from nurb_evals import report, site
 
 
@@ -55,3 +57,90 @@ def test_no_verdict_outlives_the_rows_it_describes():
     on_board = {key[:3] for key, _ in combos}
     orphans = [key for key in site.VERDICTS if key not in on_board]
     assert not orphans, f"verdicts for combos with no rows: {orphans}"
+
+
+def test_a_job_run_under_two_identities_pools_instead_of_losing_trials():
+    """The report separates rows on harness version and benchmark revision; the card
+    is coarser and must still carry every attempt. Grok ran the same jobs twice under
+    two CLI versions, and folding by task alone silently kept one and dropped the
+    other."""
+    old = _row("cable_clip", 0.5)
+    old["harness_version"] = "1.0.4 (old)"
+    old["nurb_version"] = "0.19.2"
+    new = [_row("cable_clip", 1.0), _row("cable_clip", 1.0)]
+
+    ((_, tasks),) = site._combos(report.summarize([old] + new))
+    pooled = tasks["cable_clip"]
+
+    assert pooled["trials"] == 3
+    assert sorted(pooled["scores"]) == [0.5, 1.0, 1.0]
+    assert pooled["score"] == (0.5 + 1.0 + 1.0) / 3
+    # Identity strings that no longer describe one group are dropped, not guessed.
+    assert pooled["harness_version"] is None
+    assert pooled["benchmark_revision"] == "abc123def456"
+
+
+def test_every_submitted_trial_reaches_the_board():
+    """The page promises every attempt shows as its own tick, so the count the cards
+    render has to match the count on file."""
+    paths = sorted(
+        str(p) for p in site.SUBMISSIONS.iterdir() if (p / "results.jsonl").is_file()
+    )
+    summary = report.summarize(report.rows_from(paths))
+    combos = site._combos(summary)
+    rendered = sum(sum(r["trials"] for r in tasks.values()) for _, tasks in combos)
+    assert rendered == sum(r["trials"] for r in summary)
+
+
+def _placed_labels(points):
+    """The chart's own geometry, so the check moves when the chart does."""
+    width, height = 840, 380
+    left, right, top, bottom = 56, 24, 26, 46
+    pw, ph = width - left - right, height - top - bottom
+    xmax = math.ceil(max(12.0, max(p["minutes"] for p in points) * 1.2) / 3) * 3
+
+    def sx(minutes):
+        return left + minutes / xmax * pw
+
+    def sy(rate):
+        return top + (1 - rate) * ph
+
+    sides = site._label_sides(points, sx, sy, left, width - right)
+    for p in points:
+        _, _, lo, hi, dy = sides[id(p)]
+        yield p, lo, hi, sy(p["rate"]) + dy, sx(p["minutes"]), sy(p["rate"])
+
+
+def test_no_two_labels_land_on_top_of_each_other():
+    """Every good model bunches into the top tenth of the chart, so labels there have
+    to move out of each other's way. An unreadable pile is the failure this catches;
+    it appeared the first time seven combos scored above 90 percent."""
+    paths = sorted(
+        str(p) for p in site.SUBMISSIONS.iterdir() if (p / "results.jsonl").is_file()
+    )
+    combos = site._combos(report.summarize(report.rows_from(paths)))
+    points = []
+    for (harness, model, effort, _), tasks in combos:
+        firsts, total, minutes, capped, dollars = site._stats(tasks)
+        points.append({
+            "harness": harness, "model": model, "effort": effort,
+            "rate": firsts / total if total else 0.0, "minutes": minutes,
+            "capped": capped, "dollars": dollars, "firsts": firsts, "total": total,
+        })
+    labels = list(_placed_labels(points))
+
+    overlaps = [
+        (a["model"], a["effort"], b["model"], b["effort"])
+        for i, (a, alo, ahi, ay, _, _) in enumerate(labels)
+        for b, blo, bhi, by, _, _ in labels[i + 1:]
+        if abs(ay - by) < 11 and alo < bhi and blo < ahi
+    ]
+    assert not overlaps, f"labels overlapping on the chart: {overlaps}"
+
+    buried = [
+        (a["model"], a["effort"], b["model"], b["effort"])
+        for a, alo, ahi, ay, _, _ in labels
+        for b, _, _, _, bx, by in labels
+        if a is not b and abs(by - ay) < 11 and alo - 7 < bx < ahi + 7
+    ]
+    assert not buried, f"labels sitting on someone else's dot: {buried}"

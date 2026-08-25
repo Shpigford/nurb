@@ -81,6 +81,23 @@ def test_identity_separates_benchmark_revisions():
     assert {r["benchmark_revision"] for r in summary} == {"aaaaaaaaaaaa", "bbbbbbbbbbbb"}
 
 
+def test_a_release_channel_is_not_a_version():
+    """The Grok CLI printed its version with and without a trailing "[stable]" inside
+    one run, from one binary. Splitting on that produced two table rows that render
+    identically, and cost the page trials it should have pooled."""
+    plain = _row(1.0)
+    plain["harness_version"] = "grok 1.0.5 (5115b46bc909)"
+    tagged = _row(0.5)
+    tagged["harness_version"] = "grok 1.0.5 (5115b46bc909) [stable]"
+
+    (summary,) = report.summarize([plain, tagged])
+
+    assert summary["trials"] == 2
+    assert summary["harness_version"] == "grok 1.0.5 (5115b46bc909)"
+    # A real version difference still separates.
+    assert len(report.summarize([plain, _row(1.0)])) == 2
+
+
 def test_table_is_markdown_with_one_line_per_group(tmp_path):
     sink = tmp_path / "results.jsonl"
     with open(sink, "w", encoding="utf-8") as out:

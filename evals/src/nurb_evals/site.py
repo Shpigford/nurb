@@ -15,7 +15,7 @@ import html
 import math
 import pathlib
 
-from .report import PASS, rows_from, summarize
+from .report import PASS, pass_at, rows_from, summarize
 
 SITE = pathlib.Path(__file__).parents[3] / "site" / "benchmarks.html"
 SUBMISSIONS = pathlib.Path(__file__).parents[2] / "submissions"
@@ -65,12 +65,14 @@ SUBSCRIPTIONS = {
 VERDICTS = {
     ("claude", "claude-fable-5", "high"): "Twenty-four attempts, twenty-three parts worth printing. It checked its own work in every one of them: it cuts the part open, measures what it just built, and fixes what it finds before it stops. The one miss was a D-shaft knob with a socket that did not hold the stem. The most expensive row on the board.",
     ("claude", "claude-sonnet-5", "xhigh"): "Right on all six jobs, and the slowest route there by a wide margin. One design job ran past forty minutes. Pick it when the part matters more than the wait.",
-    ("grok", "grok-4.6", "high"): "Only three of the six jobs have been run at this effort, so this is an unfinished row rather than a clean sweep. It got those three right. The low-effort Grok row has the full set and is four times faster.",
+    ("claude", "claude-opus-5", "high"): "Seventeen of eighteen parts came out right, and it was honest about the unmeasured dimension every time. The one miss is the mistake this board catches most often: a knob bored a shade too tight for the shaft to go in. Around ten minutes a part, and the design jobs are where that time goes.",
+    ("grok", "grok-4.6", "high"): "Nineteen of twenty-one right across all six jobs, and still the wrong Grok row to pick: low effort is on the same subscription, gets a higher share right, runs five times faster, and costs a third as much. The misses here are a bit block missing its top chamfer and a knob both too tight and too narrow to turn.",
     ("claude", "claude-sonnet-5", "high"): "Right on eleven of twelve tries and honest about the unmeasured dimension. The one miss was a wall clip that came out slightly off its stated sizes, not a part that fails to print. Around thirteen minutes a part is the real cost here.",
     ("grok", "grok-4.6", "low"): "The value pick, and it is not close: seventeen of eighteen parts right, about two minutes each, for pennies. Both of the hard fit jobs came out right every time. Its one miss was a wall clip you could not get a screwdriver into.",
     ("claude", "claude-opus-5", "low"): "One attempt per job, so read this as a sample rather than a score. Five of six right, and the miss was the easiest job on the board: a cable clip built to the stated size that stopped tracking once the size changed.",
     ("claude", "claude-sonnet-5", "medium"): "The same result as high effort, for about the same money and no faster, down to the same cable clip that stopped tracking its own dimensions. One design job ran fifty minutes. If you want Sonnet perfect, xhigh is the row that gets there.",
     ("claude", "claude-sonnet-5", "low"): "Fast and cheap for a Claude plan, and it slips exactly where the jobs stop handing over dimensions: a wall clip with no way in for the screwdriver, a rest the pole could not drop into, a knob too narrow to turn. Fine for parts you spell out in full.",
+    ("codex", "gpt-5.6-sol", "low"): "The Codex row to use: fifteen of eighteen right where terra manages ten and luna five, at about two minutes a part. It got every stated dimension and the curved rest right every time. Its misses are about reaching the part rather than shaping it, two wall clips with no clear path in for the screw and its driver, and one knob bored too tight for the shaft.",
     ("codex", "gpt-5.6-terra", "low"): "Everything it made built, and about half were worth printing. The pattern is a part that works at the size you stated and nowhere else: all three of its wall clips stopped fitting when the cable bundle changed, and one pole rest came out flat where the job needed a curve. It never once went back to measure what it had made.",
     ("codex", "gpt-5.6-luna", "low"): "Cheap, fast, and right five times out of eighteen. It wrote the pole's size straight into the file and still built a rest the pole would not drop into, at that size or any other. Elsewhere it left a 0.3mm wall no printer will lay down, and once wrote its guess at the unmeasured dimension down as though it had measured it.",
     ("claude", "claude-haiku-4-5-20251001", "low"): "Fine when you spell every dimension out, and cheap. Asked to design, it produced parts you would not print: it came apart on all three design jobs, with walls and sockets that break the printability rules outright. It did handle the missing measurement honestly.",
@@ -355,6 +357,52 @@ for (const b of document.querySelectorAll('[data-copy]')) {
 """
 
 
+def _pool(rows):
+    """One model, one effort, one job, several benchmark identities: pool them.
+
+    `summarize` separates rows on harness version and benchmark revision because the
+    audit table needs that precision, and it should keep it. The card is coarser by
+    design (one model, one effort, six jobs), so when the same job has been run twice
+    under different identities, both belong to the same card. Keeping one and dropping
+    the other would hide submitted trials from a page that shows every attempt as its
+    own tick. Identity strings survive only where the pooled rows agree on them."""
+    if len(rows) == 1:
+        return rows[0]
+    trials = sum(r["trials"] for r in rows)
+    scores = [s for r in rows for s in r["scores"]]
+    # lint, dims and flex are means over built trials, so they pool by built count,
+    # not by trial count; everything else is a mean over every trial.
+    builts = [round(r["built"] * r["trials"]) for r in rows]
+
+    def weighted(field, weights):
+        pairs = [(r[field], w) for r, w in zip(rows, weights) if r.get(field) is not None and w]
+        return sum(v * w for v, w in pairs) / sum(w for _, w in pairs) if pairs else None
+
+    counts = [r["trials"] for r in rows]
+    passes = sum(s >= PASS for s in scores)
+    pooled = {
+        **rows[0],
+        "trials": trials,
+        "scores": scores,
+        "score": sum(scores) / trials,
+        "seeds": sorted({s for r in rows for s in r["seeds"]}),
+        "built": sum(builts) / trials,
+        "lint": weighted("lint", builts),
+        "dims": weighted("dims", builts),
+        "flex": weighted("flex", builts),
+        "pass@1": pass_at(1, trials, passes),
+        "pass@3": pass_at(3, trials, passes),
+        "tokens": weighted("tokens", counts),
+        "cost": weighted("cost", counts),
+        "wall_s": weighted("wall_s", counts),
+        "capped": sum(r.get("capped", 0) for r in rows),
+    }
+    for field in ("harness_version", "nurb_version", "benchmark_version", "benchmark_revision"):
+        values = {r[field] for r in rows}
+        pooled[field] = values.pop() if len(values) == 1 else None
+    return pooled
+
+
 def _combos(summary):
     """Fold per-task rows into one entry per harness+model+effort, best first.
 
@@ -368,7 +416,11 @@ def _combos(summary):
     for row in summary:
         key = (row["harness"], row["model"], row["effort"],
                tuple(row.get("resolved") or ()))
-        combos.setdefault(key, {})[row["task"]] = row
+        combos.setdefault(key, {}).setdefault(row["task"], []).append(row)
+    combos = {
+        key: {task: _pool(rows) for task, rows in tasks.items()}
+        for key, tasks in combos.items()
+    }
     order = []
     for key, tasks in combos.items():
         firsts, total, _, _, _ = _stats(tasks)
@@ -465,9 +517,15 @@ def _label_sides(points, sx, sy, plot_left, plot_right):
     Three things want the space beside a dot: the label, its neighbours' labels, and
     the effort line joining a model's own variants, which runs through the label's
     row when it leaves at a shallow angle. Preference first, then the plot edges get
-    a veto, then one sweep resolves whatever still overlaps. A label that cannot go
-    anywhere clean keeps its preferred side, because a collision inside the plot
-    still reads better than a label hanging over the axis.
+    a veto, then one sweep resolves whatever still overlaps.
+
+    Left and right are only two slots, and the good models bunch into the top tenth
+    of this chart, so the sweep runs out of room there long before the labels do. A
+    label with nowhere clean on either side steps off its dot's row instead, by a
+    line or two, keeping its edge against the dot so it still reads as that dot's
+    label. Only a label that cannot go anywhere at all keeps its preferred side and
+    overlaps, because a collision inside the plot still beats a label hanging over
+    the axis.
     """
     placed = {}
     boxes = []
@@ -489,7 +547,7 @@ def _label_sides(points, sx, sy, plot_left, plot_right):
         )
         boxes.append(
             {
-                "point": p, "x": x, "y": y, "width": width,
+                "point": p, "x": x, "y": y, "width": width, "dy": 0,
                 "flip": crowd or undercut or x > plot_right - 140,
             }
         )
@@ -508,13 +566,17 @@ def _label_sides(points, sx, sy, plot_left, plot_right):
         if not fits(box, box["flip"]) and fits(box, not box["flip"]):
             box["flip"] = not box["flip"]
 
-    def collides(box, flip):
+    def collides(box, flip, dy=0):
         lo, hi = span(box, flip)
+        row = box["y"] + dy
         for other in boxes:
-            if other is box or abs(other["y"] - box["y"]) >= 11:
+            if other is box:
                 continue
-            if lo - 7 < other["x"] < hi + 7:  # someone else's dot inside this label
+            # Dots never move, so a label clears one only by leaving its row.
+            if abs(other["y"] - row) < 11 and lo - 7 < other["x"] < hi + 7:
                 return True
+            if abs(other["y"] + other["dy"] - row) >= 11:
+                continue
             olo, ohi = span(other, other["flip"])
             if lo < ohi and olo < hi:
                 return True
@@ -526,8 +588,23 @@ def _label_sides(points, sx, sy, plot_left, plot_right):
             box["flip"] = not box["flip"]
 
     for box in boxes:
+        if not collides(box, box["flip"]):
+            continue
+        moves = (
+            (flip, dy)
+            for dy in (-12, 12, -24, 24)
+            for flip in (box["flip"], not box["flip"])
+        )
+        for flip, dy in moves:
+            if fits(box, flip) and not collides(box, flip, dy):
+                box["flip"], box["dy"] = flip, dy
+                break
+
+    for box in boxes:
         lo, hi = span(box, box["flip"])
-        placed[id(box["point"])] = (("end", hi) if box["flip"] else ("start", lo)) + (lo, hi)
+        placed[id(box["point"])] = (
+            (("end", hi) if box["flip"] else ("start", lo)) + (lo, hi, box["dy"])
+        )
     return placed
 
 
@@ -608,7 +685,8 @@ def _chart(combos):
     for p in points:
         x, y = sx(p["minutes"]), sy(p["rate"])
         color = SUBSCRIPTIONS.get(p["harness"], ("", "var(--dim)"))[1]
-        anchor, lx, label_lo, label_hi = sides[id(p)]
+        anchor, lx, label_lo, label_hi, dy = sides[id(p)]
+        ly = y + dy
         title = (
             f"{p['model']} ({p['effort']} effort): {p['firsts']}/{p['total']} first-try, "
             f"{_time_note(p['minutes'], p['capped'])}"
@@ -619,6 +697,16 @@ def _chart(combos):
                 f'<line x1="{x + 8:.0f}" y1="{y:.0f}" x2="{x + 22:.0f}" y2="{y:.0f}" stroke="{color}" stroke-width="2"/>'
                 f'<path d="M {x + 22:.0f} {y - 4:.0f} L {x + 29:.0f} {y:.0f} L {x + 22:.0f} {y + 4:.0f} Z" fill="{color}"/>'
             )
+        if dy:
+            # A label pushed off its dot's row can have someone else's dot between the
+            # two. A leader says whose label it is; without one the reader guesses. It
+            # is drawn neutral, not in the subscription's color, so it cannot be read
+            # as one more effort line.
+            edge = label_hi if anchor == "end" else label_lo
+            parts.append(
+                f'<path d="M {x:.0f} {y:.0f} L {edge:.0f} {ly:.0f}" fill="none" '
+                f'stroke="var(--dimmer)" stroke-width="1"/>'
+            )
         parts.append(
             f'<circle class="dot" cx="{x:.0f}" cy="{y:.0f}" r="6" fill="{color}" stroke="var(--panel)" stroke-width="2">'
             f"<title>{html.escape(title)}</title></circle>"
@@ -626,9 +714,9 @@ def _chart(combos):
             # through the row of one of their labels. A glyph-hugging halo only masks
             # it at the strokes and leaves it showing between letters, so the label
             # gets a backing rect and reads as text on the panel, not text on a rule.
-            f'<rect x="{label_lo - 3:.0f}" y="{y - 7:.0f}" width="{label_hi - label_lo + 6:.0f}"'
+            f'<rect x="{label_lo - 3:.0f}" y="{ly - 7:.0f}" width="{label_hi - label_lo + 6:.0f}"'
             f' height="14" fill="var(--panel)"/>'
-            f'<text x="{lx:.0f}" y="{y + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)">'
+            f'<text x="{lx:.0f}" y="{ly + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)">'
             f'{html.escape(p["model"])} <tspan fill="var(--dimmer)">&middot; {html.escape(p["effort"])}</tspan></text>'
         )
 

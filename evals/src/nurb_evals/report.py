@@ -58,6 +58,18 @@ def _tokens(row):
     return None
 
 
+def harness_version(row):
+    """The harness version without its release channel.
+
+    The Grok CLI reports "grok 1.0.5 (5115b46bc909)" and "grok 1.0.5 (5115b46bc909)
+    [stable]" from the same binary, and it changed which one mid-run. A channel is
+    not a version, so splitting a row on it invents a difference the table cannot
+    even show: both render as "grok 1.0.5". The raw string stays in results.jsonl.
+    """
+    version = row.get("harness_version")
+    return version.split(" [")[0].strip() if version else version
+
+
 def summarize(rows):
     prices = pricing.load()
     groups = {}
@@ -67,7 +79,7 @@ def summarize(rows):
         # Rows recorded before the runner captured them carry an empty tuple and
         # pool by label alone, as they always did.
         key = (
-            row["task"], row["harness"], row.get("harness_version"),
+            row["task"], row["harness"], harness_version(row),
             row["nurb_version"], row["benchmark_version"], row["benchmark_revision"],
             row["model"], row["effort"],
             tuple((row.get("usage") or {}).get("models") or ()),
