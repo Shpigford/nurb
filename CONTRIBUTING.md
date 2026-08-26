@@ -96,9 +96,9 @@ uv run pytest -n auto   # parallel; the suite is CPU-bound OCCT builds and scale
 
 The parts in `examples/` are the calibration set, asserted against dimensions from really-printed parts, so a broken example is a red build rather than a stale README. Fit tests use literal numbers, never the part's own constants, because a test that reads the same constant as the code cannot catch that constant being wrong.
 
-`evals/` is its own uv project with its own suite (`cd evals && uv sync --dev && uv run pytest`); the root `pytest` deliberately does not collect it.
+The model benchmark (tasks, scorer, and every submitted run) lives in its own repo, [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks), with its own suite and CI.
 
-CI (`.github/workflows/test.yml`) runs three jobs on every push and PR: the pytest suite with the render extra and a real Chromium, the evals suite, and `nurb check --strict` from inside `examples/notch`, which exercises the rules against the real library on a machine they were not calibrated on.
+CI (`.github/workflows/test.yml`) runs two jobs on every push and PR: the pytest suite with the render extra and a real Chromium, and `nurb check --strict` from inside `examples/notch`, which exercises the rules against the real library on a machine they were not calibrated on.
 
 ## The desktop app
 

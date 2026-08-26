@@ -42,12 +42,6 @@ uv version X.Y.Z
 
 then the `version:` frontmatter line in `src/nurb/skill.md` and `skills/nurb/SKILL.md`, then `version` in `desktop/src-tauri/tauri.conf.json`.
 
-The bump also stales `evals/uv.lock`, because evals is its own uv project with nurb as an editable path dependency and CI syncs it with `--locked`. Relock it and commit the one-line change with the bump:
-
-```bash
-cd evals && uv lock && cd ..
-```
-
 Then write the changelog into the same PR: run /changelog for the pending version. Pre-merge there is no tag or GitHub release yet, so it draws from the PRs merged since the last release plus this branch's own changes, dated today.
 
 Prove the agreement before pushing: `uv run pytest tests/test_cli.py -q`. Commit the bump and the changelog together with a plain-sentence message, push, and open the PR against main with the release summary as the body (what shipped, in user-visible terms). Then stop and hand the merge to the user.
@@ -73,5 +67,7 @@ curl -sfI https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg | 
 curl -sfL https://github.com/Shpigford/nurb/releases/download/desktop-latest/latest.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"
 curl -sf https://pypi.org/pypi/nurb/json | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])"
 ```
+
+Once PyPI shows the new version, relock the benchmark so future runs grade the new engine: in a checkout of [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks), `uv lock` and a small PR with the lockfile change. Rows keep their identity through `benchmark_revision`, so this is routine, not a reset.
 
 Report with the release URL and what is now true: package users get the new version from `nurb update` and the viewer's nudge, desktop users see the one-click update at next launch, and the site's changelog names what changed. If any probe disagrees, say which channel is not live yet instead of calling the release done.

@@ -97,9 +97,9 @@ src/nurb/cli.py           command surface
 examples/notch/           the real parts, which are also the calibration set
 tests/test_notch_fit.py   the hanging interface, asserted for every configuration
 tests/                    rules and examples, both cases per rule
-evals/                    the model leaderboard: tasks, scorer, CLI runner. Its own uv
-                          project with its own suite; see evals/README.md
 ```
+
+The model leaderboard (tasks, scorer, runner, and every submitted run) lives in its own repo, [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks): submissions dwarf everything else and keep growing, so they stay out of this repo. `site/benchmarks.html` here is regenerated from that repo's submissions by the `/leaderboard` skill.
 
 ## Rules
 

@@ -41,27 +41,30 @@ main() {
   # user happens to be standing in (a dogfooding run left a full replica of the
   # repo inside a dev checkout); it lives in one fixed hidden place, like any
   # tool's cache, and re-runs and concurrent sessions all share it. Standing
-  # inside a nurb checkout already? That checkout is used as it is.
-  if [ -f "evals/src/nurb_evals/contribute.py" ]; then
-    step 2 "already inside a nurb checkout; using it as it is"
-  elif [ -f "../evals/src/nurb_evals/contribute.py" ]; then
-    step 2 "already inside a nurb checkout; using it as it is"
-    cd ..
+  # inside a benchmark checkout already? That checkout is used as it is.
+  if [ -f "src/nurb_evals/contribute.py" ]; then
+    step 2 "already inside a nurb-benchmarks checkout; using it as it is"
   else
     dir="${NURB_BENCH_HOME:-$HOME/.nurb/bench}"
+    # The benchmark used to live inside the nurb repo; a checkout from that era
+    # has evals/ at its top level and cannot pull the new layout, so it is
+    # replaced rather than updated.
     if [ -d "$dir/evals" ]; then
+      step 2 "replacing the pre-split checkout at $dir"
+      rm -rf "$dir"
+    fi
+    if [ -d "$dir" ]; then
       step 2 "updating the benchmark checkout at $dir"
       git -C "$dir" pull --ff-only >/dev/null 2>&1 || say "      (pull skipped; using the checkout as it is)"
     else
       step 2 "cloning the benchmark into $dir"
       mkdir -p "$(dirname "$dir")"
-      git clone --depth 1 https://github.com/Shpigford/nurb "$dir" || fail "clone failed"
+      git clone --depth 1 https://github.com/Shpigford/nurb-benchmarks "$dir" || fail "clone failed"
     fi
     cd "$dir" || fail "checkout is missing"
   fi
 
   step 3 "preparing and starting the wizard"
-  cd evals || fail "checkout is missing evals/"
   uv sync >/dev/null || fail "uv sync failed"
 
   # `curl | sh` leaves stdin owned by the pipe; the wizard needs the keyboard.
