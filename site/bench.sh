@@ -55,7 +55,13 @@ main() {
     fi
     if [ -d "$dir" ]; then
       step 2 "updating the benchmark checkout at $dir"
-      git -C "$dir" pull --ff-only >/dev/null 2>&1 || say "      (pull skipped; using the checkout as it is)"
+      # A previous wizard run leaves this clone on a submission branch, and
+      # `git pull` there never sees main. Always reset the cache to origin's
+      # main so a merged wizard change is what the next curl actually runs.
+      if ! git -C "$dir" fetch origin main >/dev/null 2>&1 \
+         || ! git -C "$dir" checkout -f -B main origin/main >/dev/null 2>&1; then
+        say "      (update skipped; using the checkout as it is)"
+      fi
     else
       step 2 "cloning the benchmark into $dir"
       mkdir -p "$(dirname "$dir")"
