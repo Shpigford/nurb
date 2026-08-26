@@ -15,14 +15,18 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::v1::ErrorCode;
 use agent_client_protocol::schema::v1::{
-    AuthenticateRequest, CancelNotification, ContentBlock, ImageContent, InitializeRequest, ListSessionsRequest,
-    LoadSessionRequest, NewSessionRequest, PromptRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, ResourceLink, SelectedPermissionOutcome,
-    SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions, SessionId,
-    SessionNotification, SetSessionConfigOptionRequest, TextContent,
+    AuthenticateRequest, CancelNotification, ContentBlock, ImageContent, InitializeRequest,
+    ListSessionsRequest, LoadSessionRequest, Meta, NewSessionRequest, PromptRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
+    SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions,
+    SessionId, SessionNotification, SetSessionConfigOptionRequest, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
-use agent_client_protocol::{AcpAgent, AcpAgentConfig, Agent, ByteStreams, Client, ConnectionTo};
+use agent_client_protocol::{
+    AcpAgent, AcpAgentConfig, Agent, ByteStreams, Client, ConnectionTo, JsonRpcMessage,
+    JsonRpcRequest, UntypedMessage,
+};
+use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 use tokio::sync::oneshot;
 
@@ -38,7 +42,13 @@ pub async fn authenticate(
     let (program, args) = launcher.adapter(kind);
     let mut config = AcpAgentConfig::new(program).args(args);
     if kind == AgentKind::Gemini {
-        for name in ["BROWSER", "CI", "DEBIAN_FRONTEND", "NO_BROWSER", "SSH_CONNECTION"] {
+        for name in [
+            "BROWSER",
+            "CI",
+            "DEBIAN_FRONTEND",
+            "NO_BROWSER",
+            "SSH_CONNECTION",
+        ] {
             config = config.env(name, "");
         }
     }
@@ -96,6 +106,11 @@ struct ChatSession {
     /// The model and effort this session is actually running on, as the agent
     /// last reported them.
     config: Mutex<Vec<ConfigRow>>,
+    /// Per-model effort menus from Grok's initialize `_meta.modelState`. Empty
+    /// for agents that speak ACP config options. Needed because switching Grok's
+    /// model rebuilds the effort list, and `session/set_model` does not return
+    /// the new menus.
+    grok_models: Vec<GrokModelMenu>,
     pgid: i32,
     /// Dropped (with the whole entry) to end the connection task, which kills
     /// the adapter's process group.
@@ -201,9 +216,13 @@ pub async fn list_sessions(
             .await
             .unwrap_or_else(|error| Err(format!("session list task died: {error}")));
         match listed {
-            Ok((list, config)) => {
+            Ok((list, config, model_rows)) => {
                 configured |= !config.is_empty();
                 app.state::<PrefStore>().cache(kind.id(), config);
+                if kind == AgentKind::Grok {
+                    app.state::<PrefStore>()
+                        .cache_model_rows(kind.id(), model_rows);
+                }
                 sessions.extend(list.into_iter().map(|session| (kind, session)))
             }
             Err(error) => {
@@ -248,7 +267,14 @@ async fn agent_sessions(
     launcher: &crate::env::Launcher,
     kind: AgentKind,
     project: PathBuf,
-) -> Result<(Vec<agent_client_protocol::schema::v1::SessionInfo>, Vec<ConfigRow>), String> {
+) -> Result<
+    (
+        Vec<agent_client_protocol::schema::v1::SessionInfo>,
+        Vec<ConfigRow>,
+        HashMap<String, Vec<ConfigRow>>,
+    ),
+    String,
+> {
     let (program, args) = launcher.adapter(kind);
     let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
     let mut config = AcpAgentConfig::new(program).args(args);
@@ -281,6 +307,8 @@ async fn agent_sessions(
                         .send_request(InitializeRequest::new(ProtocolVersion::V1))
                         .block_task()
                         .await?;
+                    let menus = grok_model_menus(init.meta.as_ref()).unwrap_or_default();
+                    let model_rows = grok_rows_by_model(&menus);
                     // Only a session knows what models the agent offers, and a
                     // part's chat has no session until its first message. This
                     // adapter is already up and paying for its own startup, and
@@ -292,10 +320,16 @@ async fn agent_sessions(
                         .send_request(NewSessionRequest::new(project.clone()))
                         .block_task()
                         .await
-                        .map(|session| rows(&session.config_options.unwrap_or_default()))
-                        .unwrap_or_default();
+                        .map(|session| {
+                            picker_rows(
+                                &session.config_options.unwrap_or_default(),
+                                session.meta.as_ref(),
+                                init.meta.as_ref(),
+                            )
+                        })
+                        .unwrap_or_else(|_| grok_rows(None, init.meta.as_ref()));
                     if init.agent_capabilities.session_capabilities.list.is_none() {
-                        return Ok((Vec::new(), config));
+                        return Ok((Vec::new(), config, model_rows));
                     }
                     let mut sessions = Vec::new();
                     let mut cursor: Option<String> = None;
@@ -309,7 +343,7 @@ async fn agent_sessions(
                             break;
                         }
                     }
-                    Ok((sessions, config))
+                    Ok((sessions, config, model_rows))
                 },
             ),
     )
@@ -495,6 +529,428 @@ pub fn respond_permission(
     Ok(())
 }
 
+/// Grok's per-model effort menu, taken from initialize `_meta.modelState`.
+#[derive(Clone)]
+struct GrokModelMenu {
+    id: String,
+    name: String,
+    effort: String,
+    efforts: Vec<ConfigChoice>,
+}
+
+/// `session/set_model` left ACP, but Grok still uses it to switch models and,
+/// via `_meta.reasoningEffort`, thinking level. The typed schema has neither.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetSessionModelRequest {
+    session_id: SessionId,
+    model_id: String,
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    meta: Option<Meta>,
+}
+
+impl JsonRpcMessage for SetSessionModelRequest {
+    fn matches_method(method: &str) -> bool {
+        method == "session/set_model"
+    }
+
+    fn method(&self) -> &str {
+        "session/set_model"
+    }
+
+    fn to_untyped_message(&self) -> Result<UntypedMessage, agent_client_protocol::Error> {
+        UntypedMessage::new(self.method(), self)
+    }
+
+    fn parse_message(
+        method: &str,
+        params: &impl Serialize,
+    ) -> Result<Self, agent_client_protocol::Error> {
+        if !Self::matches_method(method) {
+            return Err(agent_client_protocol::Error::method_not_found());
+        }
+        agent_client_protocol::util::json_cast(params)
+    }
+}
+
+impl JsonRpcRequest for SetSessionModelRequest {
+    type Response = serde_json::Value;
+}
+
+/// Prefers ACP config options. Grok advertises none, so the picker falls back
+/// to its vendor `_meta`: live selection on `x.ai/sessionConfig`, menus on
+/// initialize `modelState`.
+fn picker_rows(
+    options: &[SessionConfigOption],
+    session_meta: Option<&Meta>,
+    init_meta: Option<&Meta>,
+) -> Vec<ConfigRow> {
+    let from_acp = rows(options);
+    if !from_acp.is_empty() {
+        from_acp
+    } else {
+        grok_rows(session_meta, init_meta)
+    }
+}
+
+fn grok_open_meta(kind: AgentKind, chosen: &[(String, String)]) -> Option<Meta> {
+    if kind != AgentKind::Grok {
+        return None;
+    }
+    let mut meta = Meta::new();
+    for (category, value) in chosen {
+        match category.as_str() {
+            "model" => {
+                meta.insert("modelId".into(), serde_json::Value::String(value.clone()));
+            }
+            "thought_level" => {
+                meta.insert(
+                    "reasoningEffort".into(),
+                    serde_json::Value::String(value.clone()),
+                );
+            }
+            _ => {}
+        }
+    }
+    (!meta.is_empty()).then_some(meta)
+}
+
+fn grok_rows(session_meta: Option<&Meta>, init_meta: Option<&Meta>) -> Vec<ConfigRow> {
+    let menus = grok_model_menus(init_meta);
+    let selected = grok_session_selection(session_meta);
+    if let Some(menus) = menus {
+        let model_id = selected
+            .as_ref()
+            .and_then(|(model, _)| model.clone())
+            .or_else(|| menus.first().map(|menu| menu.id.clone()));
+        let Some(model_id) = model_id else {
+            return Vec::new();
+        };
+        let effort = selected.as_ref().and_then(|(_, effort)| effort.clone());
+        return grok_rows_from_menus(&menus, &model_id, effort.as_deref());
+    }
+    grok_rows_from_session_config(session_meta)
+}
+
+fn grok_rows_from_menus(
+    menus: &[GrokModelMenu],
+    model_id: &str,
+    effort: Option<&str>,
+) -> Vec<ConfigRow> {
+    let Some(current) = menus
+        .iter()
+        .find(|menu| menu.id == model_id)
+        .or_else(|| menus.first())
+    else {
+        return Vec::new();
+    };
+    let effort = effort
+        .filter(|level| current.efforts.iter().any(|choice| choice.value == *level))
+        .unwrap_or(current.effort.as_str());
+    let mut rows = vec![ConfigRow {
+        id: "model".into(),
+        category: "model".into(),
+        name: "Model".into(),
+        value: current.id.clone(),
+        options: menus
+            .iter()
+            .map(|menu| ConfigChoice {
+                value: menu.id.clone(),
+                name: menu.name.clone(),
+                description: None,
+            })
+            .collect(),
+    }];
+    if !current.efforts.is_empty() {
+        rows.push(thought_level_row(effort, &current.efforts));
+    }
+    rows
+}
+
+fn grok_rows_by_model(menus: &[GrokModelMenu]) -> HashMap<String, Vec<ConfigRow>> {
+    menus
+        .iter()
+        .map(|menu| {
+            (
+                menu.id.clone(),
+                grok_rows_from_menus(menus, &menu.id, Some(&menu.effort)),
+            )
+        })
+        .collect()
+}
+
+fn thought_level_row(value: &str, options: &[ConfigChoice]) -> ConfigRow {
+    ConfigRow {
+        id: "thought_level".into(),
+        category: "thought_level".into(),
+        name: "Effort".into(),
+        value: value.to_string(),
+        options: options.to_vec(),
+    }
+}
+
+fn grok_rows_from_session_config(meta: Option<&Meta>) -> Vec<ConfigRow> {
+    let Some(options) = grok_session_options(meta) else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    for (category, name) in [("model", "Model"), ("mode", "Effort")] {
+        let choices: Vec<&GrokSessionOption> = options
+            .iter()
+            .filter(|option| option.category == category)
+            .collect();
+        if choices.is_empty() {
+            continue;
+        }
+        let value = choices
+            .iter()
+            .find(|option| option.selected)
+            .or_else(|| choices.first())
+            .map(|option| option.id.clone())
+            .unwrap_or_default();
+        rows.push(ConfigRow {
+            id: if category == "mode" {
+                "thought_level"
+            } else {
+                "model"
+            }
+            .into(),
+            category: if category == "mode" {
+                "thought_level"
+            } else {
+                "model"
+            }
+            .into(),
+            name: name.into(),
+            value,
+            options: choices
+                .into_iter()
+                .map(|option| ConfigChoice {
+                    value: option.id.clone(),
+                    name: option.label.clone(),
+                    description: option.description.clone(),
+                })
+                .collect(),
+        });
+    }
+    rows
+}
+
+fn grok_session_selection(meta: Option<&Meta>) -> Option<(Option<String>, Option<String>)> {
+    let options = grok_session_options(meta)?;
+    let model = options
+        .iter()
+        .find(|option| option.category == "model" && option.selected)
+        .map(|option| option.id.clone());
+    let effort = options
+        .iter()
+        .find(|option| option.category == "mode" && option.selected)
+        .map(|option| option.id.clone());
+    Some((model, effort))
+}
+
+fn grok_session_options(meta: Option<&Meta>) -> Option<Vec<GrokSessionOption>> {
+    let config: GrokSessionConfig =
+        serde_json::from_value(meta?.get("x.ai/sessionConfig")?.clone()).ok()?;
+    Some(config.options)
+}
+
+fn grok_model_menus(meta: Option<&Meta>) -> Option<Vec<GrokModelMenu>> {
+    let state: GrokModelState = serde_json::from_value(meta?.get("modelState")?.clone()).ok()?;
+    let mut menus: Vec<GrokModelMenu> = state
+        .available_models
+        .into_iter()
+        .map(|model| {
+            let model_id = model.model_id;
+            let details = model.meta.unwrap_or_default();
+            let efforts: Vec<ConfigChoice> = details
+                .reasoning_efforts
+                .into_iter()
+                .filter_map(|effort| {
+                    let value = if !effort.value.is_empty() {
+                        effort.value
+                    } else {
+                        effort.id
+                    };
+                    if value.is_empty() {
+                        return None;
+                    }
+                    let name = if effort.label.is_empty() {
+                        value.clone()
+                    } else {
+                        effort.label
+                    };
+                    Some(ConfigChoice {
+                        value,
+                        name,
+                        description: effort.description,
+                    })
+                })
+                .collect();
+            let effort = details
+                .reasoning_effort
+                .filter(|level| efforts.iter().any(|choice| choice.value == *level))
+                .or_else(|| efforts.first().map(|choice| choice.value.clone()))
+                .unwrap_or_default();
+            GrokModelMenu {
+                id: model_id.clone(),
+                name: if model.name.is_empty() {
+                    model_id
+                } else {
+                    model.name
+                },
+                effort,
+                efforts,
+            }
+        })
+        .filter(|menu| !menu.id.is_empty())
+        .collect();
+    if menus.is_empty() {
+        return None;
+    }
+    if let Some(index) = menus
+        .iter()
+        .position(|menu| menu.id == state.current_model_id)
+    {
+        menus.swap(0, index);
+    }
+    Some(menus)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GrokModelState {
+    current_model_id: String,
+    available_models: Vec<GrokAvailableModel>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GrokAvailableModel {
+    model_id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default, rename = "_meta")]
+    meta: Option<GrokModelMeta>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GrokModelMeta {
+    #[serde(default)]
+    reasoning_effort: Option<String>,
+    #[serde(default)]
+    reasoning_efforts: Vec<GrokEffortOption>,
+}
+
+#[derive(Deserialize)]
+struct GrokEffortOption {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    value: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct GrokSessionConfig {
+    #[serde(default)]
+    options: Vec<GrokSessionOption>,
+}
+
+#[derive(Deserialize)]
+struct GrokSessionOption {
+    id: String,
+    #[serde(default)]
+    category: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    selected: bool,
+}
+
+fn with_grok_choice(
+    mut rows: Vec<ConfigRow>,
+    category: &str,
+    value: &str,
+    menus: &[GrokModelMenu],
+) -> Vec<ConfigRow> {
+    if category == "model" {
+        if let Some(menu) = menus.iter().find(|menu| menu.id == value) {
+            let current_effort = rows
+                .iter()
+                .find(|row| row.category == "thought_level")
+                .map(|row| row.value.as_str());
+            let effort = current_effort
+                .filter(|level| menu.efforts.iter().any(|choice| choice.value == *level))
+                .unwrap_or(menu.effort.as_str());
+            return grok_rows_from_menus(menus, value, Some(effort));
+        }
+    }
+    for row in &mut rows {
+        if row.category == category {
+            row.value = value.to_string();
+        }
+    }
+    rows
+}
+
+async fn set_grok_choice(
+    cx: &ConnectionTo<Agent>,
+    session: &SessionId,
+    category: &str,
+    value: &str,
+    current: &[ConfigRow],
+    menus: &[GrokModelMenu],
+) -> Result<Vec<ConfigRow>, agent_client_protocol::Error> {
+    let model_id = if category == "model" {
+        value.to_string()
+    } else {
+        current
+            .iter()
+            .find(|row| row.category == "model")
+            .map(|row| row.value.clone())
+            .or_else(|| menus.first().map(|menu| menu.id.clone()))
+            .ok_or_else(agent_client_protocol::Error::internal_error)?
+    };
+    let effort = if category == "thought_level" {
+        Some(value.to_string())
+    } else {
+        let wanted = current
+            .iter()
+            .find(|row| row.category == "thought_level")
+            .map(|row| row.value.clone());
+        match menus.iter().find(|menu| menu.id == model_id) {
+            Some(menu)
+                if wanted.as_ref().is_some_and(|level| {
+                    menu.efforts.iter().any(|choice| choice.value == *level)
+                }) =>
+            {
+                wanted
+            }
+            Some(menu) if !menu.effort.is_empty() => Some(menu.effort.clone()),
+            _ => wanted,
+        }
+    };
+    let mut meta = Meta::new();
+    if let Some(effort) = effort {
+        meta.insert("reasoningEffort".into(), serde_json::Value::String(effort));
+    }
+    cx.send_request(SetSessionModelRequest {
+        session_id: session.clone(),
+        model_id,
+        meta: (!meta.is_empty()).then_some(meta),
+    })
+    .block_task()
+    .await?;
+    Ok(with_grok_choice(current.to_vec(), category, value, menus))
+}
+
 /// ACP's config options, narrowed to the two the picker draws and put in the
 /// order they are applied. Matched on category rather than option id, because
 /// the ids differ per agent (Claude's `effort` is Codex's `reasoning_effort`).
@@ -503,9 +959,11 @@ fn rows(options: &[SessionConfigOption]) -> Vec<ConfigRow> {
     crate::prefs::SHOWN
         .iter()
         .filter_map(|category| {
-            let option = options
-                .iter()
-                .find(|o| o.category.as_ref().is_some_and(|c| wire_string(c) == *category))?;
+            let option = options.iter().find(|o| {
+                o.category
+                    .as_ref()
+                    .is_some_and(|c| wire_string(c) == *category)
+            })?;
             let SessionConfigKind::Select(select) = &option.kind else {
                 return None;
             };
@@ -544,6 +1002,8 @@ async fn apply_choices(
     session: &SessionId,
     mut current: Vec<ConfigRow>,
     chosen: Vec<(String, String)>,
+    kind: AgentKind,
+    menus: &[GrokModelMenu],
 ) -> Vec<ConfigRow> {
     for (category, value) in chosen {
         // The pick is stored by category; this session's own id for it comes
@@ -559,6 +1019,19 @@ async fn apply_choices(
         else {
             continue;
         };
+        if kind == AgentKind::Grok {
+            match set_grok_choice(cx, session, &category, &value, &current, menus).await {
+                Ok(updated) => current = updated,
+                Err(error) => {
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[chat-config] could not set {category}={value}: {}",
+                        error.message
+                    );
+                }
+            }
+            continue;
+        }
         match cx
             .send_request(SetSessionConfigOptionRequest::new(
                 session.clone(),
@@ -624,29 +1097,41 @@ pub async fn set_chat_config(
         let sessions = app.state::<Chats>();
         let sessions = sessions.sessions.lock().unwrap();
         sessions.get(&id).and_then(|chat| {
-            let config_id = chat
-                .config
-                .lock()
-                .unwrap()
+            let current = chat.config.lock().unwrap().clone();
+            let config_id = current
                 .iter()
                 .find(|row| row.category == category)
                 .map(|row| row.id.clone())?;
-            Some((id.clone(), chat.conn.clone(), chat.session.clone(), config_id))
+            Some((
+                id.clone(),
+                chat.conn.clone(),
+                chat.session.clone(),
+                chat.agent,
+                chat.grok_models.clone(),
+                current,
+                config_id,
+            ))
         })
     });
-    let Some((id, conn, session, config_id)) = live else {
+    let Some((id, conn, session, agent_kind, menus, current, config_id)) = live else {
         return Ok(app.state::<PrefStore>().rows(kind.id()));
     };
-    let response = conn
-        .send_request(SetSessionConfigOptionRequest::new(
-            session,
-            config_id,
-            value.as_str(),
-        ))
-        .block_task()
-        .await
-        .map_err(|error| friendly(kind, error))?;
-    let updated = rows(&response.config_options);
+    let updated = if agent_kind == AgentKind::Grok {
+        set_grok_choice(&conn, &session, &category, &value, &current, &menus)
+            .await
+            .map_err(|error| friendly(kind, error))?
+    } else {
+        let response = conn
+            .send_request(SetSessionConfigOptionRequest::new(
+                session,
+                config_id,
+                value.as_str(),
+            ))
+            .block_task()
+            .await
+            .map_err(|error| friendly(kind, error))?;
+        rows(&response.config_options)
+    };
     app.state::<PrefStore>().cache(kind.id(), updated.clone());
     let sessions = app.state::<Chats>();
     let sessions = sessions.sessions.lock().unwrap();
@@ -812,6 +1297,9 @@ async fn run_chat(
                             .send_request(InitializeRequest::new(ProtocolVersion::V1))
                             .block_task()
                             .await?;
+                        let menus = grok_model_menus(init.meta.as_ref()).unwrap_or_default();
+                        let chosen = chat_app.state::<PrefStore>().chosen(kind.id());
+                        let open_meta = grok_open_meta(kind, &chosen);
                         if let Some(id) = resume {
                             // Restore chain: session/load replays the whole
                             // transcript through the notification handler
@@ -824,16 +1312,22 @@ async fn run_chat(
                             let restored = if init.agent_capabilities.load_session {
                                 let requested = SessionId::new(id.clone());
                                 load_replaying.store(true, Ordering::Relaxed);
-                                let loaded = cx
-                                    .send_request(LoadSessionRequest::new(
-                                        requested.clone(),
-                                        project.clone(),
-                                    ))
-                                    .block_task()
-                                    .await;
+                                let mut request =
+                                    LoadSessionRequest::new(requested.clone(), project.clone());
+                                if let Some(meta) = open_meta.clone() {
+                                    request = request.meta(meta);
+                                }
+                                let loaded = cx.send_request(request).block_task().await;
                                 load_replaying.store(false, Ordering::Relaxed);
                                 loaded.map(|loaded| {
-                                    (requested, loaded.config_options.unwrap_or_default())
+                                    (
+                                        requested,
+                                        picker_rows(
+                                            &loaded.config_options.unwrap_or_default(),
+                                            loaded.meta.as_ref(),
+                                            init.meta.as_ref(),
+                                        ),
+                                    )
                                 })
                             } else {
                                 Err(agent_client_protocol::Error::method_not_found())
@@ -844,7 +1338,7 @@ async fn run_chat(
                                         std::io::stderr(),
                                         "[chat-session] restore path: session/load ok ({id})"
                                     );
-                                    return Ok(session);
+                                    return Ok((session.0, session.1, menus, chosen));
                                 }
                                 Err(error) => {
                                     let _ = writeln!(
@@ -861,32 +1355,46 @@ async fn run_chat(
                                 }
                             }
                         }
-                        cx.send_request(NewSessionRequest::new(project))
+                        let mut request = NewSessionRequest::new(project);
+                        if let Some(meta) = open_meta {
+                            request = request.meta(meta);
+                        }
+                        cx.send_request(request)
                             .block_task()
                             .await
                             .map(|new_session| {
                                 (
                                     new_session.session_id,
-                                    new_session.config_options.unwrap_or_default(),
+                                    picker_rows(
+                                        &new_session.config_options.unwrap_or_default(),
+                                        new_session.meta.as_ref(),
+                                        init.meta.as_ref(),
+                                    ),
+                                    menus,
+                                    chosen,
                                 )
                             })
                     }
                     .await;
                     let session_id = match session {
-                        Ok((session, options)) => {
+                        Ok((session, current, menus, chosen)) => {
                             // Before ready_tx: the picker's choice has to be on
                             // the session by the time the first prompt can go
                             // out, or the opening turn runs on the wrong model.
                             let config = apply_choices(
                                 &cx,
                                 &session,
-                                rows(&options),
-                                chat_app.state::<PrefStore>().chosen(kind.id()),
+                                current,
+                                chosen,
+                                kind,
+                                &menus,
                             )
                             .await;
-                            chat_app
-                                .state::<PrefStore>()
-                                .cache(kind.id(), config.clone());
+                            let prefs = chat_app.state::<PrefStore>();
+                            prefs.cache(kind.id(), config.clone());
+                            if kind == AgentKind::Grok {
+                                prefs.cache_model_rows(kind.id(), grok_rows_by_model(&menus));
+                            }
                             let id = wire_string(&session);
                             *connected_session.lock().unwrap() = Some(id.clone());
                             chat_app.state::<Chats>().sessions.lock().unwrap().insert(
@@ -899,6 +1407,7 @@ async fn run_chat(
                                     pending: chat_pending,
                                     channel: chat_channel,
                                     config: Mutex::new(config),
+                                    grok_models: menus,
                                     pgid,
                                     _close: close_tx,
                                 },
@@ -1023,8 +1532,11 @@ fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{attachment_block, friendly, rows, AgentKind};
-    use agent_client_protocol::schema::v1::{ContentBlock, SessionConfigOption};
+    use super::{
+        attachment_block, friendly, grok_open_meta, grok_rows, picker_rows, rows, with_grok_choice,
+        AgentKind,
+    };
+    use agent_client_protocol::schema::v1::{ContentBlock, Meta, SessionConfigOption};
 
     /// The exact message a revoked token produces (#115): an internal error,
     /// not -32000, so only the message can route it to the sign-in button.
@@ -1109,6 +1621,136 @@ mod tests {
         assert!(rows(&[]).is_empty());
     }
 
+    /// Grok 1.0.5's session/new, captured off the wire: no `configOptions`,
+    /// effort advertised as vendor session-config category `mode`.
+    const GROK_SESSION: &str = r#"{
+      "x.ai/sessionConfig": {
+        "options": [
+          {"id":"grok-4.6","category":"model","label":"Grok 4.6","selected":true},
+          {"id":"grok-4.5","category":"model","label":"Grok 4.5","selected":false},
+          {"id":"xhigh","category":"mode","label":"Extra High Effort",
+           "description":"Highest effort and reasoning level","selected":false},
+          {"id":"high","category":"mode","label":"High Effort",
+           "description":"Higher implementation quality with extensive reasoning","selected":true},
+          {"id":"medium","category":"mode","label":"Medium Effort","selected":false},
+          {"id":"low","category":"mode","label":"Low Effort","selected":false}
+        ]
+      }
+    }"#;
+
+    /// initialize `_meta.modelState` from the same CLI: per-model effort menus,
+    /// including Extra High on 4.6 only.
+    const GROK_INIT: &str = r#"{
+      "modelState": {
+        "currentModelId": "grok-4.6",
+        "availableModels": [
+          {
+            "modelId": "grok-4.6",
+            "name": "Grok 4.6",
+            "_meta": {
+              "supportsReasoningEffort": true,
+              "reasoningEffort": "high",
+              "reasoningEfforts": [
+                {"id":"xhigh","value":"xhigh","label":"Extra High Effort"},
+                {"id":"high","value":"high","label":"High Effort","default":true},
+                {"id":"medium","value":"medium","label":"Medium Effort"},
+                {"id":"low","value":"low","label":"Low Effort"}
+              ]
+            }
+          },
+          {
+            "modelId": "grok-4.5",
+            "name": "Grok 4.5",
+            "_meta": {
+              "supportsReasoningEffort": true,
+              "reasoningEffort": "high",
+              "reasoningEfforts": [
+                {"id":"high","value":"high","label":"High Effort","default":true},
+                {"id":"medium","value":"medium","label":"Medium Effort"},
+                {"id":"low","value":"low","label":"Low Effort"}
+              ]
+            }
+          }
+        ]
+      }
+    }"#;
+
+    fn grok_meta(json: &str) -> Meta {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn grok_gets_a_picker_from_vendor_session_config() {
+        let rows = grok_rows(Some(&grok_meta(GROK_SESSION)), None);
+        let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
+        assert_eq!(ids, ["model", "thought_level"]);
+        assert_eq!(rows[0].value, "grok-4.6");
+        assert_eq!(rows[0].options[0].name, "Grok 4.6");
+        assert_eq!(rows[1].value, "high");
+        assert_eq!(rows[1].name, "Effort");
+        assert_eq!(rows[1].options.len(), 4);
+        assert_eq!(rows[1].options[0].name, "Extra High Effort");
+    }
+
+    #[test]
+    fn grok_thinking_level_follows_the_current_models_menu() {
+        let init = grok_meta(GROK_INIT);
+        let session = grok_meta(GROK_SESSION);
+        let rows = grok_rows(Some(&session), Some(&init));
+        assert_eq!(rows[0].value, "grok-4.6");
+        assert_eq!(rows[1].options.len(), 4);
+
+        let menus = super::grok_model_menus(Some(&init)).unwrap();
+        let switched = with_grok_choice(rows.clone(), "model", "grok-4.5", &menus);
+        assert_eq!(switched[0].value, "grok-4.5");
+        assert_eq!(switched[1].value, "high");
+        assert_eq!(switched[1].options.len(), 3);
+        assert!(!switched[1]
+            .options
+            .iter()
+            .any(|choice| choice.value == "xhigh"));
+
+        let xhigh = with_grok_choice(rows, "thought_level", "xhigh", &menus);
+        let dropped = with_grok_choice(xhigh, "model", "grok-4.5", &menus);
+        assert_eq!(dropped[1].value, "high");
+    }
+
+    /// The bug this replaced: matching only ACP `thought_level` config options
+    /// showed Grok nothing, because it never advertises `configOptions`.
+    #[test]
+    fn grok_picker_does_not_need_acp_config_options() {
+        let rows = picker_rows(
+            &[],
+            Some(&grok_meta(GROK_SESSION)),
+            Some(&grok_meta(GROK_INIT)),
+        );
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1].category, "thought_level");
+    }
+
+    #[test]
+    fn acp_config_options_still_win_over_grok_vendor_meta() {
+        let options: Vec<SessionConfigOption> = serde_json::from_str(CLAUDE).unwrap();
+        let rows = picker_rows(&options, Some(&grok_meta(GROK_SESSION)), None);
+        assert_eq!(rows[0].value, "opus[1m]");
+        assert_eq!(rows[1].id, "effort");
+    }
+
+    #[test]
+    fn grok_open_meta_carries_model_and_effort() {
+        let meta = grok_open_meta(
+            AgentKind::Grok,
+            &[
+                ("model".into(), "grok-4.5".into()),
+                ("thought_level".into(), "low".into()),
+            ],
+        )
+        .unwrap();
+        assert_eq!(meta["modelId"], "grok-4.5");
+        assert_eq!(meta["reasoningEffort"], "low");
+        assert!(grok_open_meta(AgentKind::Claude, &[("model".into(), "sonnet".into())]).is_none());
+    }
+
     fn scratch(name: &str, bytes: &[u8]) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("nurb-attach-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1148,8 +1790,6 @@ mod tests {
         assert!(attachment_block(missing).unwrap_err().contains("gone.png"));
 
         let huge = scratch("huge.png", &vec![0u8; 10 * 1024 * 1024 + 1]);
-        assert!(attachment_block(&huge)
-            .unwrap_err()
-            .contains("too large"));
+        assert!(attachment_block(&huge).unwrap_err().contains("too large"));
     }
 }

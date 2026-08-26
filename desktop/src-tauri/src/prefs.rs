@@ -23,8 +23,11 @@ use serde::{Deserialize, Serialize};
 /// Categories, not option ids, because the ids are per agent and picking by id
 /// silently drops agents that name the same thing differently: Claude calls its
 /// effort option `effort`, Codex calls it `reasoning_effort`, and both tag it
-/// `thought_level`. Everything else an adapter offers (permission mode, Codex's
-/// collaboration mode, fast mode, a subagent picker) stays session-local.
+/// `thought_level`. Grok does not advertise config options at all: it puts
+/// models on initialize `_meta.modelState` and effort under vendor session
+/// config as category `mode`, and the picker maps that onto `thought_level`.
+/// Everything else an adapter offers (permission mode, Codex's collaboration
+/// mode, fast mode, a subagent picker) stays session-local.
 pub const SHOWN: [&str; 2] = ["model", "thought_level"];
 
 /// One select the picker draws, flattened out of ACP's `SessionConfigOption`
@@ -60,6 +63,10 @@ struct AgentPrefs {
     chosen: HashMap<String, String>,
     #[serde(default)]
     rows: Vec<ConfigRow>,
+    /// Grok's effort choices vary by model. Keeping each flattened row set lets
+    /// a fresh chat rebuild the effort menu before an adapter exists.
+    #[serde(default)]
+    model_rows: HashMap<String, Vec<ConfigRow>>,
 }
 
 pub struct PrefStore {
@@ -105,8 +112,12 @@ impl PrefStore {
         let Some(prefs) = agents.get(agent) else {
             return Vec::new();
         };
-        prefs
-            .rows
+        let rows = prefs
+            .chosen
+            .get("model")
+            .and_then(|model| prefs.model_rows.get(model))
+            .unwrap_or(&prefs.rows);
+        rows
             .iter()
             .filter(|row| !row.category.is_empty())
             .map(|row| match prefs.chosen.get(&row.category) {
@@ -124,11 +135,11 @@ impl PrefStore {
             return;
         }
         let mut agents = self.agents.lock().unwrap();
-        agents
-            .entry(agent.to_string())
-            .or_default()
+        let prefs = agents.entry(agent.to_string()).or_default();
+        prefs
             .chosen
             .insert(category.to_string(), value.to_string());
+        normalize_effort(prefs);
         self.save(&agents);
     }
 
@@ -139,6 +150,16 @@ impl PrefStore {
         }
         let mut agents = self.agents.lock().unwrap();
         agents.entry(agent.to_string()).or_default().rows = rows;
+        self.save(&agents);
+    }
+
+    /// Cache Grok's complete per-model menus so model changes can update the
+    /// effort picker even before a chat session starts.
+    pub fn cache_model_rows(&self, agent: &str, rows: HashMap<String, Vec<ConfigRow>>) {
+        let mut agents = self.agents.lock().unwrap();
+        let prefs = agents.entry(agent.to_string()).or_default();
+        prefs.model_rows = rows;
+        normalize_effort(prefs);
         self.save(&agents);
     }
 
@@ -155,9 +176,35 @@ impl PrefStore {
     }
 }
 
+fn normalize_effort(prefs: &mut AgentPrefs) {
+    let Some(rows) = prefs
+        .chosen
+        .get("model")
+        .and_then(|model| prefs.model_rows.get(model))
+    else {
+        return;
+    };
+    let Some(effort) = rows.iter().find(|row| row.category == "thought_level") else {
+        return;
+    };
+    let Some(chosen) = prefs.chosen.get("thought_level") else {
+        return;
+    };
+    let valid = effort
+        .options
+        .iter()
+        .any(|option| option.value == *chosen);
+    if !valid {
+        prefs
+            .chosen
+            .insert("thought_level".into(), effort.value.clone());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ConfigChoice, ConfigRow, PrefStore};
+    use std::collections::HashMap;
     use std::path::PathBuf;
 
     fn scratch(name: &str) -> PathBuf {
@@ -266,5 +313,77 @@ mod tests {
         let rows = PrefStore::load(&dir).rows("claude");
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].value, "sonnet");
+    }
+
+    #[test]
+    fn cached_model_switch_rebuilds_and_normalizes_the_effort_menu() {
+        fn rows(model: &str, efforts: &[&str]) -> Vec<ConfigRow> {
+            vec![
+                ConfigRow {
+                    id: "model".into(),
+                    category: "model".into(),
+                    name: "Model".into(),
+                    value: model.into(),
+                    options: ["grok-4.6", "grok-4.5"]
+                        .into_iter()
+                        .map(|value| ConfigChoice {
+                            value: value.into(),
+                            name: value.into(),
+                            description: None,
+                        })
+                        .collect(),
+                },
+                ConfigRow {
+                    id: "thought_level".into(),
+                    category: "thought_level".into(),
+                    name: "Effort".into(),
+                    value: "high".into(),
+                    options: efforts
+                        .iter()
+                        .map(|value| ConfigChoice {
+                            value: (*value).into(),
+                            name: (*value).into(),
+                            description: None,
+                        })
+                        .collect(),
+                },
+            ]
+        }
+
+        let dir = scratch("model-rows");
+        let store = PrefStore::load(&dir);
+        let grok_46 = rows("grok-4.6", &["xhigh", "high", "medium", "low"]);
+        let grok_45 = rows("grok-4.5", &["high", "medium", "low"]);
+        store.cache("grok", grok_46.clone());
+        store.cache_model_rows(
+            "grok",
+            HashMap::from([
+                ("grok-4.6".into(), grok_46),
+                ("grok-4.5".into(), grok_45),
+            ]),
+        );
+        store.remember("grok", "model", "grok-4.6");
+        assert_eq!(
+            store.chosen("grok"),
+            vec![("model".into(), "grok-4.6".into())]
+        );
+        store.remember("grok", "thought_level", "xhigh");
+        store.remember("grok", "model", "grok-4.5");
+
+        let rows = store.rows("grok");
+        assert_eq!(rows[0].value, "grok-4.5");
+        assert_eq!(rows[1].value, "high");
+        assert_eq!(rows[1].options.len(), 3);
+        assert!(!rows[1]
+            .options
+            .iter()
+            .any(|option| option.value == "xhigh"));
+        assert_eq!(
+            store.chosen("grok"),
+            vec![
+                ("model".into(), "grok-4.5".into()),
+                ("thought_level".into(), "high".into()),
+            ]
+        );
     }
 }
