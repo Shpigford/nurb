@@ -80,13 +80,13 @@ VERDICTS = {
     ("codex", "gpt-5.6-sol", "high"): "Twenty-eight of thirty parts right at about four minutes each. Five of the six jobs came out right on every single attempt, the curved pole rest and the one-screw wall clip included, and both misses are the same mistake, a knob bored a shade too tight for the shaft to go in. The same model at medium effort gets the same twenty-eight right in less time for less money, so start there.",
     ("codex", "gpt-5.6-luna", "xhigh"): "Eleven cents a part, and twenty-three of thirty right where the same model at low effort managed five. Effort is what luna was missing. It still slips when a part has to keep working at other sizes: two bit blocks stopped building once the bit got bigger, and a wall clip put the screw through the only place the bundle had to sit. One knob came out with a round bore that spins on the shaft, and once it filed its guess at the unmeasured dimension without marking it as a guess.",
     ("codex", "gpt-5.6-terra", "medium"): "Thirty-four of forty-eight right across two people's runs, at about two and a half minutes a part. Every stated dimension and every missing measurement it handled right; the design jobs are where it thins out. Half its wall clips left no usable path for the screw and its driver, five of eight knobs came out too tight for the shaft, and two pole rests were too flat to cradle the pole. At about eighty cents a part it costs ten times what luna does and gets no more right.",
-    ("claude", "claude-haiku-4-5-20251001", "low"): "Fine when you spell every dimension out, and cheap. Asked to design, it produced parts you would not print: it came apart on all three design jobs, with walls and sockets that break the printability rules outright. It did handle the missing measurement honestly.",
+    ("claude", "claude-haiku-4-5", "low"): "Fine when you spell every dimension out, and cheap. Asked to design, it produced parts you would not print: it came apart on all three design jobs, with walls and sockets that break the printability rules outright. It did handle the missing measurement honestly.",
     ("grok", "grok-4.6", "xhigh"): "The most reliable row on the board that anyone can afford: thirty-five of thirty-six right, pooled from two people's runs, with five of the six jobs right on every single attempt. Its one miss was a knob bored a shade too tight for the stem and a fraction under the grip width asked for. It takes five times as long as the same model at low effort and costs four times as much, which is still under thirty cents a part.",
     ("codex", "gpt-5.6-sol", "medium"): "The ChatGPT row to pick: twenty-eight of thirty right at about three minutes a part, which is what the same model manages at high effort, sooner and for less. Four of the six jobs came out right every time, the curved pole rest among them. Its two misses were a wall clip that left the bundle nothing to sit against and a knob bored a shade too tight for the shaft.",
     ("claude", "claude-opus-5", "medium"): "Fourteen of eighteen right at about seven minutes a part, and one job it never got: all three knobs came out too tight for the shaft and too narrow to grip. The fourth miss was a leg cup whose walls did not reach the rim solid. It was honest about the unmeasured dimension every time. Opus at high effort gets seventeen of eighteen for three more minutes a part, so run that instead.",
     ("codex", "gpt-5.6-luna", "high"): "Ten cents a part, and twenty-two of thirty right. The job it never got is the bit block: every one built at the size stated and then stopped tracking once the bit grew, losing its pockets or its top chamfer. Elsewhere it slipped once each, a wall clip with no way in for the screw, a rest the pole would not sit in at another size, and a knob with a round bore that spins on the shaft. The same model at xhigh is the same machine for two cents more.",
     ("codex", "gpt-5.6-terra", "high"): "Nineteen of thirty right, and the two design jobs are where it comes apart: four of five wall clips had no usable path for the screw and its driver, and all five knobs came out too tight for the shaft. It also left one cable clip with no hole in its mounting tab. The curved rest and the missing measurement it got right every time. Terra at medium effort costs about the same and gets more right, and sol at medium is a different machine for twice the money.",
-    ("claude", "claude-haiku-4-5-20251001", "high"): "The weakest row here, and the extra effort did not help. Two parts of twelve came out right. It also wrote its guess at the unmeasured dimension down as though it had measured it, which is the mistake nobody catches until the print is wrong six months later.",
+    ("claude", "claude-haiku-4-5", "high"): "The weakest row here, and the extra effort did not help. Two parts of twelve came out right. It also wrote its guess at the unmeasured dimension down as though it had measured it, which is the mistake nobody catches until the print is wrong six months later.",
 }
 
 HEAD = """\
@@ -176,14 +176,23 @@ HEAD = """\
   .job { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: .8rem 1rem; }
   .job b { display: block; }
   .job span { color: var(--dim); font: 13.5px/1.5 var(--sans); }
-  .answers { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
-  @media (max-width: 640px) { .answers { grid-template-columns: 1fr; } }
-  .answer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; }
+  /* One column per subscription: there are exactly three, and a 2-wide grid left
+     the third card orphaned under an empty slot. */
+  .answers { display: grid; grid-template-columns: repeat(3, 1fr); gap: .8rem; }
+  @media (max-width: 900px) { .answers { grid-template-columns: 1fr; } }
+  .answer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 1.05rem 1.2rem 1.15rem; }
   .answer .have { font-size: .85rem; color: var(--dim); display: flex; align-items: center; gap: .5rem; }
   .answer .have i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .answer .pick { font-size: 1.15rem; font-weight: 700; margin: .15rem 0; }
-  .answer .pick small { color: var(--dim); font-weight: 400; font-size: .8em; }
-  .answer .why { color: var(--dim); font-size: .88rem; }
+  .answer .pick { font-size: 1.2rem; font-weight: 700; margin-top: .55rem; line-height: 1.25; }
+  .answer .effort { color: var(--dim); font-size: .85rem; margin-top: .15rem; }
+  /* Stats as label/value rows, not a run-on sentence: three facts wrapping through
+     middots read as one gray blur at card width. */
+  .answer .facts { margin-top: .85rem; }
+  .answer .facts > div { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: .42rem 0; border-top: 1px solid var(--line); }
+  .answer .facts span { color: var(--dim); font: 13px/1.4 var(--sans); }
+  .answer .facts b { font-weight: 400; font-size: .88rem; white-space: nowrap; }
+  .answer .note { color: var(--dimmer); font: 12px/1.5 var(--sans); margin-top: .5rem; }
+  .answer .why { color: var(--dim); font-size: .88rem; margin-top: .3rem; }
   .chart-lead { color: var(--dim); font: 15px/1.6 var(--sans); margin-bottom: 16px; }
   .chart { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .6rem; }
   .chart svg { display: block; width: 100%; height: auto; }
@@ -192,11 +201,15 @@ HEAD = """\
   .chart-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
   .chart-legend b { font-weight: 400; color: var(--text); }
   .chart .dot { transition: r .1s; }
-  .chart .dot:hover { r: 8; }
+  .chart .dot:hover { r: 10; }
+  .chart-tip { position: fixed; z-index: 20; pointer-events: none; display: none;
+               background: var(--panel2); border: 1px solid var(--line); border-radius: 8px;
+               padding: .45rem .7rem; font-size: 12.5px; line-height: 1.6; color: var(--dim);
+               box-shadow: 0 12px 32px rgba(0,0,0,.45); white-space: nowrap; }
+  .chart-tip b { color: var(--text); }
   .board { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-  /* The model column sizes to the longest pinned id, which is a dated one like
-     claude-haiku-4-5-20251001; wrap its effort onto a second line and that row
-     stands taller than every other. */
+  /* The model column sizes to the longest pinned id; wrap its effort onto a
+     second line and that row stands taller than every other. */
   .board .hd, .board summary { display: grid; grid-template-columns: 2rem minmax(0,1.7fr) minmax(6.5rem,1fr) 7.5rem 5.2rem 5.8rem; gap: 1rem; align-items: center; padding: .7rem 1.1rem; }
   .board .hd { font-size: .72rem; color: var(--dimmer); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--line); }
   .board .hd .r { text-align: right; }
@@ -232,7 +245,7 @@ HEAD = """\
        two extra wrapped lines, and every verdict that turns on speed says so in
        words anyway. */
     .board .hd, .board summary { grid-template-columns: 1.6rem minmax(0,1.5fr) minmax(4.5rem,1fr); gap: .6rem; padding: .7rem .8rem; }
-    /* Narrow enough that a dated model id cannot fit on one line, and holding it
+    /* Narrow enough that a long model id cannot fit on one line, and holding it
        there would scroll the page sideways. A taller row is the cheaper trade. */
     .who .model { white-space: normal; }
     /* Break before the separator, never after it: a line ending in a lone middot
@@ -321,7 +334,7 @@ HEAD = """\
 
 <div class="sec-label"><b>// 03</b> &nbsp;the tradeoff</div>
 <h2>Quality against speed.</h2>
-<p class="chart-lead">First-try print rate against minutes per part. Up and to the left is better.</p>
+<p class="chart-lead">Every dot is one model at one effort setting: how often its parts printed right, against how long it took per part. The best picks sit high and to the left, right most of the time without the wait.</p>
 {chart}
 
 <div class="sec-label"><b>// 04</b> &nbsp;the jobs</div>
@@ -360,6 +373,34 @@ for (const b of document.querySelectorAll('[data-copy]')) {
     b.textContent = 'copied';
     setTimeout(() => { b.textContent = 'copy'; }, 1200);
   };
+}
+const dots = document.querySelectorAll('.chart .dot[data-model]');
+if (dots.length) {
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip';
+  document.body.appendChild(tip);
+  const place = e => {
+    let x = e.clientX + 14, y = e.clientY + 16;
+    if (x + tip.offsetWidth > innerWidth - 8) x = e.clientX - tip.offsetWidth - 14;
+    if (y + tip.offsetHeight > innerHeight - 8) y = e.clientY - tip.offsetHeight - 16;
+    tip.style.left = x + 'px'; tip.style.top = y + 'px';
+  };
+  for (const dot of dots) {
+    dot.addEventListener('mouseenter', e => {
+      tip.textContent = '';
+      const who = document.createElement('div');
+      const b = document.createElement('b');
+      b.textContent = dot.dataset.model;
+      who.append(b, ' · ' + dot.dataset.effort + ' effort');
+      const stats = document.createElement('div');
+      stats.textContent = dot.dataset.stats;
+      tip.append(who, stats);
+      tip.style.display = 'block';
+      place(e);
+    });
+    dot.addEventListener('mousemove', place);
+    dot.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  }
 }
 </script>
 </body>
@@ -503,12 +544,23 @@ def _answers(combos):
             continue
         _, key, (firsts, total, minutes, capped, dollars) = best[harness]
         model, effort = key[1], key[2]
+        facts = [
+            ("first-try prints", f"{firsts}/{total}"),
+            ("time per part", f'~{minutes:.0f}{"+" if capped else ""} min'),
+        ]
+        if dollars is not None:
+            figure = f"${dollars:.2f}" if dollars >= 0.10 else f"${dollars:.3f}"
+            facts.append(("$/part at API rates", f"~{figure}"))
+        rows = "\n".join(f"    <div><span>{n}</span><b>{v}</b></div>" for n, v in facts)
+        note = (
+            f'\n  <div class="note">hit the time limit on {capped}</div>' if capped else ""
+        )
         cards.append(
             f'<div class="answer">\n'
             f'  <div class="have"><i style="background:{color}"></i>Have {html.escape(label)}?</div>\n'
-            f'  <div class="pick">run {html.escape(model)} <small>at {html.escape(effort)} effort</small></div>\n'
-            f'  <div class="why">{firsts}/{total} first-try prints &middot; '
-            f"{_time_note(minutes, capped)}{_cost_note(dollars)}</div>\n"
+            f'  <div class="pick">run {html.escape(model)}</div>\n'
+            f'  <div class="effort">at {html.escape(effort)} effort</div>\n'
+            f'  <div class="facts">\n{rows}\n  </div>{note}\n'
             f"</div>"
         )
     return "\n".join(cards)
@@ -517,7 +569,7 @@ def _answers(combos):
 # 12px JetBrains Mono is monospace, so a label's width is its character count. Close
 # enough to reserve space with, which is all the placement below needs.
 _LABEL_ADVANCE = 7.05
-_DOT_GAP = 12
+_DOT_GAP = 14
 _ARROW_GAP = 34
 # What actually gets drawn is the backing rect, not the glyphs: 14px tall and 3px
 # wider than the text on each side. The placer tests the drawn box, or it clears a
@@ -528,47 +580,61 @@ _LABEL_PAD = 3
 # instead of a copy that can drift away from them.
 _CHART_BOX = (840, 740)
 _CHART_MARGINS = (56, 24, 26, 46)
+_EFFORT_LETTERS = {"low": "L", "medium": "M", "high": "H", "xhigh": "X"}
+
+
+def _dot_ink(color):
+    """White or ink for the effort letter, by the dot fill's luminance."""
+    if not color.startswith("#") or len(color) != 7:
+        return "#fff"
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    return "#16181d" if 0.299 * r + 0.587 * g + 0.114 * b > 150 else "#fff"
+
+
+def _mark_anchors(points):
+    """One label per model line, on the group's best point.
+
+    Labeling every dot buried the top tenth of the chart under two dozen labels the
+    moment the board grew past a handful of rows. One label names the model, each
+    dot's letter says which effort it is, and the label rides the group's best point
+    because up is where the reader's eye goes."""
+    best = {}
+    for p in points:
+        key = (p["harness"], p["model"])
+        held = best.get(key)
+        if held is None or (p["rate"], -p["minutes"]) > (held["rate"], -held["minutes"]):
+            best[key] = p
+    for p in points:
+        p["anchor"] = p is best[(p["harness"], p["model"])]
 
 
 def _label_sides(points, sx, sy, plot_left, plot_right, plot_top, plot_bottom):
     """Which side of its dot each label sits on.
 
-    Three things want the space beside a dot: the label, its neighbours' labels, and
-    the effort line joining a model's own variants, which runs through the label's
-    row when it leaves at a shallow angle. Preference first, then the plot edges get
-    a veto, then one sweep resolves whatever still overlaps.
+    Only anchor points carry a label, but every dot still vetoes the space it sits
+    in. Preference first, then the plot edges get a veto, then one sweep resolves
+    whatever still overlaps.
 
-    Left and right are only two slots, and the good models bunch into the top tenth
-    of this chart, so the sweep runs out of room there long before the labels do. A
-    label with nowhere clean on either side steps off its dot's row instead, by up to
-    three lines, keeping its edge against the dot so it still reads as that dot's
-    label. A row that would leave the plot is not offered: the axis caption sits just
-    above the top rule and a label over it reads as part of it. Only a label that
-    cannot go anywhere at all keeps its preferred side and overlaps, because a
-    collision inside the plot still beats a label hanging over the axis.
+    Left and right are only two slots, so a label with nowhere clean on either side
+    steps off its dot's row instead, by up to three lines, keeping its edge against
+    the dot so it still reads as that dot's label. A row that would leave the plot is
+    not offered: the axis caption sits just above the top rule and a label over it
+    reads as part of it. Only a label that cannot go anywhere at all keeps its
+    preferred side and overlaps, because a collision inside the plot still beats a
+    label hanging over the axis.
     """
     placed = {}
+    dots = [(p, sx(p["minutes"]), sy(p["rate"])) for p in points]
     boxes = []
     for p in points:
+        if not p.get("anchor"):
+            continue
         x, y = sx(p["minutes"]), sy(p["rate"])
-        width = len(f"{p['model']} \u00b7 {p['effort']}") * _LABEL_ADVANCE
-        crowd = any(
-            q is not p and abs(sy(q["rate"]) - y) < 16 and 0 < sx(q["minutes"]) - x < 170
-            for q in points
-        )
-        # The crowd rule only reaches 170px, and an effort line undercuts its label
-        # from any distance, so a same-model point to the right counts at any gap.
-        undercut = any(
-            q is not p
-            and (q["harness"], q["model"]) == (p["harness"], p["model"])
-            and abs(sy(q["rate"]) - y) < 20
-            and sx(q["minutes"]) > x
-            for q in points
-        )
+        width = len(p["model"]) * _LABEL_ADVANCE
         boxes.append(
             {
                 "point": p, "x": x, "y": y, "width": width, "dy": 0,
-                "flip": crowd or undercut or x > plot_right - 140,
+                "flip": x > plot_right - 140,
             }
         )
 
@@ -596,12 +662,13 @@ def _label_sides(points, sx, sy, plot_left, plot_right, plot_top, plot_bottom):
     def collides(box, flip, dy=0):
         lo, hi = span(box, flip, dy)
         row = box["y"] + dy
+        # Dots never move, so a label clears one only by leaving its row.
+        for q, qx, qy in dots:
+            if q is not box["point"] and abs(qy - row) < _LABEL_ROW and lo - 9 < qx < hi + 9:
+                return True
         for other in boxes:
             if other is box:
                 continue
-            # Dots never move, so a label clears one only by leaving its row.
-            if abs(other["y"] - row) < _LABEL_ROW and lo - 7 < other["x"] < hi + 7:
-                return True
             if abs(other["y"] + other["dy"] - row) >= _LABEL_ROW:
                 continue
             olo, ohi = span(other, other["flip"], other["dy"])
@@ -648,11 +715,12 @@ def _label_sides(points, sx, sy, plot_left, plot_right, plot_top, plot_bottom):
 
 
 def _chart(combos):
-    """One inline SVG: first-try rate against minutes per part, a labeled dot per
-    combo, colored by subscription. Effort variants of the same model connect into
-    a line as they land, so the two knobs read as geometry: pick a model's line,
-    slide along it for effort. Capped combos carry a right arrow: their time is a
-    floor, not a measurement.
+    """One inline SVG: first-try rate against minutes per part, a dot per combo,
+    colored by subscription. Nothing but dots: an earlier version joined a model's
+    effort variants into lines and the result read as a subway map. One label names
+    each model's best dot, the letter inside each dot says which effort it is, and
+    the tooltip carries the full numbers. Capped combos carry a right arrow: their
+    time is a floor, not a measurement.
 
     The box is sized for the labels, not the dots. Rate is the crowded axis, because
     every model worth running lands in the top tenth of it, and a row of labels needs
@@ -702,7 +770,7 @@ def _chart(combos):
     for m in range(tick, int(xmax) + 1, tick):
         x = sx(m)
         parts.append(
-            f'<line x1="{x:.0f}" y1="{top}" x2="{x:.0f}" y2="{height - bottom}" stroke="var(--line)" stroke-width="1" stroke-dasharray="2 5"/>'
+            f'<line x1="{x:.0f}" y1="{top}" x2="{x:.0f}" y2="{height - bottom}" stroke="var(--line)" stroke-width="1"/>'
             f'<text x="{x:.0f}" y="{height - bottom + 18}" text-anchor="middle" font-size="11" fill="var(--dimmer)">{m}</text>'
         )
     parts.append(
@@ -710,28 +778,12 @@ def _chart(combos):
         f'<text x="{left - 42}" y="{top - 10}" font-size="11" fill="var(--dim)">printed right first try</text>'
     )
 
-    # Effort variants of one model join into a line once more than one is on file.
-    by_model = {}
-    for p in points:
-        by_model.setdefault((p["harness"], p["model"]), []).append(p)
-    for (harness, _), group in by_model.items():
-        if len(group) > 1:
-            color = SUBSCRIPTIONS.get(harness, ("", "var(--dim)"))[1]
-            path = " ".join(
-                f"{'M' if i == 0 else 'L'} {sx(p['minutes']):.0f} {sy(p['rate']):.0f}"
-                for i, p in enumerate(sorted(group, key=lambda p: p["minutes"]))
-            )
-            parts.append(
-                f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2" opacity=".35"/>'
-            )
-
+    _mark_anchors(points)
     sides = _label_sides(points, sx, sy, left, width - right, top, height - bottom)
 
     for p in points:
         x, y = sx(p["minutes"]), sy(p["rate"])
         color = SUBSCRIPTIONS.get(p["harness"], ("", "var(--dim)"))[1]
-        anchor, lx, label_lo, label_hi, dy = sides[id(p)]
-        ly = y + dy
         title = (
             f"{p['model']} ({p['effort']} effort): {p['firsts']}/{p['total']} first-try, "
             f"{_time_note(p['minutes'], p['capped'])}"
@@ -739,30 +791,40 @@ def _chart(combos):
         )
         if p["capped"]:
             parts.append(
-                f'<line x1="{x + 8:.0f}" y1="{y:.0f}" x2="{x + 22:.0f}" y2="{y:.0f}" stroke="{color}" stroke-width="2"/>'
-                f'<path d="M {x + 22:.0f} {y - 4:.0f} L {x + 29:.0f} {y:.0f} L {x + 22:.0f} {y + 4:.0f} Z" fill="{color}"/>'
+                f'<line x1="{x + 10:.0f}" y1="{y:.0f}" x2="{x + 24:.0f}" y2="{y:.0f}" stroke="{color}" stroke-width="2"/>'
+                f'<path d="M {x + 24:.0f} {y - 4:.0f} L {x + 31:.0f} {y:.0f} L {x + 24:.0f} {y + 4:.0f} Z" fill="{color}"/>'
             )
-        if dy:
-            # A label pushed off its dot's row can have someone else's dot between the
-            # two. A leader says whose label it is; without one the reader guesses. It
-            # is drawn neutral, not in the subscription's color, so it cannot be read
-            # as one more effort line.
-            edge = label_hi if anchor == "end" else label_lo
+        if id(p) in sides:
+            anchor, lx, label_lo, label_hi, dy = sides[id(p)]
+            ly = y + dy
+            if dy:
+                # A label pushed off its dot's row can have someone else's dot between
+                # the two. A leader says whose label it is; without one the reader
+                # guesses. Neutral, so it never reads as data.
+                edge = label_hi if anchor == "end" else label_lo
+                parts.append(
+                    f'<path d="M {x:.0f} {y:.0f} L {edge:.0f} {ly:.0f}" fill="none" '
+                    f'stroke="var(--dimmer)" stroke-width="1"/>'
+                )
+            # The backing rect keeps a label legible where it crosses a gridline.
             parts.append(
-                f'<path d="M {x:.0f} {y:.0f} L {edge:.0f} {ly:.0f}" fill="none" '
-                f'stroke="var(--dimmer)" stroke-width="1"/>'
+                f'<rect x="{label_lo - 3:.0f}" y="{ly - 7:.0f}" width="{label_hi - label_lo + 6:.0f}"'
+                f' height="14" fill="var(--panel)"/>'
+                f'<text x="{lx:.0f}" y="{ly + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)">'
+                f'{html.escape(p["model"])}</text>'
             )
+        stats = (
+            f"{p['firsts']}/{p['total']} first-try &middot; "
+            f"{_time_note(p['minutes'], p['capped'])}{_cost_note(p['dollars'])}"
+        )
         parts.append(
-            f'<circle class="dot" cx="{x:.0f}" cy="{y:.0f}" r="6" fill="{color}" stroke="var(--panel)" stroke-width="2">'
-            f"<title>{html.escape(title)}</title></circle>"
-            # An effort line runs between two dots of the same model and passes
-            # through the row of one of their labels. A glyph-hugging halo only masks
-            # it at the strokes and leaves it showing between letters, so the label
-            # gets a backing rect and reads as text on the panel, not text on a rule.
-            f'<rect x="{label_lo - 3:.0f}" y="{ly - 7:.0f}" width="{label_hi - label_lo + 6:.0f}"'
-            f' height="14" fill="var(--panel)"/>'
-            f'<text x="{lx:.0f}" y="{ly + 4:.0f}" text-anchor="{anchor}" font-size="12" fill="var(--text)">'
-            f'{html.escape(p["model"])} <tspan fill="var(--dimmer)">&middot; {html.escape(p["effort"])}</tspan></text>'
+            f'<circle class="dot" cx="{x:.0f}" cy="{y:.0f}" r="8" fill="{color}" stroke="var(--panel)" stroke-width="2" '
+            f'data-model="{html.escape(p["model"], quote=True)}" data-effort="{html.escape(p["effort"], quote=True)}" '
+            f'data-stats="{stats}" aria-label="{html.escape(title, quote=True)}"/>'
+            # The letter is the effort. Ink by the fill's own luminance, so it clears
+            # contrast on the light Grok dots as well as the dark ones.
+            f'<text x="{x:.0f}" y="{y + 3:.0f}" text-anchor="middle" font-size="9" font-weight="700" '
+            f'fill="{_dot_ink(color)}" pointer-events="none">{_EFFORT_LETTERS.get(p["effort"], p["effort"][:1].upper())}</text>'
         )
 
     parts.append("</svg>")
@@ -774,6 +836,9 @@ def _chart(combos):
         f'<span><i style="background:{color}"></i>{html.escape(label)}</span>'
         for label, color in SUBSCRIPTIONS.values()
     ]
+    keys.append(
+        "<span><b>L&thinsp;M&thinsp;H&thinsp;X</b>effort, low to xhigh; hover a dot for its numbers</span>"
+    )
     if capped_any:
         keys.append(
             "<span><b>&rarr;</b>hit the session time limit, so the real time is longer than shown</span>"

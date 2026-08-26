@@ -35,7 +35,7 @@ cache_read = 0.30
 cache_write_5m = 3.75
 cache_write_1h = 6.00
 
-[claude."claude-haiku-4-5-20251001"]
+[claude."claude-haiku-4-5"]
 input = 1.00
 output = 5.00
 cache_read = 0.10

@@ -8,10 +8,10 @@ The transcripts kept what the rows did not. Running the current `ClaudeCode.usag
 |---|---|--:|--:|
 | `fable` | `claude-fable-5` | 1 | 6 |
 | `sonnet` | `claude-sonnet-5` | 6 | 36 |
-| `haiku` | `claude-haiku-4-5-20251001` | 5 | 27 |
+| `haiku` | `claude-haiku-4-5` | 5 | 27 |
 | `opus` | `claude-opus-5` | 1 | 6 |
 
-In every run, `model` was set to the resolved id, `usage.models` was backfilled with the full served set (each carries a `claude-haiku-4-5-20251001` sidechain alongside its primary), and the directory was renamed to the `<harness>-<model>-<effort>-<id>` the wizard would generate today. Scores, stages, timings, token counts, transcripts, and part sources are untouched.
+In every run, `model` was set to the resolved id, `usage.models` was backfilled with the full served set (each carries a `claude-haiku-4-5` sidechain alongside its primary), and the directory was renamed to the `<harness>-<model>-<effort>-<id>` the wizard would generate today. Scores, stages, timings, token counts, transcripts, and part sources are untouched.
 
 ## The one run that also needed its revision restamped
 

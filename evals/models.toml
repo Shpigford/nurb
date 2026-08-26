@@ -28,7 +28,7 @@ efforts = ["low", "medium", "high", "xhigh", "max"]
 default_effort = "high"
 
 [[claude]]
-id = "claude-haiku-4-5-20251001"
+id = "claude-haiku-4-5"
 label = "Claude Haiku 4.5 (budget)"
 efforts = ["low", "medium", "high"]
 default_effort = "low"

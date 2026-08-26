@@ -105,10 +105,35 @@ def _placed_labels(points):
     def sy(rate):
         return top + (1 - rate) * ph
 
+    site._mark_anchors(points)
     sides = site._label_sides(points, sx, sy, left, width - right, top, height - bottom)
     for p in points:
-        _, _, lo, hi, dy = sides[id(p)]
-        yield p, lo, hi, sy(p["rate"]) + dy, sx(p["minutes"]), sy(p["rate"])
+        # Unlabeled dots still veto label space, so they ride along with lo/hi None.
+        if id(p) in sides:
+            _, _, lo, hi, dy = sides[id(p)]
+        else:
+            lo = hi = dy = None
+        yield p, lo, hi, sy(p["rate"]) + (dy or 0), sx(p["minutes"]), sy(p["rate"])
+
+
+def test_one_label_per_model_line():
+    """Labeling every dot buried the top tenth of the chart the moment the board grew
+    past a handful of rows; the label names the line, the dot letters carry effort."""
+    paths = sorted(
+        str(p) for p in site.SUBMISSIONS.iterdir() if (p / "results.jsonl").is_file()
+    )
+    combos = site._combos(report.summarize(report.rows_from(paths)))
+    points = []
+    for (harness, model, effort, _), tasks in combos:
+        firsts, total, minutes, capped, dollars = site._stats(tasks)
+        points.append({
+            "harness": harness, "model": model, "effort": effort,
+            "rate": firsts / total if total else 0.0, "minutes": minutes,
+            "capped": capped, "dollars": dollars, "firsts": firsts, "total": total,
+        })
+    site._mark_anchors(points)
+    labeled = [(p["harness"], p["model"]) for p in points if p["anchor"]]
+    assert sorted(labeled) == sorted({(p["harness"], p["model"]) for p in points})
 
 
 def test_no_two_labels_land_on_top_of_each_other():
@@ -133,17 +158,18 @@ def test_no_two_labels_land_on_top_of_each_other():
     # and padded past the text on both sides. Measure that, or a label can clear its
     # neighbour by a margin the renderer then spends on padding.
     pad = site._LABEL_PAD
+    placed = [row for row in labels if row[1] is not None]
     overlaps = [
         (a["model"], a["effort"], b["model"], b["effort"])
-        for i, (a, alo, ahi, ay, _, _) in enumerate(labels)
-        for b, blo, bhi, by, _, _ in labels[i + 1:]
+        for i, (a, alo, ahi, ay, _, _) in enumerate(placed)
+        for b, blo, bhi, by, _, _ in placed[i + 1:]
         if abs(ay - by) < site._LABEL_ROW and alo - pad < bhi + pad and blo - pad < ahi + pad
     ]
     assert not overlaps, f"labels overlapping on the chart: {overlaps}"
 
     buried = [
         (a["model"], a["effort"], b["model"], b["effort"])
-        for a, alo, ahi, ay, _, _ in labels
+        for a, alo, ahi, ay, _, _ in placed
         for b, _, _, _, bx, by in labels
         if a is not b and abs(by - ay) < site._LABEL_ROW and alo - 7 < bx < ahi + 7
     ]
