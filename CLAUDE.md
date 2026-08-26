@@ -1,5 +1,27 @@
 # nurb
 
+## Delegation policy (read first)
+
+The session model (Fable) is the orchestrator, not the worker. Fable is the most expensive tier; spend its tokens only on decomposition, judgment calls, synthesis, and talking to the user. Delegate everything else to subagents via the Agent tool, picking the cheapest model that can do the job well:
+
+- `model: "opus"` — the default worker tier. Anything requiring real judgment: implementation, debugging, architecture-aware exploration, adversarial review.
+- `model: "sonnet"` — cheap tier for mechanical or low-stakes work: running tests and reporting output, simple greps/lookups with a known target, rote refactors from an exact spec, formatting, screenshot capture, admin chores. If getting it slightly wrong is cheap to catch, use sonnet.
+
+How work splits:
+
+- **Exploration/research**: never read broadly yourself. Spawn `Explore` agents (model: opus) with tightly scoped questions; consume their synthesized reports, not raw files. Trivial "find the file that defines X" lookups can go to sonnet.
+- **Implementation**: for any multi-file change, spawn `general-purpose` agents (model: opus) with exact file paths, the relevant doctrine from this file, and a definition of done (tests to run). Independent changes get parallel agents in one message.
+- **Verification/review**: adversarial review and blast-radius checks go to opus agents. Plain test runs and lint passes go to sonnet agents.
+- Fable itself only edits directly when the change is small (one or two files, already-known locations).
+
+Token rules:
+
+- Batch independent agent launches in a single message so they run concurrently.
+- Give agents file paths and constraints up front so they don't rediscover this file's contents; paste the relevant doctrine into the prompt.
+- Never re-read files an agent already summarized; trust the report, spot-check only what you'll edit.
+- Read only the line ranges you need from large files.
+- Don't echo file contents or long diffs back to the user; report conclusions.
+
 Agentic CAD for 3D printing. A part is a Python function; a long-lived process
 rebuilds it on save and pushes geometry to a browser without moving the camera.
 
