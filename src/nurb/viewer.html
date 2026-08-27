@@ -286,9 +286,21 @@
      this it inherited the question's nowrap and ran out past the pill's own border. */
   #print .line { flex-basis: 100%; white-space: normal; }
   #print .bad { color: var(--bad); }
-  #print select { flex: none; max-width: 160px; background: var(--panel); color: var(--text);
-                  border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px;
-                  font: inherit; font-size: 11px; }
+  /* Native <select> in the desktop WKWebView opens an OS menu that does not dismiss.
+     Same custom menu as #dlmenu: a pick, an outside click, or Escape. */
+  #print:has(.open) { position: relative; z-index: 1; }
+  #printerpick { position: relative; }
+  #printerpick > .pick { flex: none; max-width: 160px; background: var(--panel); color: var(--text);
+                         border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px;
+                         font: inherit; font-size: 11px; }
+  #printerpick .pickmenu { display: none; position: absolute; top: calc(100% + 5px); right: 0;
+                           min-width: 160px; max-height: 240px; overflow-y: auto;
+                           flex-direction: column; align-items: stretch; gap: 2px; padding: 3px;
+                           z-index: 2; background: rgba(29,32,39,.95); border: 1px solid var(--line);
+                           border-radius: 9px; box-shadow: 0 4px 16px rgba(0,0,0,.35);
+                           backdrop-filter: blur(10px); }
+  #printerpick.open .pickmenu { display: flex; }
+  #printerpick .pickmenu button { justify-content: flex-start; }
   /* The rebuild pill and the little spinner beside "parameters". Same .25s delay as
      the dimming above: a build that lands inside one round trip never shows either,
      so a light part stays silent and a crowned tray says what the wait is. */
@@ -1129,6 +1141,9 @@ const printbox = document.getElementById('print');
 let printAsk = null;
 let slicing = false;
 let requestToken = null;
+// hud() calls printRow on every rebuild. Rewriting the card while the list is open
+// destroys it mid-click, so a matching signature keeps the DOM that is already there.
+let printSig = null;
 
 function printRow() {
   const e = current ? parts.get(current) : null;
@@ -1137,20 +1152,28 @@ function printRow() {
   // same reason covers both: a print estimate needs a solid to send to the slicer.
   if (!e || e.error || (asm && !(e.uses || []).length)) {
     printbox.style.display = 'none';
+    printSig = null;
     return;
   }
   const said = printed.get(current);
   const answered = said && said.shape_id === e.shape_id;
+  const html = slicing ? '<span class="working"><span class="spin"></span>slicing</span>'
+    : printAsk && printAsk.name === current ? printAsking(printAsk)
+    : answered ? printAnswer(said)
+    : '<button class="go"><svg><use href="#i-clock"/></svg>print time</button>';
+  const sig = slicing ? 'slicing'
+    : printAsk && printAsk.name === current
+      ? `ask:${printAsk.kind}:${current}:${printAsk.error || ''}:${(printAsk.profiles || []).join(',')}`
+    : answered ? `ans:${said.shape_id}`
+    : 'btn';
   printbox.style.display = 'flex';
   // The full preset chain hangs off the row, because a reading is worth having next to
   // what produced it and is not worth the second line it would cost inline. Set here
   // and not in the answer, so no other state inherits the last one's hover.
   printbox.title = answered ? said.settings : '';
-  printbox.innerHTML =
-    slicing ? '<span class="working"><span class="spin"></span>slicing</span>'
-    : printAsk && printAsk.name === current ? printAsking(printAsk)
-    : answered ? printAnswer(said)
-    : '<button class="go"><svg><use href="#i-clock"/></svg>print time</button>';
+  if (sig === printSig) return;
+  printSig = sig;
+  printbox.innerHTML = html;
 }
 
 function printAnswer(said) {
@@ -1180,9 +1203,10 @@ function printAnswer(said) {
 // carries the picker where picking a different machine is what would fix it.
 function printAsking(ask) {
   const picker = (ask.profiles || []).length
-    ? `<select id="printerpick"><option value="">choose your printer…</option>${
-        ask.profiles.map(n => `<option value="${n}">${n.replace(/_/g, ' ')}</option>`).join('')
-      }</select>`
+    ? `<div id="printerpick"><button type="button" class="pick">choose your printer…</button>`
+      + `<div class="pickmenu">${
+        ask.profiles.map(n => `<button type="button" value="${n}">${n.replace(/_/g, ' ')}</button>`).join('')
+      }</div></div>`
     : '';
   if (ask.kind === 'choose') {
     return '<span class="ask">which printer is this for?</span>' + picker;
@@ -1223,19 +1247,41 @@ async function estimate() {
 // One listener on the card rather than one per state: the body is rewritten on every
 // paint, so a handler bound to a button inside it would not survive the next one.
 printbox.onclick = event => {
-  if (event.target.closest('.go')) estimate();
+  if (event.target.closest('.go')) { estimate(); return; }
+  const trigger = event.target.closest('#printerpick > .pick');
+  if (trigger) {
+    event.stopPropagation();
+    const pick = document.getElementById('printerpick');
+    if (pick) pick.classList.toggle('open');
+    return;
+  }
+  // Buttons never fire change, so the pick lives here. Option buttons have no
+  // children: event.target is the control that carries the profile name.
+  if (event.target.closest('#printerpick [value]') && event.target.value && sock) {
+    slicing = true;  // the card says "slicing" from here to the answer, one continuous act
+    printAsk = null;
+    printRow();
+    sock.send(JSON.stringify({ type: 'printer', profile: event.target.value }));
+  }
 };
 
-// Naming the machine is the whole of the setup, and it is also what the bed size and
-// half the printability rules have always wanted, so the choice goes to printer.toml
-// rather than into this page's memory.
-printbox.onchange = event => {
-  if (event.target.id !== 'printerpick' || !event.target.value || !sock) return;
-  slicing = true;  // the card says "slicing" from here to the answer, one continuous act
+// Same contract as #dlmenu: a pick, an outside click, or Escape. Registered once.
+// Snapshot open at the start of the event so closing the list does not also dismiss
+// the question on that same click or key.
+function printDismiss(event) {
+  if (!printAsk || slicing) return;
+  const pick = document.getElementById('printerpick');
+  const open = !!(pick && pick.classList.contains('open'));
+  if (open) {
+    pick.classList.remove('open');
+    return;
+  }
+  if (event.type === 'click' && printbox.contains(event.target)) return;
   printAsk = null;
   printRow();
-  sock.send(JSON.stringify({ type: 'printer', profile: event.target.value }));
-};
+}
+addEventListener('click', printDismiss);
+addEventListener('keydown', event => { if (event.key === 'Escape') printDismiss(event); });
 
 // On by default, matching the server: draft is a preview economy, and what the user
 // judges on screen should be the part that exports. Every rebuild while it is off is

@@ -13,6 +13,13 @@
 bed = [256.0, 256.0, 256.0]
 slicer = "Bambu Lab X1 Carbon"
 
+# Dual-nozzle like the H2 series: these are the single-material figures from
+# Bambu Studio's machine profile (printable_area 256x256, printable_height 261).
+# The auxiliary nozzle loses about 21mm of X and 5mm of Z.
+[bambu_x2d]
+bed = [256.0, 256.0, 261.0]
+slicer = "Bambu Lab X2D"
+
 [bambu_p1s]
 bed = [256.0, 256.0, 256.0]
 slicer = "Bambu Lab P1S"
