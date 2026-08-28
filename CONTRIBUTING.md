@@ -62,7 +62,7 @@ Prerequisites:
 
 - [uv](https://docs.astral.sh/uv/). It fetches the right Python (3.13+) on its own.
 - For the render tests and `nurb render`: a Chromium, installed by playwright below.
-- For the desktop app only: a Rust toolchain, Node 22+, and Xcode command line tools.
+- For the desktop app only: a Rust toolchain, Node 22+, and the platform's build tools. On macOS that is the Xcode command line tools. On Debian or Ubuntu it is `libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf build-essential libssl-dev pkg-config`, plus `bubblewrap` at runtime, which is what confines each agent adapter the way Seatbelt does on macOS.
 
 ```bash
 git clone https://github.com/Shpigford/nurb.git
@@ -100,6 +100,12 @@ The model benchmark (tasks, scorer, and every submitted run) lives in its own re
 
 CI (`.github/workflows/test.yml`) runs two jobs on every push and PR: the pytest suite with the render extra and a real Chromium, and `nurb check --strict` from inside `examples/notch`, which exercises the rules against the real library on a machine they were not calibrated on.
 
+## Platform support
+
+The engine runs the same on macOS and Linux: every dependency publishes a wheel for both, and the suite passes unchanged on either. The desktop app builds for both as well, but each build links against the host's system webview, so neither platform cross-builds from the other. A full release therefore runs `desktop/scripts/release.sh` on a Mac and `desktop/scripts/release-linux.sh` on a Linux machine, in either order, and both merge their own half into one update feed rather than overwriting it.
+
+The Linux support was developed with assistance from Claude Opus 5, and its commits carry a `Co-Authored-By` trailer saying so.
+
 ## The desktop app
 
 `desktop/` is a Tauri shell around nurb: project rail, agent chat column, and the live viewer in one window. The app embeds `viewer.html` in an iframe, so features about the part itself land in the viewer and reach both the app and `nurb dev` in a browser; React shell work is only for what the shell alone can do.
@@ -110,7 +116,7 @@ npm install
 npm run tauri dev
 ```
 
-Debug builds run nurb out of the checkout and need no provisioning. Release builds provision everything on first launch into `~/Library/Application Support/dev.nurb.desktop`: a managed CPython and venv with the bundled nurb wheel, a pinned Node, and the agent ACP adapters. `desktop/README.md` has the full provisioning and signing story.
+Debug builds run nurb out of the checkout and need no provisioning. Release builds provision everything on first launch into `~/Library/Application Support/dev.nurb.desktop` on macOS and `~/.local/share/dev.nurb.desktop` on Linux: a managed CPython and venv with the bundled nurb wheel, a pinned Node, and the agent ACP adapters. `desktop/README.md` has the full provisioning and signing story.
 
 ## Debugging the viewer
 
