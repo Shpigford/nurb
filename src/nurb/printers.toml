@@ -24,6 +24,10 @@ slicer = "Bambu Lab X2D"
 bed = [256.0, 256.0, 256.0]
 slicer = "Bambu Lab P1S"
 
+[bambu_p2s]
+bed = [256.0, 256.0, 256.0]
+slicer = "Bambu Lab P2S"
+
 [bambu_p1p]
 bed = [256.0, 256.0, 256.0]
 slicer = "Bambu Lab P1P"
