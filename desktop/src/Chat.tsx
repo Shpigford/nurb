@@ -153,7 +153,7 @@ function Chat({
   // that ran it, a fresh one takes the default from the agents pane.
   agent: string;
   // Everything the app can host, for the header's switcher.
-  agents: { id: string; label: string }[];
+  agents: { id: string; label: string; loggedIn: boolean | null }[];
   resume: string | null;
   hidden: boolean;
   // Text waiting for the composer, from a viewer nudge. Prefilled when the column
@@ -163,12 +163,15 @@ function Chat({
   onSession: (id: string) => void;
   onFresh: () => void;
   // Switching agents cannot move a conversation across two different session
-  // stores, so it starts a fresh one on the agent picked.
-  onAgent: (id: string) => void;
+  // stores, so it starts a fresh one on the agent picked. `unstarted` is true
+  // when nothing has been said yet, which makes the pick the new default.
+  onAgent: (id: string, unstarted: boolean) => void;
   onBusy: (busy: boolean) => void;
   onSignIn: (agent: string) => Promise<boolean>;
 }) {
   const label = AGENT_LABEL[agent] ?? agent;
+  // Known signed out, not merely unknown: an unknown status stays quiet.
+  const signedOut = agents.find((option) => option.id === agent)?.loggedIn === false;
   // The sentinel never reaches copy: everywhere the column says its name, the
   // project conversation speaks of the project.
   const isProject = part === PROJECT_CHAT;
@@ -177,7 +180,8 @@ function Chat({
   // A resumed transcript starts loading after the first paint, so treat it as
   // starting immediately rather than briefly exposing a live composer.
   const [starting, setStarting] = useState(Boolean(resume));
-  const [authNeeded, setAuthNeeded] = useState(false);
+  // A refused prompt needs explicit resend guidance; a proactive or resume sign-in does not.
+  const [authNeeded, setAuthNeeded] = useState<"none" | "sign-in" | "resume" | "resend">("none");
   const [signingIn, setSigningIn] = useState(false);
   const [permissions, setPermissions] = useState<Permission[]>([]);
   // Absolute paths; the Rust side reads them at send time.
@@ -473,22 +477,24 @@ function Chat({
     return start;
   }, [path, agent, applyEvent, refreshConfig]);
 
-  useEffect(() => {
-    // A history session replays its transcript the moment it opens, not on
-    // the first send.
-    if (!resume) return;
-    ensureSession().catch((e) => {
+  const restoreSession = useCallback(async () => {
+    try {
+      await ensureSession();
+    } catch (e) {
       const message = String(e);
       if (message === "Error: chat closed") return;
       if (message.includes("auth_required")) {
-        setAuthNeeded(true);
+        setAuthNeeded("resume");
       } else {
         setItems((list) => [...list, { kind: "note", text: message }]);
       }
-    });
-    // ensureSession is stable for this mount; resume never changes without a
-    // remount (the parent keys this component on it).
-  }, [resume, ensureSession]);
+    }
+  }, [ensureSession]);
+
+  useEffect(() => {
+    // A history session replays its transcript when it opens, not on the first send; reuse this path after sign-in.
+    if (resume) restoreSession();
+  }, [resume, restoreSession]);
 
   const send = useCallback(
     async (text: string, files: string[]) => {
@@ -506,7 +512,7 @@ function Chat({
       ]);
       setBusy(true);
       onBusyRef.current(true);
-      setAuthNeeded(false);
+      setAuthNeeded("none");
       let completed = false;
       try {
         const session = await ensureSession();
@@ -529,7 +535,7 @@ function Chat({
             inputRef.current.value = restoreDraftText(text, inputRef.current.value);
           }
           attachmentDraft.restore(files);
-          setAuthNeeded(true);
+          setAuthNeeded("resend");
         } else {
           setItems((list) => [...list, { kind: "note", text: message }]);
         }
@@ -616,16 +622,24 @@ function Chat({
   };
 
   const signIn = async () => {
+    const needsResend = authNeeded === "resend";
+    const needsRestore = authNeeded === "resume";
     setSigningIn(true);
     try {
       if (!(await onSignIn(agent))) return;
-      setAuthNeeded(false);
-      setItems((list) => [
-        ...list,
-        { kind: "note", text: "Signed in. Send your message again." },
-      ]);
+      setAuthNeeded("none");
+      if (needsRestore) await restoreSession();
+      // Only a refused message needs sending again; a proactive sign-in has nothing to repeat.
+      if (needsResend) {
+        setItems((list) => [
+          ...list,
+          { kind: "note", text: "Signed in. Send your message again." },
+        ]);
+      }
     } catch (e) {
       setItems((list) => [...list, { kind: "note", text: String(e) }]);
+      // Keep retry visible even though the failure adds an item to the transcript.
+      setAuthNeeded((state) => state === "none" ? "sign-in" : state);
     } finally {
       setSigningIn(false);
     }
@@ -680,10 +694,13 @@ function Chat({
                         }
                         onClick={() => {
                           setSwitching(false);
-                          if (option.id !== agent) onAgent(option.id);
+                          if (option.id !== agent) onAgent(option.id, items.length === 0);
                         }}
                       >
                         {option.label}
+                        {option.loggedIn === false && (
+                          <span className="chat-switcher-hint">sign in</span>
+                        )}
                       </button>
                     ))}
                     {items.length > 0 && (
@@ -717,6 +734,15 @@ function Chat({
             {isProject
               ? `This conversation covers the whole project. Ask ${label} for new parts, or for changes every part should share.`
               : `You're chatting with ${part}. Describe it or ask for changes, and ${label} will model it in the viewer.`}
+          </div>
+        )}
+        {/* Nothing said yet and the agent is known to be signed out: ask before the first message bounces. */}
+        {items.length === 0 && !starting && authNeeded === "none" && signedOut && (
+          <div className="chat-auth">
+            Sign in to {label} to start.{" "}
+            <button className="chat-auth-button" disabled={signingIn} onClick={signIn}>
+              {signingIn ? "signing in…" : "sign in"}
+            </button>
           </div>
         )}
         {items.map((item, index) => {
@@ -812,7 +838,7 @@ function Chat({
             {label} is working…
           </div>
         )}
-        {authNeeded && (
+        {authNeeded !== "none" && (
           <div className="chat-auth">
             {label} isn't signed in on this Mac.{" "}
             <button
