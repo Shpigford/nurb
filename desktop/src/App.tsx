@@ -22,7 +22,7 @@ import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
 import Logo from "./Logo";
 import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
-import { isMac } from "./platform";
+import { isLinux, isMac } from "./platform";
 import Setup from "./Setup";
 import Settings from "./Settings";
 import "./App.css";
@@ -337,7 +337,6 @@ function App() {
     }
   }, [updating]);
 
-  // The macOS "Check for Updates…" item. The menu lives in Rust and the
   useEffect(() => {
     const unlisten = listen("agent-unsandboxed", () => setUnsandboxed(true));
     return () => {
@@ -345,6 +344,7 @@ function App() {
     };
   }, []);
 
+  // The "Check for Updates…" menu item. The menu lives in Rust and the
   // update state lives here, so the click arrives as an event; unlike the
   // timed checks, this one answers even when there is nothing to install.
   useEffect(() => {
@@ -356,7 +356,11 @@ function App() {
         if (!next) {
           await message("You're on the newest version.", { title: "nurb" });
         } else if (
-          await ask(`nurb ${next.version} is ready to install.`, {
+          await ask(
+            isLinux
+              ? `nurb ${next.version} is ready to install. Your system may ask for your password.`
+              : `nurb ${next.version} is ready to install.`,
+            {
             title: "nurb",
             okLabel: "Restart & Update",
             cancelLabel: "Later",
@@ -1245,7 +1249,12 @@ function App() {
         {error && <div className="rail-error">{error}</div>}
         <div className="rail-foot">
           {update && (
-            <button className="rail-update" disabled={updating} onClick={installUpdate}>
+            <button
+              className="rail-update"
+              disabled={updating}
+              onClick={installUpdate}
+              title={isLinux ? "Your system may ask for your password." : undefined}
+            >
               {updating ? "updating…" : `update to ${update.version}`}
             </button>
           )}
