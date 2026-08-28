@@ -1076,36 +1076,45 @@ function App() {
                             !
                           </span>
                         )}
+                        {/* Folded-away variants still say how many there are, so the
+                            rail does not hide them without a trace. */}
+                        {part.variants.length > 0 && part.name !== selectedPart && (
+                          <span className="var-count">
+                            <IconVariant size={9} />
+                            {part.variants.length}
+                          </span>
+                        )}
                       </li>
                       {/* The card's variants nest under their part the way the
                           browser viewer draws them: the same part at other values,
-                          wearing the sliders glyph. The active mark follows the
-                          server's resolved variant, so it tracks slider drags and
-                          agent edits too, one poll behind. */}
-                      {part.variants.map((v) => {
-                        const how = Object.entries(v.params)
-                          .map(([k, val]) => `${k} = ${val}`)
-                          .join("\n");
-                        // Drifted off this variant: no longer resolved by the server,
-                        // but still where the work is, so the row stays pinned.
-                        const modified =
-                          part.name === selectedPart &&
-                          part.variant !== v.name &&
-                          variantOrigin?.drifted === true &&
-                          variantOrigin.part === part.name &&
-                          variantOrigin.variant === v.name;
-                        return (
-                          <li
-                            key={`${part.name}:${v.name}`}
-                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""} ${modified ? "modified" : ""}`}
-                            title={v.note ? `${v.note}\n\n${how}` : how}
-                            onClick={() => selectPart(part.name, v.name)}
-                          >
-                            <IconVariant />
-                            <span className="part-name">{v.name}</span>
-                          </li>
-                        );
-                      })}
+                          wearing the sliders glyph. They unfold under the selection
+                          only, because twenty parts' variants at once is a wall. The
+                          active mark follows the server's resolved variant, so it
+                          tracks slider drags and agent edits too, one poll behind. */}
+                      {part.name === selectedPart &&
+                        part.variants.map((v) => {
+                          const how = Object.entries(v.params)
+                            .map(([k, val]) => `${k} = ${val}`)
+                            .join("\n");
+                          // Drifted off this variant: no longer resolved by the server,
+                          // but still where the work is, so the row stays pinned.
+                          const modified =
+                            part.variant !== v.name &&
+                            variantOrigin?.drifted === true &&
+                            variantOrigin.part === part.name &&
+                            variantOrigin.variant === v.name;
+                          return (
+                            <li
+                              key={`${part.name}:${v.name}`}
+                              className={`part-var ${part.variant === v.name ? "selected" : ""} ${modified ? "modified" : ""}`}
+                              title={v.note ? `${v.note}\n\n${how}` : how}
+                              onClick={() => selectPart(part.name, v.name)}
+                            >
+                              <IconVariant />
+                              <span className="part-name">{v.name}</span>
+                            </li>
+                          );
+                        })}
                       {/* The selection expands to its counterparts: the assemblies
                           that place this part, or the parts this assembly places.
                           Only under the selection, because the relationship is what

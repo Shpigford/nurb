@@ -432,6 +432,22 @@ textarea {
   font-weight: 600;
 }
 
+/* How many variants a folded part has. `margin-left: auto` puts it at the right
+   end, and it never shrinks, because .part-name takes the slack first. */
+.var-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--dimmer);
+}
+
+.var-count .row-icon {
+  color: var(--dimmer);
+}
+
 .part-refused {
   color: var(--amber);
   font-weight: 600;
