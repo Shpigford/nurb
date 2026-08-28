@@ -4,7 +4,7 @@
 //! approximation misses shapes, and every miss was a dialog. Now the adapter
 //! process (and so every command the agent runs) is spawned under a Seatbelt
 //! profile: read anything, network allowed, write only where the app says.
-//! Dialogs are gone because the kernel is the guard; a forbidden write fails
+//! Where the kernel is the guard, dialogs are gone: a forbidden write fails
 //! in the agent's own transcript instead of interrupting the user.
 //!
 //! No entry in the profile is user-managed. Every writable root is computed
@@ -16,13 +16,33 @@
 //!
 //! Seatbelt is macOS-only. On Windows the adapter runs unconfined: there is
 //! no OS primitive with sandbox-exec's shape (a restricted token or
-//! AppContainer would break node, npm, and the venv wholesale), so the trust
-//! model there matches running the same agent CLI in a terminal yourself.
+//! AppContainer would break node, npm, and the venv wholesale). Nothing here
+//! substitutes for that, so the app asks instead: CONFINED is false, and
+//! policy.rs sends every request this profile would have constrained to a
+//! dialog until the user says otherwise for that project. That is not the
+//! same as running the agent CLI in a terminal, because that CLI prompts and
+//! this app answers for it, so suppressing the prompt without the kernel
+//! behind it is the one combination worse than either alone. Confinement and
+//! consent are one decision, which is why the flag ships beside `wrap` rather
+//! than being restated elsewhere: a platform that gains real confinement
+//! flips CONFINED and the dialogs go away on their own.
 
 #[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "macos"))]
 use std::path::Path;
+
+/// Whether `wrap` actually confines the adapter. approvals.rs reads it to
+/// pick the default for a project nobody has answered for yet: where the
+/// kernel is the guard the app can answer permission requests itself, and
+/// where it is not it has to ask. Set by the same cfg that selects `wrap`,
+/// and asserted against what `wrap` observably does by the test below, so a
+/// new platform cannot end up with an identity `wrap` and a stale true here.
+#[cfg(target_os = "macos")]
+pub(super) const CONFINED: bool = true;
+
+#[cfg(not(target_os = "macos"))]
+pub(super) const CONFINED: bool = false;
 
 /// Wrap an adapter invocation in `sandbox-exec`. sandbox-exec applies the
 /// profile and execs the target in place, so the child pid, process group,
@@ -152,6 +172,25 @@ fn regex_escaped(path: &str) -> String {
         out.push(c);
     }
     out
+}
+
+/// Kept separate from the Seatbelt tests below, which only run on macOS,
+/// because the drift this catches happens on the platforms those never see.
+#[cfg(test)]
+mod confinement {
+    use super::*;
+
+    #[test]
+    fn the_constant_tracks_what_wrap_actually_does() {
+        // The bug this file shipped once: `wrap` became the identity function
+        // on a new platform while everything downstream still believed the
+        // kernel was the guard. Derive the claim from the behavior so the two
+        // cannot separate again.
+        let root = std::env::temp_dir();
+        let (program, args) = wrap("agent".into(), vec!["--acp".into()], &root, &root);
+        let rewrote = program != "agent" || args != ["--acp"];
+        assert_eq!(CONFINED, rewrote);
+    }
 }
 
 #[cfg(all(test, target_os = "macos"))]

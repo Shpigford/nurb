@@ -2,13 +2,16 @@
 //! (Claude Code or Codex, see agents.rs), spoken to over stdio JSON-RPC,
 //! streaming updates to the webview through a Tauri ipc channel.
 
+mod approvals;
 mod events;
 mod policy;
 mod sandbox;
 
+pub use approvals::Approvals;
+
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -537,6 +540,37 @@ pub fn respond_permission(
         SelectedPermissionOutcome::new(option_id),
     ));
     Ok(())
+}
+
+/// What the chat column needs to describe its own permission posture.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalState {
+    /// Whether the OS confines agent commands on this machine, straight from
+    /// sandbox.rs. The UI's copy turns on this rather than on a user-agent
+    /// sniff, so the shell cannot disagree with the kernel.
+    confined: bool,
+    /// Whether the app may answer permission requests itself in this project.
+    auto: bool,
+}
+
+#[tauri::command]
+pub fn approval_state(app: tauri::AppHandle, path: String) -> ApprovalState {
+    use tauri::Manager;
+    let approvals = app.state::<Approvals>();
+    ApprovalState {
+        confined: approvals.confined(),
+        auto: approvals.auto(Path::new(&path)),
+    }
+}
+
+#[tauri::command]
+pub fn set_project_auto(app: tauri::AppHandle, path: String, auto: bool) {
+    use tauri::{Emitter, Manager};
+    app.state::<Approvals>().set(Path::new(&path), auto);
+    // Every chat column open on this project mirrors the flag, the way the
+    // picker lists mirror agent-config.
+    let _ = app.emit("project-approvals", ());
 }
 
 /// Grok's per-model effort menu, taken from initialize `_meta.modelState`.
@@ -1211,7 +1245,13 @@ async fn run_chat(
     let notify_channel = channel.clone();
     let ask_channel = channel.clone();
     let ask_pending = pending.clone();
+    // The handler cannot reach these through Chats, which is not populated
+    // until after the connection is up, and it cannot snapshot the flag
+    // either: the user flips it mid-turn by answering a live dialog.
+    let ask_approvals = app.state::<Approvals>().inner().clone();
+    let ask_project = project.clone();
     let live_session = Arc::new(Mutex::new(None));
+    let ask_session = Arc::clone(&live_session);
     let connected_session = Arc::clone(&live_session);
     let chat_app = app.clone();
     let chat_project = project.clone();
@@ -1236,10 +1276,14 @@ async fn run_chat(
         )
         .on_receive_request(
             async move |request: RequestPermissionRequest, responder, cx| {
-                // The app answers yes for the user; the OS sandbox the
-                // adapter runs under is the guard (see sandbox.rs). Only a
-                // request offering no allow-once option reaches a dialog.
-                if let Some(option) = policy::auto_allow(&request) {
+                // The app answers yes for the user only where something other
+                // than the user is keeping this turn honest: the OS sandbox
+                // the adapter runs under (sandbox.rs), or the standing yes the
+                // user gave this project (approvals.rs). Reads go through
+                // either way, because the sandbox profile never constrained
+                // them. Everything else reaches a dialog.
+                let guarded = ask_approvals.auto(&ask_project);
+                if let Some(option) = policy::auto_allow(&request, guarded) {
                     let _ = writeln!(
                         std::io::stderr(),
                         "[acp:{}] auto-allowed: {}",
@@ -1248,6 +1292,15 @@ async fn run_chat(
                     );
                     return responder.respond(RequestPermissionResponse::new(
                         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option)),
+                    ));
+                }
+                // The chat is registered one line after the session id lands,
+                // both before the app is told the chat is ready, so no id here
+                // means nothing on screen could answer a dialog yet. Refusing
+                // beats hanging the adapter on a prompt nobody can see.
+                if ask_session.lock().unwrap().is_none() {
+                    return responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
                     ));
                 }
                 // What the policy saw, for tuning it against real requests.
@@ -1270,6 +1323,8 @@ async fn run_chat(
                 let ask = ChatEvent::PermissionRequest {
                     id,
                     title: permission_title(kind.label(), &request),
+                    kind: fields.kind.as_ref().map(wire_string),
+                    detail: events::permission_detail(&request),
                     options: request.options.iter().map(permission_choice).collect(),
                 };
                 events::mirror(&ask);

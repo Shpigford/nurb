@@ -222,6 +222,9 @@ fn add_projects_from_folder(
 fn remove_project(app: AppHandle, path: String) {
     let dir = PathBuf::from(&path);
     app.state::<Registry>().remove(&dir);
+    // A project the app no longer knows about keeps no standing permission
+    // grant, so a different folder put here later starts from the default.
+    app.state::<acp::Approvals>().forget(&dir);
     // Removing an open project also stops its server; the files stay put.
     tauri::async_runtime::spawn_blocking(move || app.state::<Supervisor>().close(&dir));
 }
@@ -555,6 +558,7 @@ pub fn run() {
             app.manage(Registry::load(&dir));
             app.manage(sessions::SessionStore::load(&dir));
             app.manage(prefs::PrefStore::load(&dir));
+            app.manage(acp::Approvals::load(&dir));
             #[cfg(target_os = "macos")]
             install_menu(app.handle())?;
             #[cfg(debug_assertions)]
@@ -580,6 +584,8 @@ pub fn run() {
             acp::send_prompt,
             acp::cancel_turn,
             acp::respond_permission,
+            acp::approval_state,
+            acp::set_project_auto,
             acp::chat_config,
             acp::set_chat_config,
             acp::close_chat,
