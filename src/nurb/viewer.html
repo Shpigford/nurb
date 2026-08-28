@@ -634,8 +634,11 @@ if (embed) {
   // the project instead. Said before the click, because "download" would promise a
   // file the shell never produces.
   const article = { '3mf': 'a 3MF', stl: 'an STL', step: 'a STEP' };
+  // The shell reveals the file afterwards, and the app that opens is the platform's
+  // own, so the tooltip has to name the one the reader will actually see.
+  const browser = navigator.userAgent.includes('Mac') ? 'Finder' : 'your file manager';
   for (const b of document.querySelectorAll('#download [data-fmt]'))
-    b.title = `save ${article[b.dataset.fmt]} into the project's build folder and show it in Finder`;
+    b.title = `save ${article[b.dataset.fmt]} into the project's build folder and show it in ${browser}`;
   // The shell's rail switches parts by message, never by renavigating this frame:
   // WKWebView suspends requestAnimationFrame in an iframe that was navigated in
   // place, which freezes the picture while the rest of the page stays live. A

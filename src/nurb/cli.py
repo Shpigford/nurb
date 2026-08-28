@@ -1206,34 +1206,38 @@ def cmd_dev(args):
 LAUNCHER = "viewer.command" if sys.platform == "darwin" else "viewer.desktop"
 
 
-def _write_launcher(root):
-    root = root.resolve()
-    file = root / LAUNCHER
-    if sys.platform == "darwin":
+def _launcher_text(root, platform=None):
+    """The launcher body for a platform, named explicitly so either form is testable."""
+    if (platform or sys.platform) == "darwin":
         # A login shell, because Finder's Terminal session does not carry the PATH a
         # profile adds, and the double-click would die on `command not found: nurb`.
-        file.write_text(
+        return (
             "#!/bin/zsh -l\n"
             'cd "$(dirname "$0")"\n'
             "exec nurb dev --open\n"
         )
-    else:
-        # Exec= is not handed to a shell, so it names a login bash for the same PATH
-        # reason Finder needs one. Path= carries the working directory, which keeps
-        # Exec= free of quoting: a project folder may have spaces, and Path= is a
-        # literal string where Exec= is a parsed command line. The cost is that the
-        # entry names one absolute path, so a project that moves needs `nurb launcher`
-        # again, and `nurb new` writes it only at birth.
-        file.write_text(
-            "[Desktop Entry]\n"
-            "Type=Application\n"
-            "Name=nurb viewer\n"
-            f"Comment=Serve {root.name} and open the viewer\n"
-            'Exec=bash -lc "exec nurb dev --open"\n'
-            f"Path={root}\n"
-            "Terminal=true\n"
-            "Categories=Graphics;Engineering;\n"
-        )
+    # Exec= is not handed to a shell, so it names a login bash for the same PATH
+    # reason Finder needs one. Path= carries the working directory, which keeps
+    # Exec= free of quoting: a project folder may have spaces, and Path= is a
+    # literal string where Exec= is a parsed command line. The cost is that the
+    # entry names one absolute path, so a project that moves needs `nurb launcher`
+    # again, and `nurb new` writes it only at birth.
+    return (
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=nurb viewer\n"
+        f"Comment=Serve {root.name} and open the viewer\n"
+        'Exec=bash -lc "exec nurb dev --open"\n'
+        f"Path={root}\n"
+        "Terminal=true\n"
+        "Categories=Graphics;Engineering;\n"
+    )
+
+
+def _write_launcher(root):
+    root = root.resolve()
+    file = root / LAUNCHER
+    file.write_text(_launcher_text(root))
     file.chmod(0o755)
     return file
 

@@ -502,25 +502,18 @@ def test_launcher_is_an_executable_that_runs_dev(tmp_path, monkeypatch):
     assert os.access(file, os.X_OK)
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="the Finder form")
-def test_the_mac_launcher_is_a_login_shell_script(tmp_path, monkeypatch):
+def test_the_mac_launcher_is_a_login_shell_script(tmp_path):
     """Finder's Terminal session carries no profile PATH, so the shell has to be a login one."""
-    (tmp_path / "parts").mkdir()
-    monkeypatch.chdir(tmp_path)
-    cli.main(["launcher"])
-    text = (tmp_path / "viewer.command").read_text()
+    text = cli._launcher_text(tmp_path, "darwin")
     assert text.startswith("#!/bin/zsh -l\n")
     assert 'cd "$(dirname "$0")"' in text
 
 
-@pytest.mark.skipif(sys.platform == "darwin", reason="the desktop-entry form")
-def test_the_desktop_entry_names_the_project_and_a_login_shell(tmp_path, monkeypatch):
+def test_the_desktop_entry_names_the_project_and_a_login_shell(tmp_path):
     """Exec= bypasses the shell, so PATH comes from an explicit login bash and cwd from Path=."""
     project = tmp_path / "a project with spaces"
-    (project / "parts").mkdir(parents=True)
-    monkeypatch.chdir(project)
-    cli.main(["launcher"])
-    lines = (project / "viewer.desktop").read_text().splitlines()
+    project.mkdir()
+    lines = cli._launcher_text(project, "linux").splitlines()
     assert lines[0] == "[Desktop Entry]"
     assert "Type=Application" in lines
     assert "Terminal=true" in lines

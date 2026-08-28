@@ -248,9 +248,14 @@ fn auth_file(dir: &str) -> PathBuf {
         .join("auth.json")
 }
 
+#[cfg(target_os = "macos")]
 const GEMINI_KEYCHAIN_SERVICE: &str = "dev.nurb.desktop.gemini-api-key";
+#[cfg(target_os = "macos")]
 const GEMINI_KEYCHAIN_ACCOUNT: &str = "gemini";
 
+/// macOS has a system key store; Linux has none every desktop agrees on, so the
+/// key lives in a file only its owner can read, beside the app's other config.
+#[cfg(target_os = "macos")]
 pub(crate) fn gemini_api_key() -> Result<String, String> {
     let output = Command::new("/usr/bin/security")
         .args([
@@ -277,6 +282,7 @@ pub(crate) fn gemini_api_key() -> Result<String, String> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn save_gemini_api_key(key: &str) -> Result<(), String> {
     let key = security_interactive_argument(key)?;
     let command = format!(
@@ -302,6 +308,7 @@ fn save_gemini_api_key(key: &str) -> Result<(), String> {
         .ok_or_else(|| "macOS Keychain did not save the Gemini API key".into())
 }
 
+#[cfg(target_os = "macos")]
 fn security_interactive_argument(value: &str) -> Result<String, String> {
     if value.contains(['\r', '\n']) {
         return Err("Gemini API key contains an invalid line break".into());
@@ -310,6 +317,64 @@ fn security_interactive_argument(value: &str) -> Result<String, String> {
         "\"{}\"",
         value.replace('\\', "\\\\").replace('"', "\\\"")
     ))
+}
+
+/// $XDG_CONFIG_HOME/nurb/gemini-api-key, or ~/.config/nurb/gemini-api-key.
+#[cfg(not(target_os = "macos"))]
+fn gemini_key_file() -> Result<PathBuf, String> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .ok_or_else(|| {
+            "could not find a config folder for the Gemini API key. Set HOME, then try again."
+                .to_string()
+        })?;
+    Ok(base.join("nurb").join("gemini-api-key"))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn gemini_api_key() -> Result<String, String> {
+    let key = std::fs::read_to_string(gemini_key_file()?)
+        .map_err(|_| "Gemini API key not found".to_string())?
+        .trim()
+        .to_string();
+    if key.is_empty() {
+        Err("Gemini API key is empty".into())
+    } else {
+        Ok(key)
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn save_gemini_api_key(key: &str) -> Result<(), String> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let key = key.trim();
+    if key.contains(['\r', '\n']) {
+        return Err("Gemini API key contains an invalid line break".into());
+    }
+    let path = gemini_key_file()?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|error| format!("could not save the Gemini API key: {error}"))?;
+    }
+    // 0600 on create, and again on write, so a file left behind by an earlier
+    // version cannot keep looser permissions.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|error| format!("could not save the Gemini API key: {error}"))?;
+    std::fs::set_permissions(
+        &path,
+        <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o600),
+    )
+    .map_err(|error| format!("could not save the Gemini API key: {error}"))?;
+    file.write_all(format!("{key}\n").as_bytes())
+        .map_err(|error| format!("could not save the Gemini API key: {error}"))
 }
 
 /// `agent status` prints "Not logged in" signed out and account details
@@ -446,6 +511,7 @@ mod tests {
     use super::AgentKind;
 
     #[test]
+    #[cfg(target_os = "macos")]
     fn keychain_input_quotes_the_key_as_one_interactive_argument() {
         assert_eq!(
             super::security_interactive_argument("dummy \\\"key"),
