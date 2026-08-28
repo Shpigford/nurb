@@ -518,7 +518,6 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// WebKitGTK's DMA-BUF renderer paints nothing on a good number of Linux
 /// graphics stacks: the window opens, the GTK menu bar draws because it is
 /// native, and the whole webview stays black. Reproduced here on nouveau with
@@ -540,6 +539,7 @@ fn prefer_the_renderer_that_paints() {
     }
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     #[cfg(target_os = "linux")]
     prefer_the_renderer_that_paints();

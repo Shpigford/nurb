@@ -24,35 +24,23 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DESKTOP="$SCRIPT_DIR/.."
 cd "$DESKTOP"
 
-if [ -f .env ]; then
-  set -a
-  source .env
-  set +a
-fi
+# shellcheck source=common.sh
+source "$SCRIPT_DIR/common.sh"
+
+load_desktop_env
 
 APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:?Set APPLE_SIGNING_IDENTITY in desktop/.env}"
 APPLE_API_KEY="${APPLE_API_KEY:?Set APPLE_API_KEY (the key id) in desktop/.env}"
 APPLE_API_ISSUER="${APPLE_API_ISSUER:?Set APPLE_API_ISSUER in desktop/.env}"
 APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH:?Set APPLE_API_KEY_PATH in desktop/.env}"
 APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH/#\~/$HOME}"
-TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:?Set TAURI_SIGNING_PRIVATE_KEY (path to the updater key) in desktop/.env}"
-TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY/#\~/$HOME}"
-export APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH TAURI_SIGNING_PRIVATE_KEY
+export APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH
 
-VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
-PYVERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../pyproject.toml | head -1)
-TAG="v$VERSION"
-REPO="Shpigford/nurb"
-
-if [ "$VERSION" != "$PYVERSION" ]; then
-  echo "❌ tauri.conf.json says $VERSION but pyproject.toml says $PYVERSION."
-  echo "   The engine and the app release as one version; bump both."
-  exit 1
-fi
+require_updater_key
+derive_version
 
 echo "🔨 Building nurb desktop v$VERSION for Apple silicon and Intel (signed + notarized)..."
-ARTIFACTS="$(mktemp -d)"
-trap 'rm -rf "$ARTIFACTS"' EXIT
+make_artifacts_dir
 
 for target in aarch64-apple-darwin x86_64-apple-darwin; do
   arch="${target%%-*}"
@@ -93,17 +81,7 @@ for target in aarch64-apple-darwin x86_64-apple-darwin; do
   cp "$DMG" "$ARTIFACTS/$dmg_name"
 done
 
-# The build runs before this wait on purpose: merge the bump and run this
-# script immediately, and the desktop build overlaps publish.yml's run.
-echo "⏳ Waiting for publish.yml to create the $TAG release..."
-for attempt in $(seq 1 90); do
-  gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 && break
-  if [ "$attempt" -eq 90 ]; then
-    echo "❌ $TAG never appeared. Is the version bump merged? Did publish.yml fail?"
-    exit 1
-  fi
-  sleep 10
-done
+wait_for_tag
 
 if gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' 2>/dev/null | grep -qx -e 'nurb-aarch64.app.tar.gz' -e 'nurb-x86_64.app.tar.gz'; then
   echo "❌ $TAG already has desktop artifacts. Bump the version to release again."
@@ -120,26 +98,10 @@ gh release upload "$TAG" \
   "$ARTIFACTS/nurb-x86_64.app.tar.gz" "$ARTIFACTS/nurb-x86_64.app.tar.gz.sig" \
   --repo "$REPO"
 
-echo "📡 Merging the darwin slices into latest.json..."
-if ! gh release view desktop-latest --repo "$REPO" >/dev/null 2>&1; then
-  gh release create desktop-latest --repo "$REPO" --prerelease \
-    --title "nurb desktop update feed" \
-    --notes "Machine-read by installed copies of the nurb desktop app. Download the real thing from the newest release."
-fi
-# release-linux.sh publishes the Linux half from its own machine into this same
-# feed, so this reads what is there and merges rather than overwriting. feed.py
-# keeps the other platform's entries when the version matches and drops them
-# when it does not, which is what stops a Mac-only release from offering Linux
-# users an update that hands them the previous build.
-gh release download desktop-latest --repo "$REPO" --pattern latest.json \
-  --dir "$ARTIFACTS" >/dev/null 2>&1 || true
-python3 scripts/feed.py \
-  --version "$VERSION" \
-  --current "$ARTIFACTS/latest.json" \
-  --out "$ARTIFACTS/latest.json" \
-  --platform "darwin-aarch64=https://github.com/$REPO/releases/download/$TAG/nurb-aarch64.app.tar.gz=$ARTIFACTS/nurb-aarch64.app.tar.gz.sig" \
-  --platform "darwin-x86_64=https://github.com/$REPO/releases/download/$TAG/nurb-x86_64.app.tar.gz=$ARTIFACTS/nurb-x86_64.app.tar.gz.sig"
-gh release upload desktop-latest "$ARTIFACTS/latest.json" --repo "$REPO" --clobber
+DOWNLOAD="https://github.com/$REPO/releases/download/$TAG"
+publish_feed \
+  --platform "darwin-aarch64=$DOWNLOAD/nurb-aarch64.app.tar.gz=$ARTIFACTS/nurb-aarch64.app.tar.gz.sig" \
+  --platform "darwin-x86_64=$DOWNLOAD/nurb-x86_64.app.tar.gz=$ARTIFACTS/nurb-x86_64.app.tar.gz.sig"
 
 echo "✅ Done! Release: https://github.com/$REPO/releases/tag/$TAG"
 echo "   Apple silicon: https://github.com/$REPO/releases/latest/download/nurb.dmg"

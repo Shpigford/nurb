@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
-# Releases the Linux desktop packages: a .deb, an AppImage, and the updater
-# archive installed copies poll for.
+# Releases the Linux desktop packages: a .deb and an AppImage, each signed so
+# installed copies can update themselves to it.
 #
 # The companion to release.sh, which does the same for macOS. They cannot be
 # one script because Tauri links against the host's system webview, so each
@@ -22,26 +22,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DESKTOP="$SCRIPT_DIR/.."
 cd "$DESKTOP"
 
-if [ -f .env ]; then
-  set -a
-  source .env
-  set +a
-fi
+# shellcheck source=common.sh
+source "$SCRIPT_DIR/common.sh"
 
-TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:?Set TAURI_SIGNING_PRIVATE_KEY (path to the updater key) in desktop/.env}"
-TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY/#\~/$HOME}"
-export TAURI_SIGNING_PRIVATE_KEY
-
-VERSION=$(python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])")
-PYVERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' ../pyproject.toml | head -1)
-TAG="v$VERSION"
-REPO="Shpigford/nurb"
-
-if [ "$VERSION" != "$PYVERSION" ]; then
-  echo "❌ tauri.conf.json says $VERSION but pyproject.toml says $PYVERSION."
-  echo "   The engine and the app release as one version; bump both."
-  exit 1
-fi
+load_desktop_env
+require_updater_key
+derive_version
 
 # bubblewrap is what confines every agent adapter, and the .deb declares it as a
 # dependency. Building without it installed still produces a package, but it
@@ -51,25 +37,30 @@ if ! command -v bwrap >/dev/null 2>&1; then
   echo "   apt install bubblewrap, then run the Rust tests before releasing."
 fi
 
+# tauri-bundler names the two packages with different words for the same
+# machine: the .deb follows Debian (arm64) and the AppImage follows uname
+# (aarch64). They agree only on x86_64, which is why getting this wrong is
+# invisible until someone releases for ARM.
 ARCH="$(uname -m)"
 case "$ARCH" in
-  x86_64) DEB_ARCH="amd64"; FEED_ARCH="x86_64" ;;
-  aarch64) DEB_ARCH="arm64"; FEED_ARCH="aarch64" ;;
+  x86_64) DEB_ARCH="amd64"; APPIMAGE_ARCH="amd64"; FEED_ARCH="x86_64" ;;
+  aarch64) DEB_ARCH="arm64"; APPIMAGE_ARCH="aarch64"; FEED_ARCH="aarch64" ;;
   *) echo "❌ unsupported architecture $ARCH"; exit 1 ;;
 esac
 
 echo "🔨 Building nurb desktop v$VERSION for linux-$FEED_ARCH..."
-ARTIFACTS="$(mktemp -d)"
-trap 'rm -rf "$ARTIFACTS"' EXIT
+make_artifacts_dir
 
 npm run tauri build
 
+# Unlike macOS, Linux has no updater tarball. Both packages are self-contained
+# updater artifacts, so the bundler signs each one where it sits and the feed
+# points at the package itself.
 BUNDLE="src-tauri/target/release/bundle"
 DEB="$BUNDLE/deb/nurb_${VERSION}_${DEB_ARCH}.deb"
-APPIMAGE="$BUNDLE/appimage/nurb_${VERSION}_${DEB_ARCH}.AppImage"
-UPDATE_SRC="$APPIMAGE.tar.gz"
+APPIMAGE="$BUNDLE/appimage/nurb_${VERSION}_${APPIMAGE_ARCH}.AppImage"
 
-for file in "$DEB" "$APPIMAGE" "$UPDATE_SRC" "$UPDATE_SRC.sig"; do
+for file in "$DEB" "$DEB.sig" "$APPIMAGE" "$APPIMAGE.sig"; do
   if [ ! -f "$file" ]; then
     echo "❌ the build did not produce $file"
     exit 1
@@ -80,54 +71,35 @@ done
 # cannot pick an asset from the caller's machine.
 DEB_NAME="nurb_${FEED_ARCH}.deb"
 APPIMAGE_NAME="nurb-${FEED_ARCH}.AppImage"
-UPDATE_NAME="nurb-${FEED_ARCH}.AppImage.tar.gz"
 cp "$DEB" "$ARTIFACTS/$DEB_NAME"
+cp "$DEB.sig" "$ARTIFACTS/$DEB_NAME.sig"
 cp "$APPIMAGE" "$ARTIFACTS/$APPIMAGE_NAME"
-cp "$UPDATE_SRC" "$ARTIFACTS/$UPDATE_NAME"
-cp "$UPDATE_SRC.sig" "$ARTIFACTS/$UPDATE_NAME.sig"
+cp "$APPIMAGE.sig" "$ARTIFACTS/$APPIMAGE_NAME.sig"
 
 echo "🔎 Checking the package declares its dependencies..."
 dpkg-deb --field "$ARTIFACTS/$DEB_NAME" Depends
 
-# The build runs before this wait on purpose: merge the bump and run this
-# script immediately, and the desktop build overlaps publish.yml's run.
-echo "⏳ Waiting for publish.yml to create the $TAG release..."
-for attempt in $(seq 1 90); do
-  gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 && break
-  if [ "$attempt" -eq 90 ]; then
-    echo "❌ $TAG never appeared. Is the version bump merged? Did publish.yml fail?"
-    exit 1
-  fi
-  sleep 10
-done
+wait_for_tag
 
-if gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$UPDATE_NAME"; then
+if gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$APPIMAGE_NAME"; then
   echo "❌ $TAG already has linux-$FEED_ARCH artifacts. Bump the version to release again."
   exit 1
 fi
 
 echo "🚀 Uploading to the $TAG release..."
 gh release upload "$TAG" \
-  "$ARTIFACTS/$DEB_NAME" "$ARTIFACTS/$APPIMAGE_NAME" \
-  "$ARTIFACTS/$UPDATE_NAME" "$ARTIFACTS/$UPDATE_NAME.sig" \
+  "$ARTIFACTS/$DEB_NAME" "$ARTIFACTS/$DEB_NAME.sig" \
+  "$ARTIFACTS/$APPIMAGE_NAME" "$ARTIFACTS/$APPIMAGE_NAME.sig" \
   --repo "$REPO"
 
-echo "📡 Merging linux-$FEED_ARCH into latest.json..."
-if ! gh release view desktop-latest --repo "$REPO" >/dev/null 2>&1; then
-  gh release create desktop-latest --repo "$REPO" --prerelease \
-    --title "nurb desktop update feed" \
-    --notes "Machine-read by installed copies of the nurb desktop app. Download the real thing from the newest release."
-fi
-# Whatever the Mac already published, if anything: feed.py keeps it when the
-# version matches and drops it when it does not.
-gh release download desktop-latest --repo "$REPO" --pattern latest.json \
-  --dir "$ARTIFACTS" >/dev/null 2>&1 || true
-python3 scripts/feed.py \
-  --version "$VERSION" \
-  --current "$ARTIFACTS/latest.json" \
-  --out "$ARTIFACTS/latest.json" \
-  --platform "linux-$FEED_ARCH=https://github.com/$REPO/releases/download/$TAG/$UPDATE_NAME=$ARTIFACTS/$UPDATE_NAME.sig"
-gh release upload desktop-latest "$ARTIFACTS/latest.json" --repo "$REPO" --clobber
+# Two entries, because the updater asks for its own package format first. A
+# copy installed from the .deb looks for linux-<arch>-deb and would otherwise
+# fall through to the AppImage entry, download something dpkg cannot install,
+# and never update again.
+DOWNLOAD="https://github.com/$REPO/releases/download/$TAG"
+publish_feed \
+  --platform "linux-$FEED_ARCH=$DOWNLOAD/$APPIMAGE_NAME=$ARTIFACTS/$APPIMAGE_NAME.sig" \
+  --platform "linux-$FEED_ARCH-deb=$DOWNLOAD/$DEB_NAME=$ARTIFACTS/$DEB_NAME.sig"
 
 echo "✅ Done! Release: https://github.com/$REPO/releases/tag/$TAG"
 echo "   Debian/Ubuntu: https://github.com/$REPO/releases/latest/download/$DEB_NAME"

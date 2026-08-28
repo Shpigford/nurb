@@ -41,6 +41,10 @@ else
   exit 1
 fi
 
+# The sidecar used to stage as uv-<triple>. A checkout from before the rename
+# keeps those around forever, unreferenced, so sweep them.
+rm -f "$tauri/binaries"/uv-*
+
 for triple in $triples; do
   out="$tauri/binaries/nurb-uv-$triple"
   [ -x "$out" ] && continue
