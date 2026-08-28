@@ -24,18 +24,37 @@ use std::path::{Path, PathBuf};
 
 /// The agents whose state directories stay writable. One name per agent home,
 /// so config, sessions, and their temp-file variants are all covered without
-/// enumerating filenames.
+/// enumerating filenames. Linux states the same thing per spawned agent in
+/// `home_args`, so outside the Seatbelt backend this list is only a test fixture.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 const AGENT_DOTS: [&str; 5] = [".claude", ".codex", ".gemini", ".cursor", ".grok"];
+
+/// Whether a spawned adapter is actually confined. False only on Linux with
+/// bubblewrap missing, which the app has to say out loud rather than leave in
+/// its own stderr.
+#[cfg(target_os = "macos")]
+pub(super) fn active() -> bool {
+    true
+}
+
+#[cfg(target_os = "linux")]
+pub(super) fn active() -> bool {
+    which_bwrap().is_some()
+}
 
 /// Wrap an adapter invocation in `sandbox-exec`. sandbox-exec applies the
 /// profile and execs the target in place, so the child pid, process group,
 /// and kill semantics the caller relies on are unchanged.
+///
+/// `agent_dot` is the spawned agent's state prefix (`.claude`); Seatbelt takes
+/// all five as prefix regexes and ignores it, the Linux backend does not.
 #[cfg(target_os = "macos")]
 pub(super) fn wrap(
     program: String,
     args: Vec<String>,
     project: &Path,
     engine_root: &Path,
+    _agent_dot: &str,
 ) -> (String, Vec<String>) {
     let mut wrapped = vec!["-p".into(), profile(project, engine_root), program];
     wrapped.extend(args);
@@ -43,23 +62,28 @@ pub(super) fn wrap(
 }
 
 /// Wrap an adapter invocation in `bwrap`. Unlike sandbox-exec this forks
-/// rather than execing in place, so two flags carry the semantics the caller
-/// depends on: `--die-with-parent` ties the sandbox's life to the app's, and
-/// the absence of `--new-session` keeps the child in the process group the
-/// spawn established, which is what `killpg` in acp.rs reaps. `--new-session`
-/// would harden against TIOCSTI injection, but adapters get pipes rather than
-/// a tty, and losing the process group would leak adapter processes on quit.
+/// rather than execing in place, so three flags carry the semantics the caller
+/// depends on. `--die-with-parent` ties the sandbox's life to the app's, and
+/// bwrap sets it on the pid-namespace init too, so the whole namespace goes
+/// down with bwrap however bwrap itself was killed. The absence of
+/// `--new-session` keeps bwrap in the process group the spawn established,
+/// which is what `killpg` in acp.rs reaps: killpg reaches bwrap, bwrap's death
+/// takes the namespace's init with it, and the kernel reaps everything left
+/// inside. `--new-session` would harden against TIOCSTI injection, but
+/// adapters get pipes rather than a tty, and losing the process group would
+/// leak adapter processes on quit.
 ///
 /// bubblewrap is a hard dependency of the .deb for this reason. If it is
 /// somehow missing, the adapter still runs: chat that refuses to start is a
 /// dead end for the user, where an unsandboxed adapter is the behaviour every
-/// agent CLI has on its own. The warning names what was lost.
+/// agent CLI has on its own. `active` tells the app so the rail can say it.
 #[cfg(target_os = "linux")]
 pub(super) fn wrap(
     program: String,
     args: Vec<String>,
     project: &Path,
     engine_root: &Path,
+    agent_dot: &str,
 ) -> (String, Vec<String>) {
     let Some(bwrap) = which_bwrap() else {
         eprintln!(
@@ -69,7 +93,7 @@ pub(super) fn wrap(
         );
         return (program, args);
     };
-    let mut wrapped = bwrap_args(project, engine_root);
+    let mut wrapped = bwrap_args(project, engine_root, agent_dot);
     wrapped.push(program);
     wrapped.extend(args);
     (bwrap.to_string_lossy().into_owned(), wrapped)
@@ -77,14 +101,30 @@ pub(super) fn wrap(
 
 /// The bwrap invocation, without the command it wraps. Order is the policy:
 /// the whole filesystem arrives read-only, then /dev and /proc are replaced
-/// with fresh minimal instances, then each writable root is bound back over
-/// the read-only view. Network is deliberately left shared.
+/// with fresh minimal instances, then $HOME is re-laid (see `home_args`), then
+/// each writable root is bound back over all of it. Network is deliberately
+/// left shared.
+///
+/// `--unshare-pid` is a write rule, not a tidiness one. Without a pid
+/// namespace `--proc /proc` binds the host's own /proc read-write over the
+/// read-only root, and /proc/<pid>/root walks straight back out into the host
+/// mount namespace, which undoes everything below it.
 #[cfg(target_os = "linux")]
-fn bwrap_args(project: &Path, engine_root: &Path) -> Vec<String> {
-    let mut args: Vec<String> = ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc"]
-        .iter()
-        .map(|s| (*s).to_string())
-        .collect();
+fn bwrap_args(project: &Path, engine_root: &Path, agent_dot: &str) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--unshare-pid",
+        "--proc",
+        "/proc",
+    ]
+    .iter()
+    .map(|s| (*s).to_string())
+    .collect();
+    args.extend(home_args(agent_dot));
     // --bind-try, not --bind: the roots are enumerated a moment before bwrap
     // execs, and a plain --bind aborts the whole sandbox if any source has
     // gone by then. An agent's own temp file in $HOME is enough to lose that
@@ -97,6 +137,53 @@ fn bwrap_args(project: &Path, engine_root: &Path) -> Vec<String> {
         args.push(path);
     }
     args.push("--die-with-parent".into());
+    args
+}
+
+/// $HOME, laid out so the spawned agent can keep its own config and nothing
+/// else in the user's home can change.
+///
+/// Seatbelt states this as a prefix: `^$HOME/\.claude` covers `~/.claude`,
+/// `~/.claude.json`, and the temp files beside them, whether or not they exist
+/// yet. A bind mount has no prefixes, and binding the paths individually does
+/// not stand in for one: the Claude CLI saves its config by writing
+/// `~/.claude.json.<pid>.<rand>.tmp` and renaming it over the real file, so a
+/// read-only $HOME cannot even create the temp file (a fresh install then
+/// re-onboards forever), and a per-file bind makes the target a mountpoint,
+/// where the rename fails EBUSY. Either way the agent silently never saves.
+///
+/// So the directory $HOME itself is bound writable, and then every entry
+/// already in it is bound back read-only, except the ones beginning with the
+/// spawned agent's dot. Existing files keep their contents, and being
+/// mountpoints they cannot be renamed over or unlinked either. What this
+/// admits that Seatbelt does not is *new* top-level entries: an agent can
+/// create a `~/.profile` that does not exist yet. That is the same reach it
+/// already has through the writable `~/.claude/settings.json`, and the
+/// boundary this module defends is the user's data, which stays read-only.
+#[cfg(target_os = "linux")]
+fn home_args(agent_dot: &str) -> Vec<String> {
+    let Some(home) = home() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(&home) else {
+        return Vec::new();
+    };
+    let path = home.to_string_lossy().into_owned();
+    let mut args = vec!["--bind".into(), path.clone(), path];
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if name.starts_with(agent_dot) {
+            continue;
+        }
+        let path = home.join(name).to_string_lossy().into_owned();
+        // --ro-bind-try: an entry can vanish between this listing and the exec,
+        // and a missing one needs no protecting.
+        args.push("--ro-bind-try".into());
+        args.push(path.clone());
+        args.push(path);
+    }
     args
 }
 
@@ -190,32 +277,10 @@ fn writable_roots(project: &Path, engine_root: &Path) -> Vec<PathBuf> {
         push(home.join(".cache"));
         push(home.join(".npm"));
         push(home.join(".config/nurb"));
-        // Seatbelt takes the agent state as a prefix regex in `profile`, so one
-        // rule covers both ~/.claude and the ~/.claude.json family beside it. A
-        // bind mount cannot glob, so the same prefixes are enumerated: the
-        // directory itself, created when absent so a first run has somewhere to
-        // write, plus every existing $HOME entry whose name starts with one.
-        // Without the second half ~/.claude.json is read-only and the agent
-        // cannot persist its own config. All five agents, not just the one
-        // being spawned, because `wrap` is not told which it is and the macOS
-        // rule is equally unconditional.
-        #[cfg(target_os = "linux")]
-        {
-            for dot in AGENT_DOTS {
-                let state = home.join(dot);
-                let _ = std::fs::create_dir_all(&state);
-                push(state);
-            }
-            if let Ok(entries) = std::fs::read_dir(&home) {
-                for entry in entries.flatten() {
-                    if let Some(name) = entry.file_name().to_str() {
-                        if AGENT_DOTS.iter().any(|dot| name.starts_with(dot)) {
-                            push(home.join(name));
-                        }
-                    }
-                }
-            }
-        }
+        // The agent's own state is not listed here on Linux: `home_args` leaves
+        // the spawned agent's dot entries out of the read-only re-binding, so
+        // they are already writable, and nothing is created on behalf of an
+        // agent the user never installed.
     }
     roots
 }
@@ -282,8 +347,14 @@ mod tests {
             "(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write* (subpath {}) (literal \"/dev/null\"))\n",
             quoted(&project.canonicalize().unwrap())
         );
-        assert!(sh(&profile, &format!("echo hi > '{}/inside.txt'", project.display())));
-        assert!(!sh(&profile, &format!("echo hi > '{}/escape.txt'", outside.display())));
+        assert!(sh(
+            &profile,
+            &format!("echo hi > '{}/inside.txt'", project.display())
+        ));
+        assert!(!sh(
+            &profile,
+            &format!("echo hi > '{}/escape.txt'", outside.display())
+        ));
         assert!(sh(&profile, "cat /etc/hosts > /dev/null"));
         std::fs::remove_dir_all(&project).ok();
         std::fs::remove_dir_all(&outside).ok();
@@ -296,14 +367,22 @@ mod tests {
         std::fs::create_dir_all(&project).unwrap();
         let profile = profile(&project, &project);
         // Inside the project: allowed. The user's own dotfiles: refused.
-        assert!(sh(&profile, &format!("echo hi > '{}/part.py'", project.display())));
-        assert!(!sh(&profile, "echo hacked >> \"$HOME/nurb-sbx-canary\" && rm \"$HOME/nurb-sbx-canary\""));
+        assert!(sh(
+            &profile,
+            &format!("echo hi > '{}/part.py'", project.display())
+        ));
+        assert!(!sh(
+            &profile,
+            "echo hacked >> \"$HOME/nurb-sbx-canary\" && rm \"$HOME/nurb-sbx-canary\""
+        ));
         // Agent state under each agent home writes fine (created and removed).
         for dot in [".claude", ".codex", ".gemini", ".cursor", ".grok"] {
             let existed = home().map(|h| h.join(dot).exists()).unwrap_or(false);
             assert!(sh(
                 &profile,
-                &format!("mkdir -p \"$HOME/{dot}/nurb-sbx-test\" && rmdir \"$HOME/{dot}/nurb-sbx-test\"")
+                &format!(
+                    "mkdir -p \"$HOME/{dot}/nurb-sbx-test\" && rmdir \"$HOME/{dot}/nurb-sbx-test\""
+                )
             ));
             // Do not leave dotdirs behind for agents this machine lacks.
             if !existed {
@@ -329,11 +408,17 @@ mod tests {
     /// the test exercises the shipped policy rather than a copy of it.
     #[cfg(target_os = "linux")]
     fn bwrapped(project: &Path, engine_root: &Path, script: &str) -> bool {
+        bwrapped_as(".claude", project, engine_root, script)
+    }
+
+    #[cfg(target_os = "linux")]
+    fn bwrapped_as(agent_dot: &str, project: &Path, engine_root: &Path, script: &str) -> bool {
         let (program, args) = super::wrap(
             "/bin/sh".into(),
             vec!["-c".into(), script.into()],
             project,
             engine_root,
+            agent_dot,
         );
         assert!(
             program.ends_with("bwrap"),
@@ -361,17 +446,48 @@ mod tests {
         let project = std::env::temp_dir().join(format!("nurb-bwrap-{}", std::process::id()));
         std::fs::create_dir_all(&project).unwrap();
         let project = project.canonicalize().unwrap();
-        let outside = home().unwrap().join(format!("nurb-bwrap-out-{}", std::process::id()));
+        let outside = home()
+            .unwrap()
+            .join(format!("nurb-bwrap-out-{}", std::process::id()));
         std::fs::create_dir_all(&outside).unwrap();
+        let existing = outside.join("notes.txt");
+        std::fs::write(&existing, "mine").unwrap();
 
-        assert!(bwrapped(&project, &project, &format!("echo hi > '{}/inside.txt'", project.display())));
-        assert!(!bwrapped(&project, &project, &format!("echo hi > '{}/escape.txt'", outside.display())));
+        assert!(bwrapped(
+            &project,
+            &project,
+            &format!("echo hi > '{}/inside.txt'", project.display())
+        ));
+        assert!(!bwrapped(
+            &project,
+            &project,
+            &format!("echo hi > '{}/escape.txt'", outside.display())
+        ));
         assert!(!outside.join("escape.txt").exists());
         assert!(bwrapped(&project, &project, "cat /etc/hosts > /dev/null"));
         assert!(bwrapped(&project, &project, "echo discard > /dev/null"));
-        // $HOME itself stays read-only; only the agent state dirs inside it move.
-        assert!(!bwrapped(&project, &project, "echo hacked > \"$HOME/nurb-bwrap-canary\""));
-        assert!(!home().unwrap().join("nurb-bwrap-canary").exists());
+        // The user's existing files in $HOME cannot be rewritten, renamed over,
+        // or removed: `home_args` binds each of them back read-only, and a
+        // mountpoint refuses all three.
+        assert!(!bwrapped(
+            &project,
+            &project,
+            &format!("echo hacked > '{}'", existing.display())
+        ));
+        assert!(!bwrapped(
+            &project,
+            &project,
+            &format!("rm -rf '{}'", outside.display())
+        ));
+        assert_eq!(std::fs::read_to_string(&existing).unwrap(), "mine");
+        // /proc is the sandbox's own pid namespace, not the host's. Without
+        // --unshare-pid it would be the host's, mounted read-write, and
+        // /proc/<pid>/root would lead back out of every bind above.
+        assert!(bwrapped(
+            &project,
+            &project,
+            "test \"$(ls -d /proc/[0-9]* | wc -l)\" -le 3"
+        ));
 
         std::fs::remove_dir_all(&project).ok();
         std::fs::remove_dir_all(&outside).ok();
@@ -383,16 +499,40 @@ mod tests {
         let project = std::env::temp_dir().join(format!("nurb-bwrap-real-{}", std::process::id()));
         std::fs::create_dir_all(&project).unwrap();
         let project = project.canonicalize().unwrap();
-        assert!(bwrapped(&project, &project, &format!("echo hi > '{}/part.py'", project.display())));
+        assert!(bwrapped(
+            &project,
+            &project,
+            &format!("echo hi > '{}/part.py'", project.display())
+        ));
+        // Each agent's own state is writable when that agent is the one being
+        // spawned, and only then: nothing is created for agents the user never
+        // installed, and one agent cannot rewrite another's config.
+        let home = home().unwrap();
         for dot in AGENT_DOTS {
-            assert!(
-                bwrapped(
-                    &project,
-                    &project,
-                    &format!("mkdir -p \"$HOME/{dot}/nurb-bwrap-test\" && rmdir \"$HOME/{dot}/nurb-bwrap-test\"")
-                ),
-                "{dot} state should be writable"
+            // The read-only re-binding only covers entries that exist, so the
+            // "another agent cannot touch it" half needs a real directory.
+            let state = home.join(dot);
+            let existed = state.exists();
+            std::fs::create_dir_all(&state).unwrap();
+            let script = format!(
+                "mkdir -p \"$HOME/{dot}/nurb-bwrap-test\" && rmdir \"$HOME/{dot}/nurb-bwrap-test\""
             );
+            assert!(
+                bwrapped_as(dot, &project, &project, &script),
+                "{dot} state should be writable to {dot}"
+            );
+            let other = if dot == ".claude" {
+                ".codex"
+            } else {
+                ".claude"
+            };
+            assert!(
+                !bwrapped_as(other, &project, &project, &script),
+                "{dot} state should be read-only to {other}"
+            );
+            if !existed {
+                std::fs::remove_dir(&state).ok();
+            }
         }
         std::fs::remove_dir_all(&project).ok();
     }
@@ -401,14 +541,17 @@ mod tests {
     #[cfg(target_os = "linux")]
     fn agent_state_beside_the_directory_is_writable_too() {
         // Seatbelt's prefix regex covers ~/.claude.json as well as ~/.claude,
-        // and Claude keeps real config in that file. A bind of the directory
-        // alone leaves it read-only, which is silent until an agent cannot save.
+        // and Claude keeps real config in that file, saved by writing a temp
+        // file beside it and renaming it over. So three things have to hold:
+        // append, create-then-rename onto a name that does not exist yet (the
+        // fresh install), and create-then-rename over one that does.
         // A throwaway file sharing the .claude prefix, never the real
         // ~/.claude.json: this asserts the rule, and a test that appended to a
         // user's live agent config to prove a point would be a bad trade.
         let home = home().unwrap();
         let probe = home.join(format!(".claude-nurbprobe-{}", std::process::id()));
         std::fs::write(&probe, "probe").unwrap();
+        let fresh = home.join(format!(".claude-nurbfresh-{}", std::process::id()));
         let project = std::env::temp_dir().join(format!("nurb-bwrap-dot-{}", std::process::id()));
         std::fs::create_dir_all(&project).unwrap();
         let project = project.canonicalize().unwrap();
@@ -420,6 +563,29 @@ mod tests {
                 &format!("printf x >> '{}'", probe.display())
             ),
             "agent state beside the directory should be writable, as under Seatbelt"
+        );
+        assert!(
+            bwrapped(
+                &project,
+                &project,
+                &format!(
+                    "printf y > '{0}.tmp' && mv '{0}.tmp' '{0}'",
+                    fresh.display()
+                )
+            ),
+            "a fresh install must be able to create its config by rename"
+        );
+        assert_eq!(std::fs::read_to_string(&fresh).unwrap(), "y");
+        assert!(
+            bwrapped(
+                &project,
+                &project,
+                &format!(
+                    "printf z > '{0}.tmp' && mv '{0}.tmp' '{0}'",
+                    probe.display()
+                )
+            ),
+            "and to save over one that already exists"
         );
         // And the rule really is the prefix, not a blanket $HOME: a neighbour
         // that does not belong to an agent stays read-only.
@@ -433,6 +599,7 @@ mod tests {
 
         std::fs::remove_dir_all(&project).ok();
         std::fs::remove_file(&probe).ok();
+        std::fs::remove_file(&fresh).ok();
         std::fs::remove_file(&unrelated).ok();
     }
 
@@ -442,23 +609,33 @@ mod tests {
         // acp.rs reaps adapters with killpg(child.id()), which only reaches
         // inside the sandbox while bwrap stays in the spawn's process group.
         // --new-session would break that; --die-with-parent stops an orphaned
-        // adapter outliving the app.
+        // adapter outliving the app, and it is also what carries the kill
+        // through --unshare-pid, whose init would otherwise outlive bwrap.
         let project = std::env::temp_dir();
-        let (_, args) = super::wrap("/bin/sh".into(), vec![], &project, &project);
+        let (_, args) = super::wrap("/bin/sh".into(), vec![], &project, &project, ".claude");
         assert!(args.contains(&"--die-with-parent".to_string()));
+        assert!(args.contains(&"--unshare-pid".to_string()));
         assert!(!args.contains(&"--new-session".to_string()));
     }
 
     #[test]
     #[cfg(target_os = "linux")]
     fn paths_with_spaces_need_no_quoting_because_they_are_argv() {
-        let project = std::env::temp_dir().join(format!("nurb bwrap spaces {}", std::process::id()));
+        let project =
+            std::env::temp_dir().join(format!("nurb bwrap spaces {}", std::process::id()));
         std::fs::create_dir_all(&project).unwrap();
         let project = project.canonicalize().unwrap();
-        let (_, args) = super::wrap("/bin/sh".into(), vec![], &project, &project);
+        let (_, args) = super::wrap("/bin/sh".into(), vec![], &project, &project, ".claude");
         let want = project.to_string_lossy().into_owned();
-        assert!(args.iter().filter(|a| **a == want).count() >= 2, "bound as its own argv entries");
-        assert!(bwrapped(&project, &project, &format!("echo hi > '{}/x.txt'", project.display())));
+        assert!(
+            args.iter().filter(|a| **a == want).count() >= 2,
+            "bound as its own argv entries"
+        );
+        assert!(bwrapped(
+            &project,
+            &project,
+            &format!("echo hi > '{}/x.txt'", project.display())
+        ));
         std::fs::remove_dir_all(&project).ok();
     }
 }

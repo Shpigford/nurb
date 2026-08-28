@@ -276,7 +276,13 @@ async fn agent_sessions(
     String,
 > {
     let (program, args) = launcher.adapter(kind);
-    let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
+    let (program, args) = sandbox::wrap(
+        program,
+        args,
+        &project,
+        &launcher.engine_root(),
+        &agent_dot(kind),
+    );
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -1171,7 +1177,19 @@ async fn run_chat(
     use tauri::Manager;
     let launcher = app.state::<crate::env::Launcher>();
     let (program, args) = launcher.adapter(kind);
-    let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
+    let (program, args) = sandbox::wrap(
+        program,
+        args,
+        &project,
+        &launcher.engine_root(),
+        &agent_dot(kind),
+    );
+    // An adapter the kernel is not confining is a fact about the user's
+    // machine, not a diagnostic. The rail says so for as long as it is true.
+    if !sandbox::active() {
+        use tauri::Emitter;
+        let _ = app.emit("agent-unsandboxed", ());
+    }
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -1509,6 +1527,13 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
     });
 }
 
+/// The `$HOME` prefix an agent keeps its state under. Every agent the app
+/// ships names its home after its own id (`claude` -> `~/.claude`,
+/// `~/.claude.json`), so the sandbox needs no second table to drift from.
+fn agent_dot(kind: AgentKind) -> String {
+    format!(".{}", kind.id())
+}
+
 /// -32000 is ACP's auth-required code, so it means signed out for every
 /// agent; they just raise it at different moments (Claude on session/prompt,
 /// Codex as early as session/new or session/list). The `auth_required:`
@@ -1521,10 +1546,7 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
 /// dead-end note and no sign-in button (#115).
 fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
     if error.code == ErrorCode::AuthRequired || error.message.contains("Failed to authenticate") {
-        format!(
-            "auth_required: {} is not signed in on this Mac",
-            kind.label()
-        )
+        format!("auth_required: {} is not signed in", kind.label())
     } else {
         format!("{} error: {}", kind.label(), error.message)
     }

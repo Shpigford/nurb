@@ -123,9 +123,10 @@ textarea {
   overflow: hidden;
 }
 
-/* The window titlebar is an overlay: this empty strip hosts the traffic
-   lights and doubles as the drag region. The brand lives in the dock icon
-   and the setup screen, not the chrome. */
+/* On macOS the window titlebar is an overlay: this empty strip hosts the
+   traffic lights and doubles as the drag region. The brand lives in the dock
+   icon and the setup screen, not the chrome. Linux draws its own decorations,
+   so the strip is not rendered there at all. */
 .rail-title {
   flex: none;
   height: 36px;
@@ -568,6 +569,19 @@ textarea {
 .agent-signin:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* Amber, not red: the agent is working, it is only unconfined. */
+.rail-warning {
+  margin-top: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--amber);
+  background: rgba(240, 194, 116, 0.08);
+  border: 1px solid rgba(240, 194, 116, 0.25);
+  border-radius: 6px;
+  overflow-wrap: break-word;
 }
 
 .rail-error {

@@ -22,6 +22,7 @@ import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
 import Logo from "./Logo";
 import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
+import { isMac } from "./platform";
 import Setup from "./Setup";
 import Settings from "./Settings";
 import "./App.css";
@@ -268,6 +269,10 @@ function App() {
   const [ready, setReady] = useState<boolean | null>(null);
   const bootstrapped = useRef(false);
   const [about, setAbout] = useState<AboutInfo | null>(null);
+  // Set once an adapter starts without a kernel sandbox, which today only
+  // happens on Linux with bubblewrap missing. It stays set: the agent it
+  // describes keeps running, and installing the package needs a restart.
+  const [unsandboxed, setUnsandboxed] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -333,6 +338,13 @@ function App() {
   }, [updating]);
 
   // The macOS "Check for Updates…" item. The menu lives in Rust and the
+  useEffect(() => {
+    const unlisten = listen("agent-unsandboxed", () => setUnsandboxed(true));
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
   // update state lives here, so the click arrives as an event; unlike the
   // timed checks, this one answers even when there is nothing to install.
   useEffect(() => {
@@ -952,7 +964,7 @@ function App() {
       style={{ gridTemplateColumns: `${railW}px ${chatW}px minmax(0, 1fr)` }}
     >
       <aside className="rail">
-        <div className="rail-title" data-tauri-drag-region />
+        {isMac && <div className="rail-title" data-tauri-drag-region />}
         <div className="rail-heading">
           <span>projects</span>
           <button className="rail-button" title="new project" onClick={() => setNaming(true)}>
@@ -1222,6 +1234,12 @@ function App() {
             <button className="agent-more" onClick={() => setShowAgentsHelp(true)}>
               need another agent?
             </button>
+          </div>
+        )}
+        {unsandboxed && (
+          <div className="rail-warning">
+            This agent runs without a sandbox, so it can write anywhere you can.
+            Install the bubblewrap package, then reopen nurb.
           </div>
         )}
         {error && <div className="rail-error">{error}</div>}
