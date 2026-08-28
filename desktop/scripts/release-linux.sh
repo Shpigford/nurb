@@ -14,6 +14,10 @@ set -euo pipefail
 # second picks up the other's entries. What does matter is that both run for
 # the same version, because feed.py drops entries from an older one.
 #
+# GitHub Actions runs this for both architectures once publish.yml has made the
+# release, in .github/workflows/desktop-linux.yml. It still runs by hand on any
+# Linux machine that has the updater key, which is how to repair a release.
+#
 # Credentials: only the updater signing key, from `tauri signer generate`.
 # There is no Linux equivalent of notarization, so unlike the Mac script this
 # needs no certificate and no App Store Connect key.
@@ -51,7 +55,9 @@ esac
 echo "🔨 Building nurb desktop v$VERSION for linux-$FEED_ARCH..."
 make_artifacts_dir
 
-npm run tauri build
+# The config's bundle targets include the macOS app and dmg; name the Linux
+# pair explicitly so the bundler never trips over targets this host cannot build.
+npm run tauri build -- --bundles deb,appimage
 
 # Unlike macOS, Linux has no updater tarball. Both packages are self-contained
 # updater artifacts, so the bundler signs each one where it sits and the feed
@@ -81,16 +87,10 @@ dpkg-deb --field "$ARTIFACTS/$DEB_NAME" Depends
 
 wait_for_tag
 
-if gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$APPIMAGE_NAME"; then
-  echo "❌ $TAG already has linux-$FEED_ARCH artifacts. Bump the version to release again."
-  exit 1
-fi
-
-echo "🚀 Uploading to the $TAG release..."
-gh release upload "$TAG" \
+echo "🚀 Uploading missing linux-$FEED_ARCH artifacts to the $TAG release..."
+upload_release_asset_set "$TAG" "linux-$FEED_ARCH" "linux-$FEED_ARCH,linux-$FEED_ARCH-deb" \
   "$ARTIFACTS/$DEB_NAME" "$ARTIFACTS/$DEB_NAME.sig" \
-  "$ARTIFACTS/$APPIMAGE_NAME" "$ARTIFACTS/$APPIMAGE_NAME.sig" \
-  --repo "$REPO"
+  "$ARTIFACTS/$APPIMAGE_NAME" "$ARTIFACTS/$APPIMAGE_NAME.sig"
 
 # Two entries, because the updater asks for its own package format first. A
 # copy installed from the .deb looks for linux-<arch>-deb and would otherwise

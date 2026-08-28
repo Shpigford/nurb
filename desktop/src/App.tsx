@@ -269,9 +269,8 @@ function App() {
   const [ready, setReady] = useState<boolean | null>(null);
   const bootstrapped = useRef(false);
   const [about, setAbout] = useState<AboutInfo | null>(null);
-  // Set once an adapter starts without a kernel sandbox, which today only
-  // happens on Linux with bubblewrap missing. It stays set: the agent it
-  // describes keeps running, and installing the package needs a restart.
+  // Set once an adapter starts without a kernel sandbox. It stays set: the
+  // agent keeps running, and repairing the host boundary needs a restart.
   const [unsandboxed, setUnsandboxed] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
@@ -393,7 +392,7 @@ function App() {
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(event.origin)) return;
-      if (event.data === "nurb:drag") getCurrentWindow().startDragging().catch(() => {});
+      if (isMac && event.data === "nurb:drag") getCurrentWindow().startDragging().catch(() => {});
       if (event.data?.type === "nurb:saved" && typeof event.data.path === "string")
         revealItemInDir(event.data.path).catch(() => {});
       // The viewer's variant pin: the sliders started from a variant and may have
@@ -928,8 +927,8 @@ function App() {
         : {
             key: activeServer.url,
             src: selectedPart
-              ? `${activeServer.url}/?embed&part=${encodeURIComponent(selectedPart)}`
-              : `${activeServer.url}/?embed`,
+              ? `${activeServer.url}/?embed&platform=${isMac ? "mac" : "linux"}&part=${encodeURIComponent(selectedPart)}`
+              : `${activeServer.url}/?embed&platform=${isMac ? "mac" : "linux"}`,
           },
     );
   }, [activeServer, partsReady, selectedPart]);
@@ -1243,7 +1242,7 @@ function App() {
         {unsandboxed && (
           <div className="rail-warning">
             This agent runs without a sandbox, so it can write anywhere you can.
-            Install the bubblewrap package, then reopen nurb.
+            Install or repair bubblewrap, enable user namespaces, then reopen nurb.
           </div>
         )}
         {error && <div className="rail-error">{error}</div>}

@@ -608,6 +608,20 @@ def test_embed_part_messages_separate_selection_from_configuration():
     assert "pendingCommitted = true;\n  flush();" in viewer
 
 
+def test_linux_embed_does_not_capture_window_drags():
+    """Linux has a native titlebar, so its embed must leave the canvas top edge and parameters heading out of the shell's drag path."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    start = viewer.index("if (embed) {")
+    embed = viewer[start : viewer.index("// A webview has no downloads folder", start)]
+    linux, mac = embed.split("} else {", 1)
+    assert "q.get('platform') === 'linux'" in linux
+    assert "dragstrip.remove();" in linux
+    assert "dragstrip.addEventListener('mousedown', forward);" in mac
+    assert "document.getElementById('params').addEventListener" in mac
+
+
 def test_viewer_frames_the_first_geometry_a_page_paints():
     """A deep link's build lands as a `rebuilt`, which keeps the camera. On the
     page's first paint there is no camera to keep, and keeping the one at the

@@ -45,3 +45,50 @@ jobs:
       - name: nurb check --strict
         working-directory: examples/notch
         run: uv run --project ../.. nurb check --strict
+
+  # The desktop shell, which nothing else compiles. It runs on Linux because that
+  # is where the half of the sandbox that macOS never builds lives, and the
+  # bubblewrap tests exercise the real binary rather than a mock, so the runner
+  # installs it.
+  desktop:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: desktop/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      # What Tauri links against on Linux, plus libdbus because tao links it
+      # through pkg-config, and bubblewrap for the sandbox tests. 22.04 is what
+      # the release builds on, and its unrestricted user namespaces are what let
+      # bwrap run here at all.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libxdo-dev \
+            pkg-config \
+            bubblewrap
+
+      # A debug build wants the uv sidecar to exist and never runs it: tauri-build
+      # only checks the path. So CI leaves an empty file there instead of running
+      # scripts/stage.sh, which would build a wheel and download uv for nothing.
+      - name: Stub the uv sidecar
+        run: |
+          mkdir -p binaries
+          touch binaries/nurb-uv-x86_64-unknown-linux-gnu
+
+      - run: cargo check --all-targets
+
+      - run: cargo test

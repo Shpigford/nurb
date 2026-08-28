@@ -11,6 +11,7 @@
 //! shares credentials with any terminal install either way, because every
 //! agent reads its own store (~/.claude, ~/.codex, Cursor's, ~/.grok).
 
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -240,12 +241,90 @@ fn claude_auth_status(launcher: &crate::env::Launcher) -> (Option<bool>, Option<
 /// override env var.
 fn auth_file(dir: &str) -> PathBuf {
     let home = if dir == ".codex" {
-        std::env::var("CODEX_HOME").map(PathBuf::from).ok()
+        custom_agent_home(AgentKind::Codex)
     } else {
         None
     };
     home.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(dir))
         .join("auth.json")
+}
+
+/// The effective vendor-specific state root. A valid CODEX_HOME is resolved;
+/// an invalid inherited override becomes ~/.codex; no override stays None so
+/// callers can use the agent's normal default without forcing an env value.
+/// Status, login, and sandboxed ACP spawns all share this decision.
+pub(crate) fn custom_agent_home(kind: AgentKind) -> Option<PathBuf> {
+    custom_agent_home_from(
+        kind,
+        std::env::var_os("CODEX_HOME"),
+        std::env::var_os("HOME"),
+    )
+}
+
+fn custom_agent_home_from(
+    kind: AgentKind,
+    value: Option<OsString>,
+    home: Option<OsString>,
+) -> Option<PathBuf> {
+    use std::path::Component;
+
+    if kind != AgentKind::Codex {
+        return None;
+    }
+    let value = value.filter(|value| !value.is_empty())?;
+    let home = prospective_real_path(&PathBuf::from(home?))?;
+    let fallback = home.join(".codex");
+    let path = PathBuf::from(value);
+    let valid_shape = path.is_absolute()
+        && path.to_str().is_some()
+        && !path
+            .components()
+            .any(|component| matches!(component, Component::ParentDir));
+    let path = valid_shape.then(|| prospective_real_path(&path)).flatten();
+    Some(
+        path.filter(|path| !home.starts_with(path))
+            .unwrap_or(fallback),
+    )
+}
+
+fn prospective_real_path(path: &std::path::Path) -> Option<PathBuf> {
+    let mut existing = path.to_path_buf();
+    let mut suffix = Vec::new();
+    while !existing.exists() {
+        suffix.push(existing.file_name()?.to_os_string());
+        if !existing.pop() {
+            return None;
+        }
+    }
+    let mut real = existing.canonicalize().ok()?;
+    for component in suffix.into_iter().rev() {
+        real.push(component);
+    }
+    Some(real)
+}
+
+fn apply_codex_home(command: &mut Command, home: Option<&std::path::Path>) {
+    if let Some(home) = home {
+        command.env("CODEX_HOME", home);
+    }
+}
+
+/// The config directory the engine itself reads and writes. XDG requires an
+/// absolute override; a relative value is ignored in favor of `~/.config`.
+pub(crate) fn nurb_config_dir() -> Result<PathBuf, String> {
+    nurb_config_dir_from(
+        std::env::var_os("XDG_CONFIG_HOME"),
+        std::env::var_os("HOME"),
+    )
+}
+
+fn nurb_config_dir_from(xdg: Option<OsString>, home: Option<OsString>) -> Result<PathBuf, String> {
+    let base = xdg
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| home.map(|home| PathBuf::from(home).join(".config")))
+        .ok_or_else(|| "could not find a config folder. Set HOME, then try again.".to_string())?;
+    Ok(base.join("nurb"))
 }
 
 #[cfg(target_os = "macos")]
@@ -322,15 +401,7 @@ fn security_interactive_argument(value: &str) -> Result<String, String> {
 /// $XDG_CONFIG_HOME/nurb/gemini-api-key, or ~/.config/nurb/gemini-api-key.
 #[cfg(not(target_os = "macos"))]
 fn gemini_key_file() -> Result<PathBuf, String> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
-        .ok_or_else(|| {
-            "could not find a config folder for the Gemini API key. Set HOME, then try again."
-                .to_string()
-        })?;
-    Ok(base.join("nurb").join("gemini-api-key"))
+    Ok(nurb_config_dir()?.join("gemini-api-key"))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -448,6 +519,7 @@ pub async fn agent_login(
         AgentKind::Codex => launcher.paths().map(crate::env::Paths::codex_cli),
         _ => None,
     };
+    let codex_home = custom_agent_home(kind);
     match kind {
         AgentKind::Claude => {
             args.extend(["--cli", "auth", "login", "--claudeai"].map(String::from))
@@ -468,6 +540,7 @@ pub async fn agent_login(
         if let Some(cli) = codex_cli {
             command.env("CODEX_PATH", cli);
         }
+        apply_codex_home(&mut command, codex_home.as_deref());
         let mut child = command
             .args(&args)
             .stdin(std::process::Stdio::null())
@@ -508,6 +581,9 @@ pub async fn agent_login(
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+
     use super::AgentKind;
 
     #[test]
@@ -526,6 +602,87 @@ mod tests {
             assert_eq!(AgentKind::parse(agent.id()), Ok(agent));
         }
         assert!(AgentKind::parse("unknown").is_err());
+    }
+
+    #[test]
+    fn codex_home_is_the_only_agent_state_override() {
+        let custom = Some(OsString::from("/tmp/codex-state"));
+        let home = Some(OsString::from("/home/person"));
+        let expected = super::prospective_real_path(std::path::Path::new("/tmp/codex-state"));
+        assert_eq!(
+            super::custom_agent_home_from(AgentKind::Codex, custom.clone(), home.clone()),
+            expected
+        );
+        assert_eq!(
+            super::custom_agent_home_from(AgentKind::Claude, custom, home.clone()),
+            None
+        );
+        assert_eq!(
+            super::custom_agent_home_from(AgentKind::Codex, Some(OsString::new()), home),
+            None
+        );
+    }
+
+    #[test]
+    fn invalid_codex_home_falls_back_to_the_default() {
+        let home = Some(OsString::from("/home/person"));
+        let fallback = super::prospective_real_path(std::path::Path::new("/home/person"))
+            .map(|home| home.join(".codex"));
+        for path in ["/", "/home", "/home/person", "relative", "/safe/../home"] {
+            assert_eq!(
+                super::custom_agent_home_from(
+                    AgentKind::Codex,
+                    Some(OsString::from(path)),
+                    home.clone(),
+                ),
+                fallback,
+                "{path} must fall back to ~/.codex"
+            );
+        }
+        use std::os::unix::ffi::OsStringExt;
+        let invalid_utf8 = OsString::from_vec(vec![b'/', b't', b'm', b'p', b'/', 0xff]);
+        assert_eq!(
+            super::custom_agent_home_from(AgentKind::Codex, Some(invalid_utf8), home),
+            fallback
+        );
+    }
+
+    #[test]
+    fn codex_home_rejects_a_symlink_to_home() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("nurb-codex-home-symlink-{}", std::process::id()));
+        let home = root.join("home");
+        let link = root.join("state");
+        std::fs::create_dir_all(&home).unwrap();
+        symlink(&home, &link).unwrap();
+        let fallback = home.canonicalize().unwrap().join(".codex");
+        let effective = super::custom_agent_home_from(
+            AgentKind::Codex,
+            Some(link.into_os_string()),
+            Some(home.into_os_string()),
+        );
+        assert_eq!(effective, Some(fallback.clone()));
+        let mut login = std::process::Command::new("codex");
+        super::apply_codex_home(&mut login, effective.as_deref());
+        assert!(login
+            .get_envs()
+            .any(|(name, value)| name == "CODEX_HOME" && value == Some(fallback.as_os_str())));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn config_dir_honors_only_an_absolute_xdg_override() {
+        let home = Some(OsString::from("/home/person"));
+        assert_eq!(
+            super::nurb_config_dir_from(Some(OsString::from("/var/config")), home.clone()),
+            Ok(PathBuf::from("/var/config/nurb"))
+        );
+        assert_eq!(
+            super::nurb_config_dir_from(Some(OsString::from("relative")), home),
+            Ok(PathBuf::from("/home/person/.config/nurb"))
+        );
     }
 
     /// Every agent starts one way or the other, never both: an npm adapter

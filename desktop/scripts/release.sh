@@ -83,20 +83,14 @@ done
 
 wait_for_tag
 
-if gh release view "$TAG" --repo "$REPO" --json assets -q '.assets[].name' 2>/dev/null | grep -qx -e 'nurb-aarch64.app.tar.gz' -e 'nurb-x86_64.app.tar.gz'; then
-  echo "❌ $TAG already has desktop artifacts. Bump the version to release again."
-  exit 1
-fi
-
 # Keep nurb.dmg as the established Apple silicon URL. Intel Macs use a named
 # companion download because GitHub release redirects cannot select an asset
 # from the caller's architecture.
-echo "🚀 Uploading to the $TAG release..."
-gh release upload "$TAG" \
+echo "🚀 Uploading the macOS artifacts to the $TAG release..."
+upload_release_asset_set "$TAG" "macOS desktop" "darwin-aarch64,darwin-x86_64" \
   "$ARTIFACTS/nurb.dmg" "$ARTIFACTS/nurb-intel.dmg" \
   "$ARTIFACTS/nurb-aarch64.app.tar.gz" "$ARTIFACTS/nurb-aarch64.app.tar.gz.sig" \
-  "$ARTIFACTS/nurb-x86_64.app.tar.gz" "$ARTIFACTS/nurb-x86_64.app.tar.gz.sig" \
-  --repo "$REPO"
+  "$ARTIFACTS/nurb-x86_64.app.tar.gz" "$ARTIFACTS/nurb-x86_64.app.tar.gz.sig"
 
 DOWNLOAD="https://github.com/$REPO/releases/download/$TAG"
 publish_feed \

@@ -622,14 +622,21 @@ const VIEWS = {
 if (bare) document.body.classList.add('bare');
 if (embed) {
   document.body.classList.add('embed');
-  // The desktop shell owns the window; it listens for this and starts the
-  // native drag. The strip over the canvas and the parameters heading are the
-  // pane's only safe grab areas (everything else orbits, slides, or clicks).
-  const forward = e => { if (e.button === 0) window.parent.postMessage('nurb:drag', '*'); };
-  document.getElementById('dragstrip').addEventListener('mousedown', forward);
-  document.getElementById('params').addEventListener('mousedown', e => {
-    if (e.target.closest('h2') && !e.target.closest('a')) forward(e);
-  });
+  const dragstrip = document.getElementById('dragstrip');
+  if (q.get('platform') === 'linux') {
+    // Linux supplies native window decorations, so this overlay would only steal
+    // the canvas's first 44px and keep an orbit from starting there.
+    dragstrip.remove();
+  } else {
+    // The macOS shell owns the overlaid titlebar; it listens for this and starts the
+    // native drag. The strip over the canvas and the parameters heading are the
+    // pane's only safe grab areas (everything else orbits, slides, or clicks).
+    const forward = e => { if (e.button === 0) window.parent.postMessage('nurb:drag', '*'); };
+    dragstrip.addEventListener('mousedown', forward);
+    document.getElementById('params').addEventListener('mousedown', e => {
+      if (e.target.closest('h2') && !e.target.closest('a')) forward(e);
+    });
+  }
   // A webview has no downloads folder and no download UI, so the button saves into
   // the project instead. Said before the click, because "download" would promise a
   // file the shell never produces.
