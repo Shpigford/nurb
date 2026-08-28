@@ -207,8 +207,13 @@ impl Paths {
 }
 
 /// The bundled uv sidecar: Tauri strips the target-triple suffix and places
-/// it next to the app executable (Contents/MacOS in a bundle, target/debug
-/// during dev; tests run one level down in deps/).
+/// it next to the app executable (Contents/MacOS in a bundle, /usr/bin from a
+/// .deb, target/debug during dev; tests run one level down in deps/).
+///
+/// Named nurb-uv rather than uv because a Linux package installs it into
+/// /usr/bin, where a generic name would collide with the user's own uv on
+/// PATH and with any future distribution package of it. Inside a .app the
+/// name never mattered; here it does.
 pub fn uv_sidecar() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("no current exe: {e}"))?;
     let dir = exe.parent().ok_or("current exe has no parent")?;
@@ -217,7 +222,7 @@ pub fn uv_sidecar() -> Result<PathBuf, String> {
     } else {
         dir
     };
-    let uv = dir.join("uv");
+    let uv = dir.join("nurb-uv");
     if uv.is_file() {
         Ok(uv)
     } else {

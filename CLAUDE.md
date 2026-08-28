@@ -81,7 +81,7 @@ nurb verify [part]   the doctrine's verification list, --report bundles it with 
 nurb render [part]   write build/renders/<part>.png, --section cuts it open, needs the render extra
 nurb export [part]   write 3MF with tuned print settings into build/, --formats for STL, STEP or GLB
 nurb extract         find duplication across sibling parts
-nurb launcher        write viewer.command, a double-clickable `nurb dev`
+nurb launcher        write the double-clickable `nurb dev` (viewer.command, or viewer.desktop on Linux)
 ```
 
 `uv run pytest` runs the suite, which includes the parts in `examples/`.
@@ -89,7 +89,7 @@ nurb launcher        write viewer.command, a double-clickable `nurb dev`
 A project is any directory containing `parts/`. There is no init step, and there
 never should be.
 
-A release is a version bump merged to main: `uv version X.Y.Z`, plus the matching `version:` line in `src/nurb/skill.md` and `skills/nurb/SKILL.md`, plus the matching `version` in `desktop/src-tauri/tauri.conf.json` (tests enforce all three agree). The publish workflow does the PyPI upload, tag, and GitHub release; `desktop/scripts/release.sh` then builds the desktop app into that same release, so the engine and the app always ship together under one version. The `/release` skill runs the whole ceremony end to end, changelog included.
+A release is a version bump merged to main: `uv version X.Y.Z`, plus the matching `version:` line in `src/nurb/skill.md` and `skills/nurb/SKILL.md`, plus the matching `version` in `desktop/src-tauri/tauri.conf.json` (tests enforce all three agree). The publish workflow does the PyPI upload, tag, and GitHub release; `desktop/scripts/release.sh` then builds the macOS app into that same release and `desktop/scripts/release-linux.sh` does the .deb and AppImage from a Linux machine, so the engine and the app always ship together under one version. Neither script owns the update feed: both merge their own platforms into it through `desktop/scripts/feed.py`, so whichever runs second keeps the other's entries. The `/release` skill runs the whole ceremony end to end, changelog included.
 
 ## Layout
 

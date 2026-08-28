@@ -58,6 +58,14 @@ A fresh worktree has no `desktop/node_modules`, and the script dies immediately 
 
 About ten minutes: signed build, notarization, stapling, chain verification, upload of `nurb.dmg` plus the updater archive into the `vX.Y.Z` release, and the `desktop-latest` feed refresh. It refuses to double-upload, so re-running after a failure is safe. It needs this Mac; the signing cert and updater key live here by design.
 
+The Linux packages are the same step on a Linux machine, because Tauri links against the host's system webview and cannot cross-build:
+
+```bash
+cd desktop && scripts/release-linux.sh
+```
+
+It produces the `.deb` and the AppImage, needs only the updater key (there is nothing to notarize), and uploads into the same `vX.Y.Z` release. Order against the Mac does not matter: both merge their own half into `latest.json` through `scripts/feed.py` instead of overwriting it. What does matter is that both run for the same version, since the merge drops entries belonging to an older one rather than offer an update that hands the user the previous build. A release where only one platform ran is fine and simply carries that platform, but say so in the report.
+
 ## Step 4: Verify, then report
 
 Three probes, all of which must say X.Y.Z (the DMG check must return a redirect or 200):

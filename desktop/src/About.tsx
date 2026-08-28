@@ -10,7 +10,7 @@ type Props = {
   appVersion: string;
   nurbVersion: string;
   occtVersion: string | null;
-  osVersion: string;
+  os: string;
   arch: string;
   onClose: () => void;
 };
@@ -36,7 +36,7 @@ export default function About({
   appVersion,
   nurbVersion,
   occtVersion,
-  osVersion,
+  os,
   arch,
   onClose,
 }: Props) {
@@ -45,7 +45,7 @@ export default function About({
     `app ${appVersion}`,
     `CAD engine ${nurbVersion}`,
     occtVersion ? `OCCT ${occtVersion}` : null,
-    `macOS ${osVersion} (${arch})`,
+    `${os} (${arch})`,
   ]
     .filter(Boolean)
     .join("\n");

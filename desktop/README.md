@@ -31,4 +31,10 @@ The engine and the app share one version and one release: `uv version X.Y.Z` at 
 
 Updates are signed with the key from `tauri signer generate` (path in `.env`; the public key lives in `tauri.conf.json`). Losing that private key means shipped apps can never update again.
 
-Releases run from a Mac with the Developer ID certificate in the keychain, the same way the other Sabotage Media apps ship; there is no CI signing. The script builds `aarch64-apple-darwin` and `x86_64-apple-darwin`. `latest.json` carries both updater entries, so installed apps receive the archive for their architecture.
+Releases run from a Mac with the Developer ID certificate in the keychain, the same way the other Sabotage Media apps ship; there is no CI signing. The script builds `aarch64-apple-darwin` and `x86_64-apple-darwin`.
+
+Linux is the same release from a second machine: `scripts/release-linux.sh` builds the `.deb` and the AppImage for the host architecture and uploads them into that same `vX.Y.Z` release. Tauri links against the host's system webview, which is why it cannot come off the Mac. It needs the updater key and nothing else, since there is no notarization step.
+
+Neither script owns `latest.json`. Each merges its own platforms into the published feed through `scripts/feed.py`, so whichever runs second keeps the other's entries and the order the two machines run in does not matter. Entries belonging to a different version are dropped rather than carried forward, because a feed that names a new version while pointing a platform at the old artifact would offer every user on that platform an update that installs the previous build.
+
+Building on Linux needs the Tauri system libraries: `apt install libwebkit2gtk-4.1-dev libxdo-dev libayatana-appindicator3-dev librsvg2-dev patchelf build-essential libssl-dev pkg-config`. The app itself additionally needs `bubblewrap` at runtime, which the `.deb` declares as a dependency: it is what confines each agent adapter, the way Seatbelt does on macOS.

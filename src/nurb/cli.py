@@ -1201,25 +1201,53 @@ def cmd_dev(args):
         sys.exit(f"  port {port} was taken between checking it and binding it. Try again.")
 
 
-LAUNCHER = "viewer.command"
+# Finder double-clicks a .command; a Linux file manager double-clicks a desktop
+# entry. One gesture, two conventions, so the name follows the platform.
+LAUNCHER = "viewer.command" if sys.platform == "darwin" else "viewer.desktop"
 
 
 def _write_launcher(root):
+    root = root.resolve()
     file = root / LAUNCHER
-    # A login shell, because Finder's Terminal session does not carry the PATH a
-    # profile adds, and the double-click would die on `command not found: nurb`.
-    file.write_text(
-        "#!/bin/zsh -l\n"
-        'cd "$(dirname "$0")"\n'
-        "exec nurb dev --open\n"
-    )
+    if sys.platform == "darwin":
+        # A login shell, because Finder's Terminal session does not carry the PATH a
+        # profile adds, and the double-click would die on `command not found: nurb`.
+        file.write_text(
+            "#!/bin/zsh -l\n"
+            'cd "$(dirname "$0")"\n'
+            "exec nurb dev --open\n"
+        )
+    else:
+        # Exec= is not handed to a shell, so it names a login bash for the same PATH
+        # reason Finder needs one. Path= carries the working directory, which keeps
+        # Exec= free of quoting: a project folder may have spaces, and Path= is a
+        # literal string where Exec= is a parsed command line. The cost is that the
+        # entry names one absolute path, so a project that moves needs `nurb launcher`
+        # again, and `nurb new` writes it only at birth.
+        file.write_text(
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=nurb viewer\n"
+            f"Comment=Serve {root.name} and open the viewer\n"
+            'Exec=bash -lc "exec nurb dev --open"\n'
+            f"Path={root}\n"
+            "Terminal=true\n"
+            "Categories=Graphics;Engineering;\n"
+        )
     file.chmod(0o755)
     return file
 
 
 def cmd_launcher(args):
     _write_launcher(project_root())
-    print(f"  {LAUNCHER}: double-click in Finder to serve this project")
+    if sys.platform == "darwin":
+        print(f"  {LAUNCHER}: double-click in Finder to serve this project")
+        return
+    print(f"  {LAUNCHER}: double-click in your file manager to serve this project")
+    # GNOME shows an untrusted desktop entry as its own text until the user says
+    # otherwise, so the gesture silently does nothing. Saying it here beats the
+    # user deciding the launcher is broken.
+    print("  On GNOME, right-click it once and choose Allow Launching first.")
 
 
 def main(argv=None):

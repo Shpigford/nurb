@@ -73,7 +73,7 @@ type AboutInfo = {
   appVersion: string;
   nurbVersion: string;
   occtVersion: string | null;
-  osVersion: string;
+  os: string;
   arch: string;
 };
 
@@ -1318,7 +1318,7 @@ function App() {
           appVersion={about.appVersion}
           nurbVersion={about.nurbVersion}
           occtVersion={about.occtVersion}
-          osVersion={about.osVersion}
+          os={about.os}
           arch={about.arch}
           onClose={() => setShowAbout(false)}
         />

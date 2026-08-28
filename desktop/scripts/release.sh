@@ -93,24 +93,6 @@ for target in aarch64-apple-darwin x86_64-apple-darwin; do
   cp "$DMG" "$ARTIFACTS/$dmg_name"
 done
 
-echo "📡 Writing latest.json..."
-cat > "$ARTIFACTS/latest.json" << JSON
-{
-  "version": "$VERSION",
-  "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "platforms": {
-    "darwin-aarch64": {
-      "signature": "$(cat "$ARTIFACTS/nurb-aarch64.app.tar.gz.sig")",
-      "url": "https://github.com/$REPO/releases/download/$TAG/nurb-aarch64.app.tar.gz"
-    },
-    "darwin-x86_64": {
-      "signature": "$(cat "$ARTIFACTS/nurb-x86_64.app.tar.gz.sig")",
-      "url": "https://github.com/$REPO/releases/download/$TAG/nurb-x86_64.app.tar.gz"
-    }
-  }
-}
-JSON
-
 # The build runs before this wait on purpose: merge the bump and run this
 # script immediately, and the desktop build overlaps publish.yml's run.
 echo "⏳ Waiting for publish.yml to create the $TAG release..."
@@ -138,12 +120,25 @@ gh release upload "$TAG" \
   "$ARTIFACTS/nurb-x86_64.app.tar.gz" "$ARTIFACTS/nurb-x86_64.app.tar.gz.sig" \
   --repo "$REPO"
 
-echo "📡 Updating the desktop-latest feed..."
+echo "📡 Merging the darwin slices into latest.json..."
 if ! gh release view desktop-latest --repo "$REPO" >/dev/null 2>&1; then
   gh release create desktop-latest --repo "$REPO" --prerelease \
     --title "nurb desktop update feed" \
     --notes "Machine-read by installed copies of the nurb desktop app. Download the real thing from the newest release."
 fi
+# release-linux.sh publishes the Linux half from its own machine into this same
+# feed, so this reads what is there and merges rather than overwriting. feed.py
+# keeps the other platform's entries when the version matches and drops them
+# when it does not, which is what stops a Mac-only release from offering Linux
+# users an update that hands them the previous build.
+gh release download desktop-latest --repo "$REPO" --pattern latest.json \
+  --dir "$ARTIFACTS" >/dev/null 2>&1 || true
+python3 scripts/feed.py \
+  --version "$VERSION" \
+  --current "$ARTIFACTS/latest.json" \
+  --out "$ARTIFACTS/latest.json" \
+  --platform "darwin-aarch64=https://github.com/$REPO/releases/download/$TAG/nurb-aarch64.app.tar.gz=$ARTIFACTS/nurb-aarch64.app.tar.gz.sig" \
+  --platform "darwin-x86_64=https://github.com/$REPO/releases/download/$TAG/nurb-x86_64.app.tar.gz=$ARTIFACTS/nurb-x86_64.app.tar.gz.sig"
 gh release upload desktop-latest "$ARTIFACTS/latest.json" --repo "$REPO" --clobber
 
 echo "✅ Done! Release: https://github.com/$REPO/releases/tag/$TAG"

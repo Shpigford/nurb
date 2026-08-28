@@ -31,17 +31,44 @@ const NATIVE_CLI_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const NPM_CI_ARGS: &[&str] = &["ci", "--include=optional", "--no-fund", "--no-audit"];
 static PROBE_ID: AtomicU64 = AtomicU64::new(0);
 
-/// Published SHASUMS256 entries for the pinned Node tarballs.
+/// Published SHASUMS256 entries for the pinned Node tarballs, keyed by the
+/// platform-arch pair Node names its downloads with. Every supported host needs
+/// a row: an absent one is a hard error rather than an unverified download.
 const NODE_SHA256: &[(&str, &str)] = &[
     (
-        "aarch64",
+        "darwin-arm64",
         "3f1cf157479c1480352083105e13faf9d008ede98e7e157746b6df940d197b94",
     ),
     (
-        "x86_64",
+        "darwin-x64",
         "d35e95230f46f6f0751df497c56622c6735e05d5e1fb1630996a005b9d328fe4",
     ),
+    (
+        "linux-arm64",
+        "01443c1e1a29e531ccad5a46fefa6df490d2189c49f7955904aecdbb0fe86fdc",
+    ),
+    (
+        "linux-x64",
+        "14b342e71204f811bde6153be8e04b62aef63c236fef92b55f9c83154b409647",
+    ),
 ];
+
+/// How Node names the tarball for this host, e.g. `darwin-arm64`, `linux-x64`.
+/// Rust and Node disagree on the spelling of both halves, so neither passes
+/// through: `macos` is Node's `darwin`, and `x86_64` its `x64`.
+fn node_platform() -> Result<String, String> {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "linux" => "linux",
+        other => return Err(format!("unsupported operating system: {other}")),
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        "x86_64" => "x64",
+        other => return Err(format!("unsupported architecture: {other}")),
+    };
+    Ok(format!("{os}-{arch}"))
+}
 
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase", tag = "kind")]
@@ -370,8 +397,40 @@ pub struct AboutInfo {
     pub app_version: String,
     pub nurb_version: String,
     pub occt_version: Option<String>,
-    pub os_version: String,
+    /// A whole OS label, name included ("macOS 15.1", "Debian GNU/Linux 13").
+    /// The name lives here rather than hardcoded beside the version in the
+    /// frontend, which is how bug reports from Linux used to read "macOS".
+    pub os: String,
     pub arch: String,
+}
+
+/// The OS as a bug report wants to read it. macOS has one number worth having;
+/// a Linux distribution's own PRETTY_NAME says far more than a kernel version.
+fn os_label() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        let version = std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|| "unknown".into());
+        format!("macOS {version}")
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/etc/os-release")
+            .ok()
+            .and_then(|text| {
+                text.lines().find_map(|line| {
+                    line.strip_prefix("PRETTY_NAME=")
+                        .map(|value| value.trim_matches('"').to_string())
+                })
+            })
+            .unwrap_or_else(|| "Linux".into())
+    }
 }
 
 #[tauri::command]
@@ -391,19 +450,11 @@ pub fn about_info(app: tauri::AppHandle) -> Result<AboutInfo, String> {
     let occt_version = std::fs::read_to_string(dir.join("requirements.lock"))
         .ok()
         .and_then(|lock| occt_version(&lock));
-    let os_version = std::process::Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|v| v.trim().to_string())
-        .unwrap_or_else(|| "unknown".into());
     Ok(AboutInfo {
         app_version,
         nurb_version,
         occt_version,
-        os_version,
+        os: os_label(),
         arch: std::env::consts::ARCH.into(),
     })
 }
@@ -534,12 +585,13 @@ fn provision_chat(
     channel: &Channel<ProvisionEvent>,
 ) -> Result<(), String> {
     stage(channel, "chat");
-    let (arch, sha) = NODE_SHA256
+    let platform = node_platform()?;
+    let sha = NODE_SHA256
         .iter()
-        .find(|(arch, _)| *arch == std::env::consts::ARCH)
-        .ok_or_else(|| format!("unsupported architecture: {}", std::env::consts::ARCH))?;
-    let arch = if *arch == "aarch64" { "arm64" } else { "x64" };
-    let tarball_name = format!("node-{NODE_VERSION}-darwin-{arch}.tar.xz");
+        .find(|(key, _)| *key == platform)
+        .map(|(_, sha)| *sha)
+        .ok_or_else(|| format!("no pinned checksum for {platform}"))?;
+    let tarball_name = format!("node-{NODE_VERSION}-{platform}.tar.xz");
     let tarball = paths.data().join(&tarball_name);
     let mut download = Command::new("/usr/bin/curl");
     download
@@ -551,7 +603,7 @@ fn provision_chat(
     run_step(provisioner, channel, download, "the chat runtime download")?;
     let bytes =
         std::fs::read(&tarball).map_err(|e| format!("could not read {tarball_name}: {e}"))?;
-    if format!("{:x}", Sha256::digest(&bytes)) != *sha {
+    if format!("{:x}", Sha256::digest(&bytes)) != sha {
         let _ = std::fs::remove_file(&tarball);
         return Err("the chat runtime download did not match its checksum".into());
     }
@@ -697,10 +749,29 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        chat_runtime_check, chat_runtime_ok, file_hash, occt_version, probe_version, wheel_version,
-        NPM_CI_ARGS, PROBE_ID,
+        chat_runtime_check, chat_runtime_ok, file_hash, node_platform, occt_version, probe_version,
+        wheel_version, NODE_SHA256, NPM_CI_ARGS, PROBE_ID,
     };
     use crate::env::{Paths, NODE_VERSION};
+
+    #[test]
+    fn every_supported_host_has_a_pinned_node_checksum() {
+        // The download is verified against this table, so a host that builds but
+        // has no row would fail at first launch rather than at compile time.
+        let platform = node_platform().expect("this host is a supported build target");
+        assert!(
+            NODE_SHA256.iter().any(|(key, _)| *key == platform),
+            "no pinned Node checksum for {platform}"
+        );
+    }
+
+    #[test]
+    fn node_platform_speaks_nodes_names_not_rusts() {
+        let platform = node_platform().unwrap();
+        let (os, arch) = platform.split_once('-').unwrap();
+        assert!(matches!(os, "darwin" | "linux"), "{os} is not a Node os");
+        assert!(matches!(arch, "arm64" | "x64"), "{arch} is not a Node arch");
+    }
 
     #[test]
     fn wheel_filename_yields_the_bundled_version() {
