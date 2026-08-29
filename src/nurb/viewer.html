@@ -56,6 +56,9 @@
   .item.active { background: #2c313b; }
   .item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item .ms { color: var(--dim); font-size: 11px; }
+  /* How many variants a folded part has, dim beside its build time. */
+  .item .vcount { color: var(--dim); font-size: 11px; opacity: .7; display: flex; align-items: center; gap: 3px; }
+  .item .vcount .vic { width: 9px; height: 9px; flex: none; }
   /* A variant is its part flexed, so it nests under it: indented past the dot, dim
      until it is the configuration on screen. */
   .item.var { padding: 4px 10px 4px 24px; font-size: 12px; }
@@ -2521,7 +2524,11 @@ function render() {
         ? `<svg class="dot asm ${light}"><title>assembly</title><use href="#i-cubes"/></svg>`
         : `<span class="dot ${light}"></span>`)
       + `<span class="name">${e.name}</span>`
-      + `<span class="ms">${e.error ? (e.refused ? '' : 'err') : e.ms + 'ms'}</span>`;
+      + `<span class="ms">${e.error ? (e.refused ? '' : 'err') : e.ms + 'ms'}</span>`
+      // Folded-away variants still say how many there are, so the list does not
+      // hide them without a trace.
+      + (e.name !== current && (e.variants || []).length
+          ? `<span class="vcount"><svg class="vic"><use href="#i-variant"/></svg>${e.variants.length}</span>` : '');
     row.onclick = () => {
       // A click supersedes a deep link whose part is still waiting to build.
       want = null; wantVariant = null; wantConfiguration = false;
@@ -2533,7 +2540,9 @@ function render() {
       render(); show(e.name, { keepCamera: false }); setURL();
     };
     list.appendChild(row);
-    for (const v of e.variants || []) {
+    // A part's variants unfold under the part on screen only, because every part's
+    // variants at once is a wall of rows.
+    for (const v of (e.name === current ? e.variants || [] : [])) {
       const vr = document.createElement('div');
       // Drifted off a variant: no longer active, but still where the work is, so the
       // row stays pinned and its accent says these are its values plus some drag.

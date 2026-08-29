@@ -1,17 +1,45 @@
 import { useState } from "react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { playChime, setSoundEnabled, soundEnabled } from "./chime";
+import { AGENT_LABEL } from "./Chat";
+
+type SettingsAgent = {
+  id: string;
+  label: string;
+  loggedIn: boolean | null;
+  detail: string | null;
+};
 
 type Props = {
   folder: string;
   customized: boolean;
   onChange: (folder: string) => void | Promise<void>;
   onReset: () => void | Promise<void>;
+  // The agents installed on this Mac, so signing in lives with the rest of the
+  // setup rather than beside the parts.
+  agents: SettingsAgent[];
+  agentStatusState: "loading" | "ready" | "error";
+  signingIn: string | null;
+  onSignIn: (id: string) => Promise<boolean>;
+  onMoreAgents: () => void;
   onClose: () => void;
 };
 
-export default function Settings({ folder, customized, onChange, onReset, onClose }: Props) {
+export default function Settings({
+  folder,
+  customized,
+  onChange,
+  onReset,
+  agents,
+  agentStatusState,
+  signingIn,
+  onSignIn,
+  onMoreAgents,
+  onClose,
+}: Props) {
   const [sound, setSound] = useState(soundEnabled);
+  // The rail's error line is behind this modal, so a failed sign-in reports here.
+  const [signInError, setSignInError] = useState<string | null>(null);
 
   const toggleSound = (on: boolean) => {
     setSoundEnabled(on);
@@ -70,6 +98,45 @@ export default function Settings({ folder, customized, onChange, onReset, onClos
             />
             Play a chime when the agent finishes a long task
           </label>
+          <h3>Agents</h3>
+          <p>Pick which one you chat with from the chat header.</p>
+          {agentStatusState === "loading" && (
+            <p className="settings-agent-state" role="status">checking agent status…</p>
+          )}
+          {agentStatusState === "error" && (
+            <p className="settings-agent-error" role="alert">couldn’t check agent status</p>
+          )}
+          {agentStatusState === "ready" && (
+            <>
+              {agents.map((agent) => (
+                <div className="settings-agent" key={agent.id}>
+                  <span className="settings-agent-name">
+                    {AGENT_LABEL[agent.id] ?? agent.label}
+                  </span>
+                  {agent.loggedIn === false ? (
+                    <button
+                      className="settings-action"
+                      disabled={signingIn !== null}
+                      onClick={() => {
+                        setSignInError(null);
+                        onSignIn(agent.id).catch((e) => setSignInError(String(e)));
+                      }}
+                    >
+                      {signingIn === agent.id ? "signing in…" : "sign in"}
+                    </button>
+                  ) : (
+                    <span className="settings-agent-state" title={agent.detail ?? undefined}>
+                      {agent.loggedIn ? "signed in" : "status unknown"}
+                    </span>
+                  )}
+                </div>
+              ))}
+              <button className="settings-agent-more" onClick={onMoreAgents}>
+                need another agent?
+              </button>
+            </>
+          )}
+          {signInError && <p className="settings-agent-error" role="alert">{signInError}</p>}
         </div>
       </div>
     </div>

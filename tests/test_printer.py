@@ -205,6 +205,14 @@ def test_the_x2d_is_shipped_because_it_is_what_bambu_sells_now():
     }
 
 
+def test_the_p2s_profile_matches_the_vendor_and_slicer():
+    have = profiles()
+    assert have["bambu_p2s"] == {
+        "bed": [256.0, 256.0, 256.0],
+        "slicer": "Bambu Lab P2S",
+    }
+
+
 def test_anycubic_kobra_2_profile_matches_the_vendor_and_slicer():
     have = profiles()
     assert have["anycubic_kobra_2"] == {

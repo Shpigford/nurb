@@ -433,6 +433,22 @@ textarea {
   font-weight: 600;
 }
 
+/* How many variants a folded part has. `margin-left: auto` puts it at the right
+   end, and it never shrinks, because .part-name takes the slack first. */
+.var-count {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--dimmer);
+}
+
+.var-count .row-icon {
+  color: var(--dimmer);
+}
+
 .part-refused {
   color: var(--amber);
   font-weight: 600;
@@ -482,95 +498,6 @@ textarea {
   background: var(--hover);
 }
 
-.agents {
-  margin-top: 12px;
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-
-.agent-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 7px;
-  border-left: 2px solid transparent;
-  border-radius: 0 6px 6px 0;
-  font-size: 12px;
-  color: var(--dim);
-  cursor: pointer;
-}
-
-.agent-row:hover {
-  background: var(--hover);
-}
-
-/* The agent new conversations use. Same idiom as a selected part row, because
-   it answers the same question: which one is live right now. */
-.agent-row.selected {
-  color: var(--text);
-  background: var(--active);
-  border-left-color: var(--accent);
-}
-
-.agent-check {
-  flex: none;
-  color: var(--accent);
-}
-
-/* Faded rather than hidden, so the names stay on one column. Opacity, not
-   visibility, per this app's rule about keeping things in the AX tree. */
-.agent-check.hidden {
-  opacity: 0;
-}
-
-.agent-name {
-  flex: 1;
-  min-width: 0;
-}
-
-.agent-state {
-  color: var(--dimmer);
-  font-size: 11px;
-}
-
-.agent-more {
-  margin-top: 4px;
-  padding: 3px 7px;
-  font: inherit;
-  font-size: 11px;
-  text-align: left;
-  color: var(--dimmer);
-  background: none;
-  border: none;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.agent-more:hover {
-  color: var(--text);
-  background: var(--hover);
-}
-
-.agent-signin {
-  font: inherit;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 5px;
-  border: 1px solid rgba(110, 231, 168, 0.35);
-  background: none;
-  color: var(--accent);
-  cursor: pointer;
-}
-
-.agent-signin:hover:not(:disabled) {
-  background: rgba(110, 231, 168, 0.1);
-}
-
-.agent-signin:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 /* Amber, not red: the agent is working, it is only unconfined. */
 .rail-warning {
   margin-top: 8px;
@@ -583,7 +510,6 @@ textarea {
   border-radius: 6px;
   overflow-wrap: break-word;
 }
-
 .rail-error {
   margin-top: 8px;
   padding: 6px 8px;
@@ -696,7 +622,9 @@ textarea {
 }
 
 .chat-switcher-item {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   width: 100%;
   font: inherit;
   font-size: 12px;
@@ -717,6 +645,12 @@ textarea {
 .chat-switcher-item.current {
   color: var(--text);
   background: var(--active);
+}
+
+.chat-switcher-hint {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--dimmer);
 }
 
 .chat-switcher-note {
@@ -1796,6 +1730,57 @@ textarea {
 
 .settings-toggle input {
   accent-color: var(--accent);
+}
+
+.settings-agent {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+
+.settings-agent-name {
+  flex: 1;
+  min-width: 0;
+  font: 13px var(--sans);
+  color: var(--text);
+}
+
+.settings-agent-state {
+  color: var(--dimmer);
+  font: 11px var(--mono);
+}
+
+.settings-agent .settings-action {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.settings-agent .settings-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-agent-error {
+  margin: 8px 0 0;
+  font: 11px/1.5 var(--mono);
+  color: var(--bad);
+  overflow-wrap: anywhere;
+}
+
+.settings-agent-more {
+  margin-top: 10px;
+  padding: 0;
+  font: 11px var(--mono);
+  color: var(--dimmer);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.settings-agent-more:hover {
+  color: var(--text);
 }
 
 /* ---- the "need another agent?" help ---- */

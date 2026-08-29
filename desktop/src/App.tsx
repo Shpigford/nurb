@@ -17,8 +17,9 @@ import {
   updateChatActivity,
   type ChatColumn,
 } from "./chatColumns";
-import { IconCheck, IconCube, IconCubes, IconFolder, IconFolderPlus, IconGear, IconVariant } from "./Icons";
+import { IconCube, IconCubes, IconFolder, IconFolderPlus, IconGear, IconVariant } from "./Icons";
 import { COLUMNS, fitColumns, initialColumns, resizedColumn } from "./layout";
+import { createLatestRequestGate } from "./latestRequest";
 import Logo from "./Logo";
 import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
@@ -197,6 +198,8 @@ function App() {
   // nudge. Prefilled, never sent: the lift stays the user's call.
   const [projectSeed, setProjectSeed] = useState<string | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<AgentStatus[]>([]);
+  const [agentStatusState, setAgentStatusState] = useState<"loading" | "ready" | "error">("loading");
+  const agentStatusRequests = useRef(createLatestRequestGate());
   const [signingIn, setSigningIn] = useState<string | null>(null);
   // A UI preference like the agent below, so it persists the same way.
   const [columnWidths, setColumnWidths] = useState(() =>
@@ -421,11 +424,30 @@ function App() {
   }, [focusProjectChat]);
 
   const refreshAgents = useCallback(async () => {
-    setAgentStatuses(await invoke<AgentStatus[]>("agent_statuses"));
+    const isLatest = agentStatusRequests.current.begin();
+    setAgentStatusState((state) => state === "ready" ? state : "loading");
+    try {
+      const statuses = await invoke<AgentStatus[]>("agent_statuses");
+      if (!isLatest()) return;
+      setAgentStatuses(statuses);
+      setAgentStatusState("ready");
+    } catch (e) {
+      if (isLatest()) setAgentStatusState((state) => state === "ready" ? state : "error");
+      throw e;
+    }
   }, []);
 
   useEffect(() => {
-    if (ready === true) refreshAgents();
+    if (ready === true) refreshAgents().catch(() => {});
+  }, [ready, refreshAgents]);
+
+  // Signing in happens in a terminal or a browser, outside this window, so
+  // coming back is the moment to notice it.
+  useEffect(() => {
+    if (ready !== true) return;
+    const onFocus = () => refreshAgents().catch(() => {});
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, [ready, refreshAgents]);
 
   const chooseAgent = (id: string) => {
@@ -1091,36 +1113,45 @@ function App() {
                             !
                           </span>
                         )}
+                        {/* Folded-away variants still say how many there are, so the
+                            rail does not hide them without a trace. */}
+                        {part.variants.length > 0 && part.name !== selectedPart && (
+                          <span className="var-count">
+                            <IconVariant size={9} />
+                            {part.variants.length}
+                          </span>
+                        )}
                       </li>
                       {/* The card's variants nest under their part the way the
                           browser viewer draws them: the same part at other values,
-                          wearing the sliders glyph. The active mark follows the
-                          server's resolved variant, so it tracks slider drags and
-                          agent edits too, one poll behind. */}
-                      {part.variants.map((v) => {
-                        const how = Object.entries(v.params)
-                          .map(([k, val]) => `${k} = ${val}`)
-                          .join("\n");
-                        // Drifted off this variant: no longer resolved by the server,
-                        // but still where the work is, so the row stays pinned.
-                        const modified =
-                          part.name === selectedPart &&
-                          part.variant !== v.name &&
-                          variantOrigin?.drifted === true &&
-                          variantOrigin.part === part.name &&
-                          variantOrigin.variant === v.name;
-                        return (
-                          <li
-                            key={`${part.name}:${v.name}`}
-                            className={`part-var ${part.name === selectedPart && part.variant === v.name ? "selected" : ""} ${modified ? "modified" : ""}`}
-                            title={v.note ? `${v.note}\n\n${how}` : how}
-                            onClick={() => selectPart(part.name, v.name)}
-                          >
-                            <IconVariant />
-                            <span className="part-name">{v.name}</span>
-                          </li>
-                        );
-                      })}
+                          wearing the sliders glyph. They unfold under the selection
+                          only, because twenty parts' variants at once is a wall. The
+                          active mark follows the server's resolved variant, so it
+                          tracks slider drags and agent edits too, one poll behind. */}
+                      {part.name === selectedPart &&
+                        part.variants.map((v) => {
+                          const how = Object.entries(v.params)
+                            .map(([k, val]) => `${k} = ${val}`)
+                            .join("\n");
+                          // Drifted off this variant: no longer resolved by the server,
+                          // but still where the work is, so the row stays pinned.
+                          const modified =
+                            part.variant !== v.name &&
+                            variantOrigin?.drifted === true &&
+                            variantOrigin.part === part.name &&
+                            variantOrigin.variant === v.name;
+                          return (
+                            <li
+                              key={`${part.name}:${v.name}`}
+                              className={`part-var ${part.variant === v.name ? "selected" : ""} ${modified ? "modified" : ""}`}
+                              title={v.note ? `${v.note}\n\n${how}` : how}
+                              onClick={() => selectPart(part.name, v.name)}
+                            >
+                              <IconVariant />
+                              <span className="part-name">{v.name}</span>
+                            </li>
+                          );
+                        })}
                       {/* The selection expands to its counterparts: the assemblies
                           that place this part, or the parts this assembly places.
                           Only under the selection, because the relationship is what
@@ -1184,61 +1215,6 @@ function App() {
           <IconFolderPlus />
           add existing…
         </button>
-        {agentStatuses.length > 0 && (
-          <div className="agents">
-            <div className="rail-heading">
-              <span>agents</span>
-            </div>
-            {agentStatuses
-              // Agents whose CLI is not on this Mac stay out of the rail;
-              // the "need another agent?" help is where they live.
-              .filter((status) => status.installed)
-              .map((status) => (
-              <div
-                key={status.id}
-                className={
-                  status.id === defaultAgent ? "agent-row selected" : "agent-row"
-                }
-                aria-current={status.id === defaultAgent}
-                title={
-                  status.id === defaultAgent
-                    ? `${status.note} — new conversations use ${AGENT_LABEL[status.id] ?? status.label}`
-                    : `${status.note} — click to use for new conversations`
-                }
-                onClick={() => chooseAgent(status.id)}
-              >
-                <IconCheck
-                  className={
-                    status.id === defaultAgent ? "agent-check" : "agent-check hidden"
-                  }
-                />
-                <span className="agent-name">{AGENT_LABEL[status.id] ?? status.label}</span>
-                {status.loggedIn === false ? (
-                  <button
-                    className="agent-signin"
-                    disabled={signingIn !== null}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      signInAgent(status.id).catch(() => {});
-                    }}
-                  >
-                    {signingIn === status.id ? "signing in…" : "sign in"}
-                  </button>
-                ) : (
-                  <span
-                    className="agent-state"
-                    title={status.loggedIn ? (status.detail ?? "signed in") : undefined}
-                  >
-                    {status.loggedIn ? "signed in" : "status unknown"}
-                  </span>
-                )}
-              </div>
-            ))}
-            <button className="agent-more" onClick={() => setShowAgentsHelp(true)}>
-              need another agent?
-            </button>
-          </div>
-        )}
         {unsandboxed && (
           <div className="rail-warning">
             This agent runs without a sandbox, so it can write anywhere you can.
@@ -1330,6 +1306,14 @@ function App() {
           customized={projectsFolder !== null}
           onChange={changeProjectsFolder}
           onReset={() => changeProjectsFolder(null)}
+          agents={agentStatuses.filter((status) => status.installed)}
+          agentStatusState={agentStatusState}
+          signingIn={signingIn}
+          onSignIn={signInAgent}
+          onMoreAgents={() => {
+            setShowSettings(false);
+            setShowAgentsHelp(true);
+          }}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -1356,7 +1340,7 @@ function App() {
             setShowAgentsHelp(false);
             // The user may have just run an installer; notice it now, not on
             // the next launch.
-            refreshAgents();
+            refreshAgents().catch(() => {});
           }}
         />
       )}
@@ -1374,12 +1358,13 @@ function App() {
             part={col.part}
             agent={agent}
             agents={agentStatuses
-              // The rail advertises uninstalled agents with an install
-              // hint; the switcher only offers ones that can actually run.
+              // Settings lists uninstalled agents with an install hint; the
+              // switcher only offers ones that can actually run.
               .filter((status) => status.installed)
               .map((status) => ({
                 id: status.id,
                 label: AGENT_LABEL[status.id] ?? status.label,
+                loggedIn: status.loggedIn,
               }))}
             resume={col.resume}
             hidden={!columnVisible(col)}
@@ -1387,7 +1372,12 @@ function App() {
             onSeed={isProject ? () => setProjectSeed(null) : undefined}
             onSession={(id) => chatStarted(col.path, col.part, id, agent)}
             onFresh={() => startFresh(col.path, col.part)}
-            onAgent={(id) => startFresh(col.path, col.part, id)}
+            onAgent={(id, unstarted) => {
+              // Picking an agent before the first message is choosing which
+              // agent you work with, so it sticks for later chats too.
+              if (unstarted) chooseAgent(id);
+              startFresh(col.path, col.part, id);
+            }}
             onBusy={(busy) =>
               chatBusy(col.path, col.part, agent, busy, columnVisible(col))
             }
