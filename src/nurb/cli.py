@@ -42,7 +42,38 @@ def project_root(start=None):
     return here
 
 
-def _seed_agents(root):
+CLI_ONLY_OPEN = "<!-- cli-only -->"
+CLI_ONLY_CLOSE = "<!-- /cli-only -->"
+
+
+def agents_text(embed=False):
+    """The shim as a project should receive it, for the harness that will read it.
+
+    Parts of the file only make sense where the agent owns the loop: starting
+    `nurb dev`, keeping the package and skill current, and asking for permission
+    grants. An app that embeds the viewer already does all three, so an agent
+    told to do them there wastes turns and edits files it does not own.
+    """
+    from . import __file__ as pkg
+
+    text = (pathlib.Path(pkg).parent / "agents.md").read_text(encoding="utf-8")
+    kept, skipping = [], False
+    for line in text.splitlines():
+        if line == CLI_ONLY_OPEN:
+            skipping = True
+            continue
+        if line == CLI_ONLY_CLOSE:
+            skipping = False
+            continue
+        if not (embed and skipping):
+            kept.append(line)
+    out = "\n".join(kept)
+    while "\n\n\n" in out:
+        out = out.replace("\n\n\n", "\n\n")
+    return out.strip("\n") + "\n"
+
+
+def _seed_agents(root, embed=False):
     """Put a pointer to `nurb rules` where an agent will find it on day one.
 
     Everything an agent needs is already reachable: `nurb --help` lists the commands and
@@ -54,21 +85,30 @@ def _seed_agents(root):
     harness files of the user's own, and `nurb new` prints everything it writes either
     way.
     """
-    from . import __file__ as pkg
-
-    shim = (pathlib.Path(pkg).parent / "agents.md").read_text(encoding="utf-8")
+    full_shim = agents_text()
+    embedded_shim = agents_text(True)
+    shim = embedded_shim if embed else full_shim
     agents = root / "AGENTS.md"
     claude = root / "CLAUDE.md"
     if agents.is_file():
         # Heal projects seeded before Claude's native pointer was added, but
         # never make a second harness file alongside one the user wrote.
         existing = agents.read_text(encoding="utf-8")
-        generated = existing == shim or (
+        if existing in (full_shim, embedded_shim):
+            written = []
+            if existing != shim:
+                agents.write_text(shim, encoding="utf-8")
+                written.append(agents)
+            if not claude.is_file():
+                claude.write_text("@AGENTS.md\n", encoding="utf-8")
+                written.append(claude)
+            return written, None
+        legacy_generated = (
             existing.startswith("# nurb\n")
             and "`nurb rules`" in existing
             and "If `nurb` is not on PATH:" in existing
         )
-        if generated:
+        if legacy_generated:
             if not claude.is_file():
                 claude.write_text("@AGENTS.md\n", encoding="utf-8")
                 return [claude], None
@@ -106,7 +146,7 @@ def cmd_new(args):
     written = [py, md]
     if born:
         written.append(_write_launcher(root))
-    seeded, already = _seed_agents(root)
+    seeded, already = _seed_agents(root, getattr(args, "embed", False))
     written.extend(seeded)
     for path in written:
         print(f"  {path.relative_to(root)}")
@@ -1242,6 +1282,11 @@ def main(argv=None):
     s = sub.add_parser("new", help="create a part")
     s.add_argument("name")
     s.add_argument("--root", help=argparse.SUPPRESS)
+    s.add_argument(
+        "--embed",
+        action="store_true",
+        help="seed AGENTS.md for an embedding app that owns the server and permissions",
+    )
     s.set_defaults(fn=cmd_new)
 
     s = sub.add_parser("dev", help="watch parts and serve the viewer")

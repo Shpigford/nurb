@@ -2,10 +2,15 @@
 
 A part is a Python function and its keyword defaults are its parameters. A project is any directory with a `parts/` folder; there is no init step. You are the CAD operator: the user describes the part and you do everything else, including creating the project and modelling.
 
+<!-- cli-only -->
 **Start `nurb dev` in the background and hand the user its URL before anything else.** It prints one, and the viewer it serves is where the user watches the part take shape: every save rebuilds and repaints without moving their camera. When your shell runs on the user's own machine, `--open` puts the viewer on their screen without the URL hop. So work in saves, not in silence. `nurb new` already emits a working part; put that blocky draft on screen in the first minute and refine it while they watch. Caption it when you hand the URL over: a user who opens the viewer to an unannounced block cannot tell the placeholder from the design, and one sentence saying it is the starting shape you are now replacing turns the same block into progress. Ten correct but invisible minutes of modelling read as a hang. And repeat the URL at the end of every reply, the handoff included: chat scrolls the link away, and a part the user was never pointed at is a part they cannot judge. The URL deep-links: `?part=<name>` opens on that part and `&variant=<name>` loads one of its card variants, so link the exact thing you changed rather than making the user find it in the list. And it is one server and one tab for the whole session: the process outlives your turns and every save already reaches the open viewer, so never restart `nurb dev` to show new work, and `--open` is for the first start only, never per reply, because every extra open stacks another identical tab on the user's screen. A second start for a project already being served refuses and prints the running URL; reuse it.
+<!-- /cli-only -->
 
+<!-- cli-only -->
 **When `nurb dev` says something is out of date, fix it before modelling.** Its startup lines carry the version check: a `nurb update` line means the package is old, and a `nurb skill --sync` line means this very file is older than the installed nurb. Run the named command and tell the user, and after a sync re-read the skill file, because the stale copy is the one you are working from.
+<!-- /cli-only -->
 
+<!-- cli-only -->
 **Offer the permission allowlist before the prompts start.** A session is dozens of `nurb` invocations and part-file saves, and a harness that asks about each one turns twenty unattended minutes into twenty check-ins the user has to keep coming back for. If your harness keeps a per-project allowlist (in Claude Code it is `.claude/settings.local.json`), offer at the start of the first session in a project to add what the loop needs, merging with anything already there, and move on without it if the user declines:
 
 ```json
@@ -23,6 +28,7 @@ A part is a Python function and its keyword defaults are its parameters. A proje
 ```
 
 Other harnesses take the same grants, the `nurb` prefix and edits under `parts/` plus `system.py`, in their own file: Codex a `prefix_rule` in `.codex/rules/`, Gemini `tools.allowed` in `.gemini/settings.json`, Cursor's CLI a `Shell(nurb)` entry in `.cursor/cli.json`, OpenCode a `permission` block in `opencode.json`. Amp never prompts, so there is nothing to offer.
+<!-- /cli-only -->
 
 **Run `nurb rules` before you design.** It prints the doctrine: printability, load paths, aesthetics, the polish pass, the kernel traps, card discipline, and what to verify. This file stays thin on purpose so there is one copy of that, in the package, which cannot drift.
 
@@ -83,4 +89,6 @@ A standing preference is a file, not a flag you have to remember, and a printer 
 
 Read `parts/<name>.md` before editing `parts/<name>.py`. Its `## Don't` section is what was tried and rejected, and it is the only place that records it.
 
+<!-- cli-only -->
 If `nurb` is not on PATH: `uv tool install nurb` or `pip install nurb`.
+<!-- /cli-only -->

@@ -121,7 +121,7 @@ async fn create_project(
 fn seed(launcher: &env::Launcher, dir: &std::path::Path, part: &str) -> Result<(), String> {
     let output = launcher
         .nurb()
-        .args(["new", "--root"])
+        .args(["new", "--embed", "--root"])
         .arg(dir)
         .arg(part)
         .current_dir(dir)
