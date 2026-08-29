@@ -1022,3 +1022,58 @@ width = 20.0
     output = capsys.readouterr().out
     assert "thing:" in output
     assert "wide:" in output
+
+
+def test_build_says_when_the_geometry_did_not_move(tmp_path, monkeypatch, capsys):
+    """The surface the agent sees: the build succeeded and the part is what it was."""
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    part = parts / "thing.py"
+    part.write_text(PLAIN)
+    args = argparse.Namespace(part=None, draft=False)
+    cli.cmd_build(args)
+    assert "geometry unchanged" not in capsys.readouterr().out  # nothing to compare to
+    part.write_text(PLAIN + "\n# a note, not a change\n")
+    cli.cmd_build(args)
+    assert "geometry unchanged since last build" in capsys.readouterr().out
+    part.write_text(
+        PLAIN.replace("return Box(w, w, w)", "return Pos(5, 0, 0) * Box(w, w, w)")
+    )
+    cli.cmd_build(args)
+    assert "geometry unchanged" not in capsys.readouterr().out
+    part.write_text(PLAIN.replace("w=10.0", "w=20.0"))
+    cli.cmd_build(args)
+    assert "geometry unchanged" not in capsys.readouterr().out
+
+
+def test_build_fingerprints_same_named_variants_per_source(
+    tmp_path, monkeypatch, capsys
+):
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    for name, width in (("one", 10), ("two", 20)):
+        (parts / f"{name}.py").write_text(
+            PLAIN.replace("thing", name).replace("w=10.0", f"w={width}.0")
+        )
+        (parts / f"{name}.md").write_text(
+            f"""# {name}
+
+```toml
+[variants.shared.params]
+w = {width + 1}.0
+```
+"""
+        )
+    args = argparse.Namespace(part=None, draft=False)
+    cli.cmd_build(args)
+    capsys.readouterr()
+
+    cli.cmd_build(args)
+
+    assert capsys.readouterr().out.count("geometry unchanged since last build") == 4

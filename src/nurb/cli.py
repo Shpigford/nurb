@@ -186,18 +186,43 @@ def _configs(path, base=None):
 
 
 def cmd_build(args):
+    import hashlib
+    import json
+
     from . import builder
 
     root = project_root()
+    # What the last build of each configuration produced. A cut that misses the body
+    # subtracts nothing and still builds, so an edit can succeed, take its usual
+    # milliseconds, and leave the part exactly as it was. This is how the line says so.
+    store = root / "build" / "fingerprints.json"
+    try:
+        before = json.loads(store.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        before = {}
+    prints = dict(before)
     for path in _resolve(root, args.part):
+        source = path.relative_to(root).as_posix()
+        old_configs = before.get(source, {})
+        new_configs = dict(old_configs)
+        prints[source] = new_configs
         for name, overrides, _ in _configs(path):
             try:
                 shape, _, ms = builder.build(path, overrides=overrides or None, draft=args.draft)
                 info = builder.stats(shape)
                 bbox = " x ".join(str(v) for v in info["bbox"])
-                print(f"  {name}: {bbox} mm  {ms:.0f}ms")
+                mark = hashlib.blake2b(
+                    builder.to_glb(shape), digest_size=8
+                ).hexdigest()
+                same = old_configs.get(name) == mark
+                new_configs[name] = mark
+                note = ", geometry unchanged since last build" if same else ""
+                print(f"  {name}: {bbox} mm  {ms:.0f}ms{note}")
             except Exception as exc:
                 print(f"  {name}: {type(exc).__name__}: {exc}")
+    if prints != before:
+        store.parent.mkdir(parents=True, exist_ok=True)
+        store.write_text(json.dumps(prints, indent=1, sort_keys=True), encoding="utf-8")
 
 
 def cmd_check(args):

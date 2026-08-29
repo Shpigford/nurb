@@ -189,6 +189,11 @@ class Server:
         # Constructions the parts say twice, recomputed after every rebuild burst so
         # the viewer's nudge never outlives the geometry it described.
         self.shared = []
+        # Per part, what the last build was made of and what it produced: the source
+        # bytes, the sliders, and the shape. An edit that lands entirely outside the
+        # body is a legal no-op in OCCT, so without this nothing in the loop would say
+        # the file changed and the geometry did not.
+        self.prints = {}
         self.clients = set()
         self.loop = None
         self.queue = None
@@ -235,6 +240,7 @@ class Server:
     def rebuild(self, path):
         name = pathlib.Path(path).stem
         previous = self.state.get(name) or {}
+        inputs_before = self._source_snapshot(path)
         entry = {
             "name": name,
             "token": secrets.token_hex(4),
@@ -301,8 +307,112 @@ class Server:
             entry["shape"] = None
             entry["error"] = f"{type(exc).__name__}: {exc}"
             entry["traceback"] = _user_traceback(exc, path)
+        inputs_after = self._source_snapshot(path)
+        previous_sources = self._build_sources(
+            path, previous.get("shape"), inputs_before
+        )
+        current_sources = self._build_sources(path, entry.get("shape"), inputs_after)
+        absent = object()
+        stable = inputs_before is not None and inputs_after is not None and all(
+            inputs_before.get(source, absent) == inputs_after.get(source, absent)
+            for source in previous_sources | current_sources
+        )
+        self._mark_unchanged(
+            entry,
+            name,
+            self._build_inputs(current_sources, inputs_after) if stable else None,
+        )
         self.state[name] = entry
         return entry
+
+    def _source_snapshot(self, path):
+        """Bytes of every file a build could discover, captured at one instant."""
+        sources = {
+            pathlib.Path(path).resolve(),
+            *builder.find_parts(self.root),
+            *(
+                source.resolve()
+                for source in self.root.glob("*.py")
+                if not source.name.startswith((".", "_"))
+            ),
+            (self.root / "measurements.toml").resolve(),
+        }
+        snapshot = {}
+        for source in sources:
+            try:
+                snapshot[source] = source.read_bytes()
+            except FileNotFoundError:
+                snapshot[source] = None
+            except OSError:
+                return None
+        return snapshot
+
+    def _build_sources(self, path, shape, snapshot):
+        """The snapshot paths that one part or assembly can consume."""
+        sources = {
+            pathlib.Path(path).resolve(),
+            (self.root / "measurements.toml").resolve(),
+        }
+        for source in snapshot or {}:
+            if (
+                source.parent == self.root
+                and source.suffix == ".py"
+                and not source.name.startswith((".", "_"))
+            ):
+                sources.add(source)
+        pending = [shape] if shape is not None else []
+        visited = set()
+        while pending:
+            current = pending.pop()
+            scene = getattr(current, "_nurb_scene", None)
+            if scene is None or id(scene) in visited:
+                continue
+            visited.add(id(scene))
+            for used in scene.uses:
+                source = pathlib.Path(used).resolve()
+                sources.add(source)
+                nested = (self.state.get(source.stem) or {}).get("shape")
+                if nested is not None:
+                    pending.append(nested)
+        return sources
+
+    @staticmethod
+    def _build_inputs(sources, snapshot):
+        """Identity of the selected source bytes that fed one build."""
+        if snapshot is None or any(source not in snapshot for source in sources):
+            return None
+        digest = hashlib.blake2b(digest_size=8)
+        for source in sorted(sources):
+            digest.update(str(source).encode("utf-8"))
+            digest.update(b"\0")
+            data = snapshot[source]
+            if data is None:
+                digest.update(b"\0")
+                continue
+            digest.update(b"\1")
+            digest.update(len(data).to_bytes(8, "big"))
+            digest.update(data)
+        return digest.hexdigest()
+
+    def _mark_unchanged(self, entry, name, inputs):
+        """Say when an edit to the file left the geometry exactly as it was.
+
+        A boolean cut that misses the body subtracts nothing and OCCT reports success,
+        so the build, the timing and the picture all look like the edit landed. The
+        flag is recomputed here on every rebuild, so it never outlives its build.
+        """
+        if inputs is None:
+            self.prints.pop(name, None)
+            return
+        sliders = repr(sorted((self.overrides.get(name) or {}).items()))
+        before = self.prints.get(name)
+        self.prints[name] = (inputs, sliders, entry.get("shape_id"))
+        if not before or entry.get("shape_id") is None:
+            return
+        # Only for a source edit. A slider move and an `apply` write both rebuild with
+        # the same geometry on purpose, and the user can see why in both cases.
+        if before[1] == sliders and before[0] != inputs and before[2] == entry["shape_id"]:
+            entry["unchanged"] = True
 
     @staticmethod
     def _stress_spots(path):
@@ -1345,6 +1455,7 @@ class Server:
                     name = pathlib.Path(path).stem
                     existed = self.state.pop(name, None) is not None
                     self.overrides.pop(name, None)
+                    self.prints.pop(name, None)
                     pending_checks.discard(path)
                     if existed:
                         print(f"  {name}: gone", flush=True)
@@ -1356,6 +1467,8 @@ class Server:
                 async with self.building:
                     entry = await asyncio.to_thread(self.rebuild, path)
                 status = entry["error"] or f"{entry['ms']}ms"
+                if entry.get("unchanged"):
+                    status += ", geometry unchanged"
                 print(f"  {entry['name']}: {status}", flush=True)
                 await self.broadcast(entry)
                 pending_checks.add(path)

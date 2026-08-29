@@ -2041,6 +2041,9 @@ function hud(e) {
     : `<b>${v ? v.name : e.name}</b>`
       + (v && v.note ? `<br><span class="note">${v.note}</span>` : '')
       + `<br>${e.bbox.join(' &times; ')} mm<br>${e.ms} ms`
+      // The file changed and the shape did not. Quiet, because a comment or a card
+      // edit does this too, and it rides the entry so the next real change clears it.
+      + (e.unchanged ? `<br><span class="note">rebuilt, geometry unchanged</span>` : '')
       + targetLine(e);
   const ghosted = !e.error && e.target && !e.target.error && renderer;
   document.getElementById('ghostbtn').style.display = ghosted ? '' : 'none';
