@@ -163,10 +163,15 @@ fn the_kernel_enforces_the_write_boundary() {
         &format!("rm -rf '{}'", outside.display())
     ));
     assert_eq!(std::fs::read_to_string(&existing).unwrap(), "mine");
+    // Counted by glob rather than a pipeline. `$(ls -d /proc/[0-9]* | wc -l)`
+    // forks a subshell, an ls and a wc, and all three appear in the listing
+    // they are counting: that reads 5 under dash on Debian and failed here
+    // while the namespace was working perfectly. Expanding the glob in the
+    // shell itself spawns nothing, so this counts only what the sandbox holds.
     assert!(bwrapped(
         &project,
         &project,
-        "test \"$(ls -d /proc/[0-9]* | wc -l)\" -le 3"
+        "set -- /proc/[0-9]*; test \"$#\" -le 3"
     ));
     std::fs::remove_dir_all(project).ok();
     std::fs::remove_dir_all(outside).ok();
