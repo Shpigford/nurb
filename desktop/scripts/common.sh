@@ -255,7 +255,10 @@ read_remote_feed_lock() {
       return 2
     fi
     cat "$check_file"
-    return
+    # Explicit, because this runs from the EXIT trap: a bare `return` inside a
+    # trap handler reports the status of the last command before the trap
+    # fired, not the last command in this function.
+    return $?
   fi
   if release_has_asset "$FEED_TAG" "$FEED_LOCK_ASSET"; then
     echo "❌ $FEED_LOCK_ASSET exists but could not be downloaded: $download_error" >&2
@@ -273,7 +276,11 @@ feed_lock_ownership() {
   local remote state
   if remote="$(read_remote_feed_lock)"; then
     [ "$remote" = "$FEED_LOCK_TOKEN" ]
-    return
+    # Explicit for the same reason, and this one is the dangerous case. Reached
+    # from cleanup_artifacts_dir's EXIT trap, a bare `return` reported the
+    # script's pending exit status, so a clean exit read as "the lock is ours"
+    # however the comparison went, and cleanup deleted another publisher's lock.
+    return $?
   else
     state=$?
     return "$state"
