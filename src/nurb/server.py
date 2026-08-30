@@ -1126,6 +1126,21 @@ class Server:
         except Exception:
             return list(checks.Context().bed[:2])
 
+    def _printer_state(self):
+        """The named machine, or null plus the shipped list so the caption can pick.
+
+        Broken TOML is unnamed, same as `_bed`: the handshake must not die on it.
+        """
+        from . import checks
+
+        try:
+            profile, source = checks.profile_choice(self.root)
+        except Exception:
+            profile, source = None, None
+        if profile:
+            return {"printer": {"profile": profile, "source": source}}
+        return {"printer": None, "profiles": self._machines()}
+
     # ---------- websocket ----------
 
     def _sync(self, include_token=False):
@@ -1137,6 +1152,7 @@ class Server:
             # refuses to double up instead of walking to the next port.
             "root": str(self.root),
             "bed": self._bed(),
+            **self._printer_state(),
             "version": __version__,
             "upgradable": _upgrade_command() is not None,
             "draft": self.draft,
@@ -1205,7 +1221,12 @@ class Server:
                 self.queue.put_nowait(str(part))
             await self.reply(
                 client,
-                {"type": "printer", "profile": msg["profile"], "bed": self._bed()},
+                {
+                    "type": "printer",
+                    "profile": msg["profile"],
+                    "bed": self._bed(),
+                    **self._printer_state(),
+                },
             )
             return
 
@@ -1334,7 +1355,9 @@ class Server:
     async def broadcast(self, entry, kind="rebuilt"):
         # Printer settings are watched like part sources. Carrying the current bed on
         # the rebuild is what lets an edit resize an already-open viewer.
-        await self.send({"type": kind, "bed": self._bed(), **self._wire(entry)})
+        await self.send(
+            {"type": kind, "bed": self._bed(), **self._printer_state(), **self._wire(entry)}
+        )
 
     # ---------- watching ----------
 

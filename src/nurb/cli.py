@@ -152,6 +152,9 @@ def cmd_new(args):
         print(f"  {path.relative_to(root)}")
     if already:
         print(f"  {already} is yours, so it was left alone. Point it at `nurb rules`.")
+    from . import checks
+
+    print(f"  {checks.printer_line(root)}")
 
 
 def _resolve(root, name):
@@ -238,15 +241,11 @@ def cmd_check(args):
             base = checks.printer(root, args.printer)
         except ValueError as exc:
             sys.exit(f"  {exc}")
+        print(f"  {checks.printer_line(root, args.printer)}")
     else:
         # A profile picked up from a file is invisible, and invisible is how two
         # machines check the same part differently for no stated reason.
-        try:
-            profile, source = checks.profile_choice(root)
-        except ValueError:
-            profile = None  # a broken file gets its real error on the first part
-        if profile:
-            print(f"  printer: {profile} ({source})")
+        print(f"  {checks.printer_line(root)}")
     worst = 0
     for path in _resolve(root, args.part):
         configs = _configs(path, base=base)
@@ -623,6 +622,9 @@ def cmd_extract(args):
 def cmd_rules(args):
     # Explicit utf-8: the doctrine says mm², so the locale default breaks it on a machine
     # that is not utf-8, and `nurb rules` is the first command an agent runs.
+    from . import checks
+
+    print(checks.printer_line(project_root()))
     doctrine = pathlib.Path(__file__).parent / "doctrine.md"
     print(doctrine.read_text(encoding="utf-8"))
 
@@ -1247,6 +1249,7 @@ def _pick_port(asked, root):
 
 
 def cmd_dev(args):
+    from . import checks
     from .server import Server
 
     root = project_root()
@@ -1255,6 +1258,7 @@ def cmd_dev(args):
     port = _pick_port(args.port, root)
     server = Server(root, port=port, draft=args.draft, open_browser=args.open)
     print(f"  building {root.name}/parts")
+    print(f"  {checks.printer_line(root)}")
     try:
         asyncio.run(server.run())
     except KeyboardInterrupt:
