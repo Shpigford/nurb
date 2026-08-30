@@ -649,6 +649,14 @@ class Server:
         if path == "/api/parts":
             body = json.dumps([self._wire(e) for e in self.state.values()]).encode()
             return self._resp(200, body, "application/json")
+        if path == "/api/plugins":
+            # The engine's plugin registry, for the desktop Settings panel and
+            # anything else that renders toggles. load_all runs per request so
+            # an enable/disable edit lands without a server restart.
+            from .plugins import status_payload
+
+            body = json.dumps(status_payload(self.root)).encode()
+            return self._resp(200, body, "application/json")
         if path.startswith("/vendor/"):
             # three.js and the UI font, shipped in the package. A CAD tool that needs
             # a CDN is broken on a plane, and `nurb render` drives this same page.

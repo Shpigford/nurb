@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "nurb": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "nurb.mcp", "--project", "/path/to/your/nurb/project"]
+    }
+  }
+}

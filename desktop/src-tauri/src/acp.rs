@@ -31,6 +31,8 @@ use tauri::ipc::Channel;
 use tokio::sync::oneshot;
 
 use crate::agents::AgentKind;
+use crate::process;
+
 pub async fn authenticate(
     app: tauri::AppHandle,
     kind: AgentKind,
@@ -106,14 +108,14 @@ struct ChatSession {
     /// The model and effort this session is actually running on, as the agent
     /// last reported them.
     config: Mutex<Vec<ConfigRow>>,
+    pid: u32,
     /// Per-model effort menus from Grok's initialize `_meta.modelState`. Empty
     /// for agents that speak ACP config options. Needed because switching Grok's
     /// model rebuilds the effort list, and `session/set_model` does not return
     /// the new menus.
     grok_models: Vec<GrokModelMenu>,
-    pgid: i32,
     /// Dropped (with the whole entry) to end the connection task, which kills
-    /// the adapter's process group.
+    /// the adapter's process tree.
     _close: oneshot::Sender<()>,
 }
 
@@ -129,9 +131,7 @@ impl Chats {
     pub fn shutdown(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock().unwrap());
         for session in sessions.values() {
-            unsafe {
-                libc::killpg(session.pgid, libc::SIGTERM);
-            }
+            process::kill_tree(session.pid);
         }
     }
 }
@@ -290,7 +290,7 @@ async fn agent_sessions(
     let (stdin, stdout, stderr, child) = agent
         .spawn_process()
         .map_err(|error| friendly(kind, error))?;
-    let pgid = child.id() as i32;
+    let pid = child.id();
     drain_stderr(kind, stderr);
     let listed = tokio::time::timeout(
         Duration::from_secs(60),
@@ -348,7 +348,7 @@ async fn agent_sessions(
             ),
     )
     .await;
-    reap(pgid, child).await;
+    reap(pid, child).await;
     listed
         .map_err(|_| "timed out listing conversations".to_string())?
         .map_err(|error| friendly(kind, error))
@@ -474,7 +474,7 @@ fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
     let Some(mime) = mime else {
         return Ok(ContentBlock::ResourceLink(ResourceLink::new(
             name,
-            format!("file://{}", path.display()),
+            file_uri(path),
         )));
     };
     let data = std::fs::read(path).map_err(|e| format!("cannot read {name}: {e}"))?;
@@ -993,6 +993,17 @@ fn rows(options: &[SessionConfigOption]) -> Vec<ConfigRow> {
         .collect()
 }
 
+/// A file:// URI the agent's link handler can open: Windows paths carry a
+/// drive letter, so they need the empty-authority form (file:///C:/...).
+fn file_uri(path: &std::path::Path) -> String {
+    let rendered = path.display().to_string();
+    if cfg!(windows) {
+        format!("file:///{}", rendered.replace('\\', "/"))
+    } else {
+        format!("file://{rendered}")
+    }
+}
+
 /// Put the user's remembered picks onto a session the moment it exists, before
 /// the first prompt can go out on the wrong model. A pick the agent no longer
 /// offers (a model dropped from an account's allowlist) is skipped, leaving the
@@ -1189,7 +1200,7 @@ async fn run_chat(
             return;
         }
     };
-    let pgid = child.id() as i32;
+    let pid = child.id();
     drain_stderr(kind, stderr);
 
     let counter = AtomicU32::new(1);
@@ -1407,8 +1418,8 @@ async fn run_chat(
                                     pending: chat_pending,
                                     channel: chat_channel,
                                     config: Mutex::new(config),
+                                    pid,
                                     grok_models: menus,
-                                    pgid,
                                     _close: close_tx,
                                 },
                             );
@@ -1440,7 +1451,7 @@ async fn run_chat(
         .await;
 
     // Whichever way the connection ended, take the process tree with it.
-    reap(pgid, child).await;
+    reap(pid, child).await;
 
     if let Err(error) = &result {
         let _ = writeln!(
@@ -1479,19 +1490,15 @@ pub(crate) fn session_to_remove(
     }
 }
 
-/// SIGTERM the adapter's process group and reap the child, escalating to
-/// SIGKILL if it lingers.
-async fn reap(pgid: i32, mut child: async_process::Child) {
-    unsafe {
-        libc::killpg(pgid, libc::SIGTERM);
-    }
+/// Kill the adapter's process tree and reap the child, escalating to a hard
+/// kill if it lingers.
+async fn reap(pid: u32, mut child: async_process::Child) {
+    process::kill_tree(pid);
     if tokio::time::timeout(Duration::from_secs(5), child.status())
         .await
         .is_err()
     {
-        unsafe {
-            libc::killpg(pgid, libc::SIGKILL);
-        }
+        process::kill_tree_force(pid);
         let _ = child.status().await;
     }
 }
@@ -1521,10 +1528,8 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
 /// dead-end note and no sign-in button (#115).
 fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
     if error.code == ErrorCode::AuthRequired || error.message.contains("Failed to authenticate") {
-        format!(
-            "auth_required: {} is not signed in on this Mac",
-            kind.label()
-        )
+        let machine = if cfg!(windows) { "PC" } else { "Mac" };
+        format!("auth_required: {} is not signed in on this {machine}", kind.label())
     } else {
         format!("{} error: {}", kind.label(), error.message)
     }

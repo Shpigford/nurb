@@ -1,7 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { playChime, setSoundEnabled, soundEnabled } from "./chime";
 import { AGENT_LABEL } from "./Chat";
+import type { ExtensionStatus } from "./ExtensionsModal";
+import type { PluginStatus } from "./plugins";
 
 type SettingsAgent = {
   id: string;
@@ -22,6 +25,12 @@ type Props = {
   signingIn: string | null;
   onSignIn: (id: string) => Promise<boolean>;
   onMoreAgents: () => void;
+  // Fork: developer extensions and engine plugins surface live here too.
+  extensions: ExtensionStatus[];
+  onExtensionsChanged: () => void;
+  plugins: PluginStatus[];
+  onPluginsChanged: () => void;
+  projectPath: string;
   onClose: () => void;
 };
 
@@ -35,6 +44,11 @@ export default function Settings({
   signingIn,
   onSignIn,
   onMoreAgents,
+  extensions,
+  onExtensionsChanged,
+  plugins,
+  onPluginsChanged,
+  projectPath,
   onClose,
 }: Props) {
   const [sound, setSound] = useState(soundEnabled);
@@ -48,6 +62,44 @@ export default function Settings({
     if (on) playChime();
   };
 
+  const [installing, setInstalling] = useState<string | null>(null);
+  // Serialize writes per plugin. Two quick clicks otherwise race in the Rust
+  // command and the earlier choice can overwrite the later one on disk.
+  const pluginWrites = useRef<Record<string, Promise<void>>>({});
+
+  const toggleExtension = (id: string, enabled: boolean) => {
+    invoke("set_extension_enabled", { id, enabled })
+      .then(onExtensionsChanged)
+      .catch(() => {});
+  };
+
+  const installExtension = (id: string) => {
+    setInstalling(id);
+    invoke("install_extension", { id })
+      .then(() => onExtensionsChanged())
+      .catch(() => {})
+      .finally(() => setInstalling(null));
+  };
+
+  // Engine plugins: the toggle writes the project's .nurb/plugins.toml, the
+  // same file `nurb plugin enable|disable` writes, so both surfaces agree.
+  const togglePlugin = (id: string, enabled: boolean) => {
+    const previous = pluginWrites.current[id] ?? Promise.resolve();
+    const write = previous
+      .catch(() => {})
+      .then(() => invoke("set_plugin_enabled", { path: projectPath, id, enabled }))
+      .then(() => undefined);
+    pluginWrites.current[id] = write;
+    void write
+      .then(() => {
+        if (pluginWrites.current[id] === write) onPluginsChanged();
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (pluginWrites.current[id] === write) delete pluginWrites.current[id];
+      });
+  };
+
   const changeFolder = async () => {
     // Before the backend resolves the default, the folder shown is the
     // literal "~/Documents/nurb" placeholder, which is not a path.
@@ -58,6 +110,10 @@ export default function Settings({
     });
     if (typeof picked === "string") await onChange(picked);
   };
+
+  // Non-dev-only extensions get a toggle in settings; dev-only ones stay
+  // behind the "developer extensions" modal where they belong.
+  const visibleExts = extensions.filter((e) => !e.devOnly);
 
   return (
     <div className="about" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -98,6 +154,63 @@ export default function Settings({
             />
             Play a chime when the agent finishes a long task
           </label>
+          {visibleExts.length > 0 && (
+            <>
+              <h3>Extensions</h3>
+              {visibleExts.map((ext) => (
+                <label className="settings-toggle" key={ext.id}>
+                  <input
+                    type="checkbox"
+                    checked={ext.enabled}
+                    onChange={(e) => toggleExtension(ext.id, e.target.checked)}
+                  />
+                  {ext.label}
+                  {!ext.installed && (
+                    <>
+                      <span className="tag tag-off" style={{ marginLeft: 6 }}>
+                        not installed
+                      </span>
+                      <button
+                        className="rail-button"
+                        style={{ marginLeft: 6, fontSize: '0.8em', padding: '2px 8px' }}
+                        disabled={installing === ext.id}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          installExtension(ext.id);
+                        }}
+                      >
+                        {installing === ext.id ? 'installing...' : 'install'}
+                      </button>
+                    </>
+                  )}
+                </label>
+              ))}
+            </>
+          )}
+          {plugins.length > 0 && (
+            <>
+              <h3>Plugins</h3>
+              <p>Engine plugins for this project; a disabled plugin is never loaded.</p>
+              {plugins.map((p) => (
+                <label className="settings-toggle" key={p.id} title={p.description}>
+                  <input
+                    type="checkbox"
+                    checked={p.enabled}
+                    onChange={(e) => togglePlugin(p.id, e.target.checked)}
+                  />
+                  {p.name}
+                  <span className="tag" style={{ marginLeft: 6 }}>
+                    {p.version}
+                  </span>
+                  {p.state === "error" && (
+                    <span className="tag tag-off" style={{ marginLeft: 6 }}>
+                      error
+                    </span>
+                  )}
+                </label>
+              ))}
+            </>
+          )}
           <h3>Agents</h3>
           <p>Pick which one you chat with from the chat header.</p>
           {agentStatusState === "loading" && (

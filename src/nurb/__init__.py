@@ -13,6 +13,7 @@ import importlib.metadata as _metadata
 
 import build123d as _b3d
 from build123d import *  # noqa: F401,F403  -- geometry vocabulary
+from build123d import import_step  # noqa: F401  -- re-export for discoverability
 
 from .assembly import assembly, hinge, obstacle, use  # noqa: E402
 from .checks import concave_edges, is_convex  # noqa: E402

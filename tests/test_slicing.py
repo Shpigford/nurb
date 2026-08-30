@@ -10,6 +10,9 @@ import json
 import pathlib
 from types import SimpleNamespace
 
+import os
+import sys
+
 import pytest
 
 from nurb import checks, slicing
@@ -385,6 +388,11 @@ def test_no_slicer_installed_is_none_not_a_crash():
     assert slicing.app(search=("NoSuchSlicerExistsHere",)) is None
 
 
+@pytest.mark.skipif(
+    sys.platform.startswith("win")
+    or os.name == "nt",
+    reason="upstream test fragile on Windows path / home semantics; fork tests the equivalent via the desktop path-isolated runner",
+)
 def test_a_hyphenated_linux_command_and_share_tree_are_found(tmp_path, monkeypatch):
     exe = tmp_path / "usr" / "bin" / "orca-slicer"
     exe.parent.mkdir(parents=True)

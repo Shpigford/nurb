@@ -1,11 +1,15 @@
 mod acp;
 mod agents;
 mod env;
+mod extensions;
+mod plugins;
 mod prefs;
+mod process;
 mod provision;
 mod registry;
 mod sessions;
 mod supervisor;
+mod terminal;
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -84,7 +88,9 @@ async fn create_project(
     folder: Option<String>,
 ) -> Result<String, String> {
     let name = name.trim().to_string();
-    if name.is_empty() || name.contains('/') || name.starts_with('.') {
+    // On Windows the backslash is a path separator too, so a name containing
+    // one would silently create nested folders; reject both separators there.
+    if name.is_empty() || name.contains('/') || (cfg!(windows) && name.contains('\\')) || name.starts_with('.') {
         return Err("project names cannot be empty or contain slashes".into());
     }
     let base = project_base(folder, default_projects_folder_path(&app)?);
@@ -403,7 +409,7 @@ fn part_views(project: &std::path::Path, body: &str) -> Result<serde_json::Value
 
 /// A minimal loopback GET. The nurb server always answers with Content-Length
 /// and Connection: close, so read-to-end is the whole protocol.
-fn http_get(port: u16, path: &str) -> Result<String, String> {
+pub(crate) fn http_get(port: u16, path: &str) -> Result<String, String> {
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5))
         .map_err(|e| format!("connect to nurb dev: {e}"))?;
@@ -463,11 +469,12 @@ fn test_hook(app: AppHandle) {
     });
 }
 
-/// macOS ships an empty Help submenu, and a chromeless window has nowhere else to
-/// put a link. The two Help items are the only place in the app that reaches the
-/// outside world, alongside the same pair in the about box. "Check for Updates…"
-/// sits under About where every Mac app keeps it; the webview owns the update
-/// state, so the click is forwarded there as an event.
+/// macOS ships an empty Help submenu, and a chromeless window has nowhere else
+/// to put a link. "Check for Updates…" sits under About where every Mac app
+/// keeps it; the webview owns the update state, so the click is forwarded
+/// there as an event (Windows users get the same action from the rail's
+/// "check for updates" button).
+#[cfg(target_os = "macos")]
 fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, HELP_SUBMENU_ID};
     let menu = Menu::default(app)?;
@@ -492,12 +499,17 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
                 let _ = app.emit("menu:check-updates", ());
                 return;
             }
-            "help:github" => "https://github.com/Shpigford/nurb",
-            "help:issue" => "https://github.com/Shpigford/nurb/issues/new",
+            "help:github" => "https://github.com/Alot1z/nurb-windows",
+            "help:issue" => "https://github.com/Alot1z/nurb-windows/issues/new",
             _ => return,
         };
         let _ = app.opener().open_url(url, None::<&str>);
     });
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn install_menu(_app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
@@ -506,9 +518,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(acp::Chats::new())
         .manage(agents::Logins::new())
         .manage(provision::Provisioner::new())
@@ -528,6 +540,8 @@ pub fn run() {
             app.manage(Registry::load(&dir));
             app.manage(sessions::SessionStore::load(&dir));
             app.manage(prefs::PrefStore::load(&dir));
+            app.manage(std::sync::Mutex::new(extensions::Extensions::load(&dir)));
+            app.manage(terminal::Terminals::default());
             install_menu(app.handle())?;
             #[cfg(debug_assertions)]
             test_hook(app.handle().clone());
@@ -557,6 +571,16 @@ pub fn run() {
             acp::close_chat,
             agents::agent_statuses,
             agents::agent_login,
+            terminal::extension_statuses,
+            terminal::set_extension_enabled,
+            terminal::install_extension,
+            plugins::plugin_statuses,
+            plugins::set_plugin_enabled,
+            terminal::open_terminal_extension,
+            terminal::launch_external_extension,
+            terminal::terminal_input,
+            terminal::terminal_resize,
+            terminal::terminal_close,
             provision::provision_status,
             provision::provision,
             provision::about_info
@@ -569,6 +593,7 @@ pub fn run() {
                 app.state::<acp::Chats>().shutdown();
                 app.state::<agents::Logins>().shutdown();
                 app.state::<provision::Provisioner>().shutdown();
+                app.state::<terminal::Terminals>().shutdown();
             }
         });
 }
@@ -726,5 +751,32 @@ mod tests {
             Some("session-1")
         );
         assert_eq!(super::acp::session_to_remove(&Ok(None), &live), None);
+    }
+
+    // The updater pubkey in tauri.conf.json is base64 of the minisign text
+    // file. Decoding and parsing it here proves the committed key is well
+    // formed and that the updater plugin will accept it at runtime; a stray
+    // edit that breaks the update channel fails this test instead of shipping.
+    #[test]
+    fn the_committed_updater_pubkey_decodes_for_minisign_verify() {
+        use base64::Engine;
+        let conf: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let pubkey = conf["plugins"]["updater"]["pubkey"].as_str().unwrap();
+        let decoded = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(pubkey.as_bytes())
+                .unwrap(),
+        )
+        .unwrap();
+        let key = minisign_verify::PublicKey::decode(&decoded).unwrap();
+        // The minisign key blob is b"Ed" + 8-byte key id + 32-byte key, and
+        // from_base64 parses exactly that raw form.
+        let blob = base64::engine::general_purpose::STANDARD
+            .decode(decoded.lines().nth(1).unwrap())
+            .unwrap();
+        assert_eq!(&blob[..2], b"Ed");
+        assert_eq!(blob.len(), 42);
+        let _ = minisign_verify::PublicKey::from_base64(&decoded.lines().nth(1).unwrap()).unwrap();
+        assert!(key.untrusted_comment().is_some());
     }
 }

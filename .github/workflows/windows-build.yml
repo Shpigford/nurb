@@ -1,0 +1,106 @@
+﻿name: windows-build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Manual re-run from the Actions tab without pushing, useful for verifying
+  # a fix against the latest upstream dependency pins.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install Python 3.13
+        run: uv python install 3.13
+      - name: Install Python dependencies
+        run: uv sync --locked --all-extras --dev
+      # `nurb render` is the one command that wants a browser, and the extra
+      # installs playwright without one. Without this the render tests do not
+      # skip, they fail.
+      - name: Install the render browser
+        run: uv run playwright install chromium
+      - name: Windows portability audit
+        run: uv run python tools/audit_windows.py
+      - name: Python tests
+        run: uv run pytest -q -n auto
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+      - name: Desktop tests
+        working-directory: desktop
+        run: npm test
+      - name: Desktop Rust tests
+        # npm test only runs the Node suite; the Rust crate's tests (48,
+        # including the wheel-pick and extension-validation regressions) would
+        # otherwise never run in CI. Stage first: the crate's build script
+        # requires the uv sidecar in binaries/, which the release build's
+        # beforeBuildCommand would otherwise fetch. The toolchain is already
+        # installed above and the debug profile is a fraction of the release
+        # build that follows.
+        working-directory: desktop
+        run: |
+          npm run stage
+          cd src-tauri
+          cargo test --lib
+      - name: Build Windows installer and updater artifacts
+        working-directory: desktop
+        run: npm run tauri -- build
+        env:
+          RUST_BACKTRACE: 1
+          # createUpdaterArtifacts is on, so the private key is required.
+          # Set both secrets in the repository, or the build fails loudly
+          # instead of shipping an unsigned update channel.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - name: Validate installer artifact
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter *.exe -File | Select-Object -First 1
+          if (-not $installer) { throw 'NSIS installer was not produced.' }
+          if ($installer.Length -lt 1MB) { throw "Installer is unexpectedly small: $($installer.Length) bytes" }
+          $signature = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter *.exe.sig -File | Select-Object -First 1
+          if (-not $signature) { throw 'Updater signature (.sig) was not produced.' }
+          Write-Host "Installer: $($installer.FullName) ($($installer.Length) bytes)"
+          Write-Host "Signature: $($signature.FullName)"
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: nurb-windows-x64-installer
+          path: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+      - name: Upstream sync audit
+        # --strict fails the build when SAFE-zone paths (src/nurb/, tests/,
+        # examples/, skills/, evals/) differ from upstream while the fork is
+        # behind or diverged. Pure-ahead (fork-only SAFE patches) stays open
+        # so platform/ additions and cli.py Windows patches don't redline the
+        # release. The corresponding unit tests live in
+        # tests/test_upstream_sync.py.
+        run: python tools/upstream_sync.py status --strict
+      - name: Release gate
+        # Mirrors the local `tools/release_gate.py` checks in CI:
+        # clean tree on the merge commit, no tracked signing material,
+        # updater pinned to this fork, embedded pubkey matches the
+        # committed .key.pub. Fails loud if any invariant breaks.
+        # Re-runs release_gate.py on the freshly checked-out clean tree,
+        # so a polluted PR cannot slip through.
+        run: python tools/release_gate.py --strict
+

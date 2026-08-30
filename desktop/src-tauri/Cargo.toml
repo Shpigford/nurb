@@ -20,21 +20,37 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2"
-tauri-plugin-updater = "2"
+tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Reads/writes the project's .nurb/plugins.toml (the engine plugin registry's
+# enable/disable state), which the Python side also parses with tomllib. The
+# crate is already in the tree transitively; this makes it a direct dep.
+toml = "0.8"
 base64 = "0.22"
 libc = "0.2"
+# The Gemini API key goes in the OS credential store (Windows Credential
+# Manager here, macOS Keychain upstream): a secret must never live in app
+# preferences, and the crate is the cross-platform way to keep the same
+# semantics on both. Upstream shells out to /usr/bin/security, which is
+# macOS-only; keyring gives Windows a real store instead of a broken path.
+keyring = "3"
 agent-client-protocol = "2.0.0"
 tokio = { version = "1", features = ["rt", "process", "io-util", "sync", "macros", "time"] }
 async-process = "2"
 futures-lite = "2"
 sha2 = "0.10"
+# Updater signature verification, shared with tauri-plugin-updater; the test
+# suite uses it to prove the committed pubkey parses for the real verifier.
+minisign-verify = "0.2"
 # Part deletion goes through the Trash, never rm: it is the one place the app
 # destroys user work, so it has to be recoverable.
 trash = "5"
-tauri-plugin-clipboard-manager = "2"
-
+# The terminal host: ConPTY on Windows, pty elsewhere. The one runtime the
+# extension system needs to host interactive CLIs as real terminals.
+# Byte transport only; see terminal.rs for the contract.
+portable-pty = "0.8"

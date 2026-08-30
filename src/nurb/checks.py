@@ -7,11 +7,14 @@ A rule takes the shape and a Context and yields Findings. Rules compose: they ne
 see each other, and `run` gathers them.
 """
 
+import logging
 import pathlib
 from dataclasses import dataclass, field, replace
 from math import asin, atan2, cos, degrees, pi, sin
 
 from build123d import Axis, CenterOf, GeomType, Plane, Vector
+
+log = logging.getLogger(__name__)
 
 FAIL = "fail"  # this will not print, or will not work
 WARN = "warn"  # this needs attention, most often support
@@ -137,6 +140,19 @@ def run(shape, ctx=None, only=None, stop=None):
         if only and name not in only:
             continue
         found.extend(fn(shape, ctx))
+    # Plugin checks run after the built-in rules. A plugin check that raises is
+    # skipped with a warning: a broken third-party check must not fail the part.
+    # `only` restricts the caller to named rules, which a plugin check cannot
+    # be; slicing's brim probe asks for warp_risk/stability alone and must not
+    # have a plugin finding flip the brim decision. None means "everything".
+    if only is None:
+        from .plugins import registry
+
+        for check_fn in registry.build_check_functions():
+            try:
+                found.extend(check_fn(shape, ctx))
+            except Exception as exc:
+                log.warning("plugin check failed, skipped: %s", exc)
     # A part in pieces gets judged on whichever piece the kernel listed first, so the
     # rest of the report is true of a fragment and misleading about the part. The
     # `solids` docstring has the whole argument; this is where it takes effect.

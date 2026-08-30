@@ -9,7 +9,10 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import About from "./About";
 import AgentsHelp from "./AgentsHelp";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
+import ExtensionsModal, { type ExtensionStatus } from "./ExtensionsModal";
 import GeminiKeyDialog from "./GeminiKeyDialog";
+import type { PluginStatus } from "./plugins";
+import TerminalPanel from "./TerminalPanel";
 import {
   chatKey,
   markChatSeen,
@@ -275,6 +278,19 @@ function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  // Developer-only extension surface: experimental integrations the app can
+  // host (CLI in a terminal) or launch (external app). Off by default and
+  // absent from the normal feature set.
+  const [extStatuses, setExtStatuses] = useState<ExtensionStatus[]>([]);
+  // The engine's plugin registry for the active project, for the Settings
+  // panel's Plugins section. Distinct from extensions: plugins extend the
+  // engine (CLI/MCP/checks); extensions are CLIs the app hosts in a terminal.
+  const [pluginStatuses, setPluginStatuses] = useState<PluginStatus[]>([]);
+  const pluginRequestGeneration = useRef(0);
+  const activePluginPath = useRef<string | null>(null);
+  activePluginPath.current = active;
+  const [showExtensions, setShowExtensions] = useState(false);
+  const [terminalExt, setTerminalExt] = useState<ExtensionStatus | null>(null);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const geminiKeyResolver = useRef<((key: string | null) => void) | null>(null);
   const [defaultProjectsFolder, setDefaultProjectsFolder] = useState<string | null>(null);
@@ -423,6 +439,35 @@ function App() {
     }
   }, []);
 
+  const refreshExtensions = useCallback(() => {
+    invoke<ExtensionStatus[]>("extension_statuses")
+      .then(setExtStatuses)
+      .catch(() => {});
+  }, []);
+
+  // Plugins change rarely (a toggle, a scaffold), so they refresh on project
+  // switch and after a Settings toggle, not on a poll.
+  const refreshPlugins = useCallback(() => {
+    const generation = ++pluginRequestGeneration.current;
+    const path = active;
+    if (!path) {
+      setPluginStatuses([]);
+      return;
+    }
+    invoke<PluginStatus[]>("plugin_statuses", { path })
+      .then((list) => {
+        if (pluginRequestGeneration.current !== generation || activePluginPath.current !== path) return;
+        setPluginStatuses(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {
+        if (pluginRequestGeneration.current === generation && activePluginPath.current === path)
+          setPluginStatuses([]);
+      });
+  }, [active]);
+
+  useEffect(() => {
+    refreshExtensions();
+  }, [refreshExtensions]);
   useEffect(() => {
     if (ready === true) refreshAgents().catch(() => {});
   }, [ready, refreshAgents]);
@@ -542,6 +587,22 @@ function App() {
   // The parent page cannot join the viewer's websocket (the server only admits
   // its own origin), so the parts list refreshes on a light poll instead.
   const activeServer = active ? servers[active] : undefined;
+  // Invalidate an in-flight plugin request when the active project or its server
+  // changes, including the transition to no active project.
+  useEffect(() => {
+    pluginRequestGeneration.current += 1;
+  }, [active, activeServer]);
+  useEffect(() => {
+    if (!active || !activeServer) {
+      setPluginStatuses([]);
+    }
+    refreshPlugins();
+  }, [active, activeServer, refreshPlugins]);
+  // Re-opened Settings is a synchronization boundary: a CLI or another app
+  // may have changed `.nurb/plugins.toml` while Settings was closed.
+  useEffect(() => {
+    if (showSettings && activeServer) refreshPlugins();
+  }, [showSettings, activeServer, refreshPlugins]);
   useEffect(() => {
     if (!active || !activeServer) {
       setPartState(null);
@@ -1225,6 +1286,14 @@ function App() {
             )}
             <button
               className="rail-settings"
+              title="developer extensions"
+              aria-label="developer extensions"
+              onClick={() => setShowExtensions(true)}
+            >
+              <IconCubes />
+            </button>
+            <button
+              className="rail-settings"
               title="settings"
               aria-label="settings"
               onClick={() => setShowSettings(true)}
@@ -1298,7 +1367,32 @@ function App() {
             setShowSettings(false);
             setShowAgentsHelp(true);
           }}
+          extensions={extStatuses}
+          onExtensionsChanged={refreshExtensions}
+          plugins={pluginStatuses}
+          onPluginsChanged={refreshPlugins}
+          projectPath={active ?? ""}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+      {showExtensions && (
+        <ExtensionsModal
+          statuses={extStatuses}
+          projectDir={active}
+          onChanged={refreshExtensions}
+          onOpenTerminal={(ext) => {
+            setShowExtensions(false);
+            setTerminalExt(ext);
+          }}
+          onClose={() => setShowExtensions(false)}
+        />
+      )}
+      {terminalExt && active && (
+        <TerminalPanel
+          id={terminalExt.id}
+          label={terminalExt.label}
+          projectDir={active}
+          onClose={() => setTerminalExt(null)}
         />
       )}
       {showGeminiKey ? (

@@ -10,12 +10,19 @@
 //! vendor's own installer put on the machine. Signing in through the app
 //! shares credentials with any terminal install either way, because every
 //! agent reads its own store (~/.claude, ~/.codex, Cursor's, ~/.grok).
+//!
+//! EXTERNAL below is a third category: CLIs that exist and install in one
+//! line but speak no ACP, so the app cannot drive them yet. They are listed
+//! in the "need another agent?" help with their installer and an honest
+//! note, and never appear in the rail or accept a login, because claiming to
+//! host them would be a lie the app would fail at on first use.
 
-use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::Mutex;
 use std::time::Duration;
+
+use crate::process;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AgentKind {
@@ -110,13 +117,14 @@ impl AgentKind {
             Self::Grok => ".grok/bin",
             Self::Claude | Self::Codex | Self::Gemini => return None,
         };
-        let home = PathBuf::from(std::env::var("HOME").ok()?);
-        let default = home.join(install_dir).join(name);
+        let name = if cfg!(windows) { format!("{name}.exe") } else { name.into() };
+        let home = home_dir()?;
+        let default = home.join(install_dir).join(&name);
         if default.is_file() {
             return Some(default);
         }
         std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|dir| dir.join(name))
+            .map(|dir| dir.join(&name))
             .find(|candidate| candidate.is_file())
     }
 
@@ -136,12 +144,33 @@ impl AgentKind {
     /// app and are never absent outside a broken dev machine.
     pub fn install_command(self) -> Option<&'static str> {
         match self {
+            Self::Cursor if cfg!(windows) => Some("irm 'https://cursor.com/install?win32=true' | iex"),
             Self::Cursor => Some("curl https://cursor.com/install -fsSL | bash"),
+            Self::Grok if cfg!(windows) => Some("irm https://x.ai/cli/install.ps1 | iex"),
             Self::Grok => Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
             Self::Claude | Self::Codex | Self::Gemini => None,
         }
     }
 }
+
+/// A CLI the help modal mentions but the app cannot drive: it installs in
+/// one line but speaks no Agent Client Protocol, so there is no bridge to
+/// run it in the app. Listing it is honest about what exists; the note says
+/// the app cannot host it yet, so nobody installs it expecting the rail.
+/// An id here must NOT parse as an AgentKind, which is what stops a login or
+/// session from ever trying to spawn it.
+pub struct ExternalAgent {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub note: &'static str,
+    pub install: &'static str,
+}
+
+/// External agents: CLIs the help modal mentions but the app cannot drive yet.
+/// The list is empty by default; the extension runtime handles terminal-hosted
+/// and external-app agents separately. This array exists for agents that
+/// predate the extension system and have no ACP interface.
+pub const EXTERNAL: &[ExternalAgent] = &[];
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,6 +232,20 @@ pub async fn agent_statuses(app: tauri::AppHandle) -> Vec<AgentStatus> {
             install: agent.install_command(),
         }));
     }
+    // The help-only agents: never installed, never logged in, one-line
+    // installer, honest note. The rail filters on `installed`, so these live
+    // exactly where they belong, in the "need another agent?" modal.
+    for agent in EXTERNAL {
+        statuses.push(AgentStatus {
+            id: agent.id,
+            label: agent.label,
+            installed: false,
+            logged_in: None,
+            detail: None,
+            note: agent.note,
+            install: Some(agent.install),
+        });
+    }
     statuses
 }
 
@@ -244,33 +287,34 @@ fn auth_file(dir: &str) -> PathBuf {
     } else {
         None
     };
-    home.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(dir))
+    home.or_else(home_dir)
+        .unwrap_or_default()
+        .join(dir)
         .join("auth.json")
 }
 
-const GEMINI_KEYCHAIN_SERVICE: &str = "dev.nurb.desktop.gemini-api-key";
-const GEMINI_KEYCHAIN_ACCOUNT: &str = "gemini";
+/// The user's home: HOME when a shell sets it (Git Bash), USERPROFILE on
+/// Windows, the OS's answer elsewhere.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+}
+
+/// The Gemini API key lives in the OS credential store: Windows Credential
+/// Manager here, macOS Keychain upstream. Upstream shells out to
+/// /usr/bin/security, which is macOS-only; keyring is the cross-platform
+/// equivalent and keeps the same service/account naming either way.
+const GEMINI_CREDENTIAL_SERVICE: &str = "dev.nurb.desktop.gemini-api-key";
+const GEMINI_CREDENTIAL_ACCOUNT: &str = "gemini";
 
 pub(crate) fn gemini_api_key() -> Result<String, String> {
-    let output = Command::new("/usr/bin/security")
-        .args([
-            "find-generic-password",
-            "-a",
-            GEMINI_KEYCHAIN_ACCOUNT,
-            "-s",
-            GEMINI_KEYCHAIN_SERVICE,
-            "-w",
-        ])
-        .output()
-        .map_err(|error| format!("could not read the Gemini API key: {error}"))?;
-    if !output.status.success() {
-        return Err("Gemini API key not found".into());
-    }
-    let key = String::from_utf8(output.stdout)
-        .map_err(|_| "the Gemini API key is not valid text".to_string())?
-        .trim()
-        .to_string();
-    if key.is_empty() {
+    let entry = keyring::Entry::new(GEMINI_CREDENTIAL_SERVICE, GEMINI_CREDENTIAL_ACCOUNT)
+        .map_err(|error| format!("could not open the credential store: {error}"))?;
+    let key = entry
+        .get_password()
+        .map_err(|_| "Gemini API key not found".to_string())?;
+    if key.trim().is_empty() {
         Err("Gemini API key is empty".into())
     } else {
         Ok(key)
@@ -278,38 +322,14 @@ pub(crate) fn gemini_api_key() -> Result<String, String> {
 }
 
 fn save_gemini_api_key(key: &str) -> Result<(), String> {
-    let key = security_interactive_argument(key)?;
-    let command = format!(
-        "add-generic-password -a \"{GEMINI_KEYCHAIN_ACCOUNT}\" -s \"{GEMINI_KEYCHAIN_SERVICE}\" -w {key} -U\n"
-    );
-    let mut child = Command::new("/usr/bin/security")
-        .arg("-i")
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("could not save the Gemini API key: {error}"))?;
-    let write_result = child
-        .stdin
-        .take()
-        .ok_or_else(|| "could not open macOS Keychain input".to_string())?
-        .write_all(command.as_bytes());
-    let status = child
-        .wait()
-        .map_err(|error| format!("could not save the Gemini API key: {error}"))?;
-    write_result.map_err(|error| format!("could not save the Gemini API key: {error}"))?;
-    status
-        .success()
-        .then_some(())
-        .ok_or_else(|| "macOS Keychain did not save the Gemini API key".into())
-}
-
-fn security_interactive_argument(value: &str) -> Result<String, String> {
-    if value.contains(['\r', '\n']) {
+    if key.contains(['\r', '\n']) {
         return Err("Gemini API key contains an invalid line break".into());
     }
-    Ok(format!(
-        "\"{}\"",
-        value.replace('\\', "\\\\").replace('"', "\\\"")
-    ))
+    let entry = keyring::Entry::new(GEMINI_CREDENTIAL_SERVICE, GEMINI_CREDENTIAL_ACCOUNT)
+        .map_err(|error| format!("could not open the credential store: {error}"))?;
+    entry
+        .set_password(key)
+        .map_err(|error| format!("could not save the Gemini API key: {error}"))
 }
 
 /// `agent status` prints "Not logged in" signed out and account details
@@ -332,9 +352,9 @@ fn cursor_auth_status(kind: AgentKind) -> (Option<bool>, Option<String>) {
     }
 }
 
-/// Login children still running at app exit, killed by process group like
-/// every other child the app spawns.
-pub struct Logins(Mutex<Vec<i32>>);
+/// Login children still running at app exit, killed by tree like every other
+/// child the app spawns.
+pub struct Logins(Mutex<Vec<u32>>);
 
 impl Logins {
     pub fn new() -> Self {
@@ -342,10 +362,8 @@ impl Logins {
     }
 
     pub fn shutdown(&self) {
-        for pgid in self.0.lock().unwrap().drain(..) {
-            unsafe {
-                libc::killpg(pgid, libc::SIGTERM);
-            }
+        for pid in self.0.lock().unwrap().drain(..) {
+            process::kill_tree(pid);
         }
     }
 }
@@ -393,9 +411,8 @@ pub async fn agent_login(
         AgentKind::Cursor | AgentKind::Grok => args = vec!["login".into()],
         AgentKind::Gemini => unreachable!(),
     }
-    let (pgid_tx, pgid_rx) = std::sync::mpsc::channel::<i32>();
+    let (pid_tx, pid_rx) = std::sync::mpsc::channel::<u32>();
     let done = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        use std::os::unix::process::CommandExt;
         let mut command = Command::new(program);
         if let Some(path) = adapter_path {
             command.env("PATH", path);
@@ -403,20 +420,20 @@ pub async fn agent_login(
         if let Some(cli) = codex_cli {
             command.env("CODEX_PATH", cli);
         }
+        process::own_group(&mut command);
         let mut child = command
             .args(&args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .process_group(0)
             .spawn()
             .map_err(|e| format!("could not start the sign-in: {e}"))?;
-        let pgid = child.id() as i32;
-        let _ = pgid_tx.send(pgid);
+        let pid = child.id();
+        let _ = pid_tx.send(pid);
         let handle = app.state::<Logins>();
-        handle.0.lock().unwrap().push(pgid);
+        handle.0.lock().unwrap().push(pid);
         let status = child.wait();
-        handle.0.lock().unwrap().retain(|p| *p != pgid);
+        handle.0.lock().unwrap().retain(|p| *p != pid);
         let status = status.map_err(|e| format!("sign-in failed: {e}"))?;
         if status.success() {
             Ok(())
@@ -427,14 +444,12 @@ pub async fn agent_login(
         }
     });
     // A human in a browser sets the pace; ten minutes is generous. On timeout
-    // the process group is killed, which also unblocks the waiting thread.
+    // the process tree is killed, which also unblocks the waiting thread.
     match tokio::time::timeout(Duration::from_secs(600), done).await {
         Ok(joined) => joined.map_err(|e| e.to_string())?,
         Err(_) => {
-            if let Ok(pgid) = pgid_rx.try_recv() {
-                unsafe {
-                    libc::killpg(pgid, libc::SIGTERM);
-                }
+            if let Ok(pid) = pid_rx.try_recv() {
+                process::kill_tree(pid);
             }
             Err("The sign-in timed out. Try again.".into())
         }
@@ -446,12 +461,12 @@ mod tests {
     use super::AgentKind;
 
     #[test]
-    fn keychain_input_quotes_the_key_as_one_interactive_argument() {
-        assert_eq!(
-            super::security_interactive_argument("dummy \\\"key"),
-            Ok("\"dummy \\\\\\\"key\"".into())
-        );
-        assert!(super::security_interactive_argument("dummy\ncommand").is_err());
+    fn gemini_key_rejects_line_breaks() {
+        // The credential store must never receive a key with embedded
+        // newlines: it would be ambiguous across stores. The save path is
+        // the one place a key enters the app, so the guard lives there.
+        assert!(super::save_gemini_api_key("dummy\ncommand").is_err());
+        assert!(super::save_gemini_api_key("dummy\rcommand").is_err());
     }
 
     #[test]
@@ -469,6 +484,22 @@ mod tests {
         for agent in super::ALL {
             assert_eq!(agent.adapter().is_some(), agent.native_command().is_none());
             assert_eq!(agent.adapter().is_some(), agent.adapter_bin().is_some());
+        }
+    }
+
+    /// The help-only agents must never be spawnable: parsing their id fails,
+    /// so a login or session cannot launch a CLI the app has no bridge for.
+    /// When the list is empty (as it is by default), the extension system
+    /// handles external agents through manifests instead.
+    #[test]
+    fn external_agents_are_help_only_and_never_spawnable() {
+        for agent in super::EXTERNAL {
+            assert!(
+                AgentKind::parse(agent.id).is_err(),
+                "{} must not parse as a spawnable agent",
+                agent.id
+            );
+            assert!(agent.install.contains("npm") || agent.install.contains("irm"));
         }
     }
 

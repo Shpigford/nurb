@@ -23,3 +23,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Updater signing: the private key never enters the repo. The public key
+# (tauri-updater.key.pub) is committed and referenced by tauri.conf.json;
+# the matching private key lives in GitHub secrets as
+# TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+signing/tauri-updater.key
+signing/*.password
+
+# Authenticode certificate bundles: private signing material, never tracked.
+*.pfx
+*.p12

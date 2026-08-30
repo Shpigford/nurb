@@ -17,6 +17,7 @@ slicer that is already on the machine and reads the files it wrote.
 """
 
 import json
+import sys
 import math
 import os
 import pathlib
@@ -98,9 +99,10 @@ def app(search=None):
     appends the slicing arguments in exactly the same way it does for an executable.
     """
     for name in search or SLICERS:
-        bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
-        if bundle.is_file():
-            return bundle
+        if sys.platform == "darwin":
+            bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
+            if bundle.is_file():
+                return bundle
         for command in COMMANDS.get(name, (name, name.lower())):
             found = shutil.which(command)
             if found:

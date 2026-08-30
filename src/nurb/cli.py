@@ -4,6 +4,8 @@ import argparse
 import asyncio
 import errno
 import importlib.metadata
+import json
+import os
 import pathlib
 import sys
 
@@ -634,6 +636,88 @@ def cmd_api(args):
     for line in api.report():
         print(line)
 
+def cmd_plugins(args):
+    """List loaded plugins and what each contributes."""
+    from .plugins import registry, status_payload
+
+    payload = status_payload(project_root())
+    if getattr(args, "json", False):
+        print(json.dumps({"plugins": payload}, indent=2))
+        return
+    if not payload:
+        print("  no plugins loaded")
+        return
+    for entry in payload:
+        bits = [f"{entry['id']} {entry['version']}"]
+        if entry["state"] == "error":
+            bits.append(f"[error: {entry['error']}]")
+        elif entry["state"] == "loaded":
+            caps = []
+            if entry["commands"]:
+                caps.append(f"{len(entry['commands'])} command(s)")
+            if entry["mcpTools"]:
+                caps.append(f"{len(entry['mcpTools'])} mcp tool(s)")
+            if entry["checks"]:
+                caps.append(f"{entry['checks']} check(s)")
+            bits.append("[" + ", ".join(caps) + "]" if caps else "[no capabilities]")
+        else:
+            bits.append(f"[{entry['state']}]")
+        print("  " + " ".join(bits))
+    errored = [e for e in payload if e["state"] == "error"]
+    if errored:
+        print(f"  {len(errored)} plugin(s) failed to load and were skipped")
+
+
+def cmd_plugin_new(args):
+    """Scaffold a new plugin from the shipped template."""
+    from .plugins import ScaffoldError, scaffold_plugin
+
+    try:
+        dest = scaffold_plugin(project_root(), args.name)
+    except ScaffoldError as exc:
+        print(f"  {exc}")
+        sys.exit(1)
+    print(f"  created {dest}")
+    print(f"  edit {dest / 'plugin.toml'} (id, name, description), then implement {dest / 'plugin.py'}")
+    print("  the plugin loads next time nurb starts; `nurb plugins` shows it")
+
+
+def _cmd_plugin_set(args, enabled: bool):
+    """Enable or disable a plugin for this project."""
+    from .plugins import load_all, registry, set_enabled
+
+    root = project_root()
+    load_all(root)
+    record = registry.get(args.id)
+    if not record:
+        print(f"  unknown plugin {args.id!r}; nothing was changed")
+        print("  `nurb plugins` lists the ids nurb knows about")
+        sys.exit(1)
+    set_enabled(root, args.id, enabled)
+    registry.refresh()
+    load_all(root)  # re-read so the registry reflects the change immediately
+    current = registry.get(args.id)
+    state = current.state.value if current else "unknown"
+    print(f"  {args.id} {'enabled' if enabled else 'disabled'} (state: {state})")
+
+
+def cmd_plugin_enable(args):
+    _cmd_plugin_set(args, True)
+
+
+def cmd_plugin_disable(args):
+    _cmd_plugin_set(args, False)
+
+
+# The subcommands nurb itself declares. A plugin command with one of these
+# names would otherwise be dispatched before argparse and silently shadow the
+# real command, so the dispatch in main() refuses them.
+BUILTIN_COMMANDS = frozenset({
+    "new", "dev", "launcher", "build", "check", "rules", "api", "plugins",
+    "plugin", "inspect", "scan", "compare", "skill", "update", "verify", "extract",
+    "card", "diff", "slice", "stress", "render", "export",
+})
+
 
 # `render`'s iso direction at unit length, for tilting a finding camera toward it.
 ISO = (0.588, -0.630, 0.504)
@@ -946,8 +1030,8 @@ def cmd_slice(args):
     if not wanted:
         sys.exit(
             "  no printer chosen, and a slice is meaningless without one.\n"
-            "  Name the machine once in printer.toml (`profile = \"bambu_a1_mini\"`),\n"
-            f"  in ~/.config/nurb/config.toml for every project, or pass --printer.\n"
+            "  Name the machine once in printer.toml (`profile = \"bambu_a1_mini\"`)\n"
+            "  or in the per-user config file the platform layer reports, or pass --printer.\n"
             f"  have: {', '.join(sorted(checks.profiles()))}"
         )
     vendors = slicing.vendors(exe)
@@ -1266,28 +1350,68 @@ def cmd_dev(args):
         sys.exit(f"  port {port} was taken between checking it and binding it. Try again.")
 
 
-LAUNCHER = "viewer.command"
+LAUNCHER = "viewer.cmd" if os.name == "nt" else "viewer.command"
 
 
 def _write_launcher(root):
     file = root / LAUNCHER
-    # A login shell, because Finder's Terminal session does not carry the PATH a
-    # profile adds, and the double-click would die on `command not found: nurb`.
-    file.write_text(
-        "#!/bin/zsh -l\n"
-        'cd "$(dirname "$0")"\n'
-        "exec nurb dev --open\n"
-    )
-    file.chmod(0o755)
+    if os.name == "nt":
+        # newline="" so Windows text mode does not turn the explicit \r\n into
+        # \r\r\n: the batch file's line endings have to be exactly CRLF.
+        file.write_text(
+            "@echo off\r\n"
+            'cd /d "%~dp0"\r\n'
+            "nurb dev --open\r\n",
+            encoding="utf-8",
+            newline="",
+        )
+    else:
+        # A login shell, because Finder's Terminal session does not carry the PATH a
+        # profile adds, and the double-click would die on `command not found: nurb`.
+        file.write_text(
+            "#!/bin/zsh -l\n"
+            'cd "$(dirname "$0")"\n'
+            "exec nurb dev --open\n",
+            encoding="utf-8",
+        )
+        file.chmod(0o755)
     return file
 
 
 def cmd_launcher(args):
     _write_launcher(project_root())
-    print(f"  {LAUNCHER}: double-click in Finder to serve this project")
+    target = "double-click in Explorer to serve this project" if os.name == "nt" else "double-click in Finder to serve this project"
+    print(f"  {LAUNCHER}: {target}")
 
 
 def main(argv=None):
+    # Plugin commands are not argparse subcommands: the parser would reject an
+    # unknown name before the plugin ever saw it. Dispatch them up front, then
+    # let the parser handle everything nurb itself declares.
+    from .plugins import load_all, registry
+
+    args_list = list(sys.argv[1:] if argv is None else argv)
+    load_all(project_root())
+    # A plugin command must not shadow a builtin: "build" and "check" are the
+    # commands an agent guesses first, and a plugin that registers them would
+    # hijack the real ones. The registry still records the name so `nurb
+    # plugins` shows it, but main() refuses to dispatch it.
+    if (
+        args_list
+        and args_list[0] not in BUILTIN_COMMANDS
+        and registry.has_command(args_list[0])
+    ):
+        handler, plugin_id = registry.command_handler(args_list[0])
+        if handler:
+            try:
+                handler(argparse.Namespace(project=str(project_root()), argv=args_list[1:]))
+            except Exception as exc:
+                # A builtin command's failure is one trimmed line; a plugin's
+                # must be too. The plugin code is third-party, so the message
+                # names the plugin and the failure, not a traceback.
+                print(f"  plugin {plugin_id!r} failed: {type(exc).__name__}: {exc}")
+                sys.exit(1)
+            return
     p = argparse.ArgumentParser(
         prog="nurb",
         description="agentic CAD for 3D printing",
@@ -1341,6 +1465,22 @@ def main(argv=None):
 
     s = sub.add_parser("api", help="the vocabulary a part file gets, with signatures")
     s.set_defaults(fn=cmd_api)
+
+    s = sub.add_parser("plugins", help="list loaded plugins and what each contributes")
+    s.add_argument("--json", action="store_true", help="emit the registry as JSON (machine-readable)")
+    s.set_defaults(fn=cmd_plugins)
+
+    s = sub.add_parser("plugin", help="manage plugins: scaffold, enable, disable")
+    plugin_sub = s.add_subparsers(dest="plugin_cmd", required=True)
+    ps = plugin_sub.add_parser("new", help="scaffold a new plugin from the shipped template")
+    ps.add_argument("name", help="plugin id: lowercase alphanumeric with hyphens (my-plugin)")
+    ps.set_defaults(fn=cmd_plugin_new)
+    ps = plugin_sub.add_parser("enable", help="enable a plugin for this project")
+    ps.add_argument("id")
+    ps.set_defaults(fn=cmd_plugin_enable)
+    ps = plugin_sub.add_parser("disable", help="disable a plugin for this project")
+    ps.add_argument("id")
+    ps.set_defaults(fn=cmd_plugin_disable)
 
     s = sub.add_parser("inspect", help="measure a built part: faces, normals, concave edges")
     s.add_argument("part", nargs="?")

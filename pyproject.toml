@@ -24,8 +24,9 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/Shpigford/nurb"
-Issues = "https://github.com/Shpigford/nurb/issues"
+Repository = "https://github.com/Alot1z/nurb-windows"
+Issues = "https://github.com/Alot1z/nurb-windows/issues"
+Upstream = "https://github.com/Shpigford/nurb"
 
 [project.optional-dependencies]
 # `nurb render` screenshots the viewer, which means a browser. Optional because it is
@@ -57,4 +58,5 @@ source-include = [
     "src/nurb/skill.md",
     "src/nurb/printers.toml",
     "src/nurb/vendor/**/*",
+    "plugins/**/*",
 ]

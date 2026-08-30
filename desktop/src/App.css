@@ -1254,53 +1254,6 @@ textarea {
   font-size: 12px;
 }
 
-.welcome {
-  margin: auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  max-width: 34ch;
-  padding: 0 16px;
-  text-align: center;
-}
-
-.welcome-title {
-  font-size: 14px;
-  color: var(--text);
-}
-
-.welcome-copy {
-  margin: 0;
-  font-size: 12px;
-  color: var(--dim);
-}
-
-.welcome-form {
-  width: 100%;
-  margin: 4px 0 0;
-}
-
-.welcome-create {
-  font-size: 12px;
-  padding: 5px 10px;
-  border: 1px solid rgba(110, 231, 168, 0.45);
-  color: var(--accent);
-}
-
-.welcome-existing {
-  font: inherit;
-  font-size: 11px;
-  color: var(--dimmer);
-  background: none;
-  border: none;
-  cursor: pointer;
-}
-
-.welcome-existing:hover {
-  color: var(--dim);
-}
-
 .viewer {
   min-width: 0;
   display: flex;
@@ -1438,27 +1391,6 @@ textarea {
   flex-direction: column;
   gap: 6px;
   align-items: flex-start;
-}
-
-.rail-foot-row {
-  align-self: stretch;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.rail-settings {
-  background: none;
-  border: none;
-  color: var(--dimmer);
-  padding: 2px;
-  cursor: pointer;
-  display: flex;
-}
-
-/* .row-icon pins its own color, so the hover has to land on the icon, not the button. */
-.rail-settings:hover .row-icon {
-  color: var(--text);
 }
 
 .rail-version {
@@ -1794,4 +1726,58 @@ textarea {
   border-radius: 6px;
   padding: 8px 10px;
   margin: 0 0 14px;
+}
+
+/* The developer extension surface: terminal host and extension cards.
+   Everything here is opt-in and off by default. */
+.terminal-card {
+  width: min(720px, calc(100vw - 80px));
+  height: min(480px, calc(100vh - 120px));
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.terminal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.terminal-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.terminal-error {
+  padding: 8px 14px;
+  color: #e5484d;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.terminal-host {
+  flex: 1;
+  min-height: 0;
+  padding: 6px;
+  background: #141414;
+}
+
+.ext-chips {
+  display: flex;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.tag-off {
+  opacity: 0.5;
+}
+
+.ext-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }

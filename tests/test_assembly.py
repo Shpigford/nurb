@@ -7,6 +7,7 @@ trailing face crosses into the slab's quadrant. Downward it interferes immediate
 No tolerance in these tests was tuned to make them pass.
 """
 
+import os
 import pathlib
 
 import pytest

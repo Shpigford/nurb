@@ -17,5 +17,18 @@ wheels/
 # Per-worktree dev server state written by the SessionStart hook
 .DS_Store
 
+# Scratch project the MCP server tests build parts in
+tests/_scratch_mcp/
+
+/.dev/
+
+# Per-project plugin enable/disable state written by `nurb plugin` and the
+# desktop Settings panel; machine state, not source.
+/.nurb/
+tmp/
+*.pfx
+*.p12
+
 # Conductor's local, per-checkout settings (not meant to be shared/committed)
 .conductor/
+
