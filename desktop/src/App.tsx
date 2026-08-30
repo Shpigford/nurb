@@ -23,6 +23,7 @@ import { createLatestRequestGate } from "./latestRequest";
 import Logo from "./Logo";
 import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
+import { createPartRecovery } from "./partRecovery";
 import { isLinux, isMac } from "./platform";
 import Setup from "./Setup";
 import Settings from "./Settings";
@@ -563,10 +564,12 @@ function App() {
     }
     setPartState(null);
     let stale = false;
+    const recovery = createPartRecovery(() => openProject(active));
     const fetchParts = async () => {
       try {
         const entries = await invoke<Part[]>("list_parts", { path: active });
         if (stale) return;
+        recovery.success();
         setPartState({
           path: active,
           parts: entries
@@ -574,16 +577,23 @@ function App() {
             .sort((a, b) => a.name.localeCompare(b.name)),
         });
       } catch {
-        // The server just closed or is restarting; the effect re-runs on change.
+        if (stale) return;
+        // A brief failure is the server restarting after a save. A run of them
+        // means the engine died, and nothing else ever respawns it. Opening the
+        // project is a no-op while the server is alive, so a false positive is
+        // cheap, and clearing the count means another full run of failures has
+        // to pass before the next attempt.
+        recovery.failure();
       }
     };
     fetchParts();
     const timer = setInterval(fetchParts, 2500);
     return () => {
       stale = true;
+      recovery.stop();
       clearInterval(timer);
     };
-  }, [active, activeServer]);
+  }, [active, activeServer, openProject]);
 
   const parts = partState?.path === active ? partState.parts : NO_PARTS;
   const placedIn = useMemo(() => placedInMap(parts), [parts]);

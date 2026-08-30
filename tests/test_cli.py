@@ -168,12 +168,12 @@ def test_a_dev_for_a_different_project_is_walked_past_not_reused(tmp_path):
 # --- day one ------------------------------------------------------------------
 
 
-def _new(tmp_path, name="thing", root=None):
+def _new(tmp_path, name="thing", root=None, embed=False):
     import argparse, os
     was = os.getcwd()
     os.chdir(tmp_path)
     try:
-        cli.cmd_new(argparse.Namespace(name=name, root=root))
+        cli.cmd_new(argparse.Namespace(name=name, root=root, embed=embed))
     finally:
         os.chdir(was)
 
@@ -192,6 +192,47 @@ def test_a_fresh_project_gets_a_pointer_at_the_doctrine(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "AGENTS.md" in output  # it says what it wrote
     assert "CLAUDE.md" in output
+
+
+def test_a_seeded_shim_never_carries_the_markers(tmp_path):
+    _new(tmp_path)
+    text = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "cli-only" not in text
+    assert "Start `nurb dev`" in text
+    assert "permission allowlist" in text
+    assert "nurb skill --sync" in text
+    assert "\n\n\n" not in text
+
+
+def test_an_embedded_seed_drops_what_the_app_already_owns(tmp_path):
+    """The desktop app runs the server, the updates and the permissions itself, so an
+    agent told to do them there spends turns on work that is already done."""
+    _new(tmp_path, embed=True)
+    text = (tmp_path / "AGENTS.md").read_text(encoding="utf-8")
+    assert "cli-only" not in text
+    assert "Start `nurb dev`" not in text
+    assert "nurb skill --sync" not in text
+    assert "permission allowlist" not in text
+    assert '"Bash(nurb:*)"' not in text
+    assert "not on PATH" not in text
+    assert "Run `nurb rules` before you design" in text
+    assert "\n\n\n" not in text
+
+
+def test_a_plain_new_replaces_an_exact_embedded_shim(tmp_path):
+    _new(tmp_path, "one", embed=True)
+
+    _new(tmp_path, "two")
+
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == cli.agents_text()
+
+
+def test_an_embedded_new_replaces_an_exact_plain_shim(tmp_path):
+    _new(tmp_path, "one")
+
+    _new(tmp_path, "two", embed=True)
+
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == cli.agents_text(True)
 
 
 def test_a_second_part_does_not_mention_the_shim_again(tmp_path, capsys):
@@ -220,12 +261,13 @@ def test_an_old_generated_agents_shim_gets_a_claude_pointer(tmp_path):
 
 
 def test_a_custom_agents_file_does_not_grow_a_claude_pointer(tmp_path):
-    (tmp_path / "AGENTS.md").write_text("# my harness\n", encoding="utf-8")
+    custom = "# nurb\n\nOur workflow starts with `nurb rules`, then follows team policy.\n"
+    (tmp_path / "AGENTS.md").write_text(custom, encoding="utf-8")
 
     _new(tmp_path)
 
     assert not (tmp_path / "CLAUDE.md").exists()
-    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == "# my harness\n"
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8") == custom
 
 
 def test_an_explicit_root_never_seeds_an_ancestor_project(tmp_path):
@@ -727,7 +769,9 @@ def test_the_skill_is_the_shim_with_a_trigger_on_top():
     repo = pathlib.Path(__file__).parents[1]
     shipped = (pkg / "skill.md").read_text(encoding="utf-8")
     assert shipped == (repo / "skills" / "nurb" / "SKILL.md").read_text(encoding="utf-8")
-    assert shipped.endswith((pkg / "agents.md").read_text(encoding="utf-8"))
+    # agents.md carries the cli-only markers; the skill files carry the same body
+    # with the markers taken out, because `nurb skill` prints them to a terminal.
+    assert shipped.endswith(cli.agents_text())
     assert shipped.startswith("---\n")  # the trigger a harness keys on
     # Strict YAML reads an unquoted ": " inside a value as a nested mapping, and
     # skills.sh parses strictly: a colon in the description made `npx skills add`
@@ -997,3 +1041,58 @@ width = 20.0
     output = capsys.readouterr().out
     assert "thing:" in output
     assert "wide:" in output
+
+
+def test_build_says_when_the_geometry_did_not_move(tmp_path, monkeypatch, capsys):
+    """The surface the agent sees: the build succeeded and the part is what it was."""
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    part = parts / "thing.py"
+    part.write_text(PLAIN)
+    args = argparse.Namespace(part=None, draft=False)
+    cli.cmd_build(args)
+    assert "geometry unchanged" not in capsys.readouterr().out  # nothing to compare to
+    part.write_text(PLAIN + "\n# a note, not a change\n")
+    cli.cmd_build(args)
+    assert "geometry unchanged since last build" in capsys.readouterr().out
+    part.write_text(
+        PLAIN.replace("return Box(w, w, w)", "return Pos(5, 0, 0) * Box(w, w, w)")
+    )
+    cli.cmd_build(args)
+    assert "geometry unchanged" not in capsys.readouterr().out
+    part.write_text(PLAIN.replace("w=10.0", "w=20.0"))
+    cli.cmd_build(args)
+    assert "geometry unchanged" not in capsys.readouterr().out
+
+
+def test_build_fingerprints_same_named_variants_per_source(
+    tmp_path, monkeypatch, capsys
+):
+    import argparse
+
+    monkeypatch.chdir(tmp_path)
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    for name, width in (("one", 10), ("two", 20)):
+        (parts / f"{name}.py").write_text(
+            PLAIN.replace("thing", name).replace("w=10.0", f"w={width}.0")
+        )
+        (parts / f"{name}.md").write_text(
+            f"""# {name}
+
+```toml
+[variants.shared.params]
+w = {width + 1}.0
+```
+"""
+        )
+    args = argparse.Namespace(part=None, draft=False)
+    cli.cmd_build(args)
+    capsys.readouterr()
+
+    cli.cmd_build(args)
+
+    assert capsys.readouterr().out.count("geometry unchanged since last build") == 4

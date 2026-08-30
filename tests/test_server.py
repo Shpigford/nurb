@@ -1312,3 +1312,126 @@ def test_http_fallback_carries_shared_runs_into_the_panel():
         viewer.index("async function fallback()") : viewer.index("function connect()")
     ]
     assert "sharedRuns = msg.shared || [];" in fallback
+
+
+def test_an_edit_that_leaves_the_geometry_alone_is_flagged(tmp_path):
+    """A cut that misses the body builds fine and changes nothing. Say so."""
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    assert "unchanged" not in server.state["thing"]  # nothing to compare a first build to
+    part.write_text(PART + "\n# the wall is 2mm because the nozzle is 0.4mm\n")
+    entry = server.rebuild(part)
+    assert entry["unchanged"] is True
+    assert server._wire(entry)["unchanged"] is True
+
+
+def test_an_edit_that_moves_the_geometry_carries_no_flag(tmp_path):
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    part.write_text(PART.replace("width=40.0", "width=50.0"))
+    entry = server.rebuild(part)
+    assert "unchanged" not in entry
+    assert "unchanged" not in server._wire(entry)
+
+
+def test_a_slider_move_that_lands_on_the_same_shape_is_not_flagged(tmp_path):
+    """The sliders explain themselves; only a file edit needs the nudge."""
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+    server.overrides["thing"] = {"width": 40.0}
+    assert "unchanged" not in server.rebuild(part)
+
+
+@pytest.mark.parametrize(
+    ("shared_name", "shared_before", "shared_after", "part_body"),
+    [
+        (
+            "dimensions.py",
+            "WIDTH = 40.0\n",
+            "WIDTH = 40.0  # shared by the family\n",
+            "from dimensions import WIDTH\n\n@part\ndef thing():\n    return Box(WIDTH, 30, 5)\n",
+        ),
+        (
+            "measurements.toml",
+            '[width]\nvalue = 40.0\nhow = "calipers"\n',
+            '[width]\nvalue = 40.0\nhow = "digital calipers"\n',
+            '@part\ndef thing():\n    return Box(measured("width"), 30, 5)\n',
+        ),
+    ],
+)
+def test_a_shared_input_edit_that_leaves_geometry_alone_is_flagged(
+    tmp_path, monkeypatch, shared_name, shared_before, shared_after, part_body
+):
+    from nurb import server as server_mod
+
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    part = parts / "thing.py"
+    part.write_text("from nurb import *\n\n" + part_body)
+    shared = tmp_path / shared_name
+    shared.write_text(shared_before)
+    server = Server(tmp_path)
+    server.rebuild(part)
+    server.queue = asyncio.Queue()
+    server.loop = SimpleNamespace(call_soon_threadsafe=lambda fn, arg: fn(arg))
+
+    class FakeObserver:
+        def __init__(self):
+            self.scheduled = []
+
+        def schedule(self, handler, path, recursive):
+            self.scheduled.append((handler, path, recursive))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(server_mod, "Observer", FakeObserver)
+    server.watch()
+    watched = next(
+        handler
+        for handler, path, _ in server.observer.scheduled
+        if pathlib.Path(path) == tmp_path
+    )
+
+    shared.write_text(shared_after)
+    watched.on_any_event(
+        SimpleNamespace(is_directory=False, src_path=str(shared), dest_path="")
+    )
+
+    queued = server.queue.get_nowait()
+    assert queued == str(part)
+    assert server.rebuild(queued)["unchanged"] is True
+
+
+def test_non_geometry_rebuilds_are_not_flagged_as_unchanged(tmp_path):
+    server = project(tmp_path)
+    part = tmp_path / "parts" / "thing.py"
+
+    (tmp_path / "printer.toml").write_text('profile = "bambu_a1_mini"\n')
+    assert "unchanged" not in server.rebuild(part)
+
+    (tmp_path / "parts" / "thing.md").write_text("# Thing\n\nA card-only note.\n")
+    assert "unchanged" not in server.rebuild(part)
+
+
+def test_an_assembly_tracks_a_changed_child_source(tmp_path):
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    child = parts / "child.py"
+    child.write_text(
+        "from nurb import *\n\n@part\ndef child():\n    return Box(10, 10, 10)\n"
+    )
+    rig = parts / "rig.py"
+    rig.write_text(
+        'from nurb import *\n\n@assembly\ndef rig():\n    return use("child")\n'
+    )
+    server = Server(tmp_path)
+    server.rebuild(child)
+    server.rebuild(rig)
+
+    child.write_text(child.read_text() + "\n# child-only note\n")
+    dependents = server._dependents({str(child)})
+    server.rebuild(child)
+
+    assert dependents == {str(rig)}
+    assert server.rebuild(dependents.pop())["unchanged"] is True
