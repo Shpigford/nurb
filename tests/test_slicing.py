@@ -529,3 +529,45 @@ def test_the_kit_says_what_a_bare_3mf_is_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(slicing, "app", lambda search=None: tmp_path / "slicer")
     kit, why = slicing.kit(tmp_path)  # a slicer but no printer named anywhere
     assert kit is None and "no printer" in why
+
+
+def test_supports_reach_the_slicer_only_when_the_part_declares_them():
+    """Declared, not derived: no amount of looking at a solid says whether its owner
+    is willing to cut support material off it."""
+    from build123d import Box
+
+    from nurb import checks
+
+    plain, notes = slicing.tuned(Box(20, 20, 10))
+    assert "enable_support" not in plain
+    assert "supports" not in notes
+
+    carried, notes = slicing.tuned(Box(20, 20, 10), checks.Context(supports=True))
+    assert carried["enable_support"] == "1"
+    assert "supports" in notes
+
+
+def test_a_supported_mark_turns_the_slicer_on_by_itself():
+    """The mark is the declaration too, so a part that never touches its card still
+    exports a 3MF that will actually print."""
+    from build123d import Box, Pos
+
+    from nurb import supports
+
+    with supports.collecting() as marked:
+        shape = Box(60, 20, 30) - Pos(0, 0, -5) * Box(44, 20, 16)
+        supports.supported(Pos(0, 0, -5) * Box(44, 20, 16), "the bundle sets this span")
+    shape._nurb_supported = tuple(marked)
+
+    settings, notes = slicing.tuned(shape)
+    assert settings["enable_support"] == "1"
+    assert "supports" in notes
+
+
+def test_tuned_still_answers_without_a_context():
+    """`tuned` defaults its own ctx: `checks.run` does that internally, but the
+    declaration is read here, before it gets there."""
+    from build123d import Box
+
+    settings, _ = slicing.tuned(Box(20, 20, 10))
+    assert "enable_support" not in settings

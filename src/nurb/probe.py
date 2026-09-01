@@ -178,7 +178,8 @@ def report(name, shape, ctx, findings, limit=12):
     )
     lines.append(
         f"      negative faces up. Past {ctx.overhang_limit:.0f} is a finding unless it is"
-        f" on the bed or a short bridge."
+        f" on the bed, a short bridge,"
+        f" or declared to print on supports."
     )
     for row in shown:
         lines.append(f"      {_face_line(row)}")

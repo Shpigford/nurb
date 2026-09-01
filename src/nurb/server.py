@@ -259,6 +259,11 @@ class Server:
             "variants": self._variants(path),
             "variant": None,
             "stress_spots": None,
+            # Alongside findings, and cleared with them: the panel's supports control
+            # describes the build it was drawn for, so a rebuild must not leave the old
+            # answer sitting under new geometry.
+            "supports": False,
+            "marks": 0,
         }
         try:
             shape, params, ms = self._build(path, name)
@@ -504,7 +509,7 @@ class Server:
         always did and the findings can arrive a beat later. `stop` reaches the motion
         sweep, the one check that can hold the build lock for seconds.
         """
-        from . import checks
+        from . import checks, supports
         from .assembly import Interrupted
 
         entry = self.state.get(pathlib.Path(path).stem)
@@ -547,6 +552,12 @@ class Server:
                 }
                 for f, row in zip(found, rows)
             ]
+            # What the panel's supports control needs to draw itself: whether the card
+            # already declares the part, and whether the part file marks features of its
+            # own. A part with marks is not offered the card flag, because the card flag
+            # is the blunter of the two and would silently widen what they chose.
+            entry["supports"] = bool(ctx.supports)
+            entry["marks"] = len(supports.regions(entry["shape"]))
         except Interrupted:
             # A rebuild is queued, so let its geometry land before spending more time
             # here. None tells drain to keep this path pending and retry it afterward.
@@ -927,7 +938,7 @@ class Server:
         process with no opinion about our kernel, and holding the lock across it would
         stall every rebuild for the seconds it takes.
         """
-        from . import slicing
+        from . import checks, slicing
 
         async with self.slice_lock:
             out = (self.root / "build").resolve()
@@ -941,9 +952,20 @@ class Server:
                     suffix = "" if names[path.stem] == 1 else f"-{names[path.stem]}"
                     label = f"{path.stem}{suffix}"
                     async with self.building:
-                        model = await asyncio.to_thread(
+                        built, model = await asyncio.to_thread(
                             self._solid, path, overrides, out / f"{label}.stl"
                         )
+                    # The same settings the 3MF is written with, so the button prices
+                    # the file `nurb export` hands out rather than a stock slice.
+                    # Resolved per path, not once per call: an assembly's instances are
+                    # different parts with cards of their own, and only the part the
+                    # estimate was asked for has a variant on screen.
+                    ctx = (
+                        self._context(path, (self.state.get(name) or {}).get("variant"))
+                        if path.stem == name
+                        else checks.from_card(path)
+                    )
+                    settings, _ = slicing.tuned(built, ctx)
                     sliced[key], _ = await asyncio.to_thread(
                         slicing.run,
                         model,
@@ -952,6 +974,7 @@ class Server:
                         process,
                         filament,
                         exe,
+                        settings=settings,
                     )
                 took, weighs = sliced[key]
                 # One unreadable number makes that number unknown for the whole answer
@@ -980,12 +1003,16 @@ class Server:
 
     @staticmethod
     def _solid(path, overrides, target):
-        """The polished build at the exact values the estimate names, written as STL."""
+        """The polished build at the exact values the estimate names, written as STL.
+
+        Returns the solid alongside the file, because the settings that go with it are
+        read off the geometry and rebuilding to ask would double the wait.
+        """
         if not path.is_file():
             raise builder.BuildError(f"{path.stem} is no longer on disk")
         built, _, _ = builder.build(path, overrides=overrides or None, draft=False)
         builder.write_stl(built, target)
-        return target
+        return built, target
 
     # ---------- stress ----------
     # One load case, asked for by two clicks in the viewer: where the weight sits and
@@ -1294,6 +1321,33 @@ class Server:
                 {"type": "applied", "name": name, "variant": variant, "written": written, "skipped": []}
             )
 
+        elif msg.get("type") == "supports":
+            from . import edit
+
+            on = bool(msg.get("on"))
+            try:
+                edit.set_supports(path, on)
+            except Exception as exc:
+                await self.send({"type": "applied", "name": name, "error": str(exc)})
+                return
+            # The card write is what the watcher sees, and the rebuild after it is what
+            # re-runs the rules, so nothing here touches the findings directly.
+            print(f"  {name}: supports {'on' if on else 'off'} in the card", flush=True)
+            await self.send(
+                {
+                    "type": "applied",
+                    "name": name,
+                    "written": [],
+                    "skipped": [],
+                    # The flag has no room for a reason the way `supported()` does, so
+                    # this is the only place the user gets asked for one.
+                    "said": "the whole part now prints on supports. Say why on its card, "
+                    "and use supported() in the part file if it is really one feature"
+                    if on
+                    else "supports off; the overhang rules apply to the whole part again",
+                }
+            )
+            
     # What a Windows upgrade exits with instead of exec'ing itself; the desktop
     # app's supervisor relaunches on exactly this code. The twin constant lives
     # in desktop/src-tauri/src/supervisor.rs.
@@ -1377,8 +1431,15 @@ class Server:
         global_config = checks.global_file().resolve()
 
         class Handler(FileSystemEventHandler):
+            # Reads are not changes. Newer watchdog reports inotify's IN_OPEN and
+            # IN_CLOSE_NOWRITE as events, and the server opens every card on every
+            # check, so without this the loop feeds itself: check reads the card, the
+            # read queues a rebuild, the rebuild checks, forever. It presents as a part
+            # rebuilding a few hundred times a minute with nothing on disk changing.
+            READS = ("opened", "closed_no_write")
+
             def on_any_event(self, event):
-                if event.is_directory:
+                if event.is_directory or getattr(event, "event_type", None) in self.READS:
                     return
                 path = pathlib.Path(
                     getattr(event, "dest_path", "") or event.src_path

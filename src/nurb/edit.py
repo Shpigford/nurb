@@ -271,3 +271,66 @@ def apply_variant(path, variant, values):
     tmp.write_text(head + opening + new_block + "```" + tail, encoding="utf-8")
     os.replace(tmp, card)
     return sorted(values)
+
+
+def set_supports(path, on):
+    """Turn `[part] supports` on or off in the part's card, and say what it reads now.
+
+    The one thing `apply_variant` never has to handle, and the common case here: a card
+    with no settings fence at all, which is what `nurb new` writes and what most cards
+    stay until something needs declaring. That gets a fresh fence at the end rather than
+    a refusal, because the whole point of the control this serves is that the user should
+    not have to go and learn the file format first.
+
+    Only the one key is touched. A card is hand-written, and the polish, the prose and
+    every other setting in the fence belong to whoever wrote them.
+    """
+    from .checks import CARD_SETTINGS
+
+    card = pathlib.Path(path).with_suffix(".md")
+    if not card.is_file():
+        raise EditError(f"{card.name} does not exist yet, so there is nowhere to record this")
+    text = card.read_text(encoding="utf-8")
+    opening = f"```{CARD_SETTINGS}"
+    line = f"supports = {'true' if on else 'false'}"
+
+    if opening not in text:
+        # A blank line before the fence and a newline after it, so the card still reads
+        # as prose with a settings block at the end rather than as a run-on paragraph.
+        block = f"\n[part]\n{line}\n"
+        head, tail = text.rstrip("\n") + "\n\n", "\n"
+    else:
+        head, _, rest = text.partition(opening)
+        block, closing, tail = rest.partition("```")
+        if not closing:
+            raise EditError(f"{card.name}: the settings block never closes")
+        lines = block.split("\n")
+        start = next((i for i, l in enumerate(lines) if _header(l) == ("part",)), None)
+        if start is None:
+            # No [part] table yet. It goes at the top of the fence, above whatever
+            # tables are already there, so the part's own settings read before the
+            # machine's and the variants' do.
+            lead = 1 if lines and not lines[0].strip() else 0
+            lines[lead:lead] = ["[part]", line, ""]
+        else:
+            end = next((j for j in range(start + 1, len(lines)) if _header(lines[j])), len(lines))
+            at = next((j for j in range(start + 1, end) if _key(lines[j]) == "supports"), None)
+            if at is not None:
+                lines[at] = line
+            else:
+                lines[start + 1 : start + 1] = [line]
+        block = "\n".join(lines)
+
+    # Same self-check as `apply_variant`: this is someone's card, so the block has to
+    # parse and read back as the answer that was asked for before it replaces the file.
+    try:
+        parsed = tomllib.loads(block)
+    except tomllib.TOMLDecodeError as exc:
+        raise EditError(f"updating {card.name} did not come out right ({exc})") from exc
+    if parsed.get("part", {}).get("supports") is not on:
+        raise EditError(f"updating {card.name} did not come out right")
+
+    tmp = card.with_name(f"_{card.name}.tmp")
+    tmp.write_text(head + opening + block + "```" + tail, encoding="utf-8")
+    os.replace(tmp, card)
+    return on

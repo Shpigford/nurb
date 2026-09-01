@@ -219,3 +219,24 @@ def test_anycubic_kobra_2_profile_matches_the_vendor_and_slicer():
         "bed": [220.0, 220.0, 250.0],
         "slicer": "Anycubic Kobra 2",
     }
+
+
+def test_the_machine_cannot_declare_a_part_prints_on_supports(tmp_path):
+    """A judgement about one part, and machine-wide it would quietly excuse every
+    cantilever in every project on the machine, from a file nothing prints."""
+    project(tmp_path, "supports = true\n")
+    with pytest.raises(ValueError, match="not about the machine"):
+        printer(tmp_path)
+
+
+def test_the_global_config_cannot_declare_supports_either(tmp_path):
+    project(tmp_path)
+    global_config("supports = true\n")
+    with pytest.raises(ValueError, match="supports"):
+        printer(tmp_path)
+
+
+def test_a_card_may_still_declare_supports(tmp_path):
+    """The refusal is about where it is written, not about the setting."""
+    part = project(tmp_path, card="```toml\n[part]\nsupports = true\n```\n")
+    assert from_card(part).supports is True

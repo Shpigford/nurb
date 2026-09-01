@@ -240,10 +240,21 @@
   #checks .ic { flex: none; width: 12px; height: 12px; margin-top: 2.5px; }
   #checks .fail .ic { color: var(--bad); }
   #checks .warn .ic { color: #f0c274; }
+  /* A note is something the part already answered for, so it wears the warning's shape
+     drained of its colour. Anything closer to amber and a cost the user accepted reads
+     as a problem they have not looked at yet. */
+  #checks .note .ic { color: var(--dim); }
+  #checks .note { color: var(--dim); }
   /* Wide enough for the longest rule name. At 92px `projection_ratio` overflowed its
      column and printed on top of its own message. */
   #checks .rule { flex: none; color: var(--dim); width: 118px; }
   #checks .ok { color: var(--accent); display: flex; align-items: center; gap: 7px; }
+  #checks .sup { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+  #checks .sup button { font: inherit; color: var(--dim); background: none; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; }
+  #checks .sup button:hover { color: var(--text); border-color: var(--dim); }
+  #checks .sup button:disabled { opacity: .4; cursor: default; }
+  #checks.min .sup { display: none; }
   /* What a slider makes stale is the numbers, not the shape: the bbox, the build time
      and the findings all describe the solid that is being replaced. The mesh is left
      alone because fading it already means "this build failed". The .25s delay is the
@@ -765,6 +776,10 @@ const pinGeom = new THREE.SphereGeometry(1, 12, 8);
 const pinMat = {
   fail: new THREE.MeshBasicMaterial({ color: 0xf87171, depthTest: false, depthWrite: false }),
   warn: new THREE.MeshBasicMaterial({ color: 0xf0c274, depthTest: false, depthWrite: false }),
+  // Grey, and it has to be here rather than left to the `|| pinMat.warn` fallback below:
+  // a cost the part accounted for would otherwise be marked in the same amber as a real
+  // warning, which is the one place this panel could actively mislead.
+  note: new THREE.MeshBasicMaterial({ color: 0x8b95a5, depthTest: false, depthWrite: false }),
 };
 // Pins share one geometry; glows each own theirs, so clearing must dispose the latter.
 function clearPins() {
@@ -957,7 +972,7 @@ const stencilFront = new THREE.MeshBasicMaterial({
 // the surface it sits on; the clipping plane keeps a section from leaving glows afloat.
 // Declared here rather than with the pins because the plane has to exist first.
 const glowMat = {};
-for (const [sev, color] of [['fail', 0xf87171], ['warn', 0xf0c274]]) {
+for (const [sev, color] of [['fail', 0xf87171], ['warn', 0xf0c274], ['note', 0x8b95a5]]) {
   glowMat[sev] = new THREE.MeshBasicMaterial({
     color, transparent: true, opacity: 0.45, side: THREE.DoubleSide,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
@@ -1963,8 +1978,11 @@ function checks(name) {
   box.dataset.for = name;
   box.style.display = 'block';
   if (!found.length) {
+    // A clean part can still be declared on supports, and then the declaration is
+    // buying nothing but slicer time. The control is the way back out of that.
     box.innerHTML = `<h2 title="${FOLD_HINT}">checks<svg class="chev"><use href="#i-chev"/></svg></h2>`
-      + '<div class="ok"><svg class="ic"><use href="#i-ok"/></svg>clean</div>';
+      + '<div class="ok"><svg class="ic"><use href="#i-ok"/></svg>clean</div>'
+      + supportsRow(e);
     return;
   }
   // The icon is the severity tag: shape and color both carry it, the title spells it out.
@@ -1976,7 +1994,7 @@ function checks(name) {
     + `<svg class="ic"><use href="#i-${f.severity === 'fail' ? 'fail' : 'warn'}"/></svg>`
     + `<span class="rule">${f.label || f.rule}</span><span>${f.message}</span></div>`).join('');
   box.innerHTML = `<h2 title="${FOLD_HINT}">checks <span class="n">${found.length}</span>`
-    + `<svg class="chev"><use href="#i-chev"/></svg></h2>${rows}`;
+    + `<svg class="chev"><use href="#i-chev"/></svg></h2>${rows}${supportsRow(e)}`;
   const shift = mesh ? mesh.position : new THREE.Vector3();
   for (const f of found) {
     if (f.face && f.face.length) {
@@ -1996,6 +2014,27 @@ function checks(name) {
   }
 }
 
+// Offered only where it can do something: a part with an overhang the printer cannot
+// lay down, or one that already made the call. A clean part never sees it, and neither
+// does a part whose author already marked the feature in the part file, because
+// `supported()` is the narrower of the two and this would quietly widen it to the whole
+// body. Declining to draw the control is how that stays the user's decision rather than
+// a one-click default.
+function supportsRow(e) {
+  const supportable = (e.findings || []).some(f => f.rule === 'overhang' && f.severity !== 'note');
+  if (e.marks) return '';
+  if (!supportable && !e.supports) return '';
+  const embed = document.body.classList.contains('embed');
+  const on = !!e.supports;
+  // The browser can name the file it writes; the app's rail speaks to somebody who has
+  // never opened one, so there it says what happens instead of where it is recorded.
+  const hint = on
+    ? (embed ? 'go back to printing this without supports' : 'removes supports = true from the card')
+    : (embed ? 'print this part on support material' : 'writes supports = true into the card');
+  return `<div class="sup"><button id="supbtn" title="${hint}">`
+    + `${on ? 'not on supports' : 'prints on supports'}</button></div>`;
+}
+
 // The header is also the dismiss: on a narrow viewer the card buried the toolbar with
 // no way past it (issue #103). Folding keeps the count and the pins, and the choice
 // sticks across rebuilds and reloads so a save does not unfold it back over the buttons.
@@ -2004,6 +2043,14 @@ const FOLD_HINT = 'fold the findings out of the way; the count and the pins stay
   const box = document.getElementById('checks');
   if (localStorage.getItem('nurb.checks.min')) box.classList.add('min');
   box.addEventListener('click', ev => {
+    const sup = ev.target.closest('#supbtn');
+    if (sup) {
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      const e = parts.get(current);
+      sock.send(JSON.stringify({ type: 'supports', name: current, on: !(e && e.supports) }));
+      sup.disabled = true;  // the rebuild after the card write repaints this panel
+      return;
+    }
     if (!ev.target.closest('h2')) return;
     if (box.classList.toggle('min')) localStorage.setItem('nurb.checks.min', '1');
     else localStorage.removeItem('nurb.checks.min');
@@ -2820,7 +2867,9 @@ function connect() {
         bad: !!msg.error,
         text: msg.error
           ? msg.error
-          : msg.variant
+          : msg.said
+            ? msg.said
+            : msg.variant
             ? `updated ${msg.variant} (${msg.written.join(', ') || 'no overrides left'})`
             : [`wrote ${msg.written.join(', ') || 'nothing'}`,
                ...(msg.skipped || []).map(s => `left ${s.name} alone: ${s.why}`)].join('\n'),

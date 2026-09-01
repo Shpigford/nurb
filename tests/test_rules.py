@@ -9,7 +9,9 @@ from math import cos, radians, sin, tan
 from build123d import Align, Axis, Box, Cylinder, Plane, Pos, Rot, extrude, Polygon
 import pytest
 
-from nurb.checks import FAIL, WARN, Context, run
+from nurb import supports
+from nurb.checks import FAIL, NOTE, WARN, Context, run
+from nurb.orient import stand
 
 
 def only(shape, rule, ctx=None):
@@ -784,3 +786,85 @@ def test_a_message_that_is_already_plain_needs_no_twin():
     f = Finding("floating", FAIL, "a region's first layer sits on air")
     assert f.plain is None
     assert f.said == f.message
+
+
+# --- supports ----------------------------------------------------------------
+
+
+def _slotted(span=44.0, height=40.0):
+    """A slot the printer cannot bridge: one overhang finding, nothing else."""
+    return Box(90, 20, height) - Pos(0, 0, -height / 2 + 10) * Box(span, 20, 16)
+
+
+def test_the_card_flag_turns_an_overhang_into_a_note():
+    plain = only(_slotted(), "overhang")
+    assert [f.severity for f in plain] == [WARN]
+    carried = only(_slotted(), "overhang", Context(supports=True))
+    assert [f.severity for f in carried] == [NOTE]
+    # The angle and the area survive: the point of keeping the finding is that the
+    # user can still see the size of what the supports are carrying.
+    assert carried[0].value == plain[0].value
+
+
+def test_a_cantilever_fails_until_it_is_carried():
+    post = Box(10, 10, 40)
+    shape = post + Pos(12, 0, 15) * Box(24, 10, 3)
+    assert [f.severity for f in only(shape, "overhang")] == [FAIL]
+    assert [f.severity for f in only(shape, "overhang", Context(supports=True))] == [NOTE]
+
+
+def test_a_mark_carries_its_own_feature_and_nothing_else():
+    """The whole reason to mark a feature rather than declare the part: an identical
+    overhang somewhere else in the same body still fails."""
+    body = Box(120, 20, 40)
+    with supports.collecting() as marked:
+        left = supports.supported(
+            Pos(-32, 0, -10) * Box(44, 20, 16), "the bundle sets this span"
+        )
+        right = Pos(32, 0, -10) * Box(44, 20, 16)
+        shape = body - left - right
+    shape._nurb_supported = tuple(marked)
+
+    found = only(shape, "overhang")
+    by_severity = {f.severity: f for f in found}
+    assert set(by_severity) == {NOTE, WARN}
+    assert by_severity[NOTE].where[0] < 0 < by_severity[WARN].where[0]
+    assert "the bundle sets this span" in by_severity[NOTE].message
+
+
+def test_a_mark_that_carries_nothing_says_so():
+    """Either the geometry got fixed and the mark outlived it, or the mark stopped
+    landing where it used to. Both are worth a word; neither is a failure."""
+    with supports.collecting() as marked:
+        supports.supported(Box(10, 10, 10), "left over from the slot that was here")
+        shape = Box(60, 20, 40)
+    shape._nurb_supported = tuple(marked)
+
+    found = only(shape, "overhang")
+    assert [f.severity for f in found] == [NOTE]
+    assert "nothing here needed supports" in found[0].message
+    assert found[0].value is None  # what tells it apart from a finding being carried
+
+
+def test_supports_never_excuse_what_geometry_has_to_answer():
+    """floating, hole_ceiling and stability each have a doctrine answer that is not
+    support material, so neither declaration touches them."""
+    post = Box(10, 10, 40)
+    hanging = post + Pos(12, 0, 15) * Box(24, 10, 3)
+    for rule in ("floating", "stability", "hole_ceiling"):
+        plain = only(hanging, rule)
+        carried = only(hanging, rule, Context(supports=True))
+        assert [f.severity for f in plain] == [f.severity for f in carried]
+    assert only(hanging, "floating")  # and the case above really does fire one
+
+
+def test_a_mark_survives_the_transform_that_stands_a_part():
+    """`stand()` moves the whole part after the mark was made, so it moves the mark
+    too. Without that the mark describes where the feature used to be."""
+    with supports.collecting() as marked:
+        body = Box(30, 20, 60)
+        supports.supported(body, "the mounting face has to stay flat")
+        shape = stand(body, 60, fins=False)
+    shape._nurb_supported = tuple(marked)
+
+    assert [f.severity for f in only(shape, "overhang")] == [NOTE]

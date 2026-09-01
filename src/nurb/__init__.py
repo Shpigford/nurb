@@ -23,6 +23,7 @@ from .mesh import import_stl  # noqa: E402  -- must win, see below
 from .orient import stand  # noqa: E402
 from .polish import chamfer, polish  # noqa: E402  -- must win, see below
 from .registry import part, reject  # noqa: E402  -- must win over any build123d name
+from .supports import supported  # noqa: E402
 
 # `polish` is here because the doctrine prescribes the algorithm and every project
 # would otherwise write it: chamfer is all or nothing, so one edge that cannot land
@@ -42,6 +43,10 @@ from .registry import part, reject  # noqa: E402  -- must win over any build123d
 # `counterbore` is here because the naive alternative is two cylinders that build,
 # check as an ordinary bridge, and print a screw seat on sagging air: the stepped
 # bridging stack is fixed print-farm practice, not a judgement, so it is generated.
+# `supported` is here because the alternative to marking one feature is declaring the
+# whole part on supports, which excuses next month's mistake as readily as this month's
+# decision. Scoping it needs the mark to survive the booleans that follow, and a part
+# file cannot arrange that for itself: the tag has to be collected by the builder.
 # `reject` is here because a part that knows a configuration cannot work (a hole
 # narrower than the tool it holds) has to be able to say so, and the alternative is a
 # bare ValueError that the viewer can only present as a crash. A refusal through
@@ -71,6 +76,7 @@ __all__ = [
     "crown",
     "stand",
     "counterbore",
+    "supported",
     "assembly",
     "use",
     "hinge",

@@ -318,3 +318,37 @@ def test_the_default_verdict_still_reads_as_its_own_line():
     assert card.compare([size, "Checks: clean"], [size, "Checks: 1 finding: 1 warn (sliver)"]) == [
         "Checks: clean -> 1 finding: 1 warn (sliver)"
     ]
+
+
+def test_the_card_can_declare_the_part_prints_on_supports(tmp_path):
+    part = write(tmp_path, "```toml\n[part]\nsupports = true\n```")
+    assert from_card(part).supports is True
+
+
+def test_supports_is_off_unless_a_card_says_otherwise(tmp_path):
+    part = write(tmp_path, "```toml\n[part]\nmin_wall = 2.0\n```")
+    assert from_card(part).supports is False
+
+
+def test_a_variant_can_decline_the_parts_supports(tmp_path):
+    """Inheritance runs base-first, so a supported part hands the flag to every
+    variant. The diagonal one, whose whole point is not needing them, has to be able
+    to give it back."""
+    part = write(
+        tmp_path,
+        "```toml\n[part]\nsupports = true\n\n"
+        "[variants.upright.params]\nwidth = 12.0\n\n"
+        "[variants.diagonal.params]\nwidth = 12.0\n\n"
+        "[variants.diagonal.part]\nsupports = false\n```",
+    )
+    by_name = {name: ctx for name, _, ctx in configurations(part)}
+    assert by_name["upright"].supports is True
+    assert by_name["diagonal"].supports is False
+
+
+def test_supports_written_as_a_string_is_an_error_not_a_shrug(tmp_path):
+    """Every other setting is a number a rule compares against, so a wrong type gives
+    itself away. This one is only tested for truth, and "false" is true."""
+    part = write(tmp_path, '```toml\n[part]\nsupports = "false"\n```')
+    with pytest.raises(ValueError, match="true or false"):
+        from_card(part)

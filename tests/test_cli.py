@@ -1,5 +1,6 @@
 """Configuration-set validation happens before artifact writes."""
 
+import argparse
 import pathlib
 import re
 import subprocess
@@ -1085,3 +1086,63 @@ w = {width + 1}.0
     cli.cmd_build(args)
 
     assert capsys.readouterr().out.count("geometry unchanged since last build") == 4
+
+
+# --- supports and --strict ---------------------------------------------------
+
+
+SLOTTED = '''from nurb import *
+
+
+@part
+def slot(span=44.0, height=40.0):
+    """A slot wider than this printer bridges."""
+    return Box(90, 20, height) - Pos(0, 0, -height / 2 + 10) * Box(span, 20, 16)
+'''
+
+
+def supports_project(tmp_path, declared):
+    parts = tmp_path / "parts"
+    parts.mkdir(parents=True, exist_ok=True)
+    (parts / "slot.py").write_text(SLOTTED)
+    card = "# slot\n\n## What it is\n\nA wide slot.\n"
+    if declared:
+        card += "\nThe span is set by what passes through it.\n\n```toml\n[part]\nsupports = true\n```\n"
+    (parts / "slot.md").write_text(card)
+    return tmp_path
+
+
+def check_strict(monkeypatch, root, capsys):
+    """`nurb check --strict`'s exit code, and what it printed."""
+    monkeypatch.setattr(cli, "project_root", lambda *a, **k: root)
+    args = argparse.Namespace(part=None, strict=True, printer=None)
+    code = 0
+    try:
+        cli.cmd_check(args)
+    except SystemExit as exc:
+        code = exc.code
+    return code, capsys.readouterr().out
+
+
+def test_strict_fails_an_overhang_and_passes_it_once_declared(monkeypatch, tmp_path, capsys):
+    undeclared, _ = check_strict(monkeypatch, supports_project(tmp_path / "a", False), capsys)
+    assert undeclared == 1
+    declared, out = check_strict(monkeypatch, supports_project(tmp_path / "b", True), capsys)
+    assert declared == 0
+    # The finding is still on screen, and the summary says where it went, because
+    # "0 to fix" beside a listed finding reads like the checker is broken.
+    assert "note  overhang" in out
+    assert "1 on supports" in out
+
+
+def test_verify_agrees_with_check_about_a_carried_overhang(monkeypatch, tmp_path, capsys):
+    """The two commands judging the same geometry differently is worse than either
+    of them being wrong, because there is no way to tell which to believe."""
+    root = supports_project(tmp_path / "c", True)
+    monkeypatch.setattr(cli, "project_root", lambda *a, **k: root)
+    try:
+        cli.cmd_verify(argparse.Namespace(part=None, report=False))
+    except SystemExit as exc:
+        assert exc.code in (0, 1)
+    out = capsys.readouterr().out
+    assert "note  overhang" not in out  # not listed as a problem to fix

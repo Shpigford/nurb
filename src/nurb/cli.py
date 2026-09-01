@@ -264,10 +264,19 @@ def cmd_check(args):
                 print(f"  {name}: clean")
                 continue
             fails = sum(1 for f in found if f.severity == checks.FAIL)
-            print(f"  {name}: {len(found)} finding(s), {fails} to fix")
+            # A note is the part answering the checker, not the checker complaining, so
+            # it never moves the exit code. It is still counted out loud: "0 to fix"
+            # beside three findings reads like a bug in the checker unless the line
+            # says where the other three went, and support material is a running cost
+            # worth seeing the size of every time.
+            notes = sum(1 for f in found if f.severity == checks.NOTE)
+            said = f"{len(found)} finding(s), {fails} to fix"
+            if notes:
+                said += f", {notes} on supports"
+            print(f"  {name}: {said}")
             for finding in found:
                 print(f"      {finding}")
-            worst = max(worst, 2 if fails else 1)
+            worst = max(worst, 2 if fails else 1 if notes < len(found) else 0)
     # Project-level, after the parts: a guessed dimension produces a part that builds,
     # checks clean and prints, so the only place it can be caught is here.
     from .measurements import provisional
@@ -478,6 +487,12 @@ def cmd_verify(args):
             # The count is the `solids` rule's job now, and it says more than a count.
             found = checks.run(shape, ctx)
             for finding in found:
+                # Notes are not problems, and this is the one place that would
+                # otherwise disagree with `nurb check --strict` about the same
+                # geometry. `found` goes on whole to the card and to --report, which
+                # do want them: the verdict describes the part, this list is a to-do.
+                if finding.severity == checks.NOTE:
+                    continue
                 problems.append(f"{name}: {finding}")
             built.append((name, shape, ctx, found))
 

@@ -13,8 +13,17 @@ from math import asin, atan2, cos, degrees, pi, sin
 
 from build123d import Axis, CenterOf, GeomType, Plane, Vector
 
+from . import supports
+
 FAIL = "fail"  # this will not print, or will not work
 WARN = "warn"  # this needs attention, most often support
+NOTE = "note"  # accounted for: a cost this part has chosen, not a defect to fix
+
+# Findings sort by this, worst first. Note that it is also how far a severity gets to
+# push the exit code around: `nurb check --strict` and `nurb verify` both ignore notes,
+# because a note is the user telling the checker something rather than the other way.
+# Four characters each, which is what `Finding.__str__` pads to, so the columns line up.
+RANK = {FAIL: 0, WARN: 1, NOTE: 2}
 
 # What each rule is called to somebody who owns a printer rather than to whoever wrote
 # the rule. A rule's name is an identifier: it is stable, it is what the CLI prints, and
@@ -109,6 +118,11 @@ class Context:
     warp_radius: float = 8.0  # a plan corner rounded under this is still a peel point
     material: str | None = None  # what this prints in; scales warp_area, see SHRINK
     accepted: dict = field(default_factory=dict)  # rule -> how many are already known
+    # The whole part prints on support material, by the user's choice. `supported()` in
+    # the part file is the narrower way to say the same thing about one feature, and is
+    # what the doctrine sends you to first; this is for the part that is all overhang.
+    # A card's decision, never a machine's, which is why `printer()` refuses it.
+    supports: bool = False
 
 
 RULES = {}
@@ -143,7 +157,7 @@ def run(shape, ctx=None, only=None, stop=None):
     apart = [f for f in found if f.rule == "solids"]
     if apart:
         return apart
-    return sorted(found, key=lambda f: (f.severity != FAIL, f.rule))
+    return sorted(found, key=lambda f: (RANK[f.severity], f.rule))
 
 
 # --- geometry helpers --------------------------------------------------------
@@ -636,10 +650,26 @@ def overhang(shape, ctx):
     ceiling is 90. Two things are deliberately not findings: a face on the bed, which
     is the first layer, and a short bridge, which a printer spans on its own. Warning
     about either is how a checker gets switched off.
+
+    A third thing is a finding but not a fault. Where the part says it prints on
+    support material, either by wrapping the feature in `supported()` or by declaring
+    the whole part in its card, the finding drops to a note: still on screen, still
+    carrying the angle and the area so the user can see what the supports are costing,
+    but no longer something to fix. Unlike the sliver baseline, which deletes what it
+    excuses, this keeps the finding, because the whole reason to say it out loud is
+    that support material is a real price paid on every print rather than a one-time
+    edit.
+
+    A mark that excused nothing gets a note of its own. It means either the geometry
+    was fixed and the mark outlived it, or the mark stopped landing where it used to,
+    and the two are worth telling apart before somebody trusts a feature that is not
+    actually covered.
     """
     up = Vector(*ctx.up).normalized()
     bed, _ = _span(shape, up)
     solid = shape.solids()[0] if shape.solids() else None
+    marks = () if ctx.supports else supports.regions(shape)
+    used = set()
     found = []
     for face in shape.faces():
         if _span(face, up)[1] <= bed + 1e-4:
@@ -659,32 +689,75 @@ def overhang(shape, ctx):
         droop = max(ctx.overhang_reach, 1.42 * 1.15 * ctx.cosmetic_chamfer)
         if crossing is None and _reach(face, up) <= droop:
             continue  # a ledge too shallow to droop, whatever its angle or length
+        # The polish pass moves faces near a mark's edges by about a chamfer, so the
+        # mark is grown by one before asking whether this face is inside it.
+        spot = tuple(face.center())
+        mark = supports.covering(marks, spot, ctx.cosmetic_chamfer)
+        if mark is not None:
+            used.add(id(mark))
+        carried = ctx.supports or mark is not None
+        # A marked feature quotes its own reason back, because a note the reader cannot
+        # trace to a decision is one they have to go looking for the decision behind.
+        on = f"on supports: {mark.why}" if mark is not None else "on supports"
         if crossing is not None:
-            found.append(
-                Finding(
-                    "overhang",
-                    WARN,
+            severity, value = (NOTE if carried else WARN), crossing
+            if carried:
+                message = f"{crossing:.0f}mm bridge over {face.area:.1f}mm2, {on}"
+                plain = (
+                    f"a {crossing:.0f}mm gap, held up by support material you break "
+                    "off after printing"
+                )
+            else:
+                message = (
                     f"{crossing:.0f}mm bridge over {face.area:.1f}mm2, "
-                    f"past the {ctx.bridge_limit:.0f}mm this printer spans",
-                    plain=f"a {crossing:.0f}mm gap to cross in mid-air; this printer "
-                    f"holds a span up to {ctx.bridge_limit:.0f}mm",
-                    value=round(crossing, 1),
-                    where=tuple(round(v, 2) for v in face.center()),
+                    f"past the {ctx.bridge_limit:.0f}mm this printer spans"
                 )
-            )
+                plain = (
+                    f"a {crossing:.0f}mm gap to cross in mid-air; this printer "
+                    f"holds a span up to {ctx.bridge_limit:.0f}mm"
+                )
         else:
-            found.append(
-                Finding(
-                    "overhang",
-                    FAIL,
-                    f"{worst:.0f}deg unsupported over {face.area:.1f}mm2, "
-                    f"limit {ctx.overhang_limit:.0f}deg",
-                    plain=f"an underside leaning {worst:.0f} degrees out. Past "
-                    f"{ctx.overhang_limit:.0f} it droops as it prints",
-                    value=round(worst, 1),
-                    where=tuple(round(v, 2) for v in face.center()),
+            severity, value = (NOTE if carried else FAIL), worst
+            if carried:
+                message = f"{worst:.0f}deg over {face.area:.1f}mm2, {on}"
+                plain = (
+                    f"an underside leaning {worst:.0f} degrees out, held up by support "
+                    "material you break off after printing"
                 )
+            else:
+                message = (
+                    f"{worst:.0f}deg unsupported over {face.area:.1f}mm2, "
+                    f"limit {ctx.overhang_limit:.0f}deg"
+                )
+                plain = (
+                    f"an underside leaning {worst:.0f} degrees out. Past "
+                    f"{ctx.overhang_limit:.0f} it droops as it prints"
+                )
+        found.append(
+            Finding(
+                "overhang",
+                severity,
+                message,
+                plain=plain,
+                value=round(value, 1),
+                where=tuple(round(v, 2) for v in face.center()),
             )
+        )
+    for mark in marks:
+        if id(mark) in used:
+            continue
+        low, high = mark.box()
+        middle = tuple((low[i] + high[i]) / 2 for i in range(3))
+        found.append(
+            Finding(
+                "overhang",
+                NOTE,
+                f"nothing here needed supports: {mark.why}",
+                plain=f"marked as needing support material, but nothing under it does: "
+                f"{mark.why}",
+                where=tuple(round(v, 2) for v in middle),
+            )
+        )
     return found
 
 
@@ -1203,6 +1276,14 @@ def choose_profile(root, name):
 # that protection quietly stops covering one of them.
 NOT_SETTINGS = ("slicer",)
 
+# Settings a card may set and a machine may not. `supports` says this part is worth
+# printing on support material and cleaning up afterwards, which is a judgement about
+# one part and never a fact about the printer. Allowed machine-wide it would excuse
+# every cantilever in every project on the machine, from a file that nothing prints the
+# contents of, so the guard is worth the asymmetry with `min_wall`: a tighter min_wall
+# machine-wide only makes the rules stricter, and this only makes them looser.
+PART_ONLY = ("supports",)
+
 
 def machine_only(block):
     """A profile with the non-setting facts removed, ready for `_apply`."""
@@ -1256,6 +1337,15 @@ def printer(root, name=None):
     # profile is resolved above; export is a workflow preference cmd_export reads
     for settings_block, where in ((home, str(global_file())), (block, PRINTER_FILE)):
         facts = {k: v for k, v in settings_block.items() if k not in ("profile", "export")}
+        # Checked here rather than in `_apply`, which is also what a card goes through
+        # and where the key is legal. `_apply` merges [printer] and [part] into one
+        # dict, so by the time it runs there is nothing left to tell them apart.
+        for key in PART_ONLY:
+            if key in facts:
+                raise ValueError(
+                    f"{where}: {key} is a decision about one part, not about the "
+                    f"machine. Put it in that part's card, under [part]."
+                )
         _apply(ctx, {"printer": facts}, where)
     return ctx
 
@@ -1300,6 +1390,14 @@ def _apply(ctx, block, where):
                 f"{where}: no material called {ctx.material!r}. "
                 f"have: {', '.join(sorted(SHRINK))}"
             )
+    # Every other setting is a number the rules compare against, so a wrong type gives
+    # itself away the moment one runs. This one is only ever tested for truth, and TOML
+    # will hand over the string "false" as readily as the boolean, which would switch
+    # the overhang rule off while looking in the card like it was switched on.
+    if not isinstance(ctx.supports, bool):
+        raise ValueError(
+            f"{where}: supports is true or false, not {ctx.supports!r}."
+        )
     return ctx
 
 

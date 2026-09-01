@@ -12,6 +12,8 @@ import numpy as np
 import pytest
 import trimesh
 
+from build123d import Box
+
 from nurb.builder import BRIDGE_TINT
 from nurb.server import Server
 
@@ -971,15 +973,18 @@ def rig():
     ]
 
     built = []
+    # A real solid, not a stand-in: `_sliced` now reads the tuned settings off what it
+    # built, so a stub shape would skip the code that decides them.
     monkeypatch.setattr(
         server,
         "_solid",
-        lambda path, overrides, target: built.append((path.stem, overrides)) or target,
+        lambda path, overrides, target: built.append((path.stem, overrides))
+        or (Box(10, 10, 10), target),
     )
     monkeypatch.setattr(
         slicing,
         "run",
-        lambda model, target, *args: ((100, 2.0), target),
+        lambda model, target, *args, **kwargs: ((100, 2.0), target),
     )
 
     totals = asyncio.run(server._sliced("rig", "machine", "process", "filament", "exe"))
@@ -1011,9 +1016,11 @@ def test_concurrent_estimates_do_not_run_the_slicer_together(tmp_path, monkeypat
     active = high_water = 0
     guard = threading.Lock()
 
-    monkeypatch.setattr(server, "_solid", lambda path, overrides, target: target)
+    monkeypatch.setattr(
+        server, "_solid", lambda path, overrides, target: (Box(10, 10, 10), target)
+    )
 
-    def run(model, target, *args):
+    def run(model, target, *args, **kwargs):
         nonlocal active, high_water
         with guard:
             active += 1

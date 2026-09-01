@@ -42,6 +42,7 @@ def test_the_documented_vocabulary_is_the_exported_one():
         "measured",
         "stand",
         "counterbore",
+        "supported",
         "assembly",
         "use",
         "hinge",

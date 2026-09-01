@@ -8,6 +8,7 @@ import time
 import numpy as np
 import trimesh
 
+from . import supports
 from .registry import Rejected
 
 
@@ -140,7 +141,11 @@ def build(path, overrides=None, draft=False):
 
     started = time.perf_counter()
     try:
-        shape = fn(**call)
+        # `supported()` marks cannot ride on the geometry, because the booleans that
+        # follow build new solids. They are collected around the call instead and hung
+        # on the result, the same way an assembly carries its scene.
+        with supports.collecting() as marked:
+            shape = fn(**call)
     except Rejected as exc:
         # A refused build still needs to describe the attempted values: they are the
         # controls the viewer offers to get back into the part's valid range.
@@ -149,6 +154,8 @@ def build(path, overrides=None, draft=False):
     elapsed = (time.perf_counter() - started) * 1000
     if shape is None:
         raise BuildError(f"{defn.name}() returned None")
+    if marked:
+        shape._nurb_supported = tuple(marked)
 
     return shape, params, elapsed
 

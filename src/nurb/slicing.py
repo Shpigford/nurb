@@ -69,9 +69,21 @@ TUNED = {
 # The findings that mean this part needs help holding the bed. Both are the checks'
 # own judgement: a first layer big enough to peel its corners, or a part standing
 # taller than first-layer adhesion holds. The brim is the slicer-side share of both
-# fixes, and these are the only slicer settings a finding drives, because supports
-# never appear here: a part that needs them has a finding to fix in CAD instead.
+# fixes.
 BRIM_RULES = ("warp_risk", "stability")
+
+# Supports are the other setting a part can earn, and they arrive by a different route,
+# which is worth naming because the two sit side by side below. A brim is *derived*: the
+# rules look at the geometry and decide. Supports are *declared*, by `supported()` in the
+# part file or by the card, and no amount of looking at a solid can tell you whether its
+# owner is willing to cut support material off it. So this reads the declaration and
+# does not second-guess it.
+#
+# Only the on switch. The slicer's own support threshold is measured from the horizontal
+# while `overhang_limit` is measured from the build direction, so they are complements
+# and driving one from the other inverts at every value but the default. Past that, an
+# angle is tuning, and tuning belongs to the profile the user already configured.
+SUPPORT_SETTINGS = {"enable_support": "1"}
 
 
 def tuned(shape, ctx=None):
@@ -83,8 +95,10 @@ def tuned(shape, ctx=None):
     follows from the geometry nurb built is nurb's knowledge, while flow, temperature
     and layer height stay the slicer's.
     """
-    from . import checks
+    from . import checks, supports
 
+    # `checks.run` defaults this for itself, but the declaration below is read here.
+    ctx = ctx or checks.Context()
     settings = dict(TUNED)
     notes = [f"gyroid {settings['sparse_infill_density']}", f"{settings['wall_loops']} walls"]
     found = checks.run(shape, ctx, only=set(BRIM_RULES))
@@ -92,6 +106,9 @@ def tuned(shape, ctx=None):
         settings["brim_type"] = "outer_only"
         settings["brim_width"] = "5"
         notes.append(f"brim ({checks.LABELS[found[0].rule]})")
+    if ctx.supports or supports.regions(shape):
+        settings.update(SUPPORT_SETTINGS)
+        notes.append("supports")
     return settings, notes
 
 
@@ -329,6 +346,18 @@ def _preset_args(out_dir, machine_path, process, filament, settings=None):
     for kind, source in (("machine", machine_path), ("process", process), ("filament", filament)):
         data = _flatten(source)
         if kind == "process" and settings:
+            # A key the stock profile has never heard of is a typo, and it is otherwise
+            # the quietest bug in this module: the slicer ignores what it cannot parse,
+            # so the export line still promises supports and the 3MF opens without
+            # them. Said rather than raised, because a vendor is free to rename a key
+            # and losing the slice over it would be worse than losing the setting.
+            unknown = sorted(k for k in settings if k not in data)
+            if unknown:
+                print(
+                    f"  this slicer's process profile has no {', '.join(unknown)}; "
+                    "those settings will not reach it",
+                    flush=True,
+                )
             data.update(settings)
         full = out_dir / f"{kind}.json"
         full.write_text(json.dumps(data), encoding="utf-8")

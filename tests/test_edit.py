@@ -6,7 +6,7 @@ about what it leaves alone as about what it changes.
 
 import pytest
 
-from nurb import edit
+from nurb import checks, edit
 
 SOURCE = '''from nurb import *
 
@@ -288,3 +288,55 @@ def test_non_ascii_earlier_on_the_line_does_not_shift_the_offsets(tmp_path):
     path.write_text(src, encoding="utf-8")
     edit.apply(path, {"count": 6})
     assert path.read_text(encoding="utf-8") == src.replace("count=4", "count=6")
+
+
+# --- supports ----------------------------------------------------------------
+
+
+def supports_card(tmp_path, body):
+    (tmp_path / "thing.py").write_text("")
+    (tmp_path / "thing.md").write_text(body, encoding="utf-8")
+    return tmp_path / "thing.py"
+
+
+def test_supports_starts_a_settings_block_on_a_card_that_has_none(tmp_path):
+    """Every card `nurb new` writes is this shape, so it is the common case and not
+    an error: the control exists so nobody has to learn the file format first."""
+    part = supports_card(tmp_path, "# thing\n\n## What it is\n\nA thing.\n")
+    edit.set_supports(part, True)
+    text = (tmp_path / "thing.md").read_text(encoding="utf-8")
+    assert checks.settings(part) == {"part": {"supports": True}}
+    assert "A thing.\n\n```toml" in text  # prose and fence stay separate
+    assert text.endswith("```\n")
+
+
+def test_supports_joins_a_settings_block_that_already_exists(tmp_path):
+    part = supports_card(
+        tmp_path, "# thing\n\n```toml\n[accepted]\nsliver = 6\n```\n\n## Notes\n"
+    )
+    edit.set_supports(part, True)
+    settings = checks.settings(part)
+    assert settings["part"] == {"supports": True}
+    assert settings["accepted"] == {"sliver": 6}  # untouched
+    assert "## Notes" in (tmp_path / "thing.md").read_text(encoding="utf-8")
+
+
+def test_supports_leaves_the_rest_of_the_part_table_alone(tmp_path):
+    part = supports_card(
+        tmp_path, "# thing\n\n```toml\n[part]\nmin_wall = 1.0\nsupports = false\n```\n"
+    )
+    edit.set_supports(part, True)
+    assert checks.settings(part)["part"] == {"supports": True, "min_wall": 1.0}
+
+
+def test_supports_can_be_turned_back_off(tmp_path):
+    part = supports_card(tmp_path, "# thing\n\n## What it is\n\nA thing.\n")
+    edit.set_supports(part, True)
+    edit.set_supports(part, False)
+    assert checks.settings(part)["part"] == {"supports": False}
+
+
+def test_supports_needs_a_card_to_write_to(tmp_path):
+    (tmp_path / "thing.py").write_text("")
+    with pytest.raises(edit.EditError, match="does not exist"):
+        edit.set_supports(tmp_path / "thing.py", True)

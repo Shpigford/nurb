@@ -20,6 +20,7 @@ from math import radians, sin
 
 from build123d import Axis, Box, CenterOf, Keep, Plane, Polygon, Pos, Vector, extrude, split
 
+from . import supports
 from .checks import LEVERAGE
 
 FIN_THICK = 1.0  # a couple of beads of wall: stiff enough to hold, thin enough to lift
@@ -77,7 +78,12 @@ def stand(shape, tilt=45.0, axis=Axis.Y, facet=2.0, fins=True):
     # For a square corner tilted t, a cut d deep makes a flat 2*d/|sin(2t)| wide, so
     # d = facet * |sin(2t)| / 2. At 45 or 135 degrees that is half the facet.
     depth = facet * abs(sin(radians(2 * tilt))) / 2
-    seated = Pos(0, 0, -tilted.bounding_box().min.Z - depth) * tilted
+    drop = -tilted.bounding_box().min.Z - depth
+    # Any `supported()` mark was made while modelling upright, so it describes where the
+    # feature was, not where it is about to print. Same rotation, same seating: this is
+    # the only operation in the vocabulary that moves a whole finished part.
+    supports.remap(lambda marked: Pos(0, 0, drop) * marked.rotate(axis, tilt))
+    seated = Pos(0, 0, drop) * tilted
     seated = split(seated, bisect_by=Plane.XY, keep=Keep.TOP)
     height = seated.bounding_box().max.Z
     if not fins or height <= LEVERAGE * facet:
