@@ -27,6 +27,9 @@ concurrency:
 
 jobs:
   publish:
+    # Upstream's release automation: PyPI trusted publishing and the signed
+    # Windows installer both need secrets a fork doesn't have. Skip on forks.
+    if: github.repository == 'Shpigford/nurb'
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -76,6 +79,7 @@ jobs:
   # release skips everything.
   desktop-windows:
     needs: publish
+    if: github.repository == 'Shpigford/nurb'
     runs-on: windows-latest
     permissions:
       contents: write
