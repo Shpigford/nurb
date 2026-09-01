@@ -2,6 +2,7 @@ mod acp;
 mod agents;
 mod env;
 mod prefs;
+mod proc;
 mod provision;
 mod registry;
 mod sessions;
@@ -51,6 +52,30 @@ fn seed_part_name(project: &str) -> String {
     }
 }
 
+/// A name that becomes a folder on any platform the project might sync to:
+/// no path separators, none of Windows' reserved characters or device names,
+/// no trailing dot or space (which Explorer cannot create or delete). The
+/// rules apply everywhere so a project born on a Mac still opens on a PC.
+fn valid_project_name(name: &str) -> bool {
+    if name.is_empty() || name.starts_with('.') || name.ends_with('.') || name.ends_with(' ') {
+        return false;
+    }
+    if name.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|']) {
+        return false;
+    }
+    if name.chars().any(|c| c.is_control()) {
+        return false;
+    }
+    let stem = name.split('.').next().unwrap_or(name).to_ascii_uppercase();
+    let reserved = matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+            | "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+            | "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    );
+    !reserved
+}
+
 fn project_base(folder: Option<String>, default: PathBuf) -> PathBuf {
     match folder
         .as_deref()
@@ -84,7 +109,7 @@ async fn create_project(
     folder: Option<String>,
 ) -> Result<String, String> {
     let name = name.trim().to_string();
-    if name.is_empty() || name.contains('/') || name.starts_with('.') {
+    if !valid_project_name(&name) {
         return Err("project names cannot be empty or contain slashes".into());
     }
     let base = project_base(folder, default_projects_folder_path(&app)?);
@@ -197,6 +222,9 @@ fn add_projects_from_folder(
 fn remove_project(app: AppHandle, path: String) {
     let dir = PathBuf::from(&path);
     app.state::<Registry>().remove(&dir);
+    // A project the app no longer knows about keeps no standing permission
+    // grant, so a different folder put here later starts from the default.
+    app.state::<acp::Approvals>().forget(&dir);
     // Removing an open project also stops its server; the files stay put.
     tauri::async_runtime::spawn_blocking(move || app.state::<Supervisor>().close(&dir));
 }
@@ -467,7 +495,9 @@ fn test_hook(app: AppHandle) {
 /// put a link. The two Help items are the only place in the app that reaches the
 /// outside world, alongside the same pair in the about box. "Check for Updates…"
 /// sits under About where every Mac app keeps it; the webview owns the update
-/// state, so the click is forwarded there as an event.
+/// state, so the click is forwarded there as an event. Windows has no app menu;
+/// its update check and help links live in the about box alone.
+#[cfg(target_os = "macos")]
 fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, HELP_SUBMENU_ID};
     let menu = Menu::default(app)?;
@@ -528,6 +558,8 @@ pub fn run() {
             app.manage(Registry::load(&dir));
             app.manage(sessions::SessionStore::load(&dir));
             app.manage(prefs::PrefStore::load(&dir));
+            app.manage(acp::Approvals::load(&dir));
+            #[cfg(target_os = "macos")]
             install_menu(app.handle())?;
             #[cfg(debug_assertions)]
             test_hook(app.handle().clone());
@@ -552,6 +584,8 @@ pub fn run() {
             acp::send_prompt,
             acp::cancel_turn,
             acp::respond_permission,
+            acp::approval_state,
+            acp::set_project_auto,
             acp::chat_config,
             acp::set_chat_config,
             acp::close_chat,

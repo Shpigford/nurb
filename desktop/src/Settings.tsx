@@ -15,8 +15,8 @@ type Props = {
   customized: boolean;
   onChange: (folder: string) => void | Promise<void>;
   onReset: () => void | Promise<void>;
-  // The agents installed on this Mac, so signing in lives with the rest of the
-  // setup rather than beside the parts.
+  // The agents installed on this machine, so signing in lives with the rest of
+  // the setup rather than beside the parts.
   agents: SettingsAgent[];
   agentStatusState: "loading" | "ready" | "error";
   signingIn: string | null;

@@ -11,9 +11,12 @@
 //! shares credentials with any terminal install either way, because every
 //! agent reads its own store (~/.claude, ~/.codex, Cursor's, ~/.grok).
 
+#[cfg(not(windows))]
 use std::io::Write;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(not(windows))]
+use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -79,17 +82,6 @@ impl AgentKind {
         }
     }
 
-    /// The executable name npm installs for the adapter, for spawning it out
-    /// of the provisioned runtime without npx.
-    pub fn adapter_bin(self) -> Option<&'static str> {
-        match self {
-            Self::Claude => Some("claude-agent-acp"),
-            Self::Codex => Some("codex-acp"),
-            Self::Gemini => Some("gemini"),
-            Self::Cursor | Self::Grok => None,
-        }
-    }
-
     /// Binary name and the args that start ACP over stdio, for the CLIs that
     /// speak it natively. None for the adapter-hosted agents.
     pub fn native_command(self) -> Option<(&'static str, &'static [&'static str])> {
@@ -103,6 +95,8 @@ impl AgentKind {
     /// Where a native CLI actually is: the vendor installer's fixed spot
     /// first, then PATH for nonstandard installs. None when it is not on this
     /// machine, which is what "installed: false" means for these agents.
+    /// Windows installs carry an extension, so each name is tried with the
+    /// executable suffixes the platform launches.
     pub fn native_bin(self) -> Option<PathBuf> {
         let (name, _) = self.native_command()?;
         let install_dir = match self {
@@ -110,13 +104,20 @@ impl AgentKind {
             Self::Grok => ".grok/bin",
             Self::Claude | Self::Codex | Self::Gemini => return None,
         };
-        let home = PathBuf::from(std::env::var("HOME").ok()?);
-        let default = home.join(install_dir).join(name);
-        if default.is_file() {
-            return Some(default);
+        let names: Vec<String> = if cfg!(windows) {
+            vec![format!("{name}.exe"), format!("{name}.cmd")]
+        } else {
+            vec![name.to_string()]
+        };
+        let home = crate::env::home_dir()?;
+        for file in &names {
+            let default = home.join(install_dir).join(file);
+            if default.is_file() {
+                return Some(default);
+            }
         }
         std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|dir| dir.join(name))
+            .flat_map(|dir| names.iter().map(move |file| dir.join(file)))
             .find(|candidate| candidate.is_file())
     }
 
@@ -244,13 +245,42 @@ fn auth_file(dir: &str) -> PathBuf {
     } else {
         None
     };
-    home.unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(dir))
+    home.unwrap_or_else(|| crate::env::home_dir().unwrap_or_default().join(dir))
         .join("auth.json")
 }
 
 const GEMINI_KEYCHAIN_SERVICE: &str = "dev.nurb.desktop.gemini-api-key";
 const GEMINI_KEYCHAIN_ACCOUNT: &str = "gemini";
 
+/// Windows keeps the key in Credential Manager under the same service name
+/// the macOS Keychain uses.
+#[cfg(windows)]
+fn gemini_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(GEMINI_KEYCHAIN_SERVICE, GEMINI_KEYCHAIN_ACCOUNT)
+        .map_err(|error| format!("could not open the credential store: {error}"))
+}
+
+#[cfg(windows)]
+pub(crate) fn gemini_api_key() -> Result<String, String> {
+    match gemini_entry()?.get_password() {
+        Ok(key) if !key.trim().is_empty() => Ok(key.trim().to_string()),
+        Ok(_) => Err("Gemini API key is empty".into()),
+        Err(keyring::Error::NoEntry) => Err("Gemini API key not found".into()),
+        Err(error) => Err(format!("could not read the Gemini API key: {error}")),
+    }
+}
+
+#[cfg(windows)]
+fn save_gemini_api_key(key: &str) -> Result<(), String> {
+    if key.contains(['\r', '\n']) {
+        return Err("Gemini API key contains an invalid line break".into());
+    }
+    gemini_entry()?
+        .set_password(key)
+        .map_err(|error| format!("could not save the Gemini API key: {error}"))
+}
+
+#[cfg(not(windows))]
 pub(crate) fn gemini_api_key() -> Result<String, String> {
     let output = Command::new("/usr/bin/security")
         .args([
@@ -277,6 +307,7 @@ pub(crate) fn gemini_api_key() -> Result<String, String> {
     }
 }
 
+#[cfg(not(windows))]
 fn save_gemini_api_key(key: &str) -> Result<(), String> {
     let key = security_interactive_argument(key)?;
     let command = format!(
@@ -302,6 +333,7 @@ fn save_gemini_api_key(key: &str) -> Result<(), String> {
         .ok_or_else(|| "macOS Keychain did not save the Gemini API key".into())
 }
 
+#[cfg(not(windows))]
 fn security_interactive_argument(value: &str) -> Result<String, String> {
     if value.contains(['\r', '\n']) {
         return Err("Gemini API key contains an invalid line break".into());
@@ -332,9 +364,9 @@ fn cursor_auth_status(kind: AgentKind) -> (Option<bool>, Option<String>) {
     }
 }
 
-/// Login children still running at app exit, killed by process group like
-/// every other child the app spawns.
-pub struct Logins(Mutex<Vec<i32>>);
+/// Login children still running at app exit, killed as trees like every
+/// other child the app spawns.
+pub struct Logins(Mutex<Vec<crate::proc::ProcessTree>>);
 
 impl Logins {
     pub fn new() -> Self {
@@ -342,10 +374,8 @@ impl Logins {
     }
 
     pub fn shutdown(&self) {
-        for pgid in self.0.lock().unwrap().drain(..) {
-            unsafe {
-                libc::killpg(pgid, libc::SIGTERM);
-            }
+        for tree in self.0.lock().unwrap().drain(..) {
+            tree.terminate();
         }
     }
 }
@@ -393,9 +423,8 @@ pub async fn agent_login(
         AgentKind::Cursor | AgentKind::Grok => args = vec!["login".into()],
         AgentKind::Gemini => unreachable!(),
     }
-    let (pgid_tx, pgid_rx) = std::sync::mpsc::channel::<i32>();
+    let (tree_tx, tree_rx) = std::sync::mpsc::channel::<crate::proc::ProcessTree>();
     let done = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        use std::os::unix::process::CommandExt;
         let mut command = Command::new(program);
         if let Some(path) = adapter_path {
             command.env("PATH", path);
@@ -403,20 +432,22 @@ pub async fn agent_login(
         if let Some(cli) = codex_cli {
             command.env("CODEX_PATH", cli);
         }
-        let mut child = command
+        command
             .args(&args)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .process_group(0)
+            .stderr(std::process::Stdio::piped());
+        crate::proc::configure(&mut command);
+        let mut child = command
             .spawn()
             .map_err(|e| format!("could not start the sign-in: {e}"))?;
-        let pgid = child.id() as i32;
-        let _ = pgid_tx.send(pgid);
+        let pid = child.id();
+        let tree = crate::proc::ProcessTree::attach(&child);
+        let _ = tree_tx.send(tree.clone());
         let handle = app.state::<Logins>();
-        handle.0.lock().unwrap().push(pgid);
+        handle.0.lock().unwrap().push(tree);
         let status = child.wait();
-        handle.0.lock().unwrap().retain(|p| *p != pgid);
+        handle.0.lock().unwrap().retain(|t| !t.same_child(pid));
         let status = status.map_err(|e| format!("sign-in failed: {e}"))?;
         if status.success() {
             Ok(())
@@ -431,10 +462,8 @@ pub async fn agent_login(
     match tokio::time::timeout(Duration::from_secs(600), done).await {
         Ok(joined) => joined.map_err(|e| e.to_string())?,
         Err(_) => {
-            if let Ok(pgid) = pgid_rx.try_recv() {
-                unsafe {
-                    libc::killpg(pgid, libc::SIGTERM);
-                }
+            if let Ok(tree) = tree_rx.try_recv() {
+                tree.terminate();
             }
             Err("The sign-in timed out. Try again.".into())
         }
@@ -445,6 +474,7 @@ pub async fn agent_login(
 mod tests {
     use super::AgentKind;
 
+    #[cfg(not(windows))]
     #[test]
     fn keychain_input_quotes_the_key_as_one_interactive_argument() {
         assert_eq!(
@@ -468,7 +498,33 @@ mod tests {
     fn each_agent_is_adapter_hosted_or_native() {
         for agent in super::ALL {
             assert_eq!(agent.adapter().is_some(), agent.native_command().is_none());
-            assert_eq!(agent.adapter().is_some(), agent.adapter_bin().is_some());
+        }
+    }
+
+    /// The adapter entry scripts env.rs names must be the same files npm's
+    /// lock says each package's bin points at, or a version bump that moves
+    /// an entry would break every chat spawn silently.
+    #[test]
+    fn adapter_scripts_match_the_lock_bin_entries() {
+        let lock: serde_json::Value =
+            serde_json::from_str(include_str!("../../adapter-runtime/package-lock.json")).unwrap();
+        let paths = crate::env::Paths::new(std::path::PathBuf::from("scratch"));
+        for agent in super::ALL {
+            let Some(adapter) = agent.adapter() else {
+                continue;
+            };
+            let (package, _) = adapter.rsplit_once('@').unwrap();
+            let bins = lock["packages"][format!("node_modules/{package}")]["bin"]
+                .as_object()
+                .unwrap_or_else(|| panic!("no bin entries for {package}"));
+            let script = paths.adapter_script(agent);
+            let script = script.to_string_lossy().replace('\\', "/");
+            assert!(
+                bins.values()
+                    .filter_map(|entry| entry.as_str())
+                    .any(|entry| script.ends_with(&format!("{package}/{entry}"))),
+                "adapter_script for {package} does not match its lock bin: {script}"
+            );
         }
     }
 
@@ -500,5 +556,11 @@ mod tests {
             serde_json::from_str(include_str!("../../adapter-runtime/package-lock.json")).unwrap();
         let codex = &lock["packages"]["node_modules/@openai/codex"];
         assert!(codex["bin"]["codex"].is_string(), "no codex bin: {codex}");
+        // Windows points CODEX_PATH at the native exe inside the platform
+        // package (env.rs codex_cli), so the lock must still carry it.
+        for platform in ["win32-x64", "win32-arm64"] {
+            let native = &lock["packages"][format!("node_modules/@openai/codex-{platform}")];
+            assert!(native.is_object(), "no @openai/codex-{platform} in the lock");
+        }
     }
 }

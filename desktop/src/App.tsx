@@ -24,6 +24,7 @@ import Logo from "./Logo";
 import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
 import { createPartRecovery } from "./partRecovery";
+import { isWindows } from "./platform";
 import Setup from "./Setup";
 import Settings from "./Settings";
 import "./App.css";
@@ -336,34 +337,37 @@ function App() {
     }
   }, [updating]);
 
-  // The macOS "Check for Updates…" item. The menu lives in Rust and the
-  // update state lives here, so the click arrives as an event; unlike the
-  // timed checks, this one answers even when there is nothing to install.
-  useEffect(() => {
-    const unlisten = listen("menu:check-updates", async () => {
-      // The dev build never checks, so saying "newest version" would be a lie.
-      if (!import.meta.env.PROD) return;
-      try {
-        const next = await findUpdate();
-        if (!next) {
-          await message("You're on the newest version.", { title: "nurb" });
-        } else if (
-          await ask(`nurb ${next.version} is ready to install.`, {
-            title: "nurb",
-            okLabel: "Restart & Update",
-            cancelLabel: "Later",
-          })
-        ) {
-          await installUpdate();
-        }
-      } catch (e) {
-        setError(String(e));
+  // The user-initiated check: the macOS "Check for Updates…" menu item and
+  // the about box's button on every platform (Windows has no app menu).
+  // Unlike the timed checks, this one answers even when there is nothing to
+  // install.
+  const checkForUpdates = useCallback(async () => {
+    // The dev build never checks, so saying "newest version" would be a lie.
+    if (!import.meta.env.PROD) return;
+    try {
+      const next = await findUpdate();
+      if (!next) {
+        await message("You're on the newest version.", { title: "nurb" });
+      } else if (
+        await ask(`nurb ${next.version} is ready to install.`, {
+          title: "nurb",
+          okLabel: "Restart & Update",
+          cancelLabel: "Later",
+        })
+      ) {
+        await installUpdate();
       }
-    });
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [findUpdate, installUpdate]);
+
+  useEffect(() => {
+    const unlisten = listen("menu:check-updates", checkForUpdates);
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [findUpdate, installUpdate]);
+  }, [checkForUpdates]);
 
   // Two things the embedded viewer cannot do for itself. It forwards mousedowns
   // from its own top strip (the titlebar area lives inside the iframe, out of
@@ -381,7 +385,11 @@ function App() {
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(event.origin)) return;
-      if (event.data === "nurb:drag") getCurrentWindow().startDragging().catch(() => {});
+      // The drag forward exists for the macOS overlay titlebar; Windows has a
+      // real one, and a drag from the viewer's top strip should not move the
+      // window there.
+      if (event.data === "nurb:drag" && !isWindows)
+        getCurrentWindow().startDragging().catch(() => {});
       if (event.data?.type === "nurb:saved" && typeof event.data.path === "string")
         revealItemInDir(event.data.path).catch(() => {});
       // The viewer's variant pin: the sliders started from a variant and may have
@@ -1315,6 +1323,7 @@ function App() {
           osVersion={about.osVersion}
           arch={about.arch}
           onClose={() => setShowAbout(false)}
+          onCheckUpdates={checkForUpdates}
         />
       )}
       {showAgentsHelp && (

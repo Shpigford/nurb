@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Stdio};
+
+use crate::proc::ProcessTree;
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -13,6 +14,11 @@ const DEFAULT_PORT: u16 = 7373;
 // idle machine and stretched past two minutes on a loaded one (issue #202), so the
 // deadline leaves room for a busy machine rather than killing a nearly-ready server.
 const READY_TIMEOUT: Duration = Duration::from_secs(300);
+// What the engine exits with after upgrading itself on Windows, where it
+// cannot exec in place; the twin constant lives in src/nurb/server.py. The
+// supervisor answers by relaunching it on the same port, so the viewer's
+// reconnect loop lands on the new version just as it does on macOS.
+const RESTART_EXIT_CODE: i32 = 42;
 
 pub struct Supervisor {
     state: Mutex<SupervisorState>,
@@ -37,6 +43,7 @@ struct ProjectServer {
 
 struct ManagedChild {
     process: Child,
+    tree: ProcessTree,
     stopped: bool,
 }
 
@@ -257,20 +264,61 @@ fn spawn_server(
         .current_dir(project)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        // Its own process group, so killing it takes the whole uv -> python
-        // tree with it rather than orphaning the server.
-        .process_group(0);
+        .stderr(Stdio::inherit());
+    // Killable as a tree, so stopping it takes the whole uv -> python chain
+    // with it rather than orphaning the server.
+    crate::proc::configure(&mut command);
     let process = command
         .spawn()
         .map_err(|e| format!("could not start nurb dev: {e}"))?;
-    Ok(Arc::new(ProjectServer {
+    let tree = ProcessTree::attach_owned(&process);
+    let server = Arc::new(ProjectServer {
         child: Mutex::new(ManagedChild {
             process,
+            tree,
             stopped: false,
         }),
         port,
-    }))
+    });
+    monitor_restarts(Arc::clone(&server), project.to_path_buf(), launcher.clone());
+    Ok(server)
+}
+
+/// Relaunch a server that exited with the restart code (see RESTART_EXIT_CODE)
+/// on its own port, and keep watching the replacement. Any other exit is left
+/// alone: a deliberate stop set `stopped`, and a crash stays visible until the
+/// next open respawns it.
+fn monitor_restarts(server: Arc<ProjectServer>, project: PathBuf, launcher: crate::env::Launcher) {
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(1));
+        let mut child = server.child.lock().unwrap();
+        if child.stopped {
+            return;
+        }
+        match child.process.try_wait() {
+            Ok(Some(status)) if status.code() == Some(RESTART_EXIT_CODE) => {
+                let mut command = launcher.nurb();
+                command
+                    .args(["dev", "--port", &server.port.to_string()])
+                    .current_dir(&project)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::inherit());
+                crate::proc::configure(&mut command);
+                let Ok(process) = command.spawn() else { return };
+                child.tree = ProcessTree::attach_owned(&process);
+                child.process = process;
+                // Drain the replacement's stdout so the pipe never fills; the
+                // ready signal goes nowhere because nobody is waiting on it.
+                if let Some(stdout) = child.process.stdout.take() {
+                    let (tx, _rx) = mpsc::channel();
+                    drain_stdout(stdout, server.port, tx);
+                }
+            }
+            Ok(Some(_)) => return,
+            _ => {}
+        }
+    });
 }
 
 enum NotReady {
@@ -343,10 +391,7 @@ fn kill_tree(server: &ProjectServer) {
     if child.stopped {
         return;
     }
-    let pgid = child.process.id() as i32;
-    unsafe {
-        libc::killpg(pgid, libc::SIGTERM);
-    }
+    child.tree.terminate();
     for _ in 0..20 {
         if matches!(child.process.try_wait(), Ok(Some(_))) {
             child.stopped = true;
@@ -354,9 +399,7 @@ fn kill_tree(server: &ProjectServer) {
         }
         thread::sleep(Duration::from_millis(100));
     }
-    unsafe {
-        libc::killpg(pgid, libc::SIGKILL);
-    }
+    child.tree.kill();
     let _ = child.process.wait();
     child.stopped = true;
 }
@@ -377,17 +420,26 @@ mod tests {
 
     #[test]
     fn shutdown_kills_a_server_that_is_still_starting() {
-        let process = Command::new("sh")
-            .args(["-c", "sleep 60"])
+        let mut command = if cfg!(windows) {
+            let mut command = Command::new("cmd");
+            command.args(["/c", "ping -n 60 127.0.0.1 > NUL"]);
+            command
+        } else {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 60"]);
+            command
+        };
+        command
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::null());
+        crate::proc::configure(&mut command);
+        let process = command.spawn().unwrap();
+        let tree = ProcessTree::attach(&process);
         let server = Arc::new(ProjectServer {
             child: Mutex::new(ManagedChild {
                 process,
+                tree,
                 stopped: false,
             }),
             port: DEFAULT_PORT,

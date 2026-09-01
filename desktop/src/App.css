@@ -123,13 +123,18 @@ textarea {
   overflow: hidden;
 }
 
-/* The window titlebar is an overlay: this empty strip hosts the traffic
-   lights and doubles as the drag region. The brand lives in the dock icon
-   and the setup screen, not the chrome. */
+/* The window titlebar is an overlay on macOS: this empty strip hosts the
+   traffic lights and doubles as the drag region. The brand lives in the dock
+   icon and the setup screen, not the chrome. Windows has a real titlebar, so
+   the strip collapses there. */
 .rail-title {
   flex: none;
   height: 36px;
   margin: 0 -12px;
+}
+
+body[data-platform="windows"] .rail-title {
+  height: 0;
 }
 
 .rail-heading {
@@ -1035,6 +1040,38 @@ textarea {
   color: var(--accent);
 }
 
+/* Refusing has to look like its own answer. Without this the deny buttons
+   fall through to the neutral base and read as an unlabelled third option. */
+.chat-permission-button.reject_once,
+.chat-permission-button.reject_always {
+  border-color: rgba(248, 113, 113, 0.35);
+  color: var(--bad);
+}
+
+.chat-permission-button.reject_once:hover,
+.chat-permission-button.reject_always:hover {
+  background: rgba(248, 113, 113, 0.1);
+  color: var(--bad);
+}
+
+/* The command or path the dialog is asking about, in the tool card's shape
+   because it is the same raw material serving the same purpose. */
+.chat-permission-detail {
+  margin: 0 0 8px;
+  font: 11px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  color: var(--text);
+}
+
+.chat-permission-note {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--amber);
+}
+
 /* One container in the Claude/ChatGPT composer shape: chips, then the bare
    textarea, then a control row, all inside the same bordered box. */
 .chat-composer {
@@ -1163,6 +1200,23 @@ textarea {
 }
 
 .chat-config-button:hover {
+  color: var(--text);
+  background: var(--active);
+}
+
+.chat-approval {
+  font: inherit;
+  font-size: 11px;
+  color: var(--dim);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-approval:hover {
   color: var(--text);
   background: var(--active);
 }

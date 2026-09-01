@@ -2,13 +2,16 @@
 //! (Claude Code or Codex, see agents.rs), spoken to over stdio JSON-RPC,
 //! streaming updates to the webview through a Tauri ipc channel.
 
+mod approvals;
 mod events;
 mod policy;
 mod sandbox;
 
+pub use approvals::Approvals;
+
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -111,7 +114,7 @@ struct ChatSession {
     /// model rebuilds the effort list, and `session/set_model` does not return
     /// the new menus.
     grok_models: Vec<GrokModelMenu>,
-    pgid: i32,
+    tree: crate::proc::ProcessTree,
     /// Dropped (with the whole entry) to end the connection task, which kills
     /// the adapter's process group.
     _close: oneshot::Sender<()>,
@@ -129,9 +132,7 @@ impl Chats {
     pub fn shutdown(&self) {
         let sessions = std::mem::take(&mut *self.sessions.lock().unwrap());
         for session in sessions.values() {
-            unsafe {
-                libc::killpg(session.pgid, libc::SIGTERM);
-            }
+            session.tree.terminate();
         }
     }
 }
@@ -290,7 +291,7 @@ async fn agent_sessions(
     let (stdin, stdout, stderr, child) = agent
         .spawn_process()
         .map_err(|error| friendly(kind, error))?;
-    let pgid = child.id() as i32;
+    let tree = crate::proc::ProcessTree::attach_pid_owned(child.id());
     drain_stderr(kind, stderr);
     let listed = tokio::time::timeout(
         Duration::from_secs(60),
@@ -348,7 +349,7 @@ async fn agent_sessions(
             ),
     )
     .await;
-    reap(pgid, child).await;
+    reap(tree, child).await;
     listed
         .map_err(|_| "timed out listing conversations".to_string())?
         .map_err(|error| friendly(kind, error))
@@ -474,7 +475,7 @@ fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
     let Some(mime) = mime else {
         return Ok(ContentBlock::ResourceLink(ResourceLink::new(
             name,
-            format!("file://{}", path.display()),
+            file_uri(path),
         )));
     };
     let data = std::fs::read(path).map_err(|e| format!("cannot read {name}: {e}"))?;
@@ -486,6 +487,18 @@ fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
         base64::engine::general_purpose::STANDARD.encode(data),
         mime,
     )))
+}
+
+/// A file:// URI the agent can read back. Windows paths need their
+/// backslashes folded and an extra slash before the drive letter
+/// (file:///C:/...); unix paths already start with the slash.
+fn file_uri(path: &std::path::Path) -> String {
+    let text = path.display().to_string().replace('\\', "/");
+    if text.starts_with('/') {
+        format!("file://{text}")
+    } else {
+        format!("file:///{text}")
+    }
 }
 
 #[tauri::command]
@@ -527,6 +540,37 @@ pub fn respond_permission(
         SelectedPermissionOutcome::new(option_id),
     ));
     Ok(())
+}
+
+/// What the chat column needs to describe its own permission posture.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalState {
+    /// Whether the OS confines agent commands on this machine, straight from
+    /// sandbox.rs. The UI's copy turns on this rather than on a user-agent
+    /// sniff, so the shell cannot disagree with the kernel.
+    confined: bool,
+    /// Whether the app may answer permission requests itself in this project.
+    auto: bool,
+}
+
+#[tauri::command]
+pub fn approval_state(app: tauri::AppHandle, path: String) -> ApprovalState {
+    use tauri::Manager;
+    let approvals = app.state::<Approvals>();
+    ApprovalState {
+        confined: approvals.confined(),
+        auto: approvals.auto(Path::new(&path)),
+    }
+}
+
+#[tauri::command]
+pub fn set_project_auto(app: tauri::AppHandle, path: String, auto: bool) {
+    use tauri::{Emitter, Manager};
+    app.state::<Approvals>().set(Path::new(&path), auto);
+    // Every chat column open on this project mirrors the flag, the way the
+    // picker lists mirror agent-config.
+    let _ = app.emit("project-approvals", ());
 }
 
 /// Grok's per-model effort menu, taken from initialize `_meta.modelState`.
@@ -1189,7 +1233,7 @@ async fn run_chat(
             return;
         }
     };
-    let pgid = child.id() as i32;
+    let tree = crate::proc::ProcessTree::attach_pid_owned(child.id());
     drain_stderr(kind, stderr);
 
     let counter = AtomicU32::new(1);
@@ -1201,12 +1245,19 @@ async fn run_chat(
     let notify_channel = channel.clone();
     let ask_channel = channel.clone();
     let ask_pending = pending.clone();
+    // The handler cannot reach these through Chats, which is not populated
+    // until after the connection is up, and it cannot snapshot the flag
+    // either: the user flips it mid-turn by answering a live dialog.
+    let ask_approvals = app.state::<Approvals>().inner().clone();
+    let ask_project = project.clone();
     let live_session = Arc::new(Mutex::new(None));
+    let ask_session = Arc::clone(&live_session);
     let connected_session = Arc::clone(&live_session);
     let chat_app = app.clone();
     let chat_project = project.clone();
     let chat_pending = pending.clone();
     let chat_channel = channel.clone();
+    let session_tree = tree.clone();
     let mut ready_tx = Some(ready_tx);
     let mut close_tx = Some(close_tx);
 
@@ -1225,10 +1276,14 @@ async fn run_chat(
         )
         .on_receive_request(
             async move |request: RequestPermissionRequest, responder, cx| {
-                // The app answers yes for the user; the OS sandbox the
-                // adapter runs under is the guard (see sandbox.rs). Only a
-                // request offering no allow-once option reaches a dialog.
-                if let Some(option) = policy::auto_allow(&request) {
+                // The app answers yes for the user only where something other
+                // than the user is keeping this turn honest: the OS sandbox
+                // the adapter runs under (sandbox.rs), or the standing yes the
+                // user gave this project (approvals.rs). Reads go through
+                // either way, because the sandbox profile never constrained
+                // them. Everything else reaches a dialog.
+                let guarded = ask_approvals.auto(&ask_project);
+                if let Some(option) = policy::auto_allow(&request, guarded) {
                     let _ = writeln!(
                         std::io::stderr(),
                         "[acp:{}] auto-allowed: {}",
@@ -1237,6 +1292,15 @@ async fn run_chat(
                     );
                     return responder.respond(RequestPermissionResponse::new(
                         RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option)),
+                    ));
+                }
+                // The chat is registered one line after the session id lands,
+                // both before the app is told the chat is ready, so no id here
+                // means nothing on screen could answer a dialog yet. Refusing
+                // beats hanging the adapter on a prompt nobody can see.
+                if ask_session.lock().unwrap().is_none() {
+                    return responder.respond(RequestPermissionResponse::new(
+                        RequestPermissionOutcome::Cancelled,
                     ));
                 }
                 // What the policy saw, for tuning it against real requests.
@@ -1259,6 +1323,8 @@ async fn run_chat(
                 let ask = ChatEvent::PermissionRequest {
                     id,
                     title: permission_title(kind.label(), &request),
+                    kind: fields.kind.as_ref().map(wire_string),
+                    detail: events::permission_detail(&request),
                     options: request.options.iter().map(permission_choice).collect(),
                 };
                 events::mirror(&ask);
@@ -1408,7 +1474,7 @@ async fn run_chat(
                                     channel: chat_channel,
                                     config: Mutex::new(config),
                                     grok_models: menus,
-                                    pgid,
+                                    tree: session_tree.clone(),
                                     _close: close_tx,
                                 },
                             );
@@ -1440,7 +1506,7 @@ async fn run_chat(
         .await;
 
     // Whichever way the connection ended, take the process tree with it.
-    reap(pgid, child).await;
+    reap(tree, child).await;
 
     if let Err(error) = &result {
         let _ = writeln!(
@@ -1479,19 +1545,15 @@ pub(crate) fn session_to_remove(
     }
 }
 
-/// SIGTERM the adapter's process group and reap the child, escalating to
-/// SIGKILL if it lingers.
-async fn reap(pgid: i32, mut child: async_process::Child) {
-    unsafe {
-        libc::killpg(pgid, libc::SIGTERM);
-    }
+/// Terminate the adapter's process tree and reap the child, escalating to a
+/// hard kill if it lingers.
+async fn reap(tree: crate::proc::ProcessTree, mut child: async_process::Child) {
+    tree.terminate();
     if tokio::time::timeout(Duration::from_secs(5), child.status())
         .await
         .is_err()
     {
-        unsafe {
-            libc::killpg(pgid, libc::SIGKILL);
-        }
+        tree.kill();
         let _ = child.status().await;
     }
 }
@@ -1522,7 +1584,7 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
 fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
     if error.code == ErrorCode::AuthRequired || error.message.contains("Failed to authenticate") {
         format!(
-            "auth_required: {} is not signed in on this Mac",
+            "auth_required: {} is not signed in on this computer",
             kind.label()
         )
     } else {

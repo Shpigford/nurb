@@ -8,7 +8,6 @@
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -21,6 +20,7 @@ use tauri::Manager;
 
 use crate::agents;
 use crate::env::{uv_sidecar, Launcher, Paths, NODE_VERSION};
+use crate::proc::ProcessTree;
 
 const PYTHON_VERSION: &str = "3.13";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
@@ -31,15 +31,28 @@ const NATIVE_CLI_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const NPM_CI_ARGS: &[&str] = &["ci", "--include=optional", "--no-fund", "--no-audit"];
 static PROBE_ID: AtomicU64 = AtomicU64::new(0);
 
-/// Published SHASUMS256 entries for the pinned Node tarballs.
-const NODE_SHA256: &[(&str, &str)] = &[
+/// Published SHASUMS256 entries for the pinned Node archives, keyed by the
+/// values std::env::consts reports at runtime.
+const NODE_SHA256: &[(&str, &str, &str)] = &[
     (
+        "macos",
         "aarch64",
         "3f1cf157479c1480352083105e13faf9d008ede98e7e157746b6df940d197b94",
     ),
     (
+        "macos",
         "x86_64",
         "d35e95230f46f6f0751df497c56622c6735e05d5e1fb1630996a005b9d328fe4",
+    ),
+    (
+        "windows",
+        "aarch64",
+        "8502f4a50b458d4cc38ed8f2001556c2cd239d464920f74017926ccb1e1c157f",
+    ),
+    (
+        "windows",
+        "x86_64",
+        "57f71ab3652e797d84acddc79c81cc9ff1c6ddb2a1974cdb83f00fee9bff4c73",
     ),
 ];
 
@@ -68,7 +81,7 @@ pub struct Provisioner {
     /// Single flight: React StrictMode double-invokes the setup effect, and
     /// the second call must wait out the first, then see a healthy install.
     run: Mutex<()>,
-    pgid: Mutex<Option<i32>>,
+    tree: Mutex<Option<ProcessTree>>,
     shutting_down: AtomicBool,
 }
 
@@ -76,17 +89,15 @@ impl Provisioner {
     pub fn new() -> Self {
         Self {
             run: Mutex::new(()),
-            pgid: Mutex::new(None),
+            tree: Mutex::new(None),
             shutting_down: AtomicBool::new(false),
         }
     }
 
     pub fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
-        if let Some(pgid) = *self.pgid.lock().unwrap() {
-            unsafe {
-                libc::killpg(pgid, libc::SIGTERM);
-            }
+        if let Some(tree) = self.tree.lock().unwrap().as_ref() {
+            tree.terminate();
         }
     }
 }
@@ -216,8 +227,17 @@ fn chat_runtime_check(paths: &Paths) -> Result<(), String> {
     probe_output(claude, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
         .map_err(|why| format!("the Claude CLI check failed: {why}"))?;
 
-    let mut codex = Command::new(paths.node_bin());
-    codex.arg(paths.codex_cli()).arg("--version");
+    // On unix the .bin entry is a shebang script probed through the bundled
+    // node so PATH stays out of it; on Windows codex_cli() is the native exe
+    // and runs on its own.
+    let mut codex = if cfg!(windows) {
+        Command::new(paths.codex_cli())
+    } else {
+        let mut codex = Command::new(paths.node_bin());
+        codex.arg(paths.codex_cli());
+        codex
+    };
+    codex.arg("--version");
     probe_output(codex, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
         .map_err(|why| format!("the Codex CLI check failed: {why}"))?;
     Ok(())
@@ -272,8 +292,8 @@ fn probe_output(
     command
         .stdin(Stdio::null())
         .stdout(Stdio::from(output))
-        .stderr(Stdio::from(errors))
-        .process_group(0);
+        .stderr(Stdio::from(errors));
+    crate::proc::configure(&mut command);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(e) => {
@@ -282,7 +302,7 @@ fn probe_output(
             return Err(format!("it did not start: {e}"));
         }
     };
-    let pgid = child.id() as i32;
+    let tree = ProcessTree::attach_owned(&child);
     let deadline = Instant::now() + timeout;
     // Ok(()) ran clean, Err(Some(status)) exited badly, Err(None) timed out.
     let result: Result<(), Option<std::process::ExitStatus>> = loop {
@@ -293,9 +313,7 @@ fn probe_output(
                 std::thread::sleep(Duration::from_millis(25));
             }
             Ok(None) | Err(_) => {
-                unsafe {
-                    libc::killpg(pgid, libc::SIGKILL);
-                }
+                tree.kill();
                 let _ = child.wait();
                 break Err(None);
             }
@@ -391,14 +409,7 @@ pub fn about_info(app: tauri::AppHandle) -> Result<AboutInfo, String> {
     let occt_version = std::fs::read_to_string(dir.join("requirements.lock"))
         .ok()
         .and_then(|lock| occt_version(&lock));
-    let os_version = std::process::Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|v| v.trim().to_string())
-        .unwrap_or_else(|| "unknown".into());
+    let os_version = os_version().unwrap_or_else(|| "unknown".into());
     Ok(AboutInfo {
         app_version,
         nurb_version,
@@ -406,6 +417,55 @@ pub fn about_info(app: tauri::AppHandle) -> Result<AboutInfo, String> {
         os_version,
         arch: std::env::consts::ARCH.into(),
     })
+}
+
+/// The OS tool directory the platform promises: /usr/bin on macOS, System32
+/// on Windows (which has shipped curl and bsdtar since Windows 10 1803).
+fn system_tool(name: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()))
+            .join("System32")
+            .join(format!("{name}.exe"))
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/usr/bin").join(name)
+    }
+}
+
+fn os_version() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("sw_vers");
+        command.arg("-productVersion");
+        command
+    };
+    #[cfg(windows)]
+    let mut command = {
+        // `ver` prints "Microsoft Windows [Version 10.0.26200.1234]"; the
+        // number alone is the useful part for bug reports.
+        let mut command = std::process::Command::new(system_tool("cmd"));
+        command.args(["/c", "ver"]);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("uname");
+        command.arg("-r");
+        command
+    };
+    crate::proc::configure(&mut command);
+    let out = command.output().ok().filter(|out| out.status.success())?;
+    let text = String::from_utf8(out.stdout).ok()?;
+    let version = match (text.find('['), text.find(']')) {
+        (Some(open), Some(close)) if open < close => text[open + 1..close]
+            .trim_start_matches("Version")
+            .trim()
+            .to_string(),
+        _ => text.trim().to_string(),
+    };
+    (!version.is_empty()).then_some(version)
 }
 
 #[tauri::command]
@@ -534,25 +594,39 @@ fn provision_chat(
     channel: &Channel<ProvisionEvent>,
 ) -> Result<(), String> {
     stage(channel, "chat");
-    let (arch, sha) = NODE_SHA256
+    let (_, _, sha) = NODE_SHA256
         .iter()
-        .find(|(arch, _)| *arch == std::env::consts::ARCH)
-        .ok_or_else(|| format!("unsupported architecture: {}", std::env::consts::ARCH))?;
-    let arch = if *arch == "aarch64" { "arm64" } else { "x64" };
-    let tarball_name = format!("node-{NODE_VERSION}-darwin-{arch}.tar.xz");
-    let tarball = paths.data().join(&tarball_name);
-    let mut download = Command::new("/usr/bin/curl");
+        .find(|(os, arch, _)| *os == std::env::consts::OS && *arch == std::env::consts::ARCH)
+        .ok_or_else(|| {
+            format!(
+                "unsupported platform: {}-{}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )
+        })?;
+    let arch = if std::env::consts::ARCH == "aarch64" {
+        "arm64"
+    } else {
+        "x64"
+    };
+    let archive_name = if cfg!(windows) {
+        format!("node-{NODE_VERSION}-win-{arch}.zip")
+    } else {
+        format!("node-{NODE_VERSION}-darwin-{arch}.tar.xz")
+    };
+    let archive = paths.data().join(&archive_name);
+    let mut download = Command::new(system_tool("curl"));
     download
         .args(["-fSL", "--retry", "3", "-o"])
-        .arg(&tarball)
+        .arg(&archive)
         .arg(format!(
-            "https://nodejs.org/dist/{NODE_VERSION}/{tarball_name}"
+            "https://nodejs.org/dist/{NODE_VERSION}/{archive_name}"
         ));
     run_step(provisioner, channel, download, "the chat runtime download")?;
     let bytes =
-        std::fs::read(&tarball).map_err(|e| format!("could not read {tarball_name}: {e}"))?;
+        std::fs::read(&archive).map_err(|e| format!("could not read {archive_name}: {e}"))?;
     if format!("{:x}", Sha256::digest(&bytes)) != *sha {
-        let _ = std::fs::remove_file(&tarball);
+        let _ = std::fs::remove_file(&archive);
         return Err("the chat runtime download did not match its checksum".into());
     }
     if paths.node_dir().exists() {
@@ -560,15 +634,17 @@ fn provision_chat(
             .map_err(|e| format!("could not clear the old runtime: {e}"))?;
     }
     std::fs::create_dir_all(paths.node_dir()).map_err(|e| e.to_string())?;
-    let mut extract = Command::new("/usr/bin/tar");
+    // Both platforms ship bsdtar, which detects the compression (and the zip)
+    // on its own and honors --strip-components for either archive shape.
+    let mut extract = Command::new(system_tool("tar"));
     extract
-        .arg("-xJf")
-        .arg(&tarball)
+        .arg("-xf")
+        .arg(&archive)
         .arg("-C")
         .arg(paths.node_dir())
         .args(["--strip-components", "1"]);
     run_step(provisioner, channel, extract, "the chat runtime unpack")?;
-    let _ = std::fs::remove_file(&tarball);
+    let _ = std::fs::remove_file(&archive);
 
     if paths.adapters().exists() {
         std::fs::remove_dir_all(paths.adapters())
@@ -619,19 +695,17 @@ fn run_step(
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
+        .stderr(Stdio::piped());
+    crate::proc::configure(&mut command);
     let mut child = command
         .spawn()
         .map_err(|e| format!("could not start {what}: {e}"))?;
-    let pgid = child.id() as i32;
-    *provisioner.pgid.lock().unwrap() = Some(pgid);
+    let tree = ProcessTree::attach_owned(&child);
+    *provisioner.tree.lock().unwrap() = Some(tree.clone());
     // A shutdown can land between the check above and the spawn; now that the
-    // pgid is published, re-check so that window cannot leak the child.
+    // tree is published, re-check so that window cannot leak the child.
     if provisioner.shutting_down.load(Ordering::SeqCst) {
-        unsafe {
-            libc::killpg(pgid, libc::SIGTERM);
-        }
+        tree.terminate();
     }
     let tail = Arc::new(Mutex::new(VecDeque::<String>::new()));
     let readers = [
@@ -651,7 +725,7 @@ fn run_step(
         }),
     ];
     let status = child.wait();
-    *provisioner.pgid.lock().unwrap() = None;
+    *provisioner.tree.lock().unwrap() = None;
     for reader in readers.into_iter().flatten() {
         let _ = reader.join();
     }
@@ -692,15 +766,18 @@ fn stream_lines(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    #[cfg(unix)]
     use std::process::Command;
+    #[cfg(unix)]
     use std::time::Duration;
 
-    use super::{
-        chat_runtime_check, chat_runtime_ok, file_hash, occt_version, probe_version, wheel_version,
-        NPM_CI_ARGS, PROBE_ID,
-    };
-    use crate::env::{Paths, NODE_VERSION};
+    #[cfg(unix)]
+    use super::{chat_runtime_check, chat_runtime_ok, probe_version, NODE_VERSION, PROBE_ID};
+    use super::{file_hash, occt_version, wheel_version, NPM_CI_ARGS};
+    #[cfg(unix)]
+    use crate::env::Paths;
 
     #[test]
     fn wheel_filename_yields_the_bundled_version() {
@@ -733,6 +810,39 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn health_probe_requires_the_expected_version_and_cannot_hang() {
+        use super::probe_version;
+        use std::process::Command;
+        use std::time::Duration;
+        let dir = std::env::temp_dir();
+        let shell = |script: &str| {
+            let mut command = Command::new("cmd");
+            command.args(["/c", script]);
+            command
+        };
+
+        let good = shell("echo adapter 1.2.3");
+        assert!(probe_version(good, &dir, "1.2.3", Duration::from_secs(5)).is_ok());
+
+        let wrong = shell("echo 9.9.9");
+        let mismatch = probe_version(wrong, &dir, "1.2.3", Duration::from_secs(5));
+        assert_eq!(mismatch.unwrap_err(), "it reported 9.9.9 instead of 1.2.3");
+
+        let failing = shell("echo no such device& exit 3");
+        let failed = probe_version(failing, &dir, "1.2.3", Duration::from_secs(5));
+        assert_eq!(
+            failed.unwrap_err(),
+            "it exited with status 3 saying \"no such device\""
+        );
+
+        let hung = shell("ping -n 10 127.0.0.1 > NUL");
+        let timed_out = probe_version(hung, &dir, "1.2.3", Duration::from_millis(50));
+        assert_eq!(timed_out.unwrap_err(), "it did not finish within 0s");
+    }
+
+    #[cfg(unix)]
     #[test]
     fn health_probe_requires_the_expected_version_and_cannot_hang() {
         let dir = std::env::temp_dir();
@@ -777,6 +887,10 @@ mod tests {
             .any(|args| args == ["ci", "--include=optional"]));
     }
 
+    // The fake node here is a shell script, which Windows cannot execute
+    // under node.exe's name; the probe mechanics it rides on are covered by
+    // the Windows probe test above.
+    #[cfg(unix)]
     #[test]
     fn chat_health_exercises_the_native_agent_clis() {
         let dir = std::env::temp_dir().join(format!(
@@ -795,14 +909,14 @@ mod tests {
                 r#"#!/bin/sh
 case "$*" in
   "--version") echo "{NODE_VERSION}" ;;
-  *"claude-agent-acp --cli --version"*)
+  *"claude-agent-acp/dist/index.js --cli --version"*)
     [ ! -f "$0.missing-claude" ] || exit 1
     [ ! -f "$0.slow-claude" ] || sleep 3
     echo "2.1.220 (Claude Code)"
     ;;
-  *"claude-agent-acp --version"*) echo "claude-agent-acp 0.64.2" ;;
-  *"codex-acp --version"*) echo "codex-acp 1.1.9" ;;
-    *"gemini --version"*) echo "0.55.1" ;;
+  *"claude-agent-acp/dist/index.js --version"*) echo "claude-agent-acp 0.64.2" ;;
+  *"codex-acp/dist/index.js --version"*) echo "codex-acp 1.1.9" ;;
+  *"gemini.js --version"*) echo "0.55.1" ;;
   *"/codex --version"*)
     [ ! -f "$0.missing-codex" ] || exit 1
     echo "codex-cli 0.145.0"
@@ -814,9 +928,16 @@ esac
         )
         .unwrap();
         std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
-        for agent in ["claude-agent-acp", "codex-acp", "gemini", "codex"] {
-            std::fs::write(paths.adapters().join("node_modules/.bin").join(agent), b"").unwrap();
+        for kind in [
+            crate::agents::AgentKind::Claude,
+            crate::agents::AgentKind::Codex,
+            crate::agents::AgentKind::Gemini,
+        ] {
+            let script = paths.adapter_script(kind);
+            std::fs::create_dir_all(script.parent().unwrap()).unwrap();
+            std::fs::write(script, b"").unwrap();
         }
+        std::fs::write(paths.adapters().join("node_modules/.bin/codex"), b"").unwrap();
 
         assert!(chat_runtime_ok(&paths));
         let slow_claude = format!("{}.slow-claude", node.display());

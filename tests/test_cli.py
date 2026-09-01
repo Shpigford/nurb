@@ -524,7 +524,7 @@ def test_the_first_part_brings_the_launcher(tmp_path, monkeypatch):
     """Project birth is the only moment it appears on its own; deleting it sticks."""
     monkeypatch.chdir(tmp_path)
     cli.main(["new", "one"])
-    launcher = tmp_path / "viewer.command"
+    launcher = tmp_path / cli.LAUNCHER
     assert launcher.exists()
     launcher.unlink()
     cli.main(["new", "two"])
@@ -532,17 +532,22 @@ def test_the_first_part_brings_the_launcher(tmp_path, monkeypatch):
 
 
 def test_launcher_is_an_executable_that_runs_dev(tmp_path, monkeypatch):
-    """Double-clickable from Finder: executable, login shell, lands on `nurb dev --open`."""
+    """Double-clickable from Finder or Explorer: runnable, lands on `nurb dev --open`."""
     import os
+    import sys
 
     (tmp_path / "parts").mkdir()
     monkeypatch.chdir(tmp_path)
     cli.main(["launcher"])
-    file = tmp_path / "viewer.command"
-    text = file.read_text()
-    assert text.startswith("#!/bin/zsh -l\n")
+    file = tmp_path / cli.LAUNCHER
+    text = file.read_text(encoding="utf-8")
     assert "nurb dev --open" in text
-    assert os.access(file, os.X_OK)
+    if sys.platform == "win32":
+        assert file.suffix == ".cmd"
+        assert text.startswith("@echo off")
+    else:
+        assert text.startswith("#!/bin/zsh -l\n")
+        assert os.access(file, os.X_OK)
 
 
 def test_export_reads_the_projects_formats(tmp_path, monkeypatch):
@@ -799,6 +804,7 @@ def test_desktop_app_version_is_the_package_version():
 def test_skill_sync_rewrites_a_stale_copy_and_writes_the_shared_one_once(tmp_path, monkeypatch, capsys):
     """skills.sh symlinks every harness at one universal copy; sync must not report it twice."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     packaged = (pathlib.Path(cli.__file__).parent / "skill.md").read_text(encoding="utf-8")
     universal = tmp_path / ".agents" / "skills" / "nurb"
     universal.mkdir(parents=True)
@@ -816,6 +822,7 @@ def test_skill_sync_rewrites_a_stale_copy_and_writes_the_shared_one_once(tmp_pat
 
 def test_skill_sync_leaves_a_current_copy_alone(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     packaged = (pathlib.Path(cli.__file__).parent / "skill.md").read_text(encoding="utf-8")
     claude = tmp_path / ".claude" / "skills" / "nurb"
     claude.mkdir(parents=True)
@@ -826,6 +833,7 @@ def test_skill_sync_leaves_a_current_copy_alone(tmp_path, monkeypatch, capsys):
 
 def test_skill_sync_with_nothing_installed_points_at_the_installer(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     cli.main(["skill", "--sync"])
     assert "npx skills add shpigford/nurb --skill nurb" in capsys.readouterr().out
 

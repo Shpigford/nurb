@@ -15,6 +15,12 @@ import { IconChevronDown, IconMessagePlus, IconPaperclip } from "./Icons";
 import Markdown from "./Markdown";
 import { playChime, shouldPlayCompletionChime } from "./chime";
 import { AttachmentDraft, restoreDraftText } from "./chatDraft";
+import {
+  describe,
+  orderOptions,
+  permissionPrompt,
+  type PermissionOption,
+} from "./toolLanguage";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
@@ -30,12 +36,18 @@ type ChatEvent =
   | { type: "tool_call"; id: string; title: string; kind?: string; status: string; input?: string; output?: string }
   | { type: "tool_call_update"; id: string; title?: string; status?: string; input?: string; output?: string }
   | { type: "plan"; entries: PlanEntry[] }
-  | { type: "permission_request"; id: number; title: string; options: PermissionOption[] }
+  | {
+      type: "permission_request";
+      id: number;
+      title: string;
+      kind?: string;
+      detail?: string;
+      options: PermissionOption[];
+    }
   | { type: "permission_resolved"; id: number }
   | { type: "session_error"; message: string };
 
 type PlanEntry = { content: string; status: string };
-type PermissionOption = { optionId: string; name: string; kind: string };
 
 type Item =
   | { kind: "user"; text: string; files?: string[]; localId?: number }
@@ -45,7 +57,18 @@ type Item =
   | { kind: "plan"; entries: PlanEntry[] }
   | { kind: "note"; text: string };
 
-type Permission = { id: number; title: string; options: PermissionOption[] };
+type Permission = {
+  id: number;
+  title: string;
+  kind?: string;
+  detail?: string;
+  options: PermissionOption[];
+};
+
+// Mirrors ApprovalState in src-tauri/src/acp.rs. `confined` is the kernel's
+// answer, not a user-agent sniff, so the copy cannot contradict what is
+// actually protecting the user.
+type ApprovalState = { confined: boolean; auto: boolean };
 
 // Mirrors ConfigRow in src-tauri/src/prefs.rs: the model and effort selects,
 // as the agent itself describes them.
@@ -76,39 +99,6 @@ const TOOL_STATUS_LABEL: Record<string, string> = {
   failed: "failed",
 };
 
-// Tool titles arrive as developer-speak ("Edit parts/lid.py", "nurb check").
-// The app's audience is hobbyists, so cards and permission dialogs translate
-// what they can into plain activity language and fall back to the raw title,
-// which stays untouched in state and in the debug event log.
-const FILE_TITLE = /^(Read|Edit|Write)\s+(?:.*\/)?parts\/([A-Za-z0-9_]+)\.py$/;
-const NURB_TITLE = /^(?:uv run\s+)?nurb\s+([a-z]+)/;
-const FILE_VERBS: Record<string, [string, string]> = {
-  Read: ["looking at", "look at"],
-  Edit: ["editing", "edit"],
-  Write: ["creating", "create"],
-};
-const NURB_VERBS: Record<string, [string, string]> = {
-  build: ["building the part", "build the part"],
-  check: ["checking printability", "check printability"],
-  inspect: ["inspecting the part", "inspect the part"],
-  verify: ["double-checking the part", "double-check the part"],
-  compare: ["measuring against the original", "measure against the original"],
-  render: ["rendering a preview", "render a preview"],
-  export: ["exporting print files", "export print files"],
-  rules: ["reading the design rules", "read the design rules"],
-  api: ["checking the toolbox", "check the toolbox"],
-  card: ["updating the part's notes", "update the part's notes"],
-};
-const KIND_VERBS: Record<string, [string, string]> = {
-  read: ["reading project files", "read project files"],
-  edit: ["editing project files", "edit project files"],
-  delete: ["removing project files", "remove project files"],
-  search: ["searching the project", "search the project"],
-  execute: ["running a command", "run a command"],
-  fetch: ["looking something up", "look something up"],
-  think: ["thinking", "think"],
-};
-
 const basename = (path: string) => path.split("/").pop() ?? path;
 
 // The button's own label: the selected names, not the model ids, since those
@@ -117,17 +107,6 @@ function summarize(config: ConfigRow[]): string {
   return config
     .map((row) => row.options.find((o) => o.value === row.value)?.name ?? row.value)
     .join(" · ");
-}
-
-// mode 0 is the activity form for cards ("editing lid"); mode 1 the plain verb
-// form for permission dialogs ("edit lid").
-function describe(title: string, kind: string | undefined, mode: 0 | 1): string {
-  const file = title.match(FILE_TITLE);
-  if (file) return `${FILE_VERBS[file[1]][mode]} ${file[2]}`;
-  const nurb = title.match(NURB_TITLE);
-  if (nurb && NURB_VERBS[nurb[1]]) return NURB_VERBS[nurb[1]][mode];
-  if (kind && KIND_VERBS[kind]) return KIND_VERBS[kind][mode];
-  return title;
 }
 
 function Chat({
@@ -184,6 +163,7 @@ function Chat({
   const [authNeeded, setAuthNeeded] = useState<"none" | "sign-in" | "resume" | "resend">("none");
   const [signingIn, setSigningIn] = useState(false);
   const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [approval, setApproval] = useState<ApprovalState | null>(null);
   // Absolute paths; the Rust side reads them at send time.
   const [attachments, setAttachments] = useState<string[]>([]);
   const attachmentDraftRef = useRef<AttachmentDraft | null>(null);
@@ -193,7 +173,7 @@ function Chat({
   const attachmentDraft = attachmentDraftRef.current;
   const [dropping, setDropping] = useState(false);
   // The model and effort this conversation runs on. Empty before the agent has
-  // ever reported its lists, which is only ever the first chat on this Mac.
+  // ever reported its lists, which is only ever the first chat on this machine.
   const [config, setConfig] = useState<ConfigRow[]>([]);
   const [picking, setPicking] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -381,7 +361,13 @@ function Chat({
       case "permission_request":
         setPermissions((list) => [
           ...list,
-          { id: event.id, title: event.title, options: event.options },
+          {
+            id: event.id,
+            title: event.title,
+            kind: event.kind,
+            detail: event.detail,
+            options: event.options,
+          },
         ]);
         break;
       case "permission_resolved":
@@ -413,6 +399,23 @@ function Chat({
       unlisten.then((stop) => stop());
     };
   }, [refreshConfig]);
+
+  const refreshApproval = useCallback(() => {
+    invoke<ApprovalState>("approval_state", { path })
+      .then(setApproval)
+      .catch(() => {});
+  }, [path]);
+
+  useEffect(refreshApproval, [refreshApproval]);
+
+  useEffect(() => {
+    // Sibling columns on the same project mirror this flag, so a grant made
+    // in one has to land in all of them.
+    const unlisten = listen("project-approvals", () => refreshApproval());
+    return () => {
+      unlisten.then((stop) => stop());
+    };
+  }, [refreshApproval]);
 
   const pick = useCallback(
     async (category: string, value: string) => {
@@ -656,6 +659,31 @@ function Chat({
     }).catch(() => {});
   };
 
+  // Standing yes for this project, then answer the request in front of us with
+  // the adapter's own allow-once option. The app's choice stays the app's: no
+  // invented option id crosses back over ACP.
+  const trustProject = (permission: Permission) => {
+    const allowOnce = permission.options.find((o) => o.kind === "allow_once");
+    if (!allowOnce) return;
+    setApproval((state) => (state ? { ...state, auto: true } : state));
+    invoke("set_project_auto", { path, auto: true }).catch(() => {});
+    setItems((list) => [
+      ...list,
+      {
+        kind: "note",
+        text: `${label} will now work in this project without asking. The button by the message box turns that back off.`,
+      },
+    ]);
+    answerPermission(permission, allowOnce.optionId);
+  };
+
+  const toggleAuto = () => {
+    if (!approval) return;
+    const auto = !approval.auto;
+    setApproval({ ...approval, auto });
+    invoke("set_project_auto", { path, auto }).catch(() => {});
+  };
+
   return (
     <section className={hidden ? "chat chat-hidden" : "chat"}>
       <div className="chat-header" data-tauri-drag-region>
@@ -840,7 +868,7 @@ function Chat({
         )}
         {authNeeded !== "none" && (
           <div className="chat-auth">
-            {label} isn't signed in on this Mac.{" "}
+            {label} isn't signed in on this computer.{" "}
             <button
               className="chat-auth-button"
               disabled={signingIn}
@@ -850,33 +878,53 @@ function Chat({
             </button>
           </div>
         )}
-        {permissions.map((permission) => (
-          <div key={permission.id} className="chat-permission">
-            <div className="chat-permission-title">
-              {(() => {
-                // The permission event carries no tool kind, so only pattern
-                // matches translate; anything else reads as "use: <title>".
-                // The Rust fallback title is already a full sentence.
-                if (permission.title.startsWith(`${label} `)) return permission.title;
-                const asked = describe(permission.title, undefined, 1);
-                return asked === permission.title
-                  ? `${label} wants to use: ${permission.title}`
-                  : `${label} wants to ${asked}`;
-              })()}
+        {permissions.map((permission) => {
+          const prompt = permissionPrompt(permission, label);
+          // Offer the standing yes only where it is the user's to give: an
+          // unconfined machine, a project not already granted, and a request
+          // the adapter is willing to have allowed.
+          const offerTrust =
+            prompt.verbatim &&
+            approval !== null &&
+            !approval.confined &&
+            !approval.auto &&
+            permission.options.some((o) => o.kind === "allow_once");
+          return (
+            <div key={permission.id} className="chat-permission">
+              <div className="chat-permission-title">{prompt.headline}</div>
+              {prompt.detail && (
+                <pre className="chat-permission-detail">{prompt.detail}</pre>
+              )}
+              <div className="chat-permission-options">
+                {orderOptions(permission.options).map((option) => (
+                  <button
+                    key={option.optionId}
+                    className={`chat-permission-button ${option.kind}`}
+                    onClick={() => answerPermission(permission, option.optionId)}
+                  >
+                    {option.name}
+                  </button>
+                ))}
+                {offerTrust && (
+                  <button
+                    className="chat-permission-button allow_always"
+                    onClick={() => trustProject(permission)}
+                  >
+                    Always allow in this project
+                  </button>
+                )}
+              </div>
+              {/* Shown at the moment it changes what the user decides, and
+                  only where nothing is limiting the command. */}
+              {prompt.verbatim && approval !== null && !approval.confined && (
+                <div className="chat-permission-note">
+                  nurb cannot limit what this does on your system, so it runs
+                  with your account's access.
+                </div>
+              )}
             </div>
-            <div className="chat-permission-options">
-              {permission.options.map((option) => (
-                <button
-                  key={option.optionId}
-                  className={`chat-permission-button ${option.kind}`}
-                  onClick={() => answerPermission(permission, option.optionId)}
-                >
-                  {option.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <form
         className={dropping ? "chat-composer dropping" : "chat-composer"}
@@ -927,6 +975,24 @@ function Chat({
           >
             <IconPaperclip />
           </button>
+          {approval && (
+            <button
+              type="button"
+              className="chat-approval"
+              title={
+                approval.confined
+                  ? approval.auto
+                    ? `${label} works without asking. Files outside this project are protected by macOS either way.`
+                    : `${label} asks before running commands or changing files.`
+                  : approval.auto
+                    ? `${label} runs commands in this project without asking, and nurb cannot limit what they do. Click to make it ask first.`
+                    : `${label} asks before running commands or changing files outside this project. Click to stop asking.`
+              }
+              onClick={toggleAuto}
+            >
+              {approval.auto ? "runs on its own" : "asks before running"}
+            </button>
+          )}
           {config.length > 0 && (
             <div className="chat-config">
               <button

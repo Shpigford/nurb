@@ -66,3 +66,78 @@ jobs:
           gh release create "v${{ steps.version.outputs.version }}" \
             --title "v${{ steps.version.outputs.version }}" \
             --generate-notes
+
+  # The Windows half of the desktop release. The Mac half stays a manual,
+  # signed-and-notarized run of desktop/scripts/release.sh on a Mac; Windows
+  # ships unsigned (SmartScreen warns until an Authenticode certificate
+  # lands), so CI can build it, upload it into the same vX.Y.Z release, and
+  # merge its entry into the desktop-latest updater feed. Idempotent the same
+  # way the publish job is: a version whose installer is already on the
+  # release skips everything.
+  desktop-windows:
+    needs: publish
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Skip unless this version's release wants a Windows installer
+        id: wanted
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(uv version --short)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if ! gh release view "v$VERSION" --json assets -q '.assets[].name' > assets.txt 2>/dev/null; then
+            echo "no v$VERSION release; nothing to build"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          elif grep -qx 'nurb-setup.exe' assets.txt; then
+            echo "v$VERSION already carries nurb-setup.exe"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the NSIS installer
+        if: steps.wanted.outputs.done != 'true'
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cd desktop
+          npm ci --no-fund --no-audit
+          npm run tauri build
+
+      - name: Upload the installer and merge the update feed
+        if: steps.wanted.outputs.done != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.wanted.outputs.version }}"
+          TAG="v$VERSION"
+          REPO="${{ github.repository }}"
+          BUNDLE=desktop/src-tauri/target/release/bundle/nsis
+          SETUP=$(ls "$BUNDLE"/nurb_*-setup.exe)
+          cp "$SETUP" nurb-setup.exe
+          cp "$SETUP.sig" nurb-setup.exe.sig
+          gh release upload "$TAG" nurb-setup.exe nurb-setup.exe.sig --repo "$REPO"
+          gh release download desktop-latest --repo "$REPO" --pattern latest.json \
+            --output existing.json 2>/dev/null || true
+          python3 desktop/scripts/feed.py --version "$VERSION" --existing existing.json \
+            --platform windows-x86_64 "$(cat nurb-setup.exe.sig)" \
+              "https://github.com/$REPO/releases/download/$TAG/nurb-setup.exe" \
+            > latest.json
+          if ! gh release view desktop-latest --repo "$REPO" >/dev/null 2>&1; then
+            gh release create desktop-latest --repo "$REPO" --prerelease \
+              --title "nurb desktop update feed" \
+              --notes "Machine-read by installed copies of the nurb desktop app. Download the real thing from the newest release."
+          fi
+          gh release upload desktop-latest latest.json --repo "$REPO" --clobber

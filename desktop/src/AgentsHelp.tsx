@@ -43,7 +43,7 @@ export default function AgentsHelp({
               ))}
             </>
           ) : (
-            <p>Every agent nurb supports is already installed on this Mac.</p>
+            <p>Every agent nurb supports is already installed on this computer.</p>
           )}
           <p>
             Using one that isn't here?{" "}

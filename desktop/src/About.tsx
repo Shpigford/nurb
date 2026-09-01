@@ -2,6 +2,7 @@ import { useState } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Logo from "./Logo";
+import { osLabel } from "./platform";
 import lgpl from "./licenses/OCCT_LICENSE_LGPL_21.txt?raw";
 import occtException from "./licenses/OCCT_LGPL_EXCEPTION.txt?raw";
 import uvMit from "./licenses/UV_LICENSE_MIT.txt?raw";
@@ -13,6 +14,9 @@ type Props = {
   osVersion: string;
   arch: string;
   onClose: () => void;
+  /// The same check the macOS app menu offers; here it has a surface on every
+  /// platform, because Windows has no app menu to carry it.
+  onCheckUpdates: () => void;
 };
 
 function ExternalLink({ href, children }: { href: string; children: string }) {
@@ -39,13 +43,14 @@ export default function About({
   osVersion,
   arch,
   onClose,
+  onCheckUpdates,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const debugInfo = [
     `app ${appVersion}`,
     `CAD engine ${nurbVersion}`,
     occtVersion ? `OCCT ${occtVersion}` : null,
-    `macOS ${osVersion} (${arch})`,
+    `${osLabel} ${osVersion} (${arch})`,
   ]
     .filter(Boolean)
     .join("\n");
@@ -84,6 +89,9 @@ export default function About({
             </ExternalLink>
             <button className="about-copy" onClick={copyDebugInfo}>
               {copied ? "copied" : "copy debug info"}
+            </button>
+            <button className="about-copy" onClick={onCheckUpdates}>
+              check for updates
             </button>
           </p>
           <p>
