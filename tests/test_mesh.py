@@ -214,6 +214,33 @@ def test_a_format_that_measures_but_cannot_convert_says_which(tmp_path):
             import_stl(target)
 
 
+def test_3mf_writes_a_mesh_whose_weld_collapses_a_triangle(tmp_path, monkeypatch):
+    """Welding shared vertices can leave a triangle with two corners the same.
+
+    lib3mf's SetGeometry rejects that as "invalid parameter" and the viewer's
+    3mf button dies with ELib3MFException. Drop the collapsed triangle and write
+    the rest; the STL has always carried the same holes.
+    """
+    import zipfile
+
+    from nurb import builder
+
+    mesh = trimesh.Trimesh(
+        vertices=[[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]],
+        faces=[[0, 1, 2], [0, 1, 3]],
+        process=False,
+    )
+    monkeypatch.setattr(builder, "to_mesh", lambda *a, **k: mesh)
+
+    target = tmp_path / "collapsed.3mf"
+    builder.write_3mf(Box(20, 30, 40), target)
+
+    with zipfile.ZipFile(target) as z:
+        model = z.read("3D/3dmodel.model").decode()
+    assert 'unit="millimeter"' in model
+    assert model.count("<triangle ") == 1
+
+
 def test_3mf_says_what_to_do_instead_of_naming_a_missing_module(tmp_path):
     """The other half of a model site download, and trimesh cannot read it here.
 

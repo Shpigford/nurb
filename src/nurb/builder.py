@@ -340,6 +340,19 @@ def write_3mf(shape, target):
     # viewer's edges crisp. Rebuilding welds them, which is both what the format wants
     # and a third off the file size.
     welded = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=True)
+    # Welding shared vertices can collapse a triangle onto an edge. lib3mf refuses
+    # those as "invalid parameter" and kills the whole export, so drop them; the
+    # STL has always carried the same holes and every slicer repairs them on load.
+    faces = welded.faces
+    if len(faces):
+        keep = (
+            (faces[:, 0] != faces[:, 1])
+            & (faces[:, 1] != faces[:, 2])
+            & (faces[:, 2] != faces[:, 0])
+        )
+        if not keep.all():
+            welded.update_faces(keep)
+            welded.remove_unreferenced_vertices()
     # lib3mf will happily write an empty model, and a downloaded file that opens to an
     # empty plate is worse than a refusal: it looks like it worked. A part that
     # tessellates to nothing is what the `solids` rule is for, so say that.
