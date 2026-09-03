@@ -12,6 +12,7 @@ nothing.
 
 import shlex
 
+import numpy as np
 import pytest
 import trimesh
 from build123d import Box, Cylinder, Location, Mesher, Solid, export_stl, fillet
@@ -214,12 +215,33 @@ def test_a_format_that_measures_but_cannot_convert_says_which(tmp_path):
             import_stl(target)
 
 
-def test_3mf_writes_a_mesh_whose_weld_collapses_a_triangle(tmp_path, monkeypatch):
-    """Welding shared vertices can leave a triangle with two corners the same.
+def test_to_mesh_drops_occt_triangles_with_two_corners_at_the_same_point():
+    """OCCT tessellation of a filleted box emits needles with two corners at one xyz.
 
-    lib3mf's SetGeometry rejects that as "invalid parameter" and the viewer's
-    3mf button dies with ELib3MFException. Drop the collapsed triangle and write
-    the rest; the STL has always carried the same holes.
+    Distinct indices, same point — so an a==b skip is a no-op. `_triangulate` must
+    drop them on the transformed coordinates, or welding later hands lib3mf a
+    duplicate-index triangle and the 3mf button dies.
+    """
+    from nurb import builder
+
+    shape = fillet(Box(10, 10, 10).edges(), 1.0)
+    mesh = builder.to_mesh(shape, 0.01)
+    assert len(mesh.faces), "the fillet has to produce a mesh"
+    verts, faces = mesh.vertices, mesh.faces
+    a, b, c = verts[faces[:, 0]], verts[faces[:, 1]], verts[faces[:, 2]]
+    coincident = (
+        (np.linalg.norm(a - b, axis=1) == 0)
+        | (np.linalg.norm(b - c, axis=1) == 0)
+        | (np.linalg.norm(c - a, axis=1) == 0)
+    )
+    assert not coincident.any()
+
+
+def test_3mf_writes_a_mesh_whose_weld_collapses_a_triangle(tmp_path, monkeypatch):
+    """If a dirty mesh still reaches write_3mf, coincident corners become one index.
+
+    lib3mf's SetGeometry rejects that as "invalid parameter". Drop those faces at
+    the weld; `_triangulate` is the source fix, this is the C API's invariant.
     """
     import zipfile
 
