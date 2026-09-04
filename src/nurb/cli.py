@@ -146,6 +146,7 @@ def cmd_new(args):
     written = [py, md]
     if born:
         written.append(_write_launcher(root))
+        written.extend(_init_git(root))
     seeded, already = _seed_agents(root, getattr(args, "embed", False))
     written.extend(seeded)
     for path in written:
@@ -1295,6 +1296,38 @@ def cmd_dev(args):
 
 
 LAUNCHER = "viewer.cmd" if sys.platform == "win32" else "viewer.command"
+
+
+def _init_git(root):
+    """Give a fresh project its own history from the first file.
+
+    Skipped, quietly, when the directory is already inside a repository (the
+    desktop app's shared projects folder may itself be one), and skipped with a
+    line saying so when git is not installed at all: a missing optional tool
+    should never fail the part it was seeding.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        print("  git: not installed, so no repository was started")
+        return []
+    inside = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if inside.returncode == 0 and inside.stdout.strip() == "true":
+        return []
+    init = subprocess.run(["git", "init", "--quiet"], cwd=root, capture_output=True, text=True)
+    if init.returncode != 0:
+        return []
+    gitignore = root / ".gitignore"
+    if gitignore.exists():
+        return []
+    gitignore.write_text("build/\n", encoding="utf-8")
+    return [gitignore]
 
 
 def _write_launcher(root):

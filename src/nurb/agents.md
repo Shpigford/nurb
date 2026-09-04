@@ -66,6 +66,8 @@ Other harnesses take the same grants, the `nurb` prefix and edits under `parts/`
 
 **Write the card before you hand the part over, even for a single part.** A part gets printed, used, and then revisited weeks later to adjust something, and by then the session that built it is gone. `## Don't` is the only record of what was tried and rejected, so without it the next agent helpfully re-adds the lead-in chamfer that was retired on purpose. There is no one-off: there is the first session and the ones after it, and the card is what you are leaving for them.
 
+**Project birth creates a git repository, so there is always a state worth returning to.** The first `nurb new` in a directory runs `git init` and writes a `.gitignore` for `build/`, so every project carries its own history from the first file, whether or not the user has ever touched git themselves. Making the commit stays a decision for the user, never something `nurb` or you do unasked, but you are the one who should raise it: at the first working cut of a part, at a `nurb check` or `nurb verify` that finally comes back clean, once the card is written, and right before a rewrite you might want to back out of. Ask in plain terms when you reach one of those moments, "that's a good checkpoint, want me to commit it?", rather than assuming the answer, and follow whatever the user says for the rest of the session instead of asking again on every save.
+
 ```
 nurb rules            the doctrine, read this before designing
 nurb api              the vocabulary a part file gets, with signatures
