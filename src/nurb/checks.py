@@ -9,7 +9,7 @@ see each other, and `run` gathers them.
 
 import pathlib
 from dataclasses import dataclass, field, replace
-from math import asin, atan2, cos, degrees, pi, sin
+from math import asin, atan2, cos, degrees, pi, radians, sin, tan
 
 from build123d import Axis, CenterOf, GeomType, Plane, Vector
 
@@ -113,6 +113,7 @@ class Context:
     projection_limit: float = 2.5  # reach over height, past which height is the fix
     cosmetic_chamfer: float = 1.0  # the size the polish pass uses
     min_wall: float = 1.0  # what this printer lays down reliably; per part, per card
+    bed_contact_min: float | None = None  # flat width a bottom bevel may still give up
     sliver_area: float = 1.0
     warp_area: float = 20000.0  # first-layer mm2 past which contraction peels sharp corners
     warp_radius: float = 8.0  # a plan corner rounded under this is still a peel point
@@ -1515,9 +1516,20 @@ def bed_bevel(shape, ctx):
     box is 20mm in both directions. The limit is three times the polish size because the
     largest chamfer this doctrine puts anywhere is the 3mm structural relief, and the
     smallest corbel starts with a 4 to 6mm vertical tip.
+
+    Rise puts a face in the chamfer band; a shallow draft still shouldn't fail there. A
+    wall 2 degrees off vertical met this rule head-on: within the band by rise, and
+    flagged at any tilt past 1.7 degrees, though it barely eats into the wall. What a
+    bevel actually spends is the run underneath it, the ground it gives up as it climbs:
+    `rise * tan(angle from vertical)`. A 2mm chamfer at 45 degrees spends 2mm of run for
+    2mm of rise; that 2 degree wall spends under 0.1mm over the same band. Below
+    `bed_contact_min` the run is not worth calling a knife edge. Above the overhang
+    limit the face has stopped being a bevel at all and is a shallow, self-supporting
+    problem of its own, so it fails regardless of how little run it spent getting there.
     """
     up = Vector(*ctx.up).normalized()
     bed, _ = _span(shape, up)
+    contact_min = ctx.bed_contact_min if ctx.bed_contact_min is not None else ctx.min_wall
     if _standing(shape, up) is not None:
         # Standing on a facet, so every face at the plate is deliberately tilted and
         # there is no bottom whose rim a bevel could dress. A 4mm wall stood at 45
@@ -1529,24 +1541,33 @@ def bed_bevel(shape, ctx):
         low, high = _span(face, up)
         if low > bed + 1e-4:
             continue  # does not reach the plate
-        if high - low > 3 * ctx.cosmetic_chamfer:
+        rise = high - low
+        if rise > 3 * ctx.cosmetic_chamfer:
             continue  # rises too far to be a chamfer band, so it is structure
         for normal in _sample_normals(face):
             tilt = abs(normal.dot(up))
-            if 0.03 < tilt < 0.97:  # neither lying on the plate nor standing on it
-                found.append(
-                    Finding(
-                        "bed_bevel",
-                        WARN,
-                        f"{degrees(asin(min(1.0, tilt))):.0f}deg face meets the build "
-                        f"plate over {face.area:.1f}mm2, which is polish on the first layer",
-                        plain=f"a chamfer along {face.area:.0f}mm2 of the bottom edge, "
-                        "where it costs the first layer its grip on the plate",
-                        value=round(face.area, 2),
-                        where=tuple(round(v, 2) for v in face.center()),
-                    )
+            if not 0.03 < tilt < 0.97:  # lying on the plate, or standing on it
+                continue
+            angle = degrees(asin(min(1.0, tilt)))
+            run = rise * tan(radians(angle))
+            if angle < ctx.overhang_limit and run < contact_min:
+                break  # shallow enough, and gives up too little ground to matter
+            found.append(
+                Finding(
+                    "bed_bevel",
+                    WARN,
+                    f"{angle:.0f}deg face meets the build plate over {face.area:.1f}mm2, "
+                    f"giving up {run:.2f}mm of grip, which is polish on the first layer",
+                    plain=f"a chamfer along {face.area:.0f}mm2 of the bottom edge, "
+                    "where it costs the first layer its grip on the plate",
+                    value=round(face.area, 2),
+                    where=tuple(round(v, 2) for v in face.center()),
                 )
-                break
+            )
+            break
+    allowed = ctx.accepted.get("bed_bevel", 0)
+    if len(found) <= allowed:
+        return []
     return found
 
 

@@ -514,6 +514,41 @@ def test_bed_bevel_leaves_a_standing_part_alone():
     assert only(stand(Box(4, 30, 40), tilt=45, facet=2.0), "bed_bevel") == []
 
 
+def test_bed_bevel_leaves_a_shallow_draft_alone():
+    """A wall 2 degrees off vertical, well inside the chamfer band by rise, spends
+    under 0.1mm of run getting there: not a knife edge, just a wall that is not quite
+    plumb."""
+    rise, angle = 2.0, 2.0
+    run = rise * tan(radians(angle))
+    body = Pos(0, 0, 10) * Box(20, 20, 20)  # standing on the plate at z=0
+    wedge = Plane.XZ * Polygon((run, 0), (run, rise), (0, 0), align=None)
+    drafted = body - extrude(wedge, 30, both=True)
+    assert only(drafted, "bed_bevel") == []
+
+
+def test_bed_bevel_catches_a_steep_face_even_with_little_run():
+    """Past the overhang limit a bed-landing face has stopped being a bevel and is a
+    shallow, self-supporting problem of its own, regardless of how little run it
+    spent: 0.3mm of rise at 60 degrees gives up only 0.52mm, under `min_wall`."""
+    rise, angle = 0.3, 60.0
+    run = rise * tan(radians(angle))
+    body = Pos(0, 0, 10) * Box(20, 20, 20)  # standing on the plate at z=0
+    wedge = Plane.XZ * Polygon((run, 0), (run, rise), (0, 0), align=None)
+    steep = body - extrude(wedge, 30, both=True)
+    assert len(only(steep, "bed_bevel")) == 1
+
+
+def test_bed_bevel_accepts_a_baseline():
+    from build123d import Axis, chamfer
+
+    box = Box(20, 20, 20)
+    bottom = chamfer(box.edges().group_by(Axis.Z)[0], 2)
+    found = only(bottom, "bed_bevel")
+    assert len(found) == 4
+    assert only(bottom, "bed_bevel", Context(accepted={"bed_bevel": 4})) == []
+    assert only(bottom, "bed_bevel", Context(accepted={"bed_bevel": 3})) != []
+
+
 def test_concave_cosmetic_catches_polish_in_an_inside_corner():
     from build123d import chamfer
 
