@@ -770,12 +770,17 @@ body[data-platform="windows"] .rail-title {
   padding: 0 4px;
 }
 
+/* A fenced block scrolls sideways for a long line. The explicit overflow-y is
+   not decoration: naming one axis makes the other compute to auto rather than
+   visible, which turned every code block in the transcript into a vertical
+   scroll container competing with the transcript for the wheel. */
 .chat-agent pre {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 8px 10px;
   overflow-x: auto;
+  overflow-y: hidden;
   font: 12px/1.5 var(--mono);
 }
 
@@ -1662,11 +1667,14 @@ body[data-platform="windows"] .rail-title {
   font-size: 12px;
 }
 
+/* Same reason as .chat-agent pre: naming one axis would make the other auto,
+   and the license texts would fight the card they sit in for the wheel. */
 .about-body pre {
   font: 11px/1.5 var(--mono);
   color: var(--dim);
   white-space: pre-wrap;
   overflow-x: auto;
+  overflow-y: hidden;
 }
 
 /* ---- settings ---- */
