@@ -1122,6 +1122,10 @@ def global_file():
     A printer is a fact about the workshop, not the project, so it is named once
     here instead of in every printer.toml. Same schema as printer.toml, read fresh
     each call because tests move it with XDG_CONFIG_HOME.
+
+    Deliberately ~/.config on Windows too, rather than %APPDATA%: the desktop
+    app's sandbox and docs both point here, and one location on every platform
+    beats the native convention.
     """
     import os
 

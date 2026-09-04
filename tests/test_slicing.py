@@ -10,6 +10,8 @@ import json
 import pathlib
 from types import SimpleNamespace
 
+import sys
+
 import pytest
 
 from nurb import checks, slicing
@@ -385,6 +387,7 @@ def test_no_slicer_installed_is_none_not_a_crash():
     assert slicing.app(search=("NoSuchSlicerExistsHere",)) is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="which() needs a PATHEXT extension on Windows")
 def test_a_hyphenated_linux_command_and_share_tree_are_found(tmp_path, monkeypatch):
     exe = tmp_path / "usr" / "bin" / "orca-slicer"
     exe.parent.mkdir(parents=True)
@@ -396,6 +399,34 @@ def test_a_hyphenated_linux_command_and_share_tree_are_found(tmp_path, monkeypat
     found = slicing.app(search=("OrcaSlicer",))
     assert found == exe
     assert slicing.vendors(found) == profiles
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Program Files discovery is Windows-only")
+def test_a_program_files_install_and_resources_tree_are_found(tmp_path, monkeypatch):
+    exe = tmp_path / "Program Files" / "OrcaSlicer" / "orca-slicer.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    profiles = exe.parent / "resources" / "profiles"
+    profiles.mkdir(parents=True)
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    found = slicing.app(search=("OrcaSlicer",))
+    assert found == exe
+    assert slicing.vendors(found) == profiles
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the spaced folder is the Bambu installer's")
+def test_bambu_studios_spaced_install_folder_is_found(tmp_path, monkeypatch):
+    exe = tmp_path / "Program Files" / "Bambu Studio" / "bambu-studio.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    monkeypatch.delenv("ProgramFiles(x86)", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert slicing.app(search=("BambuStudio",)) == exe
 
 
 def test_a_print_over_a_day_keeps_its_days():

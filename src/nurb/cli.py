@@ -141,8 +141,8 @@ def cmd_new(args):
     py, md = parts / f"{name}.py", parts / f"{name}.md"
     if py.exists():
         sys.exit(f"{py} already exists")
-    py.write_text(PART_TEMPLATE.format(name=name))
-    md.write_text(CARD_TEMPLATE.format(name=name))
+    py.write_text(PART_TEMPLATE.format(name=name), encoding="utf-8")
+    md.write_text(CARD_TEMPLATE.format(name=name), encoding="utf-8")
     written = [py, md]
     if born:
         written.append(_write_launcher(root))
@@ -861,7 +861,9 @@ def cmd_skill(args):
         if real.read_text(encoding="utf-8") != skill:
             real.write_text(skill, encoding="utf-8")
             state = "updated"
-        print(f"  ~/{target.relative_to(home)}: {state}")
+        # as_posix so the ~/ prefix reads the same on Windows, where the
+        # default separator would print ~/.agents\skills\nurb.
+        print(f"  ~/{target.relative_to(home).as_posix()}: {state}")
     if not found:
         print("  no installed skill found. install one: npx skills add shpigford/nurb --skill nurb")
 
@@ -934,9 +936,14 @@ def cmd_slice(args):
     worst = 0
     exe = slicing.app()
     if exe is None:
+        looked = (
+            "in Program Files or on PATH"
+            if sys.platform == "win32"
+            else "in /Applications, on PATH, or through Flatpak"
+        )
         sys.exit(
             f"  no slicer found. `nurb slice` drives one you already have installed:\n"
-            f"  {' or '.join(slicing.SLICERS)}, in /Applications, on PATH, or through Flatpak.\n"
+            f"  {' or '.join(slicing.SLICERS)}, {looked}.\n"
             f"  `nurb export` writes the 3MF if you would rather open it yourself."
         )
     try:
@@ -1167,7 +1174,13 @@ def _is_free(port):
     import socket
 
     with socket.socket() as probe:
-        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if sys.platform == "win32":
+            # Windows turns SO_REUSEADDR into permission to bind over a live
+            # socket, so a probe using it reports every port as free.
+            # SO_EXCLUSIVEADDRUSE restores the honest answer.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             probe.bind(("127.0.0.1", port))
             return True
@@ -1266,17 +1279,30 @@ def cmd_dev(args):
         sys.exit(f"  port {port} was taken between checking it and binding it. Try again.")
 
 
-LAUNCHER = "viewer.command"
+LAUNCHER = "viewer.cmd" if sys.platform == "win32" else "viewer.command"
 
 
 def _write_launcher(root):
     file = root / LAUNCHER
+    if sys.platform == "win32":
+        # cmd rather than PowerShell, because .ps1 double-clicks open an editor
+        # under the default execution policy while .cmd just runs.
+        file.write_text(
+            "@echo off\n"
+            'cd /d "%~dp0"\n'
+            "nurb dev --open\n"
+            "pause\n",
+            encoding="utf-8",
+            newline="\r\n",
+        )
+        return file
     # A login shell, because Finder's Terminal session does not carry the PATH a
     # profile adds, and the double-click would die on `command not found: nurb`.
     file.write_text(
         "#!/bin/zsh -l\n"
         'cd "$(dirname "$0")"\n'
-        "exec nurb dev --open\n"
+        "exec nurb dev --open\n",
+        encoding="utf-8",
     )
     file.chmod(0o755)
     return file
@@ -1284,7 +1310,8 @@ def _write_launcher(root):
 
 def cmd_launcher(args):
     _write_launcher(project_root())
-    print(f"  {LAUNCHER}: double-click in Finder to serve this project")
+    where = "Explorer" if sys.platform == "win32" else "Finder"
+    print(f"  {LAUNCHER}: double-click in {where} to serve this project")
 
 
 def main(argv=None):

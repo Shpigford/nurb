@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "test": "node --test tests/*.test.ts",
-    "stage": "sh scripts/stage.sh",
+    "stage": "node scripts/stage.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },

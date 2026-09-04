@@ -365,7 +365,8 @@ def test_export_confines_a_variant_filename_to_build(tmp_path):
     saved = pathlib.Path(json.loads(resp.body)["path"])
     assert resp.status_code == 200
     assert saved.parent == tmp_path / "build"
-    assert saved.name == f"{str(escaped).replace('/', '_').strip('._')}.stl"
+    separators_folded = str(escaped).replace("/", "_").replace("\\", "_").replace(":", "_")
+    assert saved.name == f"{separators_folded.strip('._')}.stl"
     assert saved.is_file()
     assert not escaped.exists()
 
@@ -484,9 +485,13 @@ def test_upgrade_declines_outside_a_uv_tool_install(tmp_path):
 
 
 def test_upgrade_failure_reports_instead_of_restarting(tmp_path, monkeypatch):
+    import sys
+
     from nurb import server as server_mod
 
-    monkeypatch.setattr(server_mod, "_upgrade_command", lambda: ["false"])
+    monkeypatch.setattr(
+        server_mod, "_upgrade_command", lambda: [sys.executable, "-c", "raise SystemExit(1)"]
+    )
     execs = []
     monkeypatch.setattr("os.execv", lambda path, argv: execs.append(path))
     server = Server(tmp_path)
@@ -498,18 +503,26 @@ def test_upgrade_failure_reports_instead_of_restarting(tmp_path, monkeypatch):
 
 
 def test_upgrade_execs_the_same_argv_after_success(tmp_path, monkeypatch):
-    """The restart is an exec of exactly what the user ran, flags and all."""
+    """The restart is an exec of exactly what the user ran, flags and all. Windows
+    cannot exec in place, so there the restart is an exit with the code the desktop
+    supervisor relaunches on."""
     import sys
 
     from nurb import server as server_mod
 
-    monkeypatch.setattr(server_mod, "_upgrade_command", lambda: ["true"])
-    execs = []
+    monkeypatch.setattr(server_mod, "_upgrade_command", lambda: [sys.executable, "-c", "pass"])
+    execs, exits = [], []
     monkeypatch.setattr("os.execv", lambda path, argv: execs.append((path, argv)))
+    monkeypatch.setattr("os._exit", lambda code: exits.append(code))
     server = Server(tmp_path)
     sent(server)
     asyncio.run(server.upgrade())
-    assert execs == [(sys.argv[0], sys.argv)]
+    if sys.platform == "win32":
+        assert exits == [Server.RESTART_EXIT_CODE]
+        assert execs == []
+    else:
+        assert execs == [(sys.argv[0], sys.argv)]
+        assert exits == []
 
 
 def test_open_browser_fires_after_the_bind(tmp_path, monkeypatch):
@@ -684,6 +697,8 @@ def test_section_reaims_after_a_new_parts_camera_is_restored():
 
 def _install_skill(tmp_path, monkeypatch, text):
     monkeypatch.setenv("HOME", str(tmp_path))
+    # Path.home() on Windows reads USERPROFILE and never HOME.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     target = tmp_path / ".claude" / "skills" / "nurb" / "SKILL.md"
     target.parent.mkdir(parents=True)
     target.write_text(text, encoding="utf-8")
@@ -732,6 +747,7 @@ def test_skill_nudge_stays_quiet_with_nothing_installed(tmp_path, monkeypatch, c
     from nurb import server as server_mod
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     server_mod._skill_nudge()
     assert capsys.readouterr().out == ""
 

@@ -13,12 +13,22 @@
 //! temp and cache trees macOS assigns, and the state directories of the
 //! agents the app ships. If a future change wants a user-typed path or a
 //! setting here, it is the wrong change.
+//!
+//! Seatbelt is macOS-only. On Windows the adapter runs unconfined: there is
+//! no OS primitive with sandbox-exec's shape (a restricted token or
+//! AppContainer would break node, npm, and the venv wholesale), so the trust
+//! model there matches running the same agent CLI in a terminal yourself.
 
+#[cfg(target_os = "macos")]
 use std::path::{Path, PathBuf};
+#[cfg(not(target_os = "macos"))]
+use std::path::Path;
 
 /// Wrap an adapter invocation in `sandbox-exec`. sandbox-exec applies the
 /// profile and execs the target in place, so the child pid, process group,
-/// and kill semantics the caller relies on are unchanged.
+/// and kill semantics the caller relies on are unchanged. Outside macOS this
+/// is the identity function; see the module note.
+#[cfg(target_os = "macos")]
 pub(super) fn wrap(
     program: String,
     args: Vec<String>,
@@ -30,8 +40,19 @@ pub(super) fn wrap(
     ("/usr/bin/sandbox-exec".into(), wrapped)
 }
 
+#[cfg(not(target_os = "macos"))]
+pub(super) fn wrap(
+    program: String,
+    args: Vec<String>,
+    _project: &Path,
+    _engine_root: &Path,
+) -> (String, Vec<String>) {
+    (program, args)
+}
+
 /// The Seatbelt profile. Later rules win, so: allow everything, deny all
 /// writes, then re-allow the app-derived writable roots.
+#[cfg(target_os = "macos")]
 fn profile(project: &Path, engine_root: &Path) -> String {
     let mut rules = String::new();
     for root in writable_roots(project, engine_root) {
@@ -68,6 +89,7 @@ fn profile(project: &Path, engine_root: &Path) -> String {
 /// Roots that do not exist are skipped: a rule for a missing path is dead
 /// weight, and everything here is created by macOS or the app before an
 /// adapter ever spawns.
+#[cfg(target_os = "macos")]
 fn writable_roots(project: &Path, engine_root: &Path) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let mut push = |path: PathBuf| {
@@ -101,13 +123,15 @@ fn writable_roots(project: &Path, engine_root: &Path) -> Vec<PathBuf> {
     roots
 }
 
+#[cfg(target_os = "macos")]
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    crate::env::home_dir()
 }
 
 /// A Seatbelt string literal: double-quoted, with quotes and backslashes
 /// escaped ("Banana Holder" is a normal project name; quotes would be
 /// pathological but must not break out of the string).
+#[cfg(target_os = "macos")]
 fn quoted(path: &Path) -> String {
     let escaped = path
         .display()
@@ -118,6 +142,7 @@ fn quoted(path: &Path) -> String {
 }
 
 /// A path made safe for use inside a Seatbelt regex literal.
+#[cfg(target_os = "macos")]
 fn regex_escaped(path: &str) -> String {
     let mut out = String::new();
     for c in path.chars() {
@@ -129,7 +154,7 @@ fn regex_escaped(path: &str) -> String {
     out
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
     use std::process::Command;

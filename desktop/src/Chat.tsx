@@ -193,7 +193,7 @@ function Chat({
   const attachmentDraft = attachmentDraftRef.current;
   const [dropping, setDropping] = useState(false);
   // The model and effort this conversation runs on. Empty before the agent has
-  // ever reported its lists, which is only ever the first chat on this Mac.
+  // ever reported its lists, which is only ever the first chat on this machine.
   const [config, setConfig] = useState<ConfigRow[]>([]);
   const [picking, setPicking] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -840,7 +840,7 @@ function Chat({
         )}
         {authNeeded !== "none" && (
           <div className="chat-auth">
-            {label} isn't signed in on this Mac.{" "}
+            {label} isn't signed in on this computer.{" "}
             <button
               className="chat-auth-button"
               disabled={signingIn}

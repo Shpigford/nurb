@@ -27,12 +27,23 @@ VENDOR = (pathlib.Path(__file__).parent / "vendor").resolve()
 
 
 def _export_name(label):
-    """A catalog label made safe for a download header and build/ filename."""
+    """A catalog label made safe for a download header and build/ filename.
+
+    Windows reserves a handful of device names (CON, NUL, COM1...) that fail to
+    open as files, and the rule travels with the export, not the platform: a
+    part exported on a Mac still has to unzip on a PC.
+    """
     safe = "".join(
         c if c.isascii() and (c.isalnum() or c in "._-") else "_"
         for c in str(label)
     )
-    return safe.strip("._") or "part"
+    safe = safe.strip("._") or "part"
+    stem = safe.split(".")[0].upper()
+    if stem in ("CON", "PRN", "AUX", "NUL") or (
+        len(stem) == 4 and stem[:3] in ("COM", "LPT") and stem[3].isdigit()
+    ):
+        safe = f"part-{safe}"
+    return safe
 
 
 def _newer(current, latest):
@@ -54,7 +65,7 @@ def _latest_on_pypi():
 
     cache = pathlib.Path.home() / ".cache" / "nurb" / "latest"
     try:
-        stamp, cached = cache.read_text().split()
+        stamp, cached = cache.read_text(encoding="utf-8").split()
         if time.time() - float(stamp) < 86400:
             return cached
     except (OSError, ValueError):
@@ -63,7 +74,7 @@ def _latest_on_pypi():
         with urllib.request.urlopen("https://pypi.org/pypi/nurb/json", timeout=3) as resp:
             latest = json.load(resp)["info"]["version"]
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_text(f"{time.time()} {latest}")
+        cache.write_text(f"{time.time()} {latest}", encoding="utf-8")
         return latest
     except Exception:
         return None
@@ -1283,6 +1294,11 @@ class Server:
                 {"type": "applied", "name": name, "variant": variant, "written": written, "skipped": []}
             )
 
+    # What a Windows upgrade exits with instead of exec'ing itself; the desktop
+    # app's supervisor relaunches on exactly this code. The twin constant lives
+    # in desktop/src-tauri/src/supervisor.rs.
+    RESTART_EXIT_CODE = 42
+
     async def upgrade(self):
         """Run the install's own upgrade, then exec ourselves so the new code serves.
 
@@ -1309,6 +1325,15 @@ class Server:
             await self.send({"type": "upgraded", "error": reason})
             return
         print("  upgraded, restarting", flush=True)
+        if sys.platform == "win32":
+            # os.execv on Windows starts a second process and exits this one,
+            # which orphans the server from whoever spawned it (the desktop
+            # app would see its child die and kill the orphan's tree). Exit
+            # with the restart code instead: the app relaunches on it, and a
+            # terminal user restarts by hand.
+            print("  restart nurb dev to serve the new version", flush=True)
+            os._exit(self.RESTART_EXIT_CODE)
+            return  # only reached when a test patches os._exit
         os.execv(sys.argv[0], sys.argv)
 
     async def send(self, payload):
@@ -1343,6 +1368,12 @@ class Server:
 
         server = self
         parts_dir = self.root / "parts"
+        # Event paths arrive resolved below, so the directories they are
+        # compared against must be resolved too: on Windows the same folder
+        # can reach the handler under a different drive-letter case or an 8.3
+        # short name, and an unresolved compare would drop every event.
+        watched_parts = parts_dir.resolve()
+        watched_root = self.root.resolve()
         global_config = checks.global_file().resolve()
 
         class Handler(FileSystemEventHandler):
@@ -1355,7 +1386,7 @@ class Server:
                 # "." skips the atomic-save temp files editors and sed leave behind
                 if path.name.startswith((".", "_")):
                     return
-                if path != global_config and path.parent not in (parts_dir, server.root):
+                if path != global_config and path.parent not in (watched_parts, watched_root):
                     return
                 # Printer settings change every part's checks, whether they came from
                 # the project or the global config. measurements.toml can feed any
@@ -1375,8 +1406,8 @@ class Server:
                 # A shared module (system.py) can feed every part, so rebuild all.
                 # The suffix guard keeps a stray toml saved into parts/ from queueing
                 # itself as a part.
-                if path.suffix == ".py" and path.parent == parts_dir:
-                    changed = [path]
+                if path.suffix == ".py" and path.parent == watched_parts:
+                    changed = [parts_dir / path.name]
                 else:
                     changed = builder.find_parts(server.root)
                 for target in changed:
