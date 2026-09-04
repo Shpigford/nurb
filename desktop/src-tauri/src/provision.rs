@@ -869,9 +869,9 @@ case "$*" in
   *"claude-agent-acp --cli --version"*)
     [ ! -f "$0.missing-claude" ] || exit 1
     [ ! -f "$0.slow-claude" ] || sleep 3
-    echo "2.1.220 (Claude Code)"
+    echo "2.1.257 (Claude Code)"
     ;;
-  *"claude-agent-acp --version"*) echo "claude-agent-acp 0.64.2" ;;
+  *"claude-agent-acp --version"*) echo "claude-agent-acp 0.74.0" ;;
   *"codex-acp --version"*) echo "codex-acp 1.1.9" ;;
     *"gemini --version"*) echo "0.55.1" ;;
   *"/codex --version"*)
