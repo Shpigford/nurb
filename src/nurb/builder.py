@@ -205,6 +205,14 @@ def _triangulate(shape, tolerance, up=(0, 0, 1)):
             a, b, c = tri.Value(1), tri.Value(2), tri.Value(3)
             if reverse:
                 b, c = c, b
+            # OCCT can emit a triangle whose nodes are distinct indices at the
+            # same xyz (a zero-area needle). Skip on the transformed points, not
+            # on a==b: the measured failures already have three different indices.
+            pa = points[offset + a - 1]
+            pb = points[offset + b - 1]
+            pc = points[offset + c - 1]
+            if pa == pb or pb == pc or pc == pa:
+                continue
             faces.append((a + offset - 1, b + offset - 1, c + offset - 1))
         if flat_ceiling:
             ceilings.append((offset, poly.NbNodes()))
@@ -340,6 +348,20 @@ def write_3mf(shape, target):
     # viewer's edges crisp. Rebuilding welds them, which is both what the format wants
     # and a third off the file size.
     welded = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=True)
+    # lib3mf SetGeometry rejects a triangle whose three indices are not unique.
+    # Tessellation already dropped exact coincident corners; this is the weld's
+    # own rule (it bins round(v*1e8), not Euclidean equality) and the last gate
+    # before the C API.
+    faces = welded.faces
+    if len(faces):
+        keep = (
+            (faces[:, 0] != faces[:, 1])
+            & (faces[:, 1] != faces[:, 2])
+            & (faces[:, 2] != faces[:, 0])
+        )
+        if not keep.all():
+            welded.update_faces(keep)
+            welded.remove_unreferenced_vertices()
     # lib3mf will happily write an empty model, and a downloaded file that opens to an
     # empty plate is worse than a refusal: it looks like it worked. A part that
     # tessellates to nothing is what the `solids` rule is for, so say that.

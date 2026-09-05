@@ -12,6 +12,7 @@ nothing.
 
 import shlex
 
+import numpy as np
 import pytest
 import trimesh
 from build123d import Box, Cylinder, Location, Mesher, Solid, export_stl, fillet
@@ -212,6 +213,54 @@ def test_a_format_that_measures_but_cannot_convert_says_which(tmp_path):
         box.export(target)
         with pytest.raises(ValueError, match=f"is a {suffix}, and only"):
             import_stl(target)
+
+
+def test_to_mesh_drops_occt_triangles_with_two_corners_at_the_same_point():
+    """OCCT tessellation of a filleted box emits needles with two corners at one xyz.
+
+    Distinct indices, same point — so an a==b skip is a no-op. `_triangulate` must
+    drop them on the transformed coordinates, or welding later hands lib3mf a
+    duplicate-index triangle and the 3mf button dies.
+    """
+    from nurb import builder
+
+    shape = fillet(Box(10, 10, 10).edges(), 1.0)
+    mesh = builder.to_mesh(shape, 0.01)
+    assert len(mesh.faces), "the fillet has to produce a mesh"
+    verts, faces = mesh.vertices, mesh.faces
+    a, b, c = verts[faces[:, 0]], verts[faces[:, 1]], verts[faces[:, 2]]
+    coincident = (
+        (np.linalg.norm(a - b, axis=1) == 0)
+        | (np.linalg.norm(b - c, axis=1) == 0)
+        | (np.linalg.norm(c - a, axis=1) == 0)
+    )
+    assert not coincident.any()
+
+
+def test_3mf_writes_a_mesh_whose_weld_collapses_a_triangle(tmp_path, monkeypatch):
+    """If a dirty mesh still reaches write_3mf, coincident corners become one index.
+
+    lib3mf's SetGeometry rejects that as "invalid parameter". Drop those faces at
+    the weld; `_triangulate` is the source fix, this is the C API's invariant.
+    """
+    import zipfile
+
+    from nurb import builder
+
+    mesh = trimesh.Trimesh(
+        vertices=[[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 0]],
+        faces=[[0, 1, 2], [0, 1, 3]],
+        process=False,
+    )
+    monkeypatch.setattr(builder, "to_mesh", lambda *a, **k: mesh)
+
+    target = tmp_path / "collapsed.3mf"
+    builder.write_3mf(Box(20, 30, 40), target)
+
+    with zipfile.ZipFile(target) as z:
+        model = z.read("3D/3dmodel.model").decode()
+    assert 'unit="millimeter"' in model
+    assert model.count("<triangle ") == 1
 
 
 def test_3mf_says_what_to_do_instead_of_naming_a_missing_module(tmp_path):
