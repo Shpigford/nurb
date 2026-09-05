@@ -278,6 +278,7 @@ Specific to OCCT, and measured on real parts rather than reasoned about.
   passes so that the first one gives those two faces a real edge to meet along, then
   reselect from the result. Found on the parts bin, where the front drop and the side
   taper land at the same height by design.
+- **The third way a chamfer dies is the kernel itself dying.** A polish on a body assembled from several unions can take OCCT down with a segmentation fault instead of an error (issue #247, inside `Geom2dAdaptor_Curve::D0`), and no Python code can catch that. nurb reports it as a build error naming the line and keeps the dev server up, with the part marked until its file changes, but the fix is in the part: polish the simple solids before uniting them, or take those edges out of the set. The tell is a `--draft` build that succeeds while the full build dies.
 - **Prefer `new_edges` over geometric selectors.** Each chamfer changes topology, so a
   selector resolved against pristine geometry drifts once an earlier chamfer runs.
   `new_edges(before, combined=after)` returns exactly the edges an operation created. It
