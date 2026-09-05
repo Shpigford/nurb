@@ -1411,11 +1411,12 @@ class Server:
         self.observer = Observer()
         self.observer.schedule(Handler(), str(parts_dir), recursive=False)
         self.observer.schedule(Handler(), str(self.root), recursive=False)
+        # Created before it is watched: on a machine that has never named a printer
+        # the first pick, or the agent, creates this directory mid-session, and a
+        # directory that did not exist at start would never be observed.
         global_dir = global_config.parent
-        if global_dir.is_dir() and global_dir not in {
-            parts_dir.resolve(),
-            self.root.resolve(),
-        }:
+        global_dir.mkdir(parents=True, exist_ok=True)
+        if global_dir not in {parts_dir.resolve(), self.root.resolve()}:
             self.observer.schedule(Handler(), str(global_dir), recursive=False)
         self.observer.daemon = True
         self.observer.start()

@@ -780,6 +780,12 @@ function plateCaption(printer, bed, profiles) {
     cap.textContent = `${printer.profile.replace(/_/g, ' ')} · ${mm}`;
     return;
   }
+  // Every rebuild carries the printer, and a rewrite mid-pick would close the list.
+  const trigger = cap.querySelector('#platecap > .pick');
+  if (cap.classList.contains('open') && trigger) {
+    trigger.textContent = `${mm} · default`;
+    return;
+  }
   cap.className = 'unnamed';
   const menu = (plateProfiles || []).map(n =>
     `<button type="button" value="${n}">${n.replace(/_/g, ' ')}</button>`

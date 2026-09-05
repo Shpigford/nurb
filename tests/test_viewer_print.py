@@ -57,6 +57,9 @@ def test_the_plate_caption_names_the_machine_and_picks_without_slicing():
     plate_click = viewer[viewer.index("platecap.onclick") : viewer.index("function plateDismiss")]
     assert "slicing = true" not in plate_click
     assert "type: 'printer', profile: event.target.value" in plate_click
+    # Every rebuild carries the printer; a rewrite mid-pick would close the open list.
+    caption = viewer[viewer.index("function plateCaption") : viewer.index("cap.innerHTML")]
+    assert "cap.classList.contains('open')" in caption
 
 
 def test_dismiss_reads_open_before_it_mutates_and_only_then_clears_the_question():

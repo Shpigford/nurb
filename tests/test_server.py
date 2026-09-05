@@ -429,6 +429,33 @@ def test_rebuild_broadcast_carries_a_changed_printer_bed(tmp_path):
     assert "bambu_a1_mini" in out[0]["profiles"]
 
 
+def test_watch_creates_the_global_config_dir_so_a_first_pick_is_observed(tmp_path, monkeypatch):
+    """On a machine that has never named a printer the directory does not exist at
+    start. The first pick, or the agent, creates it mid-session, and a directory
+    that was not there when the observer was scheduled would never fire."""
+    from nurb import checks
+    from nurb import server as server_mod
+
+    config = checks.global_file()
+    assert not config.parent.exists()
+    server = project(tmp_path)
+
+    class FakeObserver:
+        def __init__(self):
+            self.scheduled = []
+
+        def schedule(self, handler, path, recursive):
+            self.scheduled.append(pathlib.Path(path))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(server_mod, "Observer", FakeObserver)
+    server.watch()
+    assert config.parent.is_dir()
+    assert config.parent in server.observer.scheduled
+
+
 def test_global_config_change_queues_every_part(tmp_path, monkeypatch):
     """The global printer file lives outside both directories normally watched."""
     from nurb import checks
