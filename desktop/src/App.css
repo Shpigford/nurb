@@ -114,6 +114,14 @@ textarea {
   transition: none;
 }
 
+/* This seam borders the chat column, whose transcript rides its scrollbar on
+   the same edge (.chat-transcript's negative margin). A centered grab strip
+   would cover half that scrollbar and steal its clicks, so this one leans
+   into the viewer side instead. */
+.seam-chat {
+  margin-left: -1px;
+}
+
 .rail {
   background: var(--panel);
   border-right: 1px solid var(--line);

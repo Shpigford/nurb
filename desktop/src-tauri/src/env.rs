@@ -4,7 +4,7 @@
 //! Release builds only know the provisioned form; the checkout path is never
 //! compiled into them.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::agents::AgentKind;
@@ -91,33 +91,34 @@ impl Launcher {
     /// PATH for adapter processes. Agents run `nurb build` and friends while
     /// they work, and on an end-user machine the only nurb (and node) anywhere
     /// is the provisioned one, so their shells must see it. Checkout mode
-    /// inherits the dev machine's PATH untouched.
+    /// prepends the repo's own `uv`-managed venv, because a debug build of
+    /// this very app is also named `nurb.exe` (Cargo package name), and
+    /// whatever PATH launched the app is not guaranteed to put the real CLI
+    /// ahead of it (seen live: an IDE's run PATH resolved to `target/debug`
+    /// before `~/.local/bin`).
     pub fn adapter_path(&self) -> Option<String> {
-        match self {
-            Self::Checkout { .. } => None,
-            Self::Provisioned { paths } => {
-                let mut entries = vec![paths.venv_bin_dir(), paths.node_bin_dir()];
-                match std::env::var("PATH") {
-                    Ok(inherited) => entries.extend(std::env::split_paths(&inherited)),
-                    // A missing PATH is unheard of in practice; the platform's
-                    // own tool directories keep child shells functional.
-                    #[cfg(windows)]
-                    Err(_) => {
-                        let root =
-                            std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-                        entries.push(std::path::Path::new(&root).join("System32"));
-                    }
-                    #[cfg(not(windows))]
-                    Err(_) => {
-                        entries.push("/usr/bin".into());
-                        entries.push("/bin".into());
-                    }
-                }
-                std::env::join_paths(entries)
-                    .ok()
-                    .map(|joined| joined.to_string_lossy().into_owned())
+        let mut entries = match self {
+            Self::Checkout { repo } => vec![checkout_venv_bin_dir(repo)],
+            Self::Provisioned { paths } => vec![paths.venv_bin_dir(), paths.node_bin_dir()],
+        };
+        match std::env::var("PATH") {
+            Ok(inherited) => entries.extend(std::env::split_paths(&inherited)),
+            // A missing PATH is unheard of in practice; the platform's
+            // own tool directories keep child shells functional.
+            #[cfg(windows)]
+            Err(_) => {
+                let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+                entries.push(std::path::Path::new(&root).join("System32"));
+            }
+            #[cfg(not(windows))]
+            Err(_) => {
+                entries.push("/usr/bin".into());
+                entries.push("/bin".into());
             }
         }
+        std::env::join_paths(entries)
+            .ok()
+            .map(|joined| joined.to_string_lossy().into_owned())
     }
 
     /// The directory the engine writes while it works, granted to the agent
@@ -287,6 +288,14 @@ pub fn uv_sidecar() -> Result<PathBuf, String> {
     }
 }
 
+/// Where `uv run --project <repo> nurb` (see `Launcher::nurb`) puts the
+/// checkout's own venv scripts once uv has synced it: `.venv/Scripts` on
+/// Windows, `.venv/bin` elsewhere. uv's default, not configured anywhere, so
+/// this has to match it rather than read it from settings.
+fn checkout_venv_bin_dir(repo: &Path) -> PathBuf {
+    repo.join(".venv").join(if cfg!(windows) { "Scripts" } else { "bin" })
+}
+
 /// npm's launcher is a cmd shim on Windows, which std::process can spawn only
 /// under its full name. Dev-checkout only; user machines never see npx.
 fn npx() -> &'static str {
@@ -303,4 +312,23 @@ pub fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// uv's venv layout is a convention this module has to match, not
+    /// something it controls; a drift here is exactly how the `nurb.exe`
+    /// name collision with this app's own debug binary would come back.
+    #[test]
+    fn checkout_venv_bin_dir_matches_uvs_layout() {
+        let repo = PathBuf::from("/repo");
+        let expected = if cfg!(windows) {
+            repo.join(".venv").join("Scripts")
+        } else {
+            repo.join(".venv").join("bin")
+        };
+        assert_eq!(checkout_venv_bin_dir(&repo), expected);
+    }
 }

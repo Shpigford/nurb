@@ -1449,7 +1449,7 @@ function App() {
         onDoubleClick={() => resetSeam("rail")}
       />
       <div
-        className="seam"
+        className="seam seam-chat"
         style={{ left: railW + chatW }}
         title="drag to resize; double-click to reset"
         onPointerDown={(e) => dragSeam(e, "chat")}
