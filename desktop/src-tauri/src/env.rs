@@ -16,6 +16,10 @@ pub const NODE_VERSION: &str = "v24.19.0";
 
 #[derive(Clone)]
 pub enum Launcher {
+    // Built only under debug_assertions (see `resolve`), so a release build
+    // never constructs it; every match arm still has to handle it, since the
+    // variant itself is not cfg-gated.
+    #[cfg_attr(not(debug_assertions), allow(dead_code))]
     Checkout { repo: PathBuf },
     Provisioned { paths: Paths },
 }

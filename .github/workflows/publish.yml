@@ -117,7 +117,7 @@ jobs:
         run: |
           cd desktop
           npm ci --no-fund --no-audit
-          npm run tauri build
+          npm run bundle
 
       - name: Upload the installer and merge the update feed
         if: steps.wanted.outputs.done != 'true'

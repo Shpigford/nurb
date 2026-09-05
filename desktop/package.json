@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "test": "node --test tests/*.test.ts",
     "stage": "node scripts/stage.mjs",
+    "bundle": "node scripts/bundle.mjs",
     "preview": "vite preview",
     "tauri": "tauri"
   },
