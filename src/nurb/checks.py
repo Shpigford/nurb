@@ -1159,25 +1159,17 @@ def profiles():
     return tomllib.loads(PRINTERS.read_text(encoding="utf-8"))
 
 
-def choose_profile(root, name):
-    """Name this project's machine in its printer.toml, and say where it landed.
+def _write_profile_line(target, name):
+    """Insert or replace the top-level `profile` line, never appending into a table.
 
-    The viewer asks for this when a print estimate needs a machine and the project
-    has never named one: a picker beats printing what the user should have written,
-    and the choice belongs on disk where every other command reads it from.
-
-    Only the `profile` line is touched. A printer.toml is often hand-written with
-    comments explaining a bed size, so this rewrites an existing line in place and
-    otherwise inserts one above the first table, never appending, which would put a
-    top-level key inside whatever table happens to be last.
+    A printer.toml or config.toml is often hand-written with comments or an
+    `[export]` table. Appending would put `profile` inside whatever table happens
+    to be last, which parses as export.profile and leaves the machine unnamed.
     """
     import re
 
-    have = profiles()
-    if name not in have:
-        raise ValueError(f"no printer profile called {name!r}. have: {', '.join(sorted(have))}")
-    target = pathlib.Path(root) / PRINTER_FILE
     line = f'profile = "{name}"'
+    target.parent.mkdir(parents=True, exist_ok=True)
     text = target.read_text(encoding="utf-8") if target.is_file() else ""
     found = re.search(r"(?m)^[ \t]*profile[ \t]*=.*$", text)
     if found:
@@ -1191,6 +1183,59 @@ def choose_profile(root, name):
         text = f"{head}\n\n{line}\n" + (f"\n{tail}" if tail else "")
     target.write_text(text, encoding="utf-8")
     return target
+
+
+def choose_profile(root, name):
+    """Name the machine, and say which file landed the `profile` line.
+
+    A printer is a workshop fact, so the first pick on a machine with no workshop
+    profile writes `~/.config/nurb/config.toml`. A project that already named a
+    machine in printer.toml stays an exception: that line is rewritten. A later
+    pick that disagrees with the workshop file writes printer.toml for this
+    project only. The same insert-above-table rewrite is used on whichever file,
+    so an existing `[export]` table is not replaced and does not swallow `profile`.
+    """
+    have = profiles()
+    if name not in have:
+        raise ValueError(f"no printer profile called {name!r}. have: {', '.join(sorted(have))}")
+    project = pathlib.Path(root) / PRINTER_FILE
+    if _read_toml(project, PRINTER_FILE).get("profile"):
+        return _write_profile_line(project, name)
+    home = global_file()
+    workshop = _read_toml(home, str(home)).get("profile")
+    if not workshop:
+        return _write_profile_line(home, name)
+    if workshop == name:
+        return home
+    return _write_profile_line(project, name)
+
+
+def _bed_mm(bed):
+    return f"{bed[0]:.0f} x {bed[1]:.0f} x {bed[2]:.0f} mm"
+
+
+_UNNAMED = (
+    "Ask once which machine they print on; write ~/.config/nurb/config.toml "
+    "so every project uses that bed. printer.toml is the exception for a different machine."
+)
+
+
+def printer_line(root, name=None):
+    """One line an agent sees before designing: the machine and the bed.
+
+    Bed millimetres come from `printer()`, the same Context the viewer plate uses.
+    Broken TOML must not abort `nurb rules`: return the unnamed stock default.
+    """
+    try:
+        ctx = printer(root, name)
+        if name:
+            return f"printer: {name} (--printer)  {_bed_mm(ctx.bed)}"
+        profile, source = profile_choice(root)
+        if profile:
+            return f"printer: {profile} ({source})  {_bed_mm(ctx.bed)}"
+        return f"printer: unnamed (default)  {_bed_mm(ctx.bed)}. {_UNNAMED}"
+    except (ValueError, OSError):
+        return f"printer: unnamed (default)  {_bed_mm(Context().bed)}. {_UNNAMED}"
 
 
 # Keys a shipped profile carries that are facts about the machine rather than settings

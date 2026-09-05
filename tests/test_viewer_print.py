@@ -41,6 +41,27 @@ def test_picking_a_printer_is_a_click_not_a_change():
     assert "addEventListener" not in onclick
 
 
+def test_the_plate_caption_names_the_machine_and_picks_without_slicing():
+    """Unnamed caption is the picker. Print-time receive must not estimate() unless
+    that card's pick set slicing."""
+    from nurb import server as server_mod
+
+    viewer = server_mod.VIEWER.read_text(encoding="utf-8")
+    assert 'id="platecap"' in viewer
+    assert "function plateCaption" in viewer
+    assert "type: 'printer', profile: event.target.value" in viewer
+    socket = viewer.split("ws.onmessage =", 1)[1]
+    assert "const finishSlice = slicing" in socket
+    assert "if (finishSlice) estimate()" in socket
+    assert socket.index("const finishSlice = slicing") < socket.index("slicing = false")
+    plate_click = viewer[viewer.index("platecap.onclick") : viewer.index("function plateDismiss")]
+    assert "slicing = true" not in plate_click
+    assert "type: 'printer', profile: event.target.value" in plate_click
+    # Every rebuild carries the printer; a rewrite mid-pick would close the open list.
+    caption = viewer[viewer.index("function plateCaption") : viewer.index("cap.innerHTML")]
+    assert "cap.classList.contains('open')" in caption
+
+
 def test_dismiss_reads_open_before_it_mutates_and_only_then_clears_the_question():
     """Closing the list and dismissing the question are two events. Snapshot open
     first, or the same Escape or canvas click does both."""

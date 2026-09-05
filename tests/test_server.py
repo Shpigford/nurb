@@ -410,6 +410,8 @@ def test_sync_and_http_fallback_carry_the_printer_bed(tmp_path):
     (tmp_path / "printer.toml").write_text("bed = [180, 120, 180]\n")
 
     assert server._sync()["bed"] == [180, 120]
+    assert server._sync()["printer"] is None
+    assert "bambu_a1_mini" in server._sync()["profiles"]
     response = asyncio.run(server.http(None, SimpleNamespace(path="/api/sync")))
     assert json.loads(response.body)["bed"] == [180, 120]
 
@@ -423,6 +425,35 @@ def test_rebuild_broadcast_carries_a_changed_printer_bed(tmp_path):
 
     assert out[0]["type"] == "rebuilt"
     assert out[0]["bed"] == [180, 120]
+    assert out[0]["printer"] is None
+    assert "bambu_a1_mini" in out[0]["profiles"]
+
+
+def test_watch_creates_the_global_config_dir_so_a_first_pick_is_observed(tmp_path, monkeypatch):
+    """On a machine that has never named a printer the directory does not exist at
+    start. The first pick, or the agent, creates it mid-session, and a directory
+    that was not there when the observer was scheduled would never fire."""
+    from nurb import checks
+    from nurb import server as server_mod
+
+    config = checks.global_file()
+    assert not config.parent.exists()
+    server = project(tmp_path)
+
+    class FakeObserver:
+        def __init__(self):
+            self.scheduled = []
+
+        def schedule(self, handler, path, recursive):
+            self.scheduled.append(pathlib.Path(path))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(server_mod, "Observer", FakeObserver)
+    server.watch()
+    assert config.parent.is_dir()
+    assert config.parent in server.observer.scheduled
 
 
 def test_global_config_change_queues_every_part(tmp_path, monkeypatch):
@@ -657,6 +688,9 @@ def test_viewer_updates_the_bed_outside_the_initial_socket_sync():
     viewer = server_mod.VIEWER.read_text(encoding="utf-8")
     socket = viewer.split("ws.onmessage =", 1)[1]
     assert socket.index("bedUpdate(msg.bed);") < socket.index("if (msg.type === 'sync')")
+    assert socket.index("plateCaption(msg.printer, bedXY, msg.profiles)") < socket.index(
+        "if (msg.type === 'sync')"
+    )
     assert "fetch('/api/sync')" in viewer
 
 
@@ -786,7 +820,12 @@ def test_choosing_a_printer_replies_only_to_the_viewer_that_asked(tmp_path):
     )
 
     assert asking.messages == [
-        {"type": "printer", "profile": "bambu_a1_mini", "bed": [180.0, 180.0]}
+        {
+            "type": "printer",
+            "profile": "bambu_a1_mini",
+            "bed": [180.0, 180.0],
+            "printer": {"profile": "bambu_a1_mini", "source": "global"},
+        }
     ]
     assert other.messages == []
 
