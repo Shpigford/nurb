@@ -801,11 +801,11 @@ case "$*" in
     echo "2.1.257 (Claude Code)"
     ;;
   *"claude-agent-acp --version"*) echo "claude-agent-acp 0.74.0" ;;
-  *"codex-acp --version"*) echo "codex-acp 1.1.9" ;;
+  *"codex-acp --version"*) echo "codex-acp 1.10.0" ;;
     *"gemini --version"*) echo "0.55.1" ;;
   *"/codex --version"*)
     [ ! -f "$0.missing-codex" ] || exit 1
-    echo "codex-cli 0.145.0"
+    echo "codex-cli 0.153.4"
     ;;
   *) exit 1 ;;
 esac
