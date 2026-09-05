@@ -127,7 +127,8 @@ async fn create_project(
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
         // Seed the project with a first part named after it; nurb new also
-        // writes the card and AGENTS.md.
+        // writes the card, AGENTS.md, and (when git is installed) a fresh
+        // repository with a build/ .gitignore.
         let seeded = seed(&launcher, &dir, &part);
         if seeded.is_err() {
             // The folder did not exist before this call, so a failed seed

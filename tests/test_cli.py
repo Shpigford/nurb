@@ -532,6 +532,39 @@ def test_the_first_part_brings_the_launcher(tmp_path, monkeypatch):
     assert not launcher.exists()
 
 
+def test_the_first_part_starts_a_git_repository(tmp_path, monkeypatch):
+    """Project birth is also the only moment for `git init`; a second part must not
+    re-run it or clobber a `.gitignore` the user has since edited."""
+    monkeypatch.chdir(tmp_path)
+    cli.main(["new", "one"])
+    assert (tmp_path / ".git").is_dir()
+    gitignore = tmp_path / ".gitignore"
+    assert gitignore.read_text(encoding="utf-8") == "build/\n"
+    gitignore.write_text("build/\nmine.txt\n", encoding="utf-8")
+    cli.main(["new", "two"])
+    assert gitignore.read_text(encoding="utf-8") == "build/\nmine.txt\n"
+
+
+def test_git_init_is_skipped_inside_an_existing_repository(tmp_path, monkeypatch):
+    """The desktop app's shared projects folder, or any parent the user already
+    version-controls, must not get a nested repo underneath it."""
+    subprocess.run(["git", "init", "--quiet"], cwd=tmp_path, check=True)
+    monkeypatch.chdir(tmp_path)
+    cli.main(["new", "one"])
+    assert not (tmp_path / ".gitignore").exists()
+
+
+def test_new_survives_git_not_being_installed(tmp_path, monkeypatch, capsys):
+    import shutil
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    cli.main(["new", "one"])
+    assert (tmp_path / "parts" / "one.py").exists()
+    assert not (tmp_path / ".git").exists()
+    assert "git" in capsys.readouterr().out
+
+
 def test_launcher_is_an_executable_that_runs_dev(tmp_path, monkeypatch):
     """Double-clickable from Finder or Explorer: runnable, lands on `nurb dev --open`."""
     import os
