@@ -199,12 +199,13 @@ pub async fn list_sessions(
         .into_iter()
         .filter(|kind| kind.native_command().is_none() || launcher.adapter_available(*kind))
         .map(|kind| {
+            let app = app.clone();
             let launcher = launcher.clone();
             let project = project.clone();
             (
                 kind,
                 tauri::async_runtime::spawn(async move {
-                    agent_sessions(&launcher, kind, project).await
+                    agent_sessions(&app, &launcher, kind, project).await
                 }),
             )
         })
@@ -264,6 +265,7 @@ pub async fn list_sessions(
 /// while `nextCursor` still points at more, so an empty page never means done,
 /// only an absent cursor does.
 async fn agent_sessions(
+    app: &tauri::AppHandle,
     launcher: &crate::env::Launcher,
     kind: AgentKind,
     project: PathBuf,
@@ -276,7 +278,19 @@ async fn agent_sessions(
     String,
 > {
     let (program, args) = launcher.adapter(kind);
-    let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
+    let agent_home = crate::agents::custom_agent_home(kind);
+    let (program, args, confined, sandbox_guard) = sandbox::wrap(
+        program,
+        args,
+        &project,
+        &launcher.engine_root(),
+        &agent_dot(kind),
+        agent_home.as_deref(),
+    )?;
+    if !confined {
+        use tauri::Emitter;
+        let _ = app.emit("agent-unsandboxed", ());
+    }
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -287,9 +301,9 @@ async fn agent_sessions(
         }
     }
     let agent = AcpAgent::new(config);
-    let (stdin, stdout, stderr, child) = agent
-        .spawn_process()
-        .map_err(|error| friendly(kind, error))?;
+    let spawned = agent.spawn_process();
+    drop(sandbox_guard);
+    let (stdin, stdout, stderr, child) = spawned.map_err(|error| friendly(kind, error))?;
     let pgid = child.id() as i32;
     drain_stderr(kind, stderr);
     let listed = tokio::time::timeout(
@@ -1171,7 +1185,28 @@ async fn run_chat(
     use tauri::Manager;
     let launcher = app.state::<crate::env::Launcher>();
     let (program, args) = launcher.adapter(kind);
-    let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
+    let agent_home = crate::agents::custom_agent_home(kind);
+    let wrapped = sandbox::wrap(
+        program,
+        args,
+        &project,
+        &launcher.engine_root(),
+        &agent_dot(kind),
+        agent_home.as_deref(),
+    );
+    let (program, args, confined, sandbox_guard) = match wrapped {
+        Ok(wrapped) => wrapped,
+        Err(error) => {
+            let _ = ready_tx.send(Err(agent_client_protocol::Error::new(-32603, error)));
+            return;
+        }
+    };
+    // An adapter the kernel is not confining is a fact about the user's
+    // machine, not a diagnostic. The rail says so for as long as it is true.
+    if !confined {
+        use tauri::Emitter;
+        let _ = app.emit("agent-unsandboxed", ());
+    }
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -1182,7 +1217,9 @@ async fn run_chat(
         }
     }
     let agent = AcpAgent::new(config);
-    let (stdin, stdout, stderr, child) = match agent.spawn_process() {
+    let spawned = agent.spawn_process();
+    drop(sandbox_guard);
+    let (stdin, stdout, stderr, child) = match spawned {
         Ok(spawned) => spawned,
         Err(error) => {
             let _ = ready_tx.send(Err(error));
@@ -1509,6 +1546,13 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
     });
 }
 
+/// The default `$HOME` prefix an agent keeps its state under (`claude` ->
+/// `~/.claude`, `~/.claude.json`). Codex's explicit `CODEX_HOME` is passed
+/// beside it when present.
+fn agent_dot(kind: AgentKind) -> String {
+    format!(".{}", kind.id())
+}
+
 /// -32000 is ACP's auth-required code, so it means signed out for every
 /// agent; they just raise it at different moments (Claude on session/prompt,
 /// Codex as early as session/new or session/list). The `auth_required:`
@@ -1521,10 +1565,7 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
 /// dead-end note and no sign-in button (#115).
 fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
     if error.code == ErrorCode::AuthRequired || error.message.contains("Failed to authenticate") {
-        format!(
-            "auth_required: {} is not signed in on this Mac",
-            kind.label()
-        )
+        format!("auth_required: {} is not signed in", kind.label())
     } else {
         format!("{} error: {}", kind.label(), error.message)
     }

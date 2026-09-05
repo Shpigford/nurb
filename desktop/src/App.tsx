@@ -24,6 +24,7 @@ import Logo from "./Logo";
 import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
 import { createPartRecovery } from "./partRecovery";
+import { isLinux, isMac } from "./platform";
 import Setup from "./Setup";
 import Settings from "./Settings";
 import "./App.css";
@@ -75,7 +76,7 @@ type AboutInfo = {
   appVersion: string;
   nurbVersion: string;
   occtVersion: string | null;
-  osVersion: string;
+  os: string;
   arch: string;
 };
 
@@ -272,6 +273,9 @@ function App() {
   const [ready, setReady] = useState<boolean | null>(null);
   const bootstrapped = useRef(false);
   const [about, setAbout] = useState<AboutInfo | null>(null);
+  // Set once an adapter starts without a kernel sandbox. It stays set: the
+  // agent keeps running, and repairing the host boundary needs a restart.
+  const [unsandboxed, setUnsandboxed] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showAgentsHelp, setShowAgentsHelp] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -336,7 +340,14 @@ function App() {
     }
   }, [updating]);
 
-  // The macOS "Check for Updates…" item. The menu lives in Rust and the
+  useEffect(() => {
+    const unlisten = listen("agent-unsandboxed", () => setUnsandboxed(true));
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // The "Check for Updates…" menu item. The menu lives in Rust and the
   // update state lives here, so the click arrives as an event; unlike the
   // timed checks, this one answers even when there is nothing to install.
   useEffect(() => {
@@ -348,7 +359,11 @@ function App() {
         if (!next) {
           await message("You're on the newest version.", { title: "nurb" });
         } else if (
-          await ask(`nurb ${next.version} is ready to install.`, {
+          await ask(
+            isLinux
+              ? `nurb ${next.version} is ready to install. Your system may ask for your password.`
+              : `nurb ${next.version} is ready to install.`,
+            {
             title: "nurb",
             okLabel: "Restart & Update",
             cancelLabel: "Later",
@@ -381,7 +396,7 @@ function App() {
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(event.origin)) return;
-      if (event.data === "nurb:drag") getCurrentWindow().startDragging().catch(() => {});
+      if (isMac && event.data === "nurb:drag") getCurrentWindow().startDragging().catch(() => {});
       if (event.data?.type === "nurb:saved" && typeof event.data.path === "string")
         revealItemInDir(event.data.path).catch(() => {});
       // The viewer's variant pin: the sliders started from a variant and may have
@@ -944,8 +959,8 @@ function App() {
         : {
             key: activeServer.url,
             src: selectedPart
-              ? `${activeServer.url}/?embed&part=${encodeURIComponent(selectedPart)}`
-              : `${activeServer.url}/?embed`,
+              ? `${activeServer.url}/?embed&platform=${isMac ? "mac" : "linux"}&part=${encodeURIComponent(selectedPart)}`
+              : `${activeServer.url}/?embed&platform=${isMac ? "mac" : "linux"}`,
           },
     );
   }, [activeServer, partsReady, selectedPart]);
@@ -984,7 +999,7 @@ function App() {
       style={{ gridTemplateColumns: `${railW}px ${chatW}px minmax(0, 1fr)` }}
     >
       <aside className="rail">
-        <div className="rail-title" data-tauri-drag-region />
+        {isMac && <div className="rail-title" data-tauri-drag-region />}
         <div className="rail-heading">
           <span>projects</span>
           <button className="rail-button" title="new project" onClick={() => setNaming(true)}>
@@ -1210,10 +1225,21 @@ function App() {
           <IconFolderPlus />
           add existing…
         </button>
+        {unsandboxed && (
+          <div className="rail-warning">
+            This agent runs without a sandbox, so it can write anywhere you can.
+            Install or repair bubblewrap, enable user namespaces, then reopen nurb.
+          </div>
+        )}
         {error && <div className="rail-error">{error}</div>}
         <div className="rail-foot">
           {update && (
-            <button className="rail-update" disabled={updating} onClick={installUpdate}>
+            <button
+              className="rail-update"
+              disabled={updating}
+              onClick={installUpdate}
+              title={isLinux ? "Your system may ask for your password." : undefined}
+            >
               {updating ? "updating…" : `update to ${update.version}`}
             </button>
           )}
@@ -1312,7 +1338,7 @@ function App() {
           appVersion={about.appVersion}
           nurbVersion={about.nurbVersion}
           occtVersion={about.occtVersion}
-          osVersion={about.osVersion}
+          os={about.os}
           arch={about.arch}
           onClose={() => setShowAbout(false)}
         />

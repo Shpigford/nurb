@@ -1,5 +1,6 @@
 import { FormEvent, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { isMac } from "./platform";
 
 type Props = {
   onSubmit: (key: string) => void;
@@ -61,7 +62,11 @@ export default function GeminiKeyDialog({ onSubmit, onClose }: Props) {
             >
               Create a key in Google AI Studio
             </button>
-            <span>Stored in macOS Keychain.</span>
+            <span>
+              {isMac
+                ? "Stored in macOS Keychain."
+                : "Stored privately in your home folder."}
+            </span>
           </div>
           <div className="settings-actions">
             <button

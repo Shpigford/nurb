@@ -1,0 +1,143 @@
+name: desktop-linux
+
+# The Linux half of a desktop release: the .deb and the AppImage for both
+# architectures, uploaded into the vX.Y.Z release and merged into the update
+# feed. The macOS half stays a manual run of desktop/scripts/release.sh, because
+# it needs the Developer ID certificate and the notarization keys that live on
+# the release Mac. Linux signs only the update payload, so it can run here.
+#
+# The trigger is publish.yml finishing, not `release: published`. A release
+# created by a workflow's own token does not trigger other workflows, so a
+# release event would never arrive.
+#
+# The job builds the tag rather than the branch, so what ships is what was
+# released, and it calls desktop/scripts/release-linux.sh rather than repeating
+# it: the same script a person can still run by hand on a Linux machine.
+
+on:
+  workflow_run:
+    workflows: [publish]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-linux
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  # publish.yml runs on every push to main and does nothing when the version is
+  # already tagged, so most runs of this workflow have nothing to build. This
+  # asks the release what it is missing and returns a matrix of only those
+  # architectures, which also makes a rerun after one architecture failed do the
+  # right thing instead of refusing a duplicate upload.
+  pending:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pending.outputs.version }}
+      count: ${{ steps.pending.outputs.count }}
+      matrix: ${{ steps.pending.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          if ! assets="$(gh release view "v$version" --json assets -q '.assets[].name' 2>/dev/null)"; then
+            echo "There is no v$version release yet, so there is nothing to build."
+            echo "count=0" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          include=""
+          count=0
+          # 22.04 on both, because an AppImage runs on the glibc it was built
+          # against or newer, so the oldest LTS that still carries webkit2gtk-4.1
+          # reaches the most machines. GitHub retires these images in April 2027,
+          # and keeping this floor after that means building in a 22.04 container.
+          for pair in "x86_64:ubuntu-22.04" "aarch64:ubuntu-22.04-arm"; do
+            arch="${pair%%:*}"
+            runner="${pair##*:}"
+            if printf '%s\n' "$assets" | grep -Fqx "nurb_$arch.deb"; then
+              echo "v$version already carries the $arch packages."
+              continue
+            fi
+            include="$include{\"arch\":\"$arch\",\"runner\":\"$runner\"},"
+            count=$((count + 1))
+          done
+
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "matrix={\"include\":[${include%,}]}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: pending
+    if: needs.pending.outputs.count != '0'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix: ${{ fromJSON(needs.pending.outputs.matrix) }}
+      # One at a time. Both architectures merge into the same latest.json, and
+      # while common.sh holds a remote lock across that read-modify-write, a
+      # queue is cheaper than two runners taking turns on it.
+      max-parallel: 1
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.pending.outputs.version }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      # scripts/stage.sh builds the nurb wheel and compiles the hash-pinned lock
+      # that the app provisions from, both with uv.
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      # The Tauri libraries, libdbus because tao links it through pkg-config, and
+      # bubblewrap because the script warns when the machine building the sandbox
+      # has no copy of it.
+      # The AppImage needs no FUSE: the bundler runs linuxdeploy with
+      # --appimage-extract-and-run.
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libxdo-dev \
+            patchelf \
+            pkg-config \
+            xdg-utils \
+            bubblewrap
+
+      - run: npm ci
+        working-directory: desktop
+
+      - name: Build and publish the Linux packages
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The private key itself, not a path: `tauri signer generate` prints
+          # it, and the secret holds those lines verbatim.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: scripts/release-linux.sh

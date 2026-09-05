@@ -524,7 +524,7 @@ def test_the_first_part_brings_the_launcher(tmp_path, monkeypatch):
     """Project birth is the only moment it appears on its own; deleting it sticks."""
     monkeypatch.chdir(tmp_path)
     cli.main(["new", "one"])
-    launcher = tmp_path / "viewer.command"
+    launcher = tmp_path / cli.LAUNCHER
     assert launcher.exists()
     launcher.unlink()
     cli.main(["new", "two"])
@@ -532,17 +532,36 @@ def test_the_first_part_brings_the_launcher(tmp_path, monkeypatch):
 
 
 def test_launcher_is_an_executable_that_runs_dev(tmp_path, monkeypatch):
-    """Double-clickable from Finder: executable, login shell, lands on `nurb dev --open`."""
+    """Double-clickable from the file manager: executable, and lands on `nurb dev --open`."""
     import os
 
     (tmp_path / "parts").mkdir()
     monkeypatch.chdir(tmp_path)
     cli.main(["launcher"])
-    file = tmp_path / "viewer.command"
+    file = tmp_path / cli.LAUNCHER
     text = file.read_text()
-    assert text.startswith("#!/bin/zsh -l\n")
     assert "nurb dev --open" in text
     assert os.access(file, os.X_OK)
+
+
+def test_the_mac_launcher_is_a_login_shell_script(tmp_path):
+    """Finder's Terminal session carries no profile PATH, so the shell has to be a login one."""
+    text = cli._launcher_text(tmp_path, "darwin")
+    assert text.startswith("#!/bin/zsh -l\n")
+    assert 'cd "$(dirname "$0")"' in text
+
+
+def test_the_desktop_entry_names_the_project_and_a_login_shell(tmp_path):
+    """Exec= bypasses the shell, so PATH comes from an explicit login bash and cwd from Path=."""
+    project = tmp_path / "a project with spaces"
+    project.mkdir()
+    lines = cli._launcher_text(project, "linux").splitlines()
+    assert lines[0] == "[Desktop Entry]"
+    assert "Type=Application" in lines
+    assert "Terminal=true" in lines
+    # Path= is a literal, so the spaces need no quoting and Exec= stays a plain command.
+    assert f"Path={project.resolve()}" in lines
+    assert 'Exec=bash -lc "exec nurb dev --open"' in lines
 
 
 def test_export_reads_the_projects_formats(tmp_path, monkeypatch):

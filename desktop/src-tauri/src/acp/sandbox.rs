@@ -1,74 +1,35 @@
-//! The OS sandbox every agent adapter runs under. Enforcement used to live
-//! in policy.rs as a shell-command parser deciding which permission requests
-//! to auto-allow, and it lost by construction: bash's lexer is the spec, any
-//! approximation misses shapes, and every miss was a dialog. Now the adapter
-//! process (and so every command the agent runs) is spawned under a Seatbelt
-//! profile: read anything, network allowed, write only where the app says.
-//! Dialogs are gone because the kernel is the guard; a forbidden write fails
-//! in the agent's own transcript instead of interrupting the user.
+//! Kernel sandbox orchestration shared by every ACP adapter process.
 //!
-//! No entry in the profile is user-managed. Every writable root is computed
-//! at spawn time from facts the app already owns: the project the user
-//! opened, the app's own data directory (or the dev checkout), the per-user
-//! temp and cache trees macOS assigns, and the state directories of the
-//! agents the app ships. If a future change wants a user-typed path or a
-//! setting here, it is the wrong change.
+//! Both platforms enforce the same write boundary: read anything, keep network
+//! access, and write only the open project, engine state, tool caches, agent
+//! state, temp space, and nurb config. macOS renders those roots into Seatbelt;
+//! Linux overlays them on a read-only mount namespace and separately denies
+//! Unix sockets with seccomp.
 
 use std::path::{Path, PathBuf};
 
-/// Wrap an adapter invocation in `sandbox-exec`. sandbox-exec applies the
-/// profile and execs the target in place, so the child pid, process group,
-/// and kill semantics the caller relies on are unchanged.
-pub(super) fn wrap(
-    program: String,
-    args: Vec<String>,
+#[cfg(any(target_os = "linux", test))]
+mod linux;
+#[cfg(target_os = "macos")]
+mod macos;
+
+#[cfg(target_os = "linux")]
+pub(super) use linux::wrap;
+#[cfg(target_os = "macos")]
+pub(super) use macos::wrap;
+
+/// One prefix per shipped agent home. Seatbelt uses all of them; Linux exposes
+/// only the currently spawned agent through its HOME relayout.
+pub(super) const AGENT_DOTS: [&str; 5] = [".claude", ".codex", ".gemini", ".cursor", ".grok"];
+
+/// Writable roots shared by both renderers. Every returned path is resolved so
+/// Seatbelt sees the syscall path and bwrap receives a real bind source.
+pub(super) fn writable_roots(
     project: &Path,
     engine_root: &Path,
-) -> (String, Vec<String>) {
-    let mut wrapped = vec!["-p".into(), profile(project, engine_root), program];
-    wrapped.extend(args);
-    ("/usr/bin/sandbox-exec".into(), wrapped)
-}
-
-/// The Seatbelt profile. Later rules win, so: allow everything, deny all
-/// writes, then re-allow the app-derived writable roots.
-fn profile(project: &Path, engine_root: &Path) -> String {
-    let mut rules = String::new();
-    for root in writable_roots(project, engine_root) {
-        rules.push_str(&format!("  (subpath {})\n", quoted(&root)));
-    }
-    if let Some(home) = home() {
-        // The agents' own state (`~/.claude` and the `~/.claude.json` family,
-        // `~/.codex`, `~/.gemini`, `~/.cursor`, `~/.grok`): one prefix rule per agent
-        // home, so session files, config, and their temp-file variants are
-        // all covered without enumerating filenames.
-        for dot in [".claude", ".codex", ".gemini", ".cursor", ".grok"] {
-            rules.push_str(&format!(
-                "  (regex #\"^{}/\\{dot}\")\n",
-                regex_escaped(&home.display().to_string())
-            ));
-        }
-    }
-    format!(
-        "(version 1)\n\
-         (allow default)\n\
-         (deny file-write*)\n\
-         (allow file-write*\n\
-         \x20 (literal \"/dev/null\")\n\
-         \x20 (literal \"/dev/tty\")\n\
-         \x20 (literal \"/dev/dtracehelper\")\n\
-         \x20 (regex #\"^/dev/ttys[0-9]\")\n\
-         \x20 (subpath \"/private/tmp\")\n\
-         {rules})\n"
-    )
-}
-
-/// Directory roots the adapter may write, symlink-resolved because Seatbelt
-/// matches syscall paths after resolution (/tmp is really /private/tmp).
-/// Roots that do not exist are skipped: a rule for a missing path is dead
-/// weight, and everything here is created by macOS or the app before an
-/// adapter ever spawns.
-fn writable_roots(project: &Path, engine_root: &Path) -> Vec<PathBuf> {
+    agent_home: Option<&Path>,
+    config: Option<&Path>,
+) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     let mut push = |path: PathBuf| {
         if let Ok(real) = path.canonicalize() {
@@ -77,124 +38,166 @@ fn writable_roots(project: &Path, engine_root: &Path) -> Vec<PathBuf> {
             }
         }
     };
-    // The project the user opened, and the engine's home: the provisioned
-    // app-data dir on user machines, the repo checkout in dev builds (where
-    // `uv run --project` and `npx -y` write build state).
     push(project.to_path_buf());
     push(engine_root.to_path_buf());
-    // The per-user temp tree macOS hands the app (TMPDIR under
-    // /var/folders/...) and its sibling cache tree; child shells inherit the
-    // same confstr answers.
+    if let Some(agent_home) = agent_home {
+        push(agent_home.to_path_buf());
+    }
     let temp = std::env::temp_dir();
+    #[cfg(target_os = "macos")]
     if let Some(user_dir) = temp.parent() {
         push(user_dir.join("C"));
     }
     push(temp);
+    #[cfg(target_os = "linux")]
+    push(PathBuf::from("/tmp"));
     if let Some(home) = home() {
-        // Tool caches (uv resolves to ~/Library/Caches, npm to ~/.npm,
-        // XDG-style tools to ~/.cache) and nurb's own config.
+        #[cfg(target_os = "macos")]
         push(home.join("Library/Caches"));
         push(home.join(".cache"));
         push(home.join(".npm"));
-        push(home.join(".config/nurb"));
+    }
+    if let Some(config) = config {
+        push(config.to_path_buf());
     }
     roots
 }
 
-fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
-}
-
-/// A Seatbelt string literal: double-quoted, with quotes and backslashes
-/// escaped ("Banana Holder" is a normal project name; quotes would be
-/// pathological but must not break out of the string).
-fn quoted(path: &Path) -> String {
-    let escaped = path
-        .display()
-        .to_string()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"");
-    format!("\"{escaped}\"")
-}
-
-/// A path made safe for use inside a Seatbelt regex literal.
-fn regex_escaped(path: &str) -> String {
-    let mut out = String::new();
-    for c in path.chars() {
-        if "\\^$.|?*+()[]{}\"".contains(c) {
-            out.push('\\');
+pub(super) fn ensure_nurb_config_dir() -> Option<PathBuf> {
+    let path = match crate::agents::nurb_config_dir() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("[acp:sandbox] {error}");
+            return None;
         }
-        out.push(c);
+    };
+    ensure_directory(path, "nurb config")
+}
+
+/// Return the writable custom state root and the CODEX_HOME value the child
+/// must see. An invalid inherited override explicitly falls back to ~/.codex;
+/// otherwise Codex would keep targeting an intentionally read-only path.
+pub(super) fn agent_home_policy(
+    agent_dot: &str,
+    requested: Option<&Path>,
+    project: &Path,
+    engine_root: &Path,
+    override_present: bool,
+) -> Result<(Option<PathBuf>, Option<String>), String> {
+    let safe = safe_agent_home(requested, project, engine_root)?;
+    if agent_dot != ".codex" || !override_present {
+        return Ok((safe, None));
     }
-    out
+    let effective = safe
+        .as_ref()
+        .cloned()
+        .or_else(|| home().map(|home| home.join(".codex")));
+    let environment = effective.and_then(|path| path.to_str().map(str::to_string));
+    Ok((safe, environment))
+}
+
+/// Resolve symlinks before granting a custom agent root. It may not be HOME,
+/// an ancestor of HOME, or an ancestor that widens project/engine access.
+fn safe_agent_home(
+    path: Option<&Path>,
+    project: &Path,
+    engine_root: &Path,
+) -> Result<Option<PathBuf>, String> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let candidate = match prospective_real_path(path) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!(
+                "[acp:sandbox] ignoring unsafe CODEX_HOME {}: {error}",
+                path.display()
+            );
+            return Ok(None);
+        }
+    };
+    if let Some(home) = home() {
+        if home.starts_with(&candidate) {
+            eprintln!(
+                "[acp:sandbox] ignoring unsafe CODEX_HOME {} because it would make protected data writable",
+                path.display()
+            );
+            return Ok(None);
+        }
+    }
+    for root in [project, engine_root] {
+        if let Ok(root) = root.canonicalize() {
+            if root != candidate && root.starts_with(&candidate) {
+                return Err(format!(
+                    "CODEX_HOME {} contains the open project or nurb engine. Choose a separate CODEX_HOME folder, then reopen the project.",
+                    path.display()
+                ));
+            }
+        }
+    }
+    std::fs::create_dir_all(&candidate).map_err(|error| {
+        format!(
+            "Could not create CODEX_HOME {}: {error}. Choose a writable CODEX_HOME folder, then reopen the project.",
+            candidate.display()
+        )
+    })?;
+    Ok(Some(candidate))
+}
+
+fn prospective_real_path(path: &Path) -> Result<PathBuf, String> {
+    use std::path::Component;
+
+    if !path.is_absolute() {
+        return Err("the path is not absolute".into());
+    }
+    if path.to_str().is_none() {
+        return Err("the path is not valid UTF-8".into());
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err("the path contains '..'".into());
+    }
+    let mut existing = path.to_path_buf();
+    let mut suffix = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name() else {
+            return Err("the path has no existing ancestor".into());
+        };
+        suffix.push(name.to_os_string());
+        if !existing.pop() {
+            return Err("the path has no existing ancestor".into());
+        }
+    }
+    let mut real = existing
+        .canonicalize()
+        .map_err(|error| format!("its existing ancestor cannot be resolved: {error}"))?;
+    for component in suffix.into_iter().rev() {
+        real.push(component);
+    }
+    Ok(real)
+}
+
+fn ensure_directory(path: PathBuf, label: &str) -> Option<PathBuf> {
+    if let Err(error) = std::fs::create_dir_all(&path) {
+        eprintln!(
+            "[acp:sandbox] could not create the {label} directory at {}: {error}",
+            path.display()
+        );
+        return None;
+    }
+    Some(path)
+}
+
+pub(super) fn home() -> Option<PathBuf> {
+    canonical_existing_dir(PathBuf::from(std::env::var_os("HOME")?))
+}
+
+pub(super) fn canonical_existing_dir(path: PathBuf) -> Option<PathBuf> {
+    path.canonicalize().ok().filter(|path| path.is_dir())
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::process::Command;
-
-    fn sh(profile: &str, script: &str) -> bool {
-        Command::new("/usr/bin/sandbox-exec")
-            .args(["-p", profile, "/bin/sh", "-c", script])
-            .output()
-            .expect("sandbox-exec runs")
-            .status
-            .success()
-    }
-
-    #[test]
-    fn the_kernel_enforces_the_write_boundary() {
-        // The test IS the security property: writes inside the project
-        // succeed, writes beside it fail, reads work everywhere.
-        let project = std::env::temp_dir().join(format!("nurb-sbx-{}", std::process::id()));
-        let outside = std::env::temp_dir().join(format!("nurb-sbx-out-{}", std::process::id()));
-        std::fs::create_dir_all(&project).unwrap();
-        std::fs::create_dir_all(&outside).unwrap();
-        // A profile whose only writable root is the project: temp trees are
-        // excluded here on purpose, because the test's "outside" lives there.
-        let profile = format!(
-            "(version 1)\n(allow default)\n(deny file-write*)\n(allow file-write* (subpath {}) (literal \"/dev/null\"))\n",
-            quoted(&project.canonicalize().unwrap())
-        );
-        assert!(sh(&profile, &format!("echo hi > '{}/inside.txt'", project.display())));
-        assert!(!sh(&profile, &format!("echo hi > '{}/escape.txt'", outside.display())));
-        assert!(sh(&profile, "cat /etc/hosts > /dev/null"));
-        std::fs::remove_dir_all(&project).ok();
-        std::fs::remove_dir_all(&outside).ok();
-    }
-
-    #[test]
-    fn the_real_profile_admits_the_project_and_agent_state() {
-        let project = std::env::temp_dir().join(format!("nurb-sbx-real-{}", std::process::id()));
-        std::fs::create_dir_all(&project).unwrap();
-        let profile = profile(&project, &project);
-        // Inside the project: allowed. The user's own dotfiles: refused.
-        assert!(sh(&profile, &format!("echo hi > '{}/part.py'", project.display())));
-        assert!(!sh(&profile, "echo hacked >> \"$HOME/nurb-sbx-canary\" && rm \"$HOME/nurb-sbx-canary\""));
-        // Agent state under each agent home writes fine (created and removed).
-        for dot in [".claude", ".codex", ".gemini", ".cursor", ".grok"] {
-            let existed = home().map(|h| h.join(dot).exists()).unwrap_or(false);
-            assert!(sh(
-                &profile,
-                &format!("mkdir -p \"$HOME/{dot}/nurb-sbx-test\" && rmdir \"$HOME/{dot}/nurb-sbx-test\"")
-            ));
-            // Do not leave dotdirs behind for agents this machine lacks.
-            if !existed {
-                if let Some(h) = home() {
-                    std::fs::remove_dir(h.join(dot)).ok();
-                }
-            }
-        }
-        std::fs::remove_dir_all(&project).ok();
-    }
-
-    #[test]
-    fn quoting_survives_hostile_paths() {
-        let path = PathBuf::from("/Users/me/Documents/nurb/Banana Holder");
-        assert_eq!(quoted(&path), "\"/Users/me/Documents/nurb/Banana Holder\"");
-        let tricky = PathBuf::from("/Users/me/a\"b");
-        assert_eq!(quoted(&tricky), "\"/Users/me/a\\\"b\"");
-        assert_eq!(regex_escaped("/Users/j.p"), "/Users/j\\.p");
-    }
-}
+#[path = "sandbox/common_tests.rs"]
+mod common_tests;

@@ -468,21 +468,38 @@ fn test_hook(app: AppHandle) {
 /// outside world, alongside the same pair in the about box. "Check for Updates…"
 /// sits under About where every Mac app keeps it; the webview owns the update
 /// state, so the click is forwarded there as an event.
+///
+/// Linux has no app submenu to sit under, so the update check joins the Help
+/// items instead. Silently dropping it would leave the app updatable only by
+/// whatever the user happened to download.
 fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, HELP_SUBMENU_ID};
     let menu = Menu::default(app)?;
-    if let Some(appmenu) = menu.items()?.first().and_then(|i| i.as_submenu().cloned()) {
-        appmenu.insert(
-            &MenuItem::with_id(app, "app:check-updates", "Check for Updates…", true, None::<&str>)?,
-            1,
-        )?;
+    let updates = MenuItem::with_id(
+        app,
+        "app:check-updates",
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
+    let mut placed = false;
+    if cfg!(target_os = "macos") {
+        if let Some(appmenu) = menu.items()?.first().and_then(|i| i.as_submenu().cloned()) {
+            appmenu.insert(&updates, 1)?;
+            placed = true;
+        }
     }
     if let Some(help) = menu.get(HELP_SUBMENU_ID).and_then(|i| i.as_submenu().cloned()) {
+        if !placed {
+            help.append(&updates)?;
+            placed = true;
+        }
         help.append_items(&[
             &MenuItem::with_id(app, "help:github", "nurb on GitHub", true, None::<&str>)?,
             &MenuItem::with_id(app, "help:issue", "Report an Issue", true, None::<&str>)?,
         ])?;
     }
+    debug_assert!(placed, "the update check needs a menu to live in");
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         use tauri::Emitter;
@@ -501,8 +518,31 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// WebKitGTK's DMA-BUF renderer paints nothing on a good number of Linux
+/// graphics stacks: the window opens, the GTK menu bar draws because it is
+/// native, and the whole webview stays black. Reproduced here on nouveau with
+/// Mesa 25, which is an ordinary desktop, not an exotic one.
+///
+/// The app is unusable when it happens and the cause is invisible from inside
+/// it, so the fallback renderer is the default rather than something the user
+/// is told to export. That costs some compositing performance on machines that
+/// would have been fine, which is the right trade against a black window on
+/// machines that would not. Anyone who knows their stack is healthy can set the
+/// variable themselves; a value already in the environment is left alone.
+///
+/// This has to run before Tauri builds the webview, so it is the first thing
+/// `run` does.
+#[cfg(target_os = "linux")]
+fn prefer_the_renderer_that_paints() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    prefer_the_renderer_that_paints();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

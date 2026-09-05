@@ -58,15 +58,22 @@ A fresh worktree has no `desktop/node_modules`, and the script dies immediately 
 
 About ten minutes: signed build, notarization, stapling, chain verification, upload of `nurb.dmg` plus the updater archive into the `vX.Y.Z` release, and the `desktop-latest` feed refresh. It refuses to double-upload, so re-running after a failure is safe. It needs this Mac; the signing cert and updater key live here by design.
 
+The Linux packages need no machine of yours. `.github/workflows/desktop-linux.yml` starts when publish.yml finishes, and runs `scripts/release-linux.sh` on a 22.04 runner per architecture: the `.deb` and the AppImage for x86_64 and aarch64, into the same `vX.Y.Z` release. It takes about fifteen minutes for both. Watch it with `gh run list --workflow desktop-linux.yml --limit 3`, and re-run the workflow if an architecture failed: it asks the release what is missing and builds only that.
+
+Order against the Mac does not matter: both platforms merge their own half into `latest.json` through `scripts/feed.py` instead of overwriting it, and take a lock on the feed release while they do. What does matter is that both run for the same version, since the merge drops entries belonging to an older one rather than offer an update that hands the user the previous build. A release where only one platform ran is fine and simply carries that platform, but say so in the report.
+
 ## Step 4: Verify, then report
 
-Three probes, all of which must say X.Y.Z (the DMG check must return a redirect or 200):
+Expose the current tag's assets and the feed's platform keys before calling the release complete:
 
 ```bash
+gh release view vX.Y.Z --json assets -q '.assets[].name' | sort
+curl -sfL https://github.com/Shpigford/nurb/releases/download/desktop-latest/latest.json | python3 -c 'import json,sys; feed=json.load(sys.stdin); print(feed["version"]); print("\n".join(sorted(feed["platforms"])))'
 curl -sfI https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg | head -1
-curl -sfL https://github.com/Shpigford/nurb/releases/download/desktop-latest/latest.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])"
 curl -sf https://pypi.org/pypi/nurb/json | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])"
 ```
+
+The feed and PyPI probes must say X.Y.Z. If the Mac half ran, the tag must carry both DMGs plus both `.app.tar.gz` archives and signatures, the feed must carry `darwin-aarch64` and `darwin-x86_64`, and the DMG probe must return a redirect or 200. If the Linux x86_64 half ran, the tag must carry `nurb_x86_64.deb`, `nurb_x86_64.deb.sig`, `nurb-x86_64.AppImage`, and `nurb-x86_64.AppImage.sig`, and the feed must carry `linux-x86_64` and `linux-x86_64-deb`; substitute `aarch64` for an ARM release. A deliberately one-sided release is valid only when every artifact and feed key for the half that ran is present, and the report explicitly names the half that was skipped. A missing artifact or key from a half that ran is a failed release, not a one-sided one.
 
 Once PyPI shows the new version, relock the benchmark so future runs grade the new engine: in a checkout of [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks), `uv lock` and a small PR with the lockfile change. Rows keep their identity through `benchmark_revision`, so this is routine, not a reset.
 
