@@ -89,7 +89,7 @@
      ResizeObserver, which calls setSize() again -- a resize loop that flickers. */
   canvas { display: block; position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
   /* The canvas is appended last, so overlays need to be lifted above it. */
-  #hud, #err, #tools, #empty, #checks, #nogl { z-index: 1; }
+  #hud, #err, #tools, #empty, #checks, #nogl, #platecap, #building { z-index: 1; }
   #hud {
     position: absolute; left: 16px; bottom: 14px; color: var(--dim);
     font-size: 11px; pointer-events: none; line-height: 1.7;
@@ -317,6 +317,23 @@
               color: var(--dim); font-size: 11px; pointer-events: none;
               opacity: 0; transition: opacity .12s .25s; }
   body.stale #building { opacity: 1; }
+  /* The plate's millimetres, so a 256 mm default does not read as the user's machine.
+     Named is chrome. Unnamed is the picker: same hanging menu as #printerpick. */
+  #platecap { position: absolute; right: 16px; bottom: 14px; font-size: 11px;
+              color: var(--dim); pointer-events: none; z-index: 1; }
+  #platecap.unnamed { pointer-events: auto; }
+  #platecap:has(.open) { z-index: 2; }
+  #platecap > .pick { background: none; border: none; color: var(--dim); font: inherit;
+                      font-size: 11px; padding: 0; cursor: pointer; }
+  #platecap > .pick:hover { color: var(--text); }
+  #platecap .pickmenu { display: none; position: absolute; bottom: calc(100% + 5px); right: 0;
+                        min-width: 160px; max-height: 240px; overflow-y: auto;
+                        flex-direction: column; align-items: stretch; gap: 2px; padding: 3px;
+                        background: rgba(29,32,39,.95); border: 1px solid var(--line);
+                        border-radius: 9px; box-shadow: 0 4px 16px rgba(0,0,0,.35);
+                        backdrop-filter: blur(10px); }
+  #platecap.open .pickmenu { display: flex; }
+  #platecap .pickmenu button { justify-content: flex-start; }
   #params h2 .spin { margin-left: 7px; opacity: 0; transition: opacity .12s .25s; }
   body.stale #params h2 .spin { opacity: 1; }
 
@@ -587,6 +604,7 @@
   <div id="hud"></div>
   <div id="stresshint"></div>
   <div id="building"><span class="spin"></span><span>rebuilding</span><span id="buildsecs"></span></div>
+  <div id="platecap"></div>
   <div id="checks"></div>
   <div id="err"></div>
 </main>
@@ -760,6 +778,30 @@ function plate([w, d]) {
 plate(bedXY);
 function bedUpdate(bed) {
   if (bed && (bed[0] !== bedXY[0] || bed[1] !== bedXY[1])) plate(bedXY = bed);
+}
+let plateProfiles = [];
+function plateCaption(printer, bed, profiles) {
+  const cap = document.getElementById('platecap');
+  if (!cap || !bed) return;
+  const mm = `${Math.round(bed[0])} × ${Math.round(bed[1])} mm`;
+  if (profiles) plateProfiles = profiles;
+  if (printer && printer.profile) {
+    cap.className = '';
+    cap.textContent = `${printer.profile.replace(/_/g, ' ')} · ${mm}`;
+    return;
+  }
+  // Every rebuild carries the printer, and a rewrite mid-pick would close the list.
+  const trigger = cap.querySelector('#platecap > .pick');
+  if (cap.classList.contains('open') && trigger) {
+    trigger.textContent = `${mm} · default`;
+    return;
+  }
+  cap.className = 'unnamed';
+  const menu = (plateProfiles || []).map(n =>
+    `<button type="button" value="${n}">${n.replace(/_/g, ' ')}</button>`
+  ).join('');
+  cap.innerHTML = `<button type="button" class="pick">${mm} · default</button>`
+    + `<div class="pickmenu">${menu}</div>`;
 }
 
 // Findings get a pin at their reported point, in the same shifted space as the mesh.
@@ -1295,6 +1337,29 @@ function printDismiss(event) {
 }
 addEventListener('click', printDismiss);
 addEventListener('keydown', event => { if (event.key === 'Escape') printDismiss(event); });
+
+const platecap = document.getElementById('platecap');
+platecap.onclick = event => {
+  const trigger = event.target.closest('#platecap > .pick');
+  if (trigger) {
+    event.stopPropagation();
+    platecap.classList.toggle('open');
+    return;
+  }
+  if (event.target.closest('#platecap [value]') && event.target.value && sock) {
+    platecap.classList.remove('open');
+    sock.send(JSON.stringify({ type: 'printer', profile: event.target.value }));
+  }
+};
+function plateDismiss(event) {
+  const cap = document.getElementById('platecap');
+  const open = !!(cap && cap.classList.contains('open'));
+  if (!open) return;
+  if (event.type === 'click' && cap.contains(event.target)) return;
+  cap.classList.remove('open');
+}
+addEventListener('click', plateDismiss);
+addEventListener('keydown', event => { if (event.key === 'Escape') plateDismiss(event); });
 
 // On by default, matching the server: draft is a preview economy, and what the user
 // judges on screen should be the part that exports. Every rebuild while it is off is
@@ -2675,6 +2740,7 @@ async function fallback() {
     const msg = await (await fetch('/api/sync')).json();
     const rows = msg.parts || [];
     bedUpdate(msg.bed);
+    if ('printer' in msg) plateCaption(msg.printer, bedXY, msg.profiles);
     if (parts.size) return;  // a socket sync won the race
     sharedRuns = msg.shared || [];
     if (!rows.length) return;  // truly empty
@@ -2709,6 +2775,7 @@ function connect() {
   ws.onmessage = ev => {
     const msg = JSON.parse(ev.data);
     bedUpdate(msg.bed);
+    if ('printer' in msg) plateCaption(msg.printer, bedXY, msg.profiles);
     if (msg.type === 'sync') {
       requestToken = msg.request_token;
       project = msg.project || '';
@@ -2790,18 +2857,17 @@ function connect() {
       render();
       setURL();
     }
-    // The machine is named, so the question the card was asking is answered: move the
-    // bed it just settled, then go get the number the user actually clicked for. The
-    // card has read "slicing" since the pick, so this finishes that sentence.
+    // Print-time pick sets `slicing` before the send, so this finishes that sentence.
+    // Caption pick does not: naming the machine is not a request for a print estimate.
     if (msg.type === 'printer') {
+      const finishSlice = slicing;
       slicing = false;
       if (msg.error) {
         printAsk = { name: current, error: msg.error };
         printRow();
         return;
       }
-      bedUpdate(msg.bed);
-      estimate();
+      if (finishSlice) estimate();
     }
     if (msg.type === 'shared') {
       sharedRuns = msg.runs || [];

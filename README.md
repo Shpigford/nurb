@@ -96,16 +96,18 @@ build_volume      does it fit the printer at all
 
 ## Your printer, your plastic
 
-Name your machine once in `printer.toml` (`profile = "bambu_a1_mini"`) and every check, slice, and export knows your build volume and nozzle. The viewer asks for your printer the first time it needs one and writes the answer down for you. Name your material (`material = "abs"`) and the warp rules tighten to match how hard that plastic shrinks.
+Name your machine once in `~/.config/nurb/config.toml` (`profile = "bambu_a1_mini"`). Every project on this machine then knows the bed: `nurb rules` prints it first, the viewer labels the plate with it, and check, slice, and export use it. The first time the viewer asks which printer this is for, that pick writes the workshop file, so the next project does not ask. Name your material (`material = "abs"`) and the warp rules tighten to match how hard that plastic shrinks.
 
-The same file carries preferences like extra export formats:
+`printer.toml` at a project root takes the same schema and wins where they disagree: the one project aimed at a different machine.
+
+The same files carry preferences like extra export formats:
 
 ```toml
 [export]
 formats = ["3mf", "step"]
 ```
 
-A machine-wide `~/.config/nurb/config.toml` takes the same settings for every project. There is no `.env` and there are no environment variables.
+There is no `.env` and there are no environment variables.
 
 ## Memory between sessions
 

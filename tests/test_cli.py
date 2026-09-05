@@ -631,10 +631,62 @@ def test_check_says_where_the_printer_came_from(tmp_path, monkeypatch, capsys):
     _global_config('profile = "bambu_a1_mini"\n')
     monkeypatch.chdir(tmp_path)
     cli.main(["check"])
-    assert "printer: bambu_a1_mini (global)" in capsys.readouterr().out
+    assert "printer: bambu_a1_mini (global)  180 x 180 x 180 mm" in capsys.readouterr().out
     (tmp_path / "printer.toml").write_text('profile = "prusa_mk4s"\n')
     cli.main(["check"])
-    assert "printer: prusa_mk4s (printer.toml)" in capsys.readouterr().out
+    assert "printer: prusa_mk4s (printer.toml)  250 x 210 x 220 mm" in capsys.readouterr().out
+
+
+def test_check_announces_an_unnamed_default_bed(tmp_path, monkeypatch, capsys):
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    monkeypatch.chdir(tmp_path)
+    cli.main(["check"])
+    out = capsys.readouterr().out
+    assert "printer: unnamed (default)  256 x 256 x 256 mm" in out
+
+
+def test_check_announces_the_flag_printer_not_the_file(tmp_path, monkeypatch, capsys):
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    _global_config('profile = "bambu_a1_mini"\n')
+    monkeypatch.chdir(tmp_path)
+    cli.main(["check", "--printer", "prusa_mk4s"])
+    out = capsys.readouterr().out
+    assert "printer: prusa_mk4s (--printer)  250 x 210 x 220 mm" in out
+    assert "bambu_a1_mini" not in out
+
+
+def test_rules_starts_with_the_printer_line(tmp_path, monkeypatch, capsys):
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    monkeypatch.chdir(tmp_path)
+    cli.main(["rules"])
+    out = capsys.readouterr().out
+    assert out.startswith("printer: unnamed (default)  256 x 256 x 256 mm")
+    assert "# nurb design doctrine" in out
+
+
+def test_rules_still_dumps_doctrine_when_printer_toml_is_broken(
+    tmp_path, monkeypatch, capsys
+):
+    parts = tmp_path / "parts"
+    parts.mkdir()
+    (parts / "thing.py").write_text(PLAIN)
+    (tmp_path / "printer.toml").write_text("profile = \n")
+    monkeypatch.chdir(tmp_path)
+    cli.main(["rules"])
+    out = capsys.readouterr().out
+    assert out.startswith("printer: unnamed (default)  256 x 256 x 256 mm")
+    assert "# nurb design doctrine" in out
+
+
+def test_new_prints_the_printer_line(tmp_path, capsys):
+    _new(tmp_path)
+    assert "printer: unnamed (default)" in capsys.readouterr().out
 
 
 def test_3mf_writes_a_tessellation_with_a_crack_in_it(tmp_path, monkeypatch):

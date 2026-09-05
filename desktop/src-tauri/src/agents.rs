@@ -74,7 +74,7 @@ impl AgentKind {
     pub fn adapter(self) -> Option<&'static str> {
         match self {
             Self::Claude => Some("@agentclientprotocol/claude-agent-acp@0.74.0"),
-            Self::Codex => Some("@agentclientprotocol/codex-acp@1.1.9"),
+            Self::Codex => Some("@agentclientprotocol/codex-acp@1.10.0"),
             Self::Gemini => Some("@google/gemini-cli@0.55.1"),
             Self::Cursor | Self::Grok => None,
         }

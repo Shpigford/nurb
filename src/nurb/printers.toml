@@ -73,6 +73,10 @@ slicer = "Prusa XL"
 bed = [220.0, 220.0, 250.0]
 slicer = "Creality Ender-3 V3"
 
+[creality_k2_plus]
+bed = [350.0, 350.0, 350.0]
+slicer = "Creality K2 Plus"
+
 [anycubic_kobra_2]
 bed = [220.0, 220.0, 250.0]
 slicer = "Anycubic Kobra 2"

@@ -8,6 +8,7 @@ import asyncio
 import collections
 import hashlib
 import json
+import os
 import pathlib
 import secrets
 import threading
@@ -20,9 +21,10 @@ from websockets.asyncio.server import serve
 from websockets.http11 import Response
 from websockets.datastructures import Headers
 
-from . import __version__, builder, extract, registry
+from . import __version__, builder, crash, extract, registry
 
 VIEWER = pathlib.Path(__file__).parent / "viewer.html"
+CRASHED = "NURB_CRASHED"  # the environment variable a crash restart carries its marker in
 VENDOR = (pathlib.Path(__file__).parent / "vendor").resolve()
 
 
@@ -197,6 +199,14 @@ class Server:
         self.clients = set()
         self.loop = None
         self.queue = None
+        # A replacement process restores the whole session, including earlier faults. Opening another tab would strand the user's existing view.
+        resumed = json.loads(os.environ.pop(CRASHED, "null"))
+        self.crashed = resumed["crashed"] if resumed else {}
+        if resumed:
+            self.port = resumed["port"]
+            self.draft = resumed["draft"]
+            self.overrides = resumed["overrides"]
+            self.open_browser = False
         self.observer = None
         self.drain_task = None
         # One build at a time, shared by the rebuild loop and the export route. OCCT
@@ -222,10 +232,44 @@ class Server:
 
     # ---------- building ----------
 
-    def _build(self, path, name):
+    def _crash_key(self, path, overrides, draft, snapshot=None):
+        """What a build is made of, hashed, so a crash marker knows when to let go."""
+        if snapshot is None:
+            snapshot = self._source_snapshot(path)
+        digest = hashlib.blake2b(digest_size=8)
+        for source in sorted(snapshot or {}):
+            digest.update(str(source).encode())
+            digest.update(snapshot[source] or b"")
+        digest.update(json.dumps([overrides, draft], sort_keys=True).encode())
+        return digest.hexdigest()
+
+    def _guarded(self, path, overrides, draft, snapshot=None):
+        """Build, and should the kernel fault instead, come back as a server that knows.
+
+        The crash handler execs this process with the marker in its environment. A
+        one-off build (an export, a slice) can crash too; the marker then names the
+        polished configuration, and the dev build at its own settings goes ahead.
+        """
+        marker = {
+            "path": str(path),
+            "key": self._crash_key(path, overrides, draft, snapshot),
+        }
+        state = {
+            "port": self.port,
+            "draft": self.draft,
+            "overrides": self.overrides,
+            "crashed": self.crashed,
+        }
+        crash.restart = (CRASHED, state, marker)
+        try:
+            return builder.build(path, overrides=overrides, draft=draft)
+        finally:
+            crash.restart = None
+
+    def _build(self, path, name, snapshot=None):
         """Build with whatever the sliders are holding for this part."""
         try:
-            return builder.build(path, overrides=self.overrides.get(name), draft=self.draft)
+            return self._guarded(path, self.overrides.get(name), self.draft, snapshot)
         except builder.UnknownParams as exc:
             # An edit renamed or removed a parameter a slider was still holding. The
             # file is the authority, so those get dropped and the build goes ahead: a
@@ -235,7 +279,33 @@ class Server:
                 self.overrides.get(name, {}).pop(gone, None)
             if not self.overrides.get(name):
                 self.overrides.pop(name, None)
-            return builder.build(path, overrides=self.overrides.get(name), draft=self.draft)
+            return self._guarded(path, self.overrides.get(name), self.draft, snapshot)
+
+    def _crashed_entry(self, path, name, entry, snapshot):
+        """The entry a part gets when the last process died building exactly this.
+
+        Skipping the build is the whole point: building it again is how eight crash
+        dialogs happened (issue #247). The sliders still come from the file, so the user
+        can try another configuration, and any edit to the project clears the marker.
+        """
+        marker = self.crashed.get(str(path))
+        if marker is None:
+            return None
+        key = self._crash_key(path, self.overrides.get(name), self.draft, snapshot)
+        if marker["key"] != key:
+            self.crashed.pop(str(path))
+            return None
+        entry["glb"] = None
+        entry["shape"] = None
+        entry["error"] = marker["error"]
+        entry["traceback"] = marker["traceback"]
+        try:
+            defn = builder.load(path)._nurb
+            values = {**defn.params, **(self.overrides.get(name) or {})}
+            entry["params"] = builder.describe(defn, values)
+        except Exception:
+            entry["params"] = []
+        return entry
 
     def rebuild(self, path):
         name = pathlib.Path(path).stem
@@ -250,7 +320,10 @@ class Server:
             "stress_spots": None,
         }
         try:
-            shape, params, ms = self._build(path, name)
+            if self._crashed_entry(path, name, entry, inputs_before) is not None:
+                self.state[name] = entry
+                return entry
+            shape, params, ms = self._build(path, name, inputs_before)
             entry.update(builder.stats(shape))
             entry["params"] = params
             entry["variant"] = self._active_variant(params, entry["variants"])
@@ -770,7 +843,7 @@ class Server:
 
         def solid(path, stem):
             """(bytes, None, said) for a part, (None, scene, None) for an assembly."""
-            built, _, _ = builder.build(path, overrides=self.overrides.get(stem), draft=False)
+            built, _, _ = self._guarded(path, self.overrides.get(stem), draft=False)
             scene = getattr(built, "_nurb_scene", None)
             if scene is not None:
                 return None, scene, None
@@ -967,12 +1040,11 @@ class Server:
             raise builder.BuildError(f"{name} places no parts; nothing to print")
         return out
 
-    @staticmethod
-    def _solid(path, overrides, target):
+    def _solid(self, path, overrides, target):
         """The polished build at the exact values the estimate names, written as STL."""
         if not path.is_file():
             raise builder.BuildError(f"{path.stem} is no longer on disk")
-        built, _, _ = builder.build(path, overrides=overrides or None, draft=False)
+        built, _, _ = self._guarded(path, overrides or None, draft=False)
         builder.write_stl(built, target)
         return target
 
@@ -1126,6 +1198,21 @@ class Server:
         except Exception:
             return list(checks.Context().bed[:2])
 
+    def _printer_state(self):
+        """The named machine, or null plus the shipped list so the caption can pick.
+
+        Broken TOML is unnamed, same as `_bed`: the handshake must not die on it.
+        """
+        from . import checks
+
+        try:
+            profile, source = checks.profile_choice(self.root)
+        except Exception:
+            profile, source = None, None
+        if profile:
+            return {"printer": {"profile": profile, "source": source}}
+        return {"printer": None, "profiles": self._machines()}
+
     # ---------- websocket ----------
 
     def _sync(self, include_token=False):
@@ -1137,6 +1224,7 @@ class Server:
             # refuses to double up instead of walking to the next port.
             "root": str(self.root),
             "bed": self._bed(),
+            **self._printer_state(),
             "version": __version__,
             "upgradable": _upgrade_command() is not None,
             "draft": self.draft,
@@ -1205,7 +1293,12 @@ class Server:
                 self.queue.put_nowait(str(part))
             await self.reply(
                 client,
-                {"type": "printer", "profile": msg["profile"], "bed": self._bed()},
+                {
+                    "type": "printer",
+                    "profile": msg["profile"],
+                    "bed": self._bed(),
+                    **self._printer_state(),
+                },
             )
             return
 
@@ -1334,7 +1427,9 @@ class Server:
     async def broadcast(self, entry, kind="rebuilt"):
         # Printer settings are watched like part sources. Carrying the current bed on
         # the rebuild is what lets an edit resize an already-open viewer.
-        await self.send({"type": kind, "bed": self._bed(), **self._wire(entry)})
+        await self.send(
+            {"type": kind, "bed": self._bed(), **self._printer_state(), **self._wire(entry)}
+        )
 
     # ---------- watching ----------
 
@@ -1388,11 +1483,12 @@ class Server:
         self.observer = Observer()
         self.observer.schedule(Handler(), str(parts_dir), recursive=False)
         self.observer.schedule(Handler(), str(self.root), recursive=False)
+        # Created before it is watched: on a machine that has never named a printer
+        # the first pick, or the agent, creates this directory mid-session, and a
+        # directory that did not exist at start would never be observed.
         global_dir = global_config.parent
-        if global_dir.is_dir() and global_dir not in {
-            parts_dir.resolve(),
-            self.root.resolve(),
-        }:
+        global_dir.mkdir(parents=True, exist_ok=True)
+        if global_dir not in {parts_dir.resolve(), self.root.resolve()}:
             self.observer.schedule(Handler(), str(global_dir), recursive=False)
         self.observer.daemon = True
         self.observer.start()
