@@ -122,9 +122,10 @@ def app(search=None):
     executable.
     """
     for name in search or SLICERS:
-        bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
-        if bundle.is_file():
-            return bundle
+        if sys.platform == "darwin":
+            bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
+            if bundle.is_file():
+                return bundle
         for folder in _windows_install_dirs(name):
             for command in COMMANDS.get(name, (name, name.lower())):
                 found = folder / f"{command}.exe"
