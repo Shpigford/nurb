@@ -213,6 +213,19 @@ def test_the_p2s_profile_matches_the_vendor_and_slicer():
     }
 
 
+def test_the_k2_plus_profile_matches_the_vendor_and_slicer():
+    """The only Creality on the list was the Ender-3 V3, so a K2 Plus owner had no
+    profile to name and no way to add one: profiles ship inside the package, and
+    printer.toml can name a machine but not define one, because a `slicer` key there
+    is refused as an unknown check setting. Hand-adding the entry worked until the
+    next `nurb update` rewrote the file and took it out again."""
+    have = profiles()
+    assert have["creality_k2_plus"] == {
+        "bed": [350.0, 350.0, 350.0],
+        "slicer": "Creality K2 Plus",
+    }
+
+
 def test_anycubic_kobra_2_profile_matches_the_vendor_and_slicer():
     have = profiles()
     assert have["anycubic_kobra_2"] == {
