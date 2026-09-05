@@ -101,6 +101,10 @@ const TOOL_STATUS_LABEL: Record<string, string> = {
 
 const basename = (path: string) => path.split("/").pop() ?? path;
 
+// How close to the end still counts as reading the latest. Wide enough that a
+// half-line of overshoot from a wheel notch does not read as scrolling away.
+const BOTTOM_SLACK = 80;
+
 // The button's own label: the selected names, not the model ids, since those
 // are the agent's wire values and mean nothing to someone printing a bracket.
 function summarize(config: ConfigRow[]): string {
@@ -191,6 +195,9 @@ function Chat({
   // mount cannot spawn two adapters.
   const startRef = useRef<Promise<string> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Whether the transcript was resting at its end when the user last moved it.
+  // True to begin with: a fresh or resumed conversation opens at the latest.
+  const atBottomRef = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Latest callbacks behind stable refs so ensureSession never goes stale.
   const onSessionRef = useRef(onSession);
@@ -216,10 +223,21 @@ function Chat({
     };
   }, []);
 
+  // Sticky bottom, and only that. A transcript already at the end follows new
+  // content; one the user has scrolled up into stays where they left it, which
+  // a turn streaming a tool row every few hundred ms would otherwise undo on
+  // every row. The ref is what makes it work: by the time the effect runs the
+  // new content has already grown scrollHeight, so "were they at the bottom"
+  // has to be answered from before the update, and the scroll listener is the
+  // only thing that saw that moment.
   useEffect(() => {
     const pane = scrollRef.current;
-    if (pane) pane.scrollTop = pane.scrollHeight;
-  }, [items, permissions, busy]);
+    // A hidden column has no layout, so scrollHeight is 0 and this would park
+    // it at the top. It re-runs when the column is shown, which is when the
+    // scroll position first means anything.
+    if (!pane || pane.clientHeight === 0) return;
+    if (atBottomRef.current) pane.scrollTop = pane.scrollHeight;
+  }, [items, permissions, busy, hidden]);
 
   useEffect(() => {
     // Dev-only test hook: the Rust side forwards loopback-socket text here so
@@ -502,6 +520,9 @@ function Chat({
   const send = useCallback(
     async (text: string, files: string[]) => {
       sendingRef.current = true;
+      // Saying something is asking to watch the reply, wherever the transcript
+      // was parked while composing it.
+      atBottomRef.current = true;
       const startedAt = Date.now();
       const localId = nextLocalIdRef.current++;
       setItems((list) => [
@@ -756,7 +777,15 @@ function Chat({
           </button>
         )}
       </div>
-      <div className="chat-transcript" ref={scrollRef}>
+      <div
+        className="chat-transcript"
+        ref={scrollRef}
+        onScroll={(event) => {
+          const pane = event.currentTarget;
+          atBottomRef.current =
+            pane.scrollHeight - pane.scrollTop - pane.clientHeight <= BOTTOM_SLACK;
+        }}
+      >
         {items.length === 0 && !busy && (
           <div className="chat-empty">
             {isProject
