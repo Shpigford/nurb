@@ -235,9 +235,7 @@ def test_the_viewer_export_route_zips_an_assemblys_placed_parts(project):
 
     write(project, "plate", PLATE)
     write(project, "carrier", USE_ASM)
-    srv = Server.__new__(Server)
-    srv.root = project
-    srv.overrides = {}
+    srv = Server(project)
 
     body, attach, mime, _ = srv._export("carrier", "stl")
     assert (attach, mime) == ("carrier-stl.zip", "application/zip")

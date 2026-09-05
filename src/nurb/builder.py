@@ -8,6 +8,7 @@ import time
 import numpy as np
 import trimesh
 
+from . import crash
 from .registry import Rejected
 
 
@@ -108,6 +109,22 @@ def _safe(value):
     return repr(value)
 
 
+def describe(defn, values):
+    """One row per parameter: what the file declares, what a build uses, what control it
+    can carry. The keyword defaults are the parameters, so this is derived, never
+    declared, and it needs no build: a part the kernel crashed on still gets its sliders."""
+    return [
+        {
+            "name": name,
+            "default": _safe(default),
+            "value": _safe(values[name]),
+            "kind": _kind(default),
+            "doc": defn.docs.get(name),
+        }
+        for name, default in defn.params.items()
+    ]
+
+
 def build(path, overrides=None, draft=False):
     """Build a part. Returns (shape, params, milliseconds).
 
@@ -127,18 +144,13 @@ def build(path, overrides=None, draft=False):
     if defn.accepts_draft:
         call["draft"] = draft
 
-    params = [
-        {
-            "name": name,
-            "default": _safe(default),
-            "value": _safe(kwargs[name]),
-            "kind": _kind(default),
-            "doc": defn.docs.get(name),
-        }
-        for name, default in defn.params.items()
-    ]
+    params = describe(defn, kwargs)
 
     started = time.perf_counter()
+    # Named for the crash handler: a kernel fault inside fn() has no Python traceback,
+    # and this is how the message still says which part and which line. Restored, not
+    # cleared, because an assembly builds the parts it places from inside its own build.
+    outer, crash.part = crash.part, str(path)
     try:
         shape = fn(**call)
     except Rejected as exc:
@@ -146,6 +158,8 @@ def build(path, overrides=None, draft=False):
         # controls the viewer offers to get back into the part's valid range.
         exc.params = params
         raise
+    finally:
+        crash.part = outer
     elapsed = (time.perf_counter() - started) * 1000
     if shape is None:
         raise BuildError(f"{defn.name}() returned None")

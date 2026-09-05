@@ -1252,8 +1252,8 @@ def cmd_dev(args):
     root = project_root()
     # Before the build, not after. Discovering the port is taken used to cost a full
     # rebuild of every part in the project first.
-    port = _pick_port(args.port, root)
-    server = Server(root, port=port, draft=args.draft, open_browser=args.open)
+    server = Server(root, port=args.port, draft=args.draft, open_browser=args.open)
+    port = server.port = _pick_port(server.port, root)
     print(f"  building {root.name}/parts")
     try:
         asyncio.run(server.run())
@@ -1288,6 +1288,11 @@ def cmd_launcher(args):
 
 
 def main(argv=None):
+    from . import crash
+
+    # Before anything touches the kernel: a fault in OCCT must end as a message and an
+    # exit code, never as a signal death with a crash dialog behind it.
+    crash.install()
     p = argparse.ArgumentParser(
         prog="nurb",
         description="agentic CAD for 3D printing",
