@@ -473,6 +473,18 @@ depth = measured("shelf_depth")
 - A fit coupon turns a loose measurement into a tight one: print the mating surface
   alone, minutes of filament, and correct the parameters against the real object
   before the full part prints. A coupon that fits removes the provisional flag.
+- A downloaded model (an STL, OBJ or GLB from a listing) is a measurement, not a
+  starting point. A mesh is triangles, so no dimension in it is an editable
+  parameter; measure it and rebuild the part properly. Never mark a download
+  `provisional` or ask for a fit coupon over it: unlike a scan, it's exact to the
+  micron.
+- `import_stl` returns a real solid only from a closed, low-poly mesh with flat
+  faces, like a plate, a bracket, or a machined blank someone exported. Prefer
+  rebuilding whenever the user might want to change a dimension, which is nearly
+  always.
+- STEP is the exception worth asking for. Take it over STL when a listing offers
+  one: it imports as real B-rep with its curves intact, and chamfers like anything
+  modelled.
 - When there's nobody to ask, write the guess down and mark it `provisional = true`
   with an honest `how` ("eyeballed against a broom"). `nurb check` lists every
   provisional value until somebody picks up a caliper.
