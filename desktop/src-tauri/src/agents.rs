@@ -219,6 +219,7 @@ fn claude_auth_status(launcher: &crate::env::Launcher) -> (Option<bool>, Option<
     if let Some(path) = launcher.adapter_path() {
         command.env("PATH", path);
     }
+    crate::proc::configure(&mut command);
     let output = command.output();
     let Ok(output) = output else {
         return (None, None);
@@ -351,7 +352,10 @@ fn cursor_auth_status(kind: AgentKind) -> (Option<bool>, Option<String>) {
     let Some(bin) = kind.native_bin() else {
         return (None, None);
     };
-    let Ok(output) = Command::new(bin).arg("status").output() else {
+    let mut command = Command::new(bin);
+    command.arg("status");
+    crate::proc::configure(&mut command);
+    let Ok(output) = command.output() else {
         return (None, None);
     };
     let text = String::from_utf8_lossy(&output.stdout);
