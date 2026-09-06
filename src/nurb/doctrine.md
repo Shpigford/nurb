@@ -208,6 +208,37 @@ wraps a corner, where no flat orientation keeps every member strong.
     toward the bottom.
   - `fins=False` shows the stability warning without them.
 
+## Splitting into multiple parts
+
+Sometimes no single orientation serves the whole part. One region needs its layer
+bonds running one way, another needs them running a different way; or every tilt
+that fixes one region's overhang wrecks another region's finish or fit. Forcing a
+compromise orientation is worse than the alternative: split the part and join the
+pieces after printing.
+
+- Consider a split when, and only when, the conflict is between different regions
+  of the same part:
+  - Two regions need conflicting layer directions to hold their real loads.
+  - No single tilt keeps every region's overhang inside the printable limit without
+    disfiguring the part.
+  - One region would need extensive support material that a different split
+    eliminates entirely, not just reduces.
+- This is not the answer to a single region that just wants a lot of support.
+  That's the existing support-material rule: ask the user, then corbel, tilt, or
+  support.
+- Always ask the user before splitting. It trades one print for several, adds a
+  joint, and adds assembly steps, none of which is free.
+- Pick the join from what already exists in the doctrine, not a new mechanism:
+  - A snap fit, designed as a flex feature (see Features that flex).
+  - A screw into a heat-set insert or a captured nut (see Fasteners).
+  - A dowel or pin, sized from the fits table (see Fits between printed parts).
+  - Glue, as the last resort: permanent, and harder to service or reprint one half
+    of.
+- Model the split as an `@assembly`. Each piece is its own part built and checked
+  on its own orientation; the assembly places them, and the join becomes a `hinge`
+  (if the pieces still move) or a fixed pose. The card explains why the part was
+  split and which orientation each piece answers to.
+
 ## Load path
 
 If the part is a bracket or mechanical attachment, work out where the weight sits and
