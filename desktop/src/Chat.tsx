@@ -11,10 +11,11 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
-import { IconChevronDown, IconMessagePlus, IconPaperclip } from "./Icons";
+import { IconChevronDown, IconHistory, IconMessagePlus, IconPaperclip } from "./Icons";
 import Markdown from "./Markdown";
 import { playChime, shouldPlayCompletionChime } from "./chime";
 import { AttachmentDraft, restoreDraftText } from "./chatDraft";
+import { sessionTitle, sessionWhen, type SessionInfo } from "./sessionHistory";
 import {
   describe,
   orderOptions,
@@ -119,12 +120,14 @@ function Chat({
   agent,
   agents,
   resume,
+  sessions,
   hidden,
   seed,
   onSeed,
   onSession,
   onFresh,
   onAgent,
+  onOpenSession,
   onBusy,
   onSignIn,
 }: {
@@ -138,6 +141,9 @@ function Chat({
   // Everything the app can host, for the header's switcher.
   agents: { id: string; label: string; loggedIn: boolean | null }[];
   resume: string | null;
+  // Every conversation this part has had, newest first, for the header's
+  // history menu. The `resume` id above is the one on screen.
+  sessions: SessionInfo[];
   hidden: boolean;
   // Text waiting for the composer, from a viewer nudge. Prefilled when the column
   // is visible, never sent; onSeed reports it landed so the owner clears it.
@@ -149,6 +155,9 @@ function Chat({
   // stores, so it starts a fresh one on the agent picked. `unstarted` is true
   // when nothing has been said yet, which makes the pick the new default.
   onAgent: (id: string, unstarted: boolean) => void;
+  // Reopen an earlier conversation. It carries its own agent, since a session
+  // only exists in the store of the agent that ran it.
+  onOpenSession: (id: string, agent: string) => void;
   onBusy: (busy: boolean) => void;
   onSignIn: (agent: string) => Promise<boolean>;
 }) {
@@ -158,6 +167,10 @@ function Chat({
   // The sentinel never reaches copy: everywhere the column says its name, the
   // project conversation speaks of the project.
   const isProject = part === PROJECT_CHAT;
+  // A picker holding only the conversation already on screen is noise. After
+  // "start fresh" nothing is on screen yet, so the one it set aside counts and
+  // the way back stays open.
+  const hasOtherSessions = sessions.some((entry) => entry.id !== resume);
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
   // A resumed transcript starts loading after the first paint, so treat it as
@@ -181,6 +194,7 @@ function Chat({
   const [config, setConfig] = useState<ConfigRow[]>([]);
   const [picking, setPicking] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
   const sessionRef = useRef<string | null>(null);
   // A resume id is single-use after the adapter accepts it. Authentication
   // failures retain it; a dead resumed session must not replay it again.
@@ -312,7 +326,8 @@ function Chat({
         });
         break;
       case "session_info":
-        // Titles have no home since the visible session list went away.
+        // The header's history menu titles rows from the agent's session
+        // listing, so a live title has nothing to update.
         break;
       case "note":
         setItems((list) => [...list, { kind: "note", text: event.text }]);
@@ -765,17 +780,70 @@ function Chat({
             <span>{label}</span>
           )}
         </span>
-        {items.length > 0 && (
-          <button
-            className="chat-fresh"
-            title="set this conversation aside and start a fresh one"
-            disabled={busy || starting}
-            onClick={onFresh}
-          >
-            <IconMessagePlus />
-            start fresh
-          </button>
-        )}
+        <span className="chat-header-right">
+          {hasOtherSessions && (
+            <span className="chat-history">
+              <button
+                type="button"
+                className="chat-history-button"
+                aria-expanded={browsing}
+                disabled={busy || starting}
+                title="reopen an earlier conversation"
+                onClick={() => setBrowsing((open) => !open)}
+              >
+                <IconHistory />
+                history
+                <IconChevronDown />
+              </button>
+              {browsing && (
+                <>
+                  <div className="chat-history-away" onClick={() => setBrowsing(false)} />
+                  <div className="chat-history-menu">
+                    {sessions.map((entry) => {
+                      // The owning agent only earns a line when there is more
+                      // than one it could have been.
+                      const meta = [
+                        sessionWhen(entry.updatedAt, Date.now()),
+                        agents.length > 1 ? AGENT_LABEL[entry.agent] ?? entry.agent : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ");
+                      return (
+                        <button
+                          key={entry.id}
+                          type="button"
+                          className={
+                            entry.id === resume
+                              ? "chat-history-item current"
+                              : "chat-history-item"
+                          }
+                          onClick={() => {
+                            setBrowsing(false);
+                            if (entry.id !== resume) onOpenSession(entry.id, entry.agent);
+                          }}
+                        >
+                          <span className="chat-history-title">{sessionTitle(entry)}</span>
+                          {meta && <span className="chat-history-meta">{meta}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </span>
+          )}
+          {items.length > 0 && (
+            <button
+              className="chat-fresh"
+              title="set this conversation aside and start a fresh one"
+              disabled={busy || starting}
+              onClick={onFresh}
+            >
+              <IconMessagePlus />
+              start fresh
+            </button>
+          )}
+        </span>
       </div>
       <div
         className="chat-transcript"

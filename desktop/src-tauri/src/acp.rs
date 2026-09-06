@@ -177,6 +177,9 @@ pub struct SessionEntry {
     title: Option<String>,
     updated_at: Option<String>,
     part: Option<String>,
+    /// Whether this is the session its part reopens on its own. The rest are
+    /// history: still listed under the part, but only entered by choice.
+    attached: bool,
     agent: &'static str,
 }
 
@@ -248,12 +251,14 @@ pub async fn list_sessions(
         .into_iter()
         .map(|(kind, session)| {
             let id = wire_string(&session.session_id);
-            let part = store.part_of(&id, &project);
+            let part = store.recorded_part(&id);
+            let attached = store.attached(&id, &project);
             SessionEntry {
                 id,
                 title: session.title,
                 updated_at: session.updated_at,
                 part,
+                attached,
                 agent: kind.id(),
             }
         })
