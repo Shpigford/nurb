@@ -25,6 +25,7 @@ import type { Column } from "./layout";
 import { partMessage, type PartConfigurationRequest } from "./partMessages";
 import { createPartRecovery } from "./partRecovery";
 import { isWindows } from "./platform";
+import { groupSessions, type PartChat, type SessionInfo } from "./sessionHistory";
 import Setup from "./Setup";
 import Settings from "./Settings";
 import "./App.css";
@@ -54,13 +55,6 @@ type Part = {
   variant: string | null;
 };
 type PartState = { path: string; parts: Part[] };
-type ChatInfo = {
-  id: string;
-  title: string | null;
-  updatedAt: string | null;
-  part: string | null;
-  agent: string;
-};
 
 type AgentStatus = {
   id: string;
@@ -80,14 +74,17 @@ type AboutInfo = {
   arch: string;
 };
 
-// What a project's session list says to resume, per part: the newest recorded
-// session's id and the agent that owns it. There is no visible session list;
-// each part has one rolling conversation, picked up where it left off. Built
-// once per project open, then only read to seed columns.
-type PartChat = { id: string | null; agent: string | null };
-type ResumeState = { path: string; byPart: Record<string, PartChat> };
+// What a project's session list says about each part: the conversation it picks
+// up where it left off, and every earlier one behind it for the chat header's
+// history menu. Built once per project open, then only read.
+type ResumeState = {
+  path: string;
+  byPart: Record<string, PartChat>;
+  history: Record<string, SessionInfo[]>;
+};
 
 const NO_PARTS: Part[] = [];
+const NO_SESSIONS: SessionInfo[] = [];
 const PROJECTS_FOLDER_KEY = "nurb-projects-folder";
 
 // What the rail says about an assembly, or nothing for an ordinary part. An
@@ -591,10 +588,11 @@ function App() {
   const parts = partState?.path === active ? partState.parts : NO_PARTS;
   const placedIn = useMemo(() => placedInMap(parts), [parts]);
 
-  // Opening a project silently resumes each part's conversation: the newest
-  // session recorded against that part (one short-lived adapter call, not
-  // polled). Sessions with no recorded part, or a failed listing (logged out,
-  // an agent without session listing), just mean fresh chats.
+  // Opening a project silently resumes each part's conversation: the session
+  // that part is attached to (one short-lived adapter call, not polled). The
+  // older ones stay listed under the part, for the header's history menu.
+  // Sessions with no recorded part, or a failed listing (logged out, an agent
+  // without session listing), just mean fresh chats.
   useEffect(() => {
     setResumeState(null);
     setVariantOrigin(null);   // the pin belongs to the viewer this project just left
@@ -606,20 +604,14 @@ function App() {
     setProjectSeed(null);
     if (!active) return;
     let stale = false;
-    invoke<ChatInfo[]>("list_sessions", { path: active })
+    invoke<SessionInfo[]>("list_sessions", { path: active })
       .then((list) => {
         if (stale) return;
-        const byPart: Record<string, PartChat> = {};
-        for (const entry of list) {
-          // Newest first, so the first session seen per part wins.
-          if (entry.part && !byPart[entry.part]) {
-            byPart[entry.part] = { id: entry.id, agent: entry.agent };
-          }
-        }
-        setResumeState({ path: active, byPart });
+        const { resume, history } = groupSessions(list);
+        setResumeState({ path: active, byPart: resume, history });
       })
       .catch(() => {
-        if (!stale) setResumeState({ path: active, byPart: {} });
+        if (!stale) setResumeState({ path: active, byPart: {}, history: {} });
       });
     return () => {
       stale = true;
@@ -887,6 +879,32 @@ function App() {
       list.map((col) =>
         col.path === path && col.part === part
           ? { ...col, resume: null, agent, gen: col.gen + 1 }
+          : col,
+      ),
+    );
+  };
+
+  // Reopen an earlier conversation from the header's history menu. Same
+  // remount as starting fresh, with a session to load instead of none, and the
+  // agent that ran it: a session lives in one agent's store only.
+  const openSession = async (
+    path: string,
+    part: string,
+    sessionId: string,
+    agent: string,
+  ) => {
+    try {
+      // Persist the pick before remounting, so the part reopens this
+      // conversation next launch rather than the one it set aside.
+      await invoke("select_part_chat", { path, part, sessionId });
+    } catch (e) {
+      setError(String(e));
+      return;
+    }
+    setColumns((list) =>
+      list.map((col) =>
+        col.path === path && col.part === part
+          ? { ...col, resume: sessionId, agent, gen: col.gen + 1 }
           : col,
       ),
     );
@@ -1360,6 +1378,12 @@ function App() {
                 loggedIn: status.loggedIn,
               }))}
             resume={col.resume}
+            sessions={
+              resumeState?.path === col.path
+                ? resumeState.history[col.part] ?? NO_SESSIONS
+                : NO_SESSIONS
+            }
+            onOpenSession={(id, owner) => openSession(col.path, col.part, id, owner)}
             hidden={!columnVisible(col)}
             seed={isProject && col.path === active ? projectSeed : null}
             onSeed={isProject ? () => setProjectSeed(null) : undefined}

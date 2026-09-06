@@ -99,6 +99,18 @@ export function IconCheck({ size = 11, className }: { size?: number; className?:
   );
 }
 
+// A clock for past conversations: the header's history menu.
+export function IconHistory({ size = 12 }: { size?: number }) {
+  return (
+    <svg className="row-icon" width={size} height={size} viewBox="0 0 18 18" aria-hidden="true">
+      <g {...strokeProps}>
+        <circle cx="9" cy="9" r="6.75" />
+        <polyline points="9 4.75 9 9 12 10.75" />
+      </g>
+    </svg>
+  );
+}
+
 export function IconChevronDown({ size = 10 }: { size?: number }) {
   return (
     <svg className="row-icon" width={size} height={size} viewBox="0 0 18 18" aria-hidden="true">

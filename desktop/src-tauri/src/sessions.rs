@@ -72,23 +72,32 @@ impl SessionStore {
         }
     }
 
-    pub fn part_of(&self, session_id: &str, project: &Path) -> Option<String> {
-        let part = self
-            .sessions
+    /// The part a session was recorded against, whether or not that part still
+    /// points at it. Every session a part ever had belongs in its history; only
+    /// the attached one is reopened on its own.
+    pub fn recorded_part(&self, session_id: &str) -> Option<String> {
+        self.sessions
             .lock()
             .unwrap()
             .get(session_id)
-            .and_then(|meta| meta.part.clone())?;
+            .and_then(|meta| meta.part.clone())
+    }
+
+    /// Whether the part would reopen this session by itself. False once "start
+    /// fresh" or a pick from history moved the part's pointer elsewhere.
+    pub fn attached(&self, session_id: &str, project: &Path) -> bool {
+        let Some(part) = self.recorded_part(session_id) else {
+            return false;
+        };
         let part_chats = self.part_chats.lock().unwrap();
         match part_chats
             .iter()
             .find(|chat| chat.project == project && chat.part == part)
         {
-            Some(chat) if chat.session_id.as_deref() == Some(session_id) => Some(part),
-            Some(_) => None,
+            Some(chat) => chat.session_id.as_deref() == Some(session_id),
             // Existing metadata predates the current-session pointer. Preserve
             // its old newest-session behavior until the user picks or clears it.
-            None => Some(part),
+            None => true,
         }
     }
 
@@ -156,20 +165,25 @@ mod tests {
         store.record("s1", "claude", &project, Some("bracket".into()));
         // A part-less prompt must not erase the remembered part.
         store.record("s1", "claude", &project, None);
-        assert_eq!(store.part_of("s1", &project).as_deref(), Some("bracket"));
-        assert_eq!(store.part_of("missing", &project), None);
+        assert_eq!(store.recorded_part("s1").as_deref(), Some("bracket"));
+        assert!(store.attached("s1", &project));
+        assert_eq!(store.recorded_part("missing"), None);
+        assert!(!store.attached("missing", &project));
 
-        // Starting fresh suppresses the old conversation across reloads.
+        // Starting fresh suppresses the old conversation across reloads, but
+        // history still knows which part it belonged to.
         store.select_part_chat(&project, "bracket", None);
-        assert_eq!(store.part_of("s1", &project), None);
+        assert!(!store.attached("s1", &project));
+        assert_eq!(store.recorded_part("s1").as_deref(), Some("bracket"));
 
         let reloaded = SessionStore::load(&dir);
-        assert_eq!(reloaded.part_of("s1", &project), None);
+        assert!(!reloaded.attached("s1", &project));
 
         // The next real session becomes the durable conversation for the part.
         reloaded.record("s2", "codex", &project, Some("bracket".into()));
-        assert_eq!(reloaded.part_of("s2", &project).as_deref(), Some("bracket"));
-        assert_eq!(reloaded.part_of("s1", &project), None);
+        assert!(reloaded.attached("s2", &project));
+        assert!(!reloaded.attached("s1", &project));
+        assert_eq!(reloaded.recorded_part("s1").as_deref(), Some("bracket"));
         fs::remove_dir_all(dir).unwrap();
     }
 }
