@@ -1152,11 +1152,183 @@ def profile_choice(root):
     return None, None
 
 
+def workshop_profile():
+    """The workshop default profile, independent of any project override."""
+    home = _read_toml(global_file(), str(global_file()))
+    return home.get("profile")
+
+
+def set_workshop_profile(name, root=None):
+    """Set the workshop default, dropping the same project's redundant override."""
+    have = profiles()
+    if name not in have:
+        raise ValueError(f"no printer profile called {name!r}. have: {', '.join(sorted(have))}")
+    project_choice = profile_choice(root) if root is not None else (None, None)
+    written = _write_profile_line(global_file(), name)
+    if project_choice == (name, PRINTER_FILE):
+        use_workshop_profile(root)
+    return written
+
+
 def profiles():
-    """The shipped printer profiles: machine facts, keyed by name."""
+    """Shipped and user-defined printer profiles, keyed by stable name."""
+    import math
+    import re
     import tomllib
 
-    return tomllib.loads(PRINTERS.read_text(encoding="utf-8"))
+    shipped = tomllib.loads(PRINTERS.read_text(encoding="utf-8"))
+    registry = custom_printers_file()
+    document = _read_toml(registry, str(registry))
+    if set(document) - {"printers"}:
+        raise ValueError(f"{registry}: only a [printers] registry is allowed")
+    custom = document.get("printers", {})
+    if not isinstance(custom, dict):
+        raise ValueError(f"{registry}: printers must be a table of printer profiles")
+    for name, facts in custom.items():
+        if not re.fullmatch(r"custom_[0-9a-f]{32}", name):
+            raise ValueError(f"{registry}: custom printer id {name!r} is invalid")
+        if not isinstance(facts, dict):
+            raise ValueError(f"{registry}: printer {name!r} must be a table")
+        extra = set(facts) - {"brand", "model", "bed"}
+        if extra:
+            raise ValueError(f"{registry}: printer {name!r} has unknown field {sorted(extra)[0]!r}")
+        brand, model, bed = facts.get("brand"), facts.get("model"), facts.get("bed")
+        if not isinstance(brand, str) or not brand.strip() or not isinstance(model, str) or not model.strip():
+            raise ValueError(f"{registry}: printer {name!r} needs non-empty brand and model strings")
+        if len(brand) > 80 or len(model) > 80:
+            raise ValueError(f"{registry}: printer {name!r} brand and model must be 80 characters or fewer")
+        if not isinstance(bed, list) or len(bed) != 3 or any(isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0 or value > 10000 for value in bed):
+            raise ValueError(f"{registry}: printer {name!r} bed must contain three positive numbers no larger than 10000 mm")
+    collision = set(shipped) & set(custom)
+    if collision:
+        raise ValueError(f"custom printer registry uses reserved profile {sorted(collision)[0]!r}")
+    return {**shipped, **custom}
+
+
+def custom_printers_file():
+    """The user-scoped model registry, separate from workshop preferences."""
+    return global_file().with_name("printers.toml")
+
+
+def add_custom_profile(brand, model, bed):
+    """Persist a user-scoped printer model and return its stable profile name."""
+    import math
+    import os
+    import tempfile
+    import uuid
+
+    brand = str(brand).strip()
+    model = str(model).strip()
+    if not brand or not model:
+        raise ValueError("brand and model are required")
+    if len(brand) > 80 or len(model) > 80:
+        raise ValueError("brand and model must be 80 characters or fewer")
+    try:
+        bed = [float(value) for value in bed]
+    except (TypeError, ValueError) as exc:
+        raise ValueError("build volume must contain three numbers in millimetres") from exc
+    if len(bed) != 3 or any(not math.isfinite(value) or value <= 0 or value > 10000 for value in bed):
+        raise ValueError("build volume must contain three positive numbers no larger than 10000 mm")
+    existing = profiles()
+    name = f"custom_{uuid.uuid4().hex}"
+    while name in existing:
+        name = f"custom_{uuid.uuid4().hex}"
+    target = custom_printers_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    text = target.read_text(encoding="utf-8") if target.is_file() else ""
+    lines = [f"[printers.{name}]", f"brand = {_toml_string(brand)}", f"model = {_toml_string(model)}", f"bed = [{', '.join(f'{value:g}' for value in bed)}]"]
+    updated = text.rstrip() + ("\n\n" if text.strip() else "") + "\n".join(lines) + "\n"
+    fd, temporary = tempfile.mkstemp(prefix=".printers-", suffix=".toml", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+        os.replace(temporary, target)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+    return name
+
+
+def delete_custom_profile(name):
+    """Delete one user-scoped profile while leaving unrelated text untouched."""
+    import os
+    import re
+    import tempfile
+
+    if not re.fullmatch(r"custom_[0-9a-f]{32}", str(name)):
+        raise ValueError("only custom printer profiles can be deleted")
+    # Validate the whole registry before rewriting it. Silently editing around a
+    # malformed neighboring table would make the user's recovery harder.
+    have = profiles()
+    if name not in have or not have[name].get("brand"):
+        raise ValueError(f"no custom printer profile called {name!r}")
+    target = custom_printers_file()
+    text = target.read_text(encoding="utf-8")
+    header = re.compile(rf"(?m)^\[printers\.{re.escape(name)}\]\s*\n")
+    match = header.search(text)
+    if not match:
+        raise ValueError(f"custom printer profile {name!r} could not be found")
+    following = re.compile(r"(?m)^\[").search(text, match.end())
+    end = following.start() if following else len(text)
+    updated = (text[:match.start()] + text[end:]).rstrip() + "\n"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".printers-", suffix=".toml", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(updated)
+        os.replace(temporary, target)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def replace_default_and_delete_custom_profile(root, name):
+    """Delete the default custom profile and move this project to its replacement.
+
+    All inputs and affected TOML are validated before the first write. If one of
+    the three writes then fails, restore their original contents so a printer is
+    never removed while either the workshop or current project still names it.
+    """
+    have = profiles()
+    if name not in have or not have[name].get("brand"):
+        raise ValueError(f"no custom printer profile called {name!r}")
+    if workshop_profile() != name:
+        raise ValueError(f"custom printer profile {name!r} is not the default printer")
+    remaining = [profile for profile in have if profile != name]
+    if not remaining:
+        raise ValueError("add another printer before deleting the only available printer")
+
+    def label(profile):
+        facts = have[profile]
+        return " ".join(filter(None, (facts.get("brand"), facts.get("model")))) or profile.replace("_", " ")
+
+    replacement = sorted(remaining, key=lambda profile: label(profile).casefold())[0]
+    targets = (global_file(), pathlib.Path(root) / PRINTER_FILE, custom_printers_file())
+    original = {target: target.read_bytes() if target.is_file() else None for target in targets}
+    try:
+        set_workshop_profile(replacement, root)
+        use_workshop_profile(root)
+        delete_custom_profile(name)
+    except Exception:
+        for target, contents in original.items():
+            if contents is None:
+                target.unlink(missing_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(contents)
+        raise
+    return replacement
+
+
+def _toml_string(value):
+    """A basic TOML string, sufficient for user-entered profile labels."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r") + '"'
 
 
 def _write_profile_line(target, name):
@@ -1185,7 +1357,7 @@ def _write_profile_line(target, name):
     return target
 
 
-def choose_profile(root, name):
+def choose_profile(root, name, reset_bed=False):
     """Name the machine, and say which file landed the `profile` line.
 
     A printer is a workshop fact, so the first pick on a machine with no workshop
@@ -1199,15 +1371,71 @@ def choose_profile(root, name):
     if name not in have:
         raise ValueError(f"no printer profile called {name!r}. have: {', '.join(sorted(have))}")
     project = pathlib.Path(root) / PRINTER_FILE
+    workshop = workshop_profile()
     if _read_toml(project, PRINTER_FILE).get("profile"):
-        return _write_profile_line(project, name)
+        # Choosing the default through the ordinary picker should mean the same
+        # thing as "use default printer": leaving a redundant project line here
+        # makes the caption claim this project is still an override.
+        if workshop == name:
+            use_workshop_profile(root)
+            return global_file()
+        target = _write_profile_line(project, name)
+        if reset_bed:
+            _remove_top_level_setting(target, "bed")
+        return target
     home = global_file()
-    workshop = _read_toml(home, str(home)).get("profile")
     if not workshop:
-        return _write_profile_line(home, name)
+        target = _write_profile_line(home, name)
+        if reset_bed:
+            _remove_top_level_setting(target, "bed")
+        return target
     if workshop == name:
         return home
-    return _write_profile_line(project, name)
+    target = _write_profile_line(project, name)
+    if reset_bed:
+        _remove_top_level_setting(target, "bed")
+    return target
+
+
+def _remove_top_level_setting(target, key):
+    """Remove one scalar/list machine override without touching comments or tables."""
+    import re
+
+    if not target.is_file():
+        return
+    text = target.read_text(encoding="utf-8")
+    table = re.search(r"(?m)^[ \t]*\[", text)
+    stop = table.start() if table else len(text)
+    head, tail = text[:stop], text[stop:]
+    head = re.sub(rf"(?m)^[ \t]*{re.escape(key)}[ \t]*=.*(?:\n|$)", "", head, count=1)
+    target.write_text(head + tail, encoding="utf-8")
+
+
+def use_workshop_profile(root):
+    """Remove a project's profile override and return the workshop profile. Other project settings in printer.toml are preserved. A file that contained only the override is removed because it no longer carries any configuration."""
+    import re
+
+    workshop = workshop_profile()
+    if not workshop:
+        raise ValueError("no default printer is configured")
+    project = pathlib.Path(root) / PRINTER_FILE
+    block = _read_toml(project, PRINTER_FILE)
+    if not block.get("profile"):
+        return workshop
+    text = project.read_text(encoding="utf-8")
+    text = re.sub(r"(?m)^[ \t]*profile[ \t]*=.*(?:\n|$)", "", text, count=1)
+    # `bed` described the overridden machine. Keeping it would make "use workshop
+    # default" change the caption but retain the exception machine's dimensions.
+    table = re.search(r"(?m)^[ \t]*\[", text)
+    stop = table.start() if table else len(text)
+    head, tail = text[:stop], text[stop:]
+    head = re.sub(r"(?m)^[ \t]*bed[ \t]*=.*(?:\n|$)", "", head, count=1)
+    text = head + tail
+    if text.strip():
+        project.write_text(text.lstrip("\n"), encoding="utf-8")
+    else:
+        project.unlink()
+    return workshop
 
 
 def _bed_mm(bed):
@@ -1242,7 +1470,7 @@ def printer_line(root, name=None):
 # a rule reads. Named once because `_apply` deliberately refuses a key the Context does
 # not have, which is what catches a typo, and an exclusion spelled in two places is how
 # that protection quietly stops covering one of them.
-NOT_SETTINGS = ("slicer",)
+NOT_SETTINGS = ("slicer", "brand", "model")
 
 
 def machine_only(block):
@@ -1296,7 +1524,7 @@ def printer(root, name=None):
         _apply(ctx, {"printer": machine_only(have[name])}, f"profile {name!r}")
     # profile is resolved above; export is a workflow preference cmd_export reads
     for settings_block, where in ((home, str(global_file())), (block, PRINTER_FILE)):
-        facts = {k: v for k, v in settings_block.items() if k not in ("profile", "export")}
+        facts = {k: v for k, v in settings_block.items() if k not in ("profile", "export", "printers")}
         _apply(ctx, {"printer": facts}, where)
     return ctx
 

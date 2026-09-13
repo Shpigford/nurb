@@ -687,10 +687,10 @@ def test_viewer_updates_the_bed_outside_the_initial_socket_sync():
 
     viewer = server_mod.VIEWER.read_text(encoding="utf-8")
     socket = viewer.split("ws.onmessage =", 1)[1]
-    assert socket.index("bedUpdate(msg.bed);") < socket.index("if (msg.type === 'sync')")
-    assert socket.index("plateCaption(msg.printer, bedXY, msg.profiles)") < socket.index(
-        "if (msg.type === 'sync')"
-    )
+    update = viewer[viewer.index("function printerUpdate") : viewer.index("// Findings get a pin")]
+    assert "bedUpdate(msg.bed);" in update
+    assert "plateCaption(msg.printer, bedXY, msg.profiles, msg.workshop_profile, msg.profile_details)" in update
+    assert socket.index("printerUpdate(msg);") < socket.index("if (msg.type === 'sync')")
     assert "fetch('/api/sync')" in viewer
 
 
@@ -800,6 +800,8 @@ def test_slice_asks_which_printer_rather_than_refusing(tmp_path, monkeypatch):
 def test_choosing_a_printer_replies_only_to_the_viewer_that_asked(tmp_path):
     """Another open viewer must not treat this acknowledgement as its own request and
     immediately slice whichever part it happens to show."""
+    from nurb import checks
+
     server = project(tmp_path)
     server.queue = asyncio.Queue()
 
@@ -819,15 +821,290 @@ def test_choosing_a_printer_replies_only_to_the_viewer_that_asked(tmp_path):
         )
     )
 
+    state = {
+        "type": "printer_state",
+        "bed": [180.0, 180.0],
+        **server._printer_state(),
+    }
     assert asking.messages == [
+        state,
         {
             "type": "printer",
             "profile": "bambu_a1_mini",
             "bed": [180.0, 180.0],
-            "printer": {"profile": "bambu_a1_mini", "source": "global"},
+            **server._printer_state(),
         }
     ]
-    assert other.messages == []
+    assert other.messages == [state]
+
+
+def test_adding_a_custom_printer_selects_it_and_broadcasts_its_details(tmp_path):
+    from nurb import checks
+
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+    sent = []
+
+    async def record(payload):
+        sent.append(payload)
+
+    server.send = record
+    asyncio.run(server.command(json.dumps({
+        "type": "printer",
+        "custom": {"brand": "Snapmaker", "model": "Artisan", "bed_x": "400", "bed_y": "400", "bed_z": "400"},
+    })))
+
+    name, source = checks.profile_choice(tmp_path)
+    assert name.startswith("custom_")
+    assert source == "global"
+    assert server._bed() == [400.0, 400.0]
+    assert sent[-1]["profile_details"][name] == {
+        "brand": "Snapmaker",
+        "model": "Artisan",
+        "label": "Snapmaker Artisan",
+        "custom": True,
+        "bed": [400.0, 400.0, 400.0],
+    }
+
+
+def test_adding_a_custom_printer_can_make_it_the_default_and_select_it(tmp_path):
+    from nurb import checks
+
+    checks.global_file().parent.mkdir(parents=True, exist_ok=True)
+    checks.global_file().write_text('profile = "prusa_mk4s"\n')
+    (tmp_path / "printer.toml").write_text('profile = "bambu_h2d"\nmaterial = "petg"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+
+    asyncio.run(server.command(json.dumps({
+        "type": "printer",
+        "custom": {"brand": "Acme", "model": "One", "bed_x": "210", "bed_y": "220", "bed_z": "230"},
+        "make_workshop": True,
+    })))
+
+    name, source = checks.profile_choice(tmp_path)
+    assert name.startswith("custom_")
+    assert source == "global"
+    assert checks.workshop_profile() == name
+    assert (tmp_path / "printer.toml").read_text() == 'material = "petg"\n'
+    assert server._bed() == [210.0, 220.0]
+
+
+def test_a_malformed_custom_registry_keeps_the_handshake_alive(tmp_path):
+    from nurb import checks
+
+    checks.custom_printers_file().parent.mkdir(parents=True, exist_ok=True)
+    checks.custom_printers_file().write_text('printers = "broken"\n')
+    server = Server(tmp_path)
+
+    state = server._printer_state()
+
+    assert "printers must be a table" in state["printer_error"]
+    assert "bambu_a1" in state["profiles"]
+    assert state["printer"] is None
+
+
+def test_deleting_a_custom_printer_rejects_an_active_project_override_then_removes_it(tmp_path):
+    from nurb import checks
+
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+    name = checks.add_custom_profile("Acme", "One", [200, 200, 200])
+    checks.set_workshop_profile("bambu_a1")
+    checks.choose_profile(tmp_path, name)
+    asyncio.run(server.command(json.dumps({"type": "printer", "profile": name, "delete_custom": True})))
+    assert name in checks.profiles()
+    checks.choose_profile(tmp_path, "bambu_a1")
+    checks.set_workshop_profile("bambu_a1")
+
+    asyncio.run(server.command(json.dumps({"type": "printer", "profile": name, "delete_custom": True})))
+
+    assert name not in checks.profiles()
+
+
+def test_deleting_the_default_custom_printer_selects_first_alphabetical_replacement(tmp_path):
+    from nurb import checks
+
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+    name = checks.add_custom_profile("Zero", "Default", [200, 200, 200])
+    first = checks.add_custom_profile("Aardvark", "Printer", [210, 220, 230])
+    checks.set_workshop_profile(name)
+    (tmp_path / "printer.toml").write_text(f'profile = "{name}"\nmaterial = "petg"\n')
+    sent = []
+
+    async def record(payload):
+        sent.append(payload)
+
+    server.send = record
+    asyncio.run(server.command(json.dumps({"type": "printer", "profile": name, "delete_custom": True})))
+
+    assert name not in checks.profiles()
+    assert checks.workshop_profile() == first
+    assert checks.profile_choice(tmp_path) == (first, "global")
+    assert (tmp_path / "printer.toml").read_text() == 'material = "petg"\n'
+    state = next(message for message in sent if message["type"] == "printer_state")
+    assert state["workshop_profile"] == first
+    assert state["printer"] == {"profile": first, "source": "global"}
+    assert name not in state["profiles"]
+
+
+def test_switching_printers_replaces_a_stale_bed_and_rebuilds_for_the_effective_size(tmp_path):
+    from nurb import checks
+
+    (tmp_path / "printer.toml").write_text('profile = "prusa_xl"\nbed = [300, 300, 330]\nmaterial = "pla"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+    sent = []
+
+    async def record(payload):
+        sent.append(payload)
+
+    server.send = record
+    asyncio.run(server.command(json.dumps({"type": "printer", "profile": "prusa_mk4s"})))
+
+    assert server._bed() == [250.0, 210.0]
+    assert server.queue.qsize() == 1
+    assert sent[0]["bed"] == [250.0, 210.0]
+    text = (tmp_path / "printer.toml").read_text()
+    assert "bed =" not in text
+    assert 'material = "pla"' in text
+    assert checks.profile_choice(tmp_path) == ("prusa_mk4s", "printer.toml")
+
+
+def test_reselecting_the_default_through_the_picker_removes_the_project_override(tmp_path):
+    from nurb import checks
+
+    checks.global_file().parent.mkdir(parents=True, exist_ok=True)
+    checks.global_file().write_text('profile = "bambu_a1_mini"\n')
+    (tmp_path / "printer.toml").write_text('profile = "prusa_mk4s"\nbed = [300, 300, 330]\nmaterial = "petg"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+
+    asyncio.run(server.command(json.dumps({"type": "printer", "profile": "bambu_a1_mini"})))
+
+    assert checks.profile_choice(tmp_path) == ("bambu_a1_mini", "global")
+    assert (tmp_path / "printer.toml").read_text() == 'material = "petg"\n'
+
+
+def test_making_workshop_default_updates_following_projects_and_all_viewers(tmp_path):
+    from nurb import checks
+
+    checks.global_file().parent.mkdir(parents=True, exist_ok=True)
+    checks.global_file().write_text('profile = "bambu_a1_mini"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+
+    class Client:
+        def __init__(self):
+            self.messages = []
+
+        async def send(self, raw):
+            self.messages.append(json.loads(raw))
+
+    asking, other = Client(), Client()
+    server.clients = {asking, other}
+    asyncio.run(
+        server.command(
+            json.dumps({"type": "printer", "profile": "bambu_x1c", "make_workshop": True}),
+            asking,
+        )
+    )
+
+    assert checks.workshop_profile() == "bambu_x1c"
+    assert server.queue.qsize() == 1
+    state = other.messages[-1]
+    assert state["type"] == "printer_state"
+    assert state["workshop_profile"] == "bambu_x1c"
+    assert state["printer"] == {"profile": "bambu_x1c", "source": "global"}
+    assert asking.messages[-1]["type"] == "printer"
+
+
+def test_making_different_workshop_default_keeps_project_override_active_and_estimate_fresh(tmp_path):
+    from nurb import checks
+
+    checks.global_file().parent.mkdir(parents=True, exist_ok=True)
+    checks.global_file().write_text('profile = "bambu_a1_mini"\n')
+    (tmp_path / "printer.toml").write_text('profile = "prusa_mk4s"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+    asyncio.run(
+        server.command(
+            json.dumps({"type": "printer", "profile": "bambu_x1c", "make_workshop": True})
+        )
+    )
+
+    assert checks.workshop_profile() == "bambu_x1c"
+    assert checks.profile_choice(tmp_path) == ("prusa_mk4s", "printer.toml")
+    assert server.queue.empty()
+    assert (tmp_path / "printer.toml").read_text() == 'profile = "prusa_mk4s"\n'
+
+
+def test_making_project_printer_default_then_using_default_keeps_that_printer(tmp_path):
+    """The two picker actions are ordered on one socket: removing the override must
+    read the workshop value written by the immediately preceding command."""
+    from nurb import checks
+
+    checks.global_file().parent.mkdir(parents=True, exist_ok=True)
+    checks.global_file().write_text('profile = "prusa_mk4s"\n')
+    (tmp_path / "printer.toml").write_text('profile = "bambu_h2d"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+
+    asyncio.run(
+        server.command(
+            json.dumps({"type": "printer", "profile": "bambu_h2d", "make_workshop": True})
+        )
+    )
+    asyncio.run(server.command(json.dumps({"type": "printer", "use_workshop": True})))
+
+    assert checks.workshop_profile() == "bambu_h2d"
+    assert checks.profile_choice(tmp_path) == ("bambu_h2d", "global")
+    assert not (tmp_path / "printer.toml").exists()
+
+
+def test_making_active_project_printer_default_removes_override_immediately(tmp_path):
+    from nurb import checks
+
+    checks.global_file().parent.mkdir(parents=True, exist_ok=True)
+    checks.global_file().write_text('profile = "prusa_mk4s"\n')
+    (tmp_path / "printer.toml").write_text(
+        '# keep me\nprofile = "bambu_h2d"\nbed = [111, 112, 113]\nmaterial = "petg"\n'
+    )
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+
+    asyncio.run(
+        server.command(
+            json.dumps({"type": "printer", "profile": "bambu_h2d", "make_workshop": True})
+        )
+    )
+
+    assert checks.workshop_profile() == "bambu_h2d"
+    assert checks.profile_choice(tmp_path) == ("bambu_h2d", "global")
+    assert (tmp_path / "printer.toml").read_text() == '# keep me\nmaterial = "petg"\n'
+    assert server.queue.qsize() == 1
+
+
+def test_making_any_printer_default_and_selecting_it_removes_project_override(tmp_path):
+    from nurb import checks
+
+    checks.global_file().parent.mkdir(parents=True, exist_ok=True)
+    checks.global_file().write_text('profile = "prusa_mk4s"\n')
+    (tmp_path / "printer.toml").write_text('profile = "bambu_h2d"\nmaterial = "petg"\n')
+    server = project(tmp_path)
+    server.queue = asyncio.Queue()
+
+    asyncio.run(
+        server.command(
+            json.dumps({"type": "printer", "profile": "bambu_x1c", "make_workshop": True, "select": True})
+        )
+    )
+
+    assert checks.workshop_profile() == "bambu_x1c"
+    assert checks.profile_choice(tmp_path) == ("bambu_x1c", "global")
+    assert (tmp_path / "printer.toml").read_text() == 'material = "petg"\n'
+    assert server.queue.qsize() == 1
 
 
 def test_slice_says_what_is_missing_before_it_needs_a_printer(tmp_path, monkeypatch):

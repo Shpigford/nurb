@@ -96,9 +96,11 @@ build_volume      does it fit the printer at all
 
 ## Your printer, your plastic
 
-Name your machine once in `~/.config/nurb/config.toml` (`profile = "bambu_a1_mini"`). Every project on this machine then knows the bed: `nurb rules` prints it first, the viewer labels the plate with it, and check, slice, and export use it. The first time the viewer asks which printer this is for, that pick writes the workshop file, so the next project does not ask. Name your material (`material = "abs"`) and the warp rules tighten to match how hard that plastic shrinks.
+Choose a printer from the plate label in the viewer. The first choice becomes the default printer in `~/.config/nurb/config.toml` (`profile = "bambu_a1_mini"`), so every project on this machine knows the bed: `nurb rules` prints it first, the viewer labels the plate with it, and check, slice, and export use it. Select a printer name to use it only for this project, or select its `☆` to make it the default and use it here. Name your material (`material = "abs"`) and the warp rules tighten to match how hard that plastic shrinks.
 
-`printer.toml` at a project root takes the same schema and wins where they disagree: the one project aimed at a different machine.
+`printer.toml` at a project root takes the same schema and wins where they disagree: the one project aimed at a different machine. Choosing the default printer again, or choosing "use default printer", removes that profile and bed override while preserving the project's other printer settings.
+
+The viewer's "add a printer" form creates a custom profile from its brand, model, and build volume. Its "Make this my default printer" option creates, selects, and makes the new profile the default in one step. Custom profiles are stored in `~/.config/nurb/printers.toml`, are available to every project, and appear alongside the profiles shipped with nurb. Shipped profiles remain read-only; custom profiles can be deleted from the printer menu. Deleting the default selects the first remaining printer alphabetically as the new default, while a custom profile that is an active project override but not the default must be changed before deletion.
 
 The same files carry preferences like extra export formats:
 

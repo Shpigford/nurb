@@ -320,11 +320,14 @@
   /* The plate's millimetres, so a 256 mm default does not read as the user's machine.
      Named is chrome. Unnamed is the picker: same hanging menu as #printerpick. */
   #platecap { position: absolute; right: 16px; bottom: 14px; font-size: 11px;
-              color: var(--dim); pointer-events: none; z-index: 1; }
-  #platecap.unnamed { pointer-events: auto; }
-  #platecap:has(.open) { z-index: 2; }
+              color: var(--dim); pointer-events: auto; z-index: 1; }
+  #platecap.open { z-index: 2; }
   #platecap > .pick { background: none; border: none; color: var(--dim); font: inherit;
-                      font-size: 11px; padding: 0; cursor: pointer; }
+                      font-size: 11px; padding: 3px 5px; cursor: pointer; display: inline-flex;
+                      align-items: center; gap: 5px; }
+  #platecap > .pick::before { content: '▶'; font-size: 15px; line-height: 1; color: var(--text); }
+  #platecap.open > .pick::before { content: '▲'; }
+  #platecap.pending > .pick::before { content: 'updating'; font-size: 9px; color: var(--dim); }
   #platecap > .pick:hover { color: var(--text); }
   #platecap .pickmenu { display: none; position: absolute; bottom: calc(100% + 5px); right: 0;
                         min-width: 160px; max-height: 240px; overflow-y: auto;
@@ -334,6 +337,28 @@
                         backdrop-filter: blur(10px); }
   #platecap.open .pickmenu { display: flex; }
   #platecap .pickmenu button { justify-content: flex-start; }
+  #platecap .printeroption { display: flex; align-items: stretch; }
+  #platecap .printeroption > button[value] { flex: 1; }
+  #platecap .printeroption .defaultprinter { flex: none; color: var(--dim); padding-inline: 7px;
+                                             font-size: 14px; justify-content: center; }
+  #platecap .printeroption .defaultprinter[aria-pressed="true"] { color: var(--warn); }
+  #platecap .printeroption .defaultprinter:hover { color: var(--text); }
+  #platecap .printeroption .deleteprinter { flex: none; color: var(--dim); padding-inline: 7px; }
+  #platecap .printeroption .deleteprinter:hover { color: var(--bad); }
+  #platecap .printererror { color: var(--bad); max-width: 260px; padding: 4px 6px; white-space: normal; }
+  #platecap .addprinter { border-top: 1px solid var(--line); margin-top: 2px; padding-top: 5px; }
+  #platecap .printerform { display: none; width: 230px; padding: 5px; gap: 6px; flex-direction: column; }
+  #platecap.adding .printerform { display: flex; }
+  #platecap.adding .pickmenu > button, #platecap.adding .printeroption, #platecap.adding .printererror { display: none; }
+  #platecap .printerform label { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  #platecap .printerform input { width: 130px; box-sizing: border-box; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 5px; padding: 4px 5px; font: inherit; }
+  #platecap .printerform .defaultchoice { justify-content: flex-start; }
+  #platecap .printerform .defaultchoice input { width: auto; }
+  #platecap .printerform .volume { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  #platecap .printerform .volume input { width: 100%; }
+  #platecap .printerform .formerror { color: var(--bad); min-height: 1em; white-space: normal; }
+  #platecap .printerform .formactions { display: flex; gap: 5px; }
+  #platecap .printerform .formactions button { flex: 1; justify-content: center; }
   #params h2 .spin { margin-left: 7px; opacity: 0; transition: opacity .12s .25s; }
   body.stale #params h2 .spin { opacity: 1; }
 
@@ -770,28 +795,93 @@ function bedUpdate(bed) {
   if (bed && (bed[0] !== bedXY[0] || bed[1] !== bedXY[1])) plate(bedXY = bed);
 }
 let plateProfiles = [];
-function plateCaption(printer, bed, profiles) {
+let plateProfileDetails = {};
+let workshopProfile = null;
+let activePrinterKey = null;
+let activePrinter = null;
+let printerChangePending = false;
+let printerChangeSnapshot = null;
+let customPrinterPending = false;
+let printerActionPending = false;
+function plateCaption(printer, bed, profiles, workshop, profileDetails) {
   const cap = document.getElementById('platecap');
   if (!cap || !bed) return;
   const mm = `${Math.round(bed[0])} × ${Math.round(bed[1])} mm`;
   if (profiles) plateProfiles = profiles;
-  if (printer && printer.profile) {
-    cap.className = '';
-    cap.textContent = `${printer.profile.replace(/_/g, ' ')} · ${mm}`;
-    return;
-  }
+  if (profileDetails) plateProfileDetails = profileDetails;
+  if (workshop !== undefined) workshopProfile = workshop;
+  activePrinter = printer;
+  const key = printer ? `${printer.profile}:${printer.source}` : 'unnamed';
+  if (activePrinterKey !== null && activePrinterKey !== key) invalidatePrinterState();
+  activePrinterKey = key;
   // Every rebuild carries the printer, and a rewrite mid-pick would close the list.
   const trigger = cap.querySelector('#platecap > .pick');
-  if (cap.classList.contains('open') && trigger) {
-    trigger.textContent = `${mm} · default`;
+  if (cap.classList.contains('open') && trigger && !printerActionPending) {
+    trigger.textContent = printerCaption(printer, mm);
     return;
   }
-  cap.className = 'unnamed';
-  const menu = (plateProfiles || []).map(n =>
-    `<button type="button" value="${n}">${n.replace(/_/g, ' ')}</button>`
+  cap.className = printerChangePending ? 'pending' : '';
+  const profileLabel = n => (plateProfileDetails[n] || {}).label || n.replace(/_/g, ' ');
+  const menu = [...(plateProfiles || [])].sort((a, b) => profileLabel(a).localeCompare(profileLabel(b), undefined, { sensitivity: 'base' })).map(n =>
+    `<div class="printeroption"><button type="button" value="${escapeAttribute(n)}">${escapeText(profileLabel(n))}${printer && n === printer.profile && printer.source === 'printer.toml' ? ' · project override' : ''}</button><button type="button" class="defaultprinter" data-make-default="${escapeAttribute(n)}" aria-label="${n === workshopProfile ? 'Default printer' : `Make ${escapeAttribute(profileLabel(n))} the default printer`}" aria-pressed="${n === workshopProfile}">${n === workshopProfile ? '★' : '☆'}</button>${(plateProfileDetails[n] || {}).custom ? `<button type="button" class="deleteprinter" data-delete-profile="${escapeAttribute(n)}" aria-label="delete ${escapeAttribute(profileLabel(n))}">×</button>` : ''}</div>`
   ).join('');
-  cap.innerHTML = `<button type="button" class="pick">${mm} · default</button>`
-    + `<div class="pickmenu">${menu}</div>`;
+  const useDefault = printer && printer.source === 'printer.toml' && workshopProfile
+    ? '<button type="button" data-use-workshop>use default printer</button>' : '';
+  cap.innerHTML = `<button type="button" class="pick" aria-haspopup="true" aria-expanded="false">${escapeText(printerCaption(printer, mm))}</button>`
+    + `<div class="pickmenu"><div class="printererror" aria-live="polite"></div>${useDefault}${menu}<button type="button" class="addprinter">add a printer…</button>`
+    + `<form class="printerform"><label>brand <input name="brand" required></label><label>model <input name="model" required></label>`
+    + `<label>build volume (mm)</label><div class="volume"><input name="bed_x" type="number" min="1" step="any" placeholder="X" required><input name="bed_y" type="number" min="1" step="any" placeholder="Y" required><input name="bed_z" type="number" min="1" step="any" placeholder="Z" required></div>`
+    + `<label class="defaultchoice"><input name="make_default" type="checkbox"> Make this my default printer</label>`
+    + `<div class="formerror" aria-live="polite"></div><div class="formactions"><button type="button" class="cancelprinter">cancel</button><button type="submit">add and select</button></div></form></div>`;
+}
+function escapeText(value) {
+  const span = document.createElement('span');
+  span.textContent = value;
+  return span.innerHTML;
+}
+function escapeAttribute(value) {
+  return escapeText(String(value)).replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/`/g, '&#96;');
+}
+function printerCaption(printer, mm) {
+  if (!printer || !printer.profile) return `${mm} · default`;
+  const source = printer.source === 'printer.toml' ? 'project override' : 'default';
+  const label = (plateProfileDetails[printer.profile] || {}).label || printer.profile.replace(/_/g, ' ');
+  return `${label} · ${source} · ${mm}`;
+}
+function printerUpdate(msg) {
+  // A printer is one state, even though the plate and its caption are separate DOM
+  // surfaces. Keeping the two writes together prevents a selection acknowledgement
+  // from naming the new machine while leaving the previous machine's plate behind.
+  if (msg.type === 'printer_state' && printerChangePending) {
+    printerChangePending = false;
+    printerChangeSnapshot = null;
+  }
+  bedUpdate(msg.bed);
+  if ('printer' in msg) plateCaption(msg.printer, bedXY, msg.profiles, msg.workshop_profile, msg.profile_details);
+}
+function selectedProfileSource(profile) {
+  if (activePrinter && activePrinter.source === 'printer.toml') return 'printer.toml';
+  return !workshopProfile || workshopProfile === profile ? 'global' : 'printer.toml';
+}
+function optimisticPrinterChange(profile, source, workshop) {
+  const details = plateProfileDetails[profile];
+  if (!details || !Array.isArray(details.bed) || details.bed.length < 2) return;
+  printerChangeSnapshot = {
+    printer: activePrinter,
+    bed: [...bedXY],
+    workshop: workshopProfile,
+  };
+  printerChangePending = true;
+  bedUpdate(details.bed);
+  plateCaption({ profile, source }, bedXY, undefined, workshop);
+}
+function rollbackPrinterChange() {
+  if (!printerChangePending || !printerChangeSnapshot) return;
+  const prior = printerChangeSnapshot;
+  printerChangePending = false;
+  printerChangeSnapshot = null;
+  bedUpdate(prior.bed);
+  plateCaption(prior.printer, bedXY, undefined, prior.workshop);
 }
 
 // Findings get a pin at their reported point, in the same shifted space as the mesh.
@@ -1180,11 +1270,22 @@ for (const b of document.querySelectorAll('#download [data-fmt]')) {
 // this rebuild" is the wrong question, and answering it was how the estimate kept
 // deleting itself.
 const printed = new Map();
+let printerRevision = 0;
+function invalidatePrinterState() {
+  printerRevision += 1;
+  printed.clear();
+  printAsk = null;
+  printSig = null;
+  slicing = false;
+  if (typeof lastNote !== 'undefined') lastNote = null;
+  printRow();
+}
 const printbox = document.getElementById('print');
 // The machine this project still has to name, or the last failure, held against the
 // part it was asked about so switching parts does not inherit someone else's question.
 let printAsk = null;
 let slicing = false;
+let pendingPrinterSlice = false;
 let requestToken = null;
 // hud() calls printRow on every rebuild. Rewriting the card while the list is open
 // destroys it mid-click, so a matching signature keeps the DOM that is already there.
@@ -1267,6 +1368,7 @@ function printAsking(ask) {
 
 async function estimate() {
   const name = current;
+  const revision = printerRevision;
   if (!name || slicing || !requestToken) return;
   slicing = true;
   printAsk = null;
@@ -1277,15 +1379,19 @@ async function estimate() {
     });
     if (!r.ok) throw new Error(await r.text());
     const said = await r.json();
+    if (revision !== printerRevision) return;
     // Every answer that is not a number carries a `kind`, and only some of those
     // carry an `error`: the unchosen machine is a question with nothing wrong to say.
     if (said.kind) printAsk = { ...said, name };
     else printed.set(name, said);
   } catch (e) {
-    printAsk = { name, error: `could not slice: ${e.message}` };
+    if (revision === printerRevision)
+      printAsk = { name, error: `could not slice: ${e.message}` };
   } finally {
-    slicing = false;
-    printRow();
+    if (revision === printerRevision) {
+      slicing = false;
+      printRow();
+    }
   }
 }
 
@@ -1303,6 +1409,7 @@ printbox.onclick = event => {
   // Buttons never fire change, so the pick lives here. Option buttons have no
   // children: event.target is the control that carries the profile name.
   if (event.target.closest('#printerpick [value]') && event.target.value && sock) {
+    pendingPrinterSlice = true;
     slicing = true;  // the card says "slicing" from here to the answer, one continuous act
     printAsk = null;
     printRow();
@@ -1334,19 +1441,79 @@ platecap.onclick = event => {
   if (trigger) {
     event.stopPropagation();
     platecap.classList.toggle('open');
+    trigger.setAttribute('aria-expanded', String(platecap.classList.contains('open')));
     return;
   }
-  if (event.target.closest('#platecap [value]') && event.target.value && sock) {
+  if (event.target.closest('#platecap button[value]') && event.target.value && sock) {
+    const profile = event.target.value;
     platecap.classList.remove('open');
-    sock.send(JSON.stringify({ type: 'printer', profile: event.target.value }));
+    invalidatePrinterState();
+    optimisticPrinterChange(profile, selectedProfileSource(profile));
+    sock.send(JSON.stringify({ type: 'printer', profile }));
+    return;
   }
+  if (event.target.closest('#platecap [data-use-workshop]') && sock) {
+    platecap.classList.remove('open');
+    invalidatePrinterState();
+    optimisticPrinterChange(workshopProfile, 'global');
+    sock.send(JSON.stringify({ type: 'printer', use_workshop: true }));
+    return;
+  }
+  const makeDefault = event.target.closest('#platecap [data-make-default]');
+  if (makeDefault && sock) {
+    platecap.classList.remove('open');
+    invalidatePrinterState();
+    optimisticPrinterChange(makeDefault.dataset.makeDefault, 'global', makeDefault.dataset.makeDefault);
+    sock.send(JSON.stringify({ type: 'printer', profile: makeDefault.dataset.makeDefault, make_workshop: true, select: true }));
+    return;
+  }
+  const remove = event.target.closest('#platecap [data-delete-profile]');
+  if (remove && sock) {
+    const details = plateProfileDetails[remove.dataset.deleteProfile] || {};
+    const label = details.label || 'this printer';
+    if (!confirm(`Delete ${label}?`)) return;
+    printerActionPending = true;
+    platecap.classList.remove('open');
+    platecap.querySelector('#platecap > .pick')?.setAttribute('aria-expanded', 'false');
+    sock.send(JSON.stringify({ type: 'printer', profile: remove.dataset.deleteProfile, delete_custom: true }));
+    return;
+  }
+  if (event.target.closest('#platecap .addprinter')) {
+    platecap.classList.add('adding');
+    platecap.querySelector('[name=brand]').focus();
+    return;
+  }
+  if (event.target.closest('#platecap .cancelprinter')) {
+    const form = platecap.querySelector('.printerform');
+    form.reset();
+    form.querySelector('.formerror').textContent = '';
+    platecap.classList.remove('adding');
+  }
+};
+platecap.onsubmit = event => {
+  event.preventDefault();
+  if (!sock) return;
+  const form = event.target;
+  if (!form.reportValidity()) return;
+  form.querySelector('.formerror').textContent = '';
+  customPrinterPending = true;
+  platecap.classList.remove('open', 'adding');
+  const custom = Object.fromEntries(new FormData(form));
+  const makeDefault = form.elements.make_default.checked;
+  delete custom.make_default;
+  sock.send(JSON.stringify({ type: 'printer', custom, make_workshop: makeDefault }));
 };
 function plateDismiss(event) {
   const cap = document.getElementById('platecap');
   const open = !!(cap && cap.classList.contains('open'));
   if (!open) return;
   if (event.type === 'click' && cap.contains(event.target)) return;
-  cap.classList.remove('open');
+  cap.classList.remove('open', 'adding');
+  const form = cap.querySelector('.printerform');
+  form?.reset();
+  const error = form?.querySelector('.formerror');
+  if (error) error.textContent = '';
+  cap.querySelector('#platecap > .pick')?.setAttribute('aria-expanded', 'false');
 }
 addEventListener('click', plateDismiss);
 addEventListener('keydown', event => { if (event.key === 'Escape') plateDismiss(event); });
@@ -2729,8 +2896,7 @@ async function fallback() {
   try {
     const msg = await (await fetch('/api/sync')).json();
     const rows = msg.parts || [];
-    bedUpdate(msg.bed);
-    if ('printer' in msg) plateCaption(msg.printer, bedXY, msg.profiles);
+    printerUpdate(msg);
     if (parts.size) return;  // a socket sync won the race
     sharedRuns = msg.shared || [];
     if (!rows.length) return;  // truly empty
@@ -2764,8 +2930,7 @@ function connect() {
   };
   ws.onmessage = ev => {
     const msg = JSON.parse(ev.data);
-    bedUpdate(msg.bed);
-    if ('printer' in msg) plateCaption(msg.printer, bedXY, msg.profiles);
+    printerUpdate(msg);
     if (msg.type === 'sync') {
       requestToken = msg.request_token;
       project = msg.project || '';
@@ -2850,7 +3015,25 @@ function connect() {
     // Print-time pick sets `slicing` before the send, so this finishes that sentence.
     // Caption pick does not: naming the machine is not a request for a print estimate.
     if (msg.type === 'printer') {
-      const finishSlice = slicing;
+      if (msg.error && printerChangePending) rollbackPrinterChange();
+      if (customPrinterPending) {
+        customPrinterPending = false;
+        if (msg.error) {
+          platecap.classList.add('open', 'adding');
+          platecap.querySelector('.formerror').textContent = msg.error;
+          return;
+        }
+      }
+      if (printerActionPending) {
+        printerActionPending = false;
+        if (msg.error) {
+          platecap.classList.add('open');
+          platecap.querySelector('.printererror').textContent = msg.error;
+          return;
+        }
+      }
+      const finishSlice = pendingPrinterSlice || slicing;
+      pendingPrinterSlice = false;
       slicing = false;
       if (msg.error) {
         printAsk = { name: current, error: msg.error };
@@ -2858,6 +3041,10 @@ function connect() {
         return;
       }
       if (finishSlice) estimate();
+    }
+    if (msg.type === 'sync' || msg.type === 'printer_state') {
+      const error = document.querySelector('#platecap .printererror');
+      if (error) error.textContent = msg.printer_error || '';
     }
     if (msg.type === 'shared') {
       sharedRuns = msg.runs || [];

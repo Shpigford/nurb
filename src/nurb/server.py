@@ -1209,9 +1209,45 @@ class Server:
             profile, source = checks.profile_choice(self.root)
         except Exception:
             profile, source = None, None
+        workshop = None
+        try:
+            workshop = checks.workshop_profile()
+        except Exception:
+            pass
+        error = None
+        try:
+            have = checks.profiles()
+        except (ValueError, OSError) as exc:
+            # A hand-edited custom registry must not take down the websocket
+            # handshake. Shipped choices remain usable while the UI explains which
+            # file needs attention.
+            import tomllib
+
+            have = tomllib.loads(checks.PRINTERS.read_text(encoding="utf-8"))
+            error = str(exc)
+        details = {
+            name: {
+                "label": " ".join(filter(None, (facts.get("brand"), facts.get("model")))) or name.replace("_", " "),
+                "custom": "brand" in facts or "model" in facts,
+                # The picker applies a chosen profile immediately. Sending the
+                # profile's already-validated dimensions avoids making the plate wait
+                # for filesystem writes and the following websocket acknowledgement.
+                "bed": list(facts["bed"]),
+                **({"brand": facts["brand"]} if "brand" in facts else {}),
+                **({"model": facts["model"]} if "model" in facts else {}),
+            }
+            for name, facts in have.items()
+        }
+        state = {
+            "profiles": sorted(have, key=lambda name: details[name]["label"].casefold()),
+            "profile_details": details,
+            "workshop_profile": workshop,
+        }
+        if error:
+            state["printer_error"] = error
         if profile:
-            return {"printer": {"profile": profile, "source": source}}
-        return {"printer": None, "profiles": self._machines()}
+            return {**state, "printer": {"profile": profile, "source": source}}
+        return {**state, "printer": None}
 
     # ---------- websocket ----------
 
@@ -1283,19 +1319,60 @@ class Server:
             from . import checks
 
             try:
-                target = checks.choose_profile(self.root, msg.get("profile"))
+                before = checks.profile_choice(self.root)
+                before_bed = self._bed()
+                custom = msg.get("custom")
+                if custom is not None:
+                    if not isinstance(custom, dict):
+                        raise ValueError("custom printer details are missing")
+                    profile = checks.add_custom_profile(
+                        custom.get("brand", ""),
+                        custom.get("model", ""),
+                        [custom.get("bed_x"), custom.get("bed_y"), custom.get("bed_z")],
+                    )
+                    if msg.get("make_workshop"):
+                        target = checks.set_workshop_profile(profile, self.root)
+                        checks.use_workshop_profile(self.root)
+                    else:
+                        target = checks.choose_profile(self.root, profile, reset_bed=True)
+                elif msg.get("delete_custom"):
+                    profile = msg.get("profile")
+                    if checks.workshop_profile() == profile:
+                        profile = checks.replace_default_and_delete_custom_profile(self.root, profile)
+                    else:
+                        chosen, _ = checks.profile_choice(self.root)
+                        if chosen == profile:
+                            raise ValueError("choose another printer for this project before deleting this printer")
+                        checks.delete_custom_profile(profile)
+                    target = checks.custom_printers_file()
+                elif msg.get("use_workshop"):
+                    profile = checks.use_workshop_profile(self.root)
+                    target = checks.global_file()
+                elif msg.get("make_workshop"):
+                    profile = msg.get("profile")
+                    target = checks.set_workshop_profile(profile, self.root)
+                    if msg.get("select"):
+                        checks.use_workshop_profile(self.root)
+                else:
+                    profile = msg.get("profile")
+                    target = checks.choose_profile(self.root, profile, reset_bed=True)
+                after = checks.profile_choice(self.root)
+                after_bed = self._bed()
             except (ValueError, OSError) as exc:
                 await self.reply(client, {"type": "printer", "error": str(exc)})
                 return
-            print(f"  printer: {msg['profile']}, written to {target.name}", flush=True)
+            print(f"  printer: {profile}, using {target.name}", flush=True)
             # Bed size is a check setting, so every part's verdict can move with it.
-            for part in builder.find_parts(self.root):
-                self.queue.put_nowait(str(part))
+            if before != after or before_bed != after_bed:
+                for part in builder.find_parts(self.root):
+                    self.queue.put_nowait(str(part))
+            # Empty projects have no rebuilt messages to carry the new state. A distinct broadcast type lets another viewer update its caption without mistaking this for acknowledgement of its own print-time choice.
+            await self.send({"type": "printer_state", "bed": self._bed(), **self._printer_state()})
             await self.reply(
                 client,
                 {
                     "type": "printer",
-                    "profile": msg["profile"],
+                    "profile": profile,
                     "bed": self._bed(),
                     **self._printer_state(),
                 },

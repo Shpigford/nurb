@@ -10,13 +10,120 @@ import pytest
 from nurb.checks import (
     Context,
     _apply,
+    add_custom_profile,
     choose_profile,
+    custom_printers_file,
+    delete_custom_profile,
     from_card,
     global_file,
     printer,
     printer_line,
+    profile_choice,
     profiles,
+    replace_default_and_delete_custom_profile,
+    set_workshop_profile,
+    use_workshop_profile,
+    workshop_profile,
 )
+
+
+def test_custom_profile_is_user_scoped_and_keeps_workshop_config_separate():
+    global_config('# workshop\nprofile = "bambu_a1"\n\n[export]\nformats = ["3mf"]\n')
+    name = add_custom_profile("Snapmaker", "Artisan", [400, 400, 400])
+
+    assert name.startswith("custom_")
+    assert profiles()[name] == {
+        "brand": "Snapmaker",
+        "model": "Artisan",
+        "bed": [400.0, 400.0, 400.0],
+    }
+    assert printer(".", name).bed == (400.0, 400.0, 400.0)
+    assert '# workshop\nprofile = "bambu_a1"\n\n[export]\nformats = ["3mf"]\n' == global_file().read_text()
+    assert "[printers.custom_" in custom_printers_file().read_text()
+
+
+def test_custom_profiles_get_stable_unique_names():
+    first = add_custom_profile("Acme", "Model 1", [200, 201, 202])
+    second = add_custom_profile("Acme", "Model 1", [210, 211, 212])
+
+    assert first.startswith("custom_")
+    assert second.startswith("custom_")
+    assert first != second
+
+
+def test_custom_profile_can_be_deleted_without_rewriting_its_neighbors():
+    first = add_custom_profile("Acme", "One", [200, 201, 202])
+    second = add_custom_profile("Acme", "Two", [210, 211, 212])
+
+    delete_custom_profile(first)
+
+    assert first not in profiles()
+    assert profiles()[second]["model"] == "Two"
+
+
+def test_default_custom_profile_is_replaced_alphabetically_before_deletion(tmp_path):
+    selected = add_custom_profile("Zebra", "Last", [200, 201, 202])
+    earlier = add_custom_profile("Aardvark", "First", [210, 211, 212])
+    set_workshop_profile(selected)
+    project_file = tmp_path / "printer.toml"
+    project_file.write_text(f'# keep me\nprofile = "{selected}"\nbed = [1, 2, 3]\nmaterial = "petg"\n')
+
+    replacement = replace_default_and_delete_custom_profile(tmp_path, selected)
+
+    # Bambu A1 sorts before the custom Aardvark label only if profile ids are used;
+    # visible labels put Aardvark First first.
+    assert replacement == earlier
+    assert workshop_profile() == earlier
+    assert profile_choice(tmp_path) == (earlier, "global")
+    assert project_file.read_text() == '# keep me\nmaterial = "petg"\n'
+    assert selected not in profiles()
+
+
+def test_default_custom_profile_deletion_rolls_back_every_file_on_failure(tmp_path, monkeypatch):
+    import nurb.checks as checks
+
+    selected = add_custom_profile("Zero", "Default", [200, 201, 202])
+    set_workshop_profile(selected)
+    project_file = tmp_path / "printer.toml"
+    project_file.write_text(f'profile = "{selected}"\nbed = [1, 2, 3]\nmaterial = "petg"\n')
+    before = {
+        global_file(): global_file().read_bytes(),
+        project_file: project_file.read_bytes(),
+        custom_printers_file(): custom_printers_file().read_bytes(),
+    }
+
+    def fail(_name):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(checks, "delete_custom_profile", fail)
+    with pytest.raises(OSError, match="disk full"):
+        replace_default_and_delete_custom_profile(tmp_path, selected)
+
+    assert {target: target.read_bytes() for target in before} == before
+
+
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ('printers = "wrong"\n', "printers must be a table"),
+        ('[printers.unsafe]\nbrand = "A"\nmodel = "B"\nbed = [1, 2, 3]\n', "custom printer id"),
+        ('[printers.custom_00000000000000000000000000000000]\nbrand = "A"\nmodel = "B"\nbed = [1, 2]\n', "bed must contain three"),
+        ('[printers.custom_00000000000000000000000000000000]\nbrand = "A"\nmodel = "B"\nbed = [nan, 2, 3]\n', "bed must contain three"),
+        ('[printers.custom_00000000000000000000000000000000]\nbrand = "A"\nmodel = "B"\nbed = [1, 2, 3]\npreferred_slicer = "later"\n', "unknown field"),
+    ],
+)
+def test_malformed_custom_profile_registry_has_an_actionable_error(text, message):
+    custom_printers_file().parent.mkdir(parents=True, exist_ok=True)
+    custom_printers_file().write_text(text)
+
+    with pytest.raises(ValueError, match=message):
+        profiles()
+
+
+@pytest.mark.parametrize("bed", ([0, 200, 200], [200, 200], ["wide", 200, 200]))
+def test_custom_profile_rejects_invalid_build_volume(bed):
+    with pytest.raises(ValueError, match="build volume"):
+        add_custom_profile("Acme", "Printer", bed)
 
 
 def project(tmp_path, printer_toml=None, card=None):
@@ -172,6 +279,19 @@ def test_choosing_again_replaces_the_line_instead_of_adding_one(tmp_path):
     )
 
 
+def test_viewer_choice_drops_a_stale_bed_but_preserves_other_project_settings(tmp_path):
+    project(tmp_path, '# keep me\nprofile = "bambu_a1_mini"\nbed = [300, 300, 330]\nmaterial = "pla"\n\n[export]\nformats = ["stl"]\n')
+
+    choose_profile(tmp_path, "prusa_mk4s", reset_bed=True)
+
+    text = (tmp_path / "printer.toml").read_text()
+    assert "bed =" not in text
+    assert '# keep me' in text
+    assert 'material = "pla"' in text
+    assert '[export]\nformats = ["stl"]' in text
+    assert printer(tmp_path).bed == (250.0, 210.0, 220.0)
+
+
 def test_a_chosen_printer_lands_above_the_tables_not_inside_the_last_one(tmp_path):
     """Appended, `profile` would become a key of whatever table happens to be last,
     which parses as export.profile and leaves the machine still unnamed."""
@@ -204,6 +324,47 @@ def test_the_first_pick_inserts_above_export_in_an_existing_workshop_file(tmp_pa
     assert not (tmp_path / "printer.toml").exists()
 
 
+def test_setting_workshop_default_preserves_global_configuration(tmp_path):
+    project(tmp_path)
+    global_config('# keep me\nprofile = "bambu_a1_mini"\n\n[export]\nformats = ["stl"]\n')
+    set_workshop_profile("bambu_x1c")
+    text = global_file().read_text()
+    assert "keep me" in text
+    assert 'profile = "bambu_x1c"' in text
+    assert 'formats = ["stl"]' in text
+
+
+def test_setting_workshop_default_does_not_change_a_project_override(tmp_path):
+    project(tmp_path, '# exception\nprofile = "prusa_mk4s"\n')
+    global_config('profile = "bambu_a1_mini"\n')
+    set_workshop_profile("bambu_x1c")
+    assert profile_choice(tmp_path) == ("prusa_mk4s", "printer.toml")
+    assert (tmp_path / "printer.toml").read_text() == '# exception\nprofile = "prusa_mk4s"\n'
+
+
+def test_setting_active_project_printer_as_default_removes_redundant_override(tmp_path):
+    project(
+        tmp_path,
+        '# keep me\nprofile = "bambu_x1c"\nbed = [111, 112, 113]\nmaterial = "petg"\n\n[export]\nformats = ["stl"]\n',
+    )
+    global_config('profile = "bambu_a1_mini"\n')
+
+    set_workshop_profile("bambu_x1c", tmp_path)
+
+    assert profile_choice(tmp_path) == ("bambu_x1c", "global")
+    assert (tmp_path / "printer.toml").read_text() == '# keep me\nmaterial = "petg"\n\n[export]\nformats = ["stl"]\n'
+
+
+def test_setting_different_printer_as_default_keeps_project_override(tmp_path):
+    project(tmp_path, '# keep me\nprofile = "prusa_mk4s"\nbed = [111, 112, 113]\n')
+    global_config('profile = "bambu_a1_mini"\n')
+
+    set_workshop_profile("bambu_x1c", tmp_path)
+
+    assert profile_choice(tmp_path) == ("prusa_mk4s", "printer.toml")
+    assert (tmp_path / "printer.toml").read_text() == '# keep me\nprofile = "prusa_mk4s"\nbed = [111, 112, 113]\n'
+
+
 def test_export_only_printer_toml_is_not_an_exception_project(tmp_path):
     project(tmp_path, '[export]\nformats = ["stl"]\n')
     choose_profile(tmp_path, "bambu_a1_mini")
@@ -227,6 +388,51 @@ def test_picking_the_workshop_machine_again_writes_nothing(tmp_path):
     assert written == global_file()
     assert not (tmp_path / "printer.toml").exists()
     assert global_file().read_text() == 'profile = "bambu_a1_mini"\n'
+
+
+def test_reselecting_the_default_clears_the_project_override_and_its_bed(tmp_path):
+    project(tmp_path, '# keep me\nprofile = "prusa_mk4s"\nbed = [300, 300, 330]\nmaterial = "petg"\n\n[export]\nformats = ["stl"]\n')
+    global_config('profile = "bambu_a1_mini"\n')
+
+    written = choose_profile(tmp_path, "bambu_a1_mini", reset_bed=True)
+
+    assert written == global_file()
+    assert profile_choice(tmp_path) == ("bambu_a1_mini", "global")
+    assert (tmp_path / "printer.toml").read_text() == '# keep me\nmaterial = "petg"\n\n[export]\nformats = ["stl"]\n'
+
+
+def test_using_the_workshop_default_removes_only_the_project_override(tmp_path):
+    project(tmp_path, '# keep me\nprofile = "prusa_mk4s"\n\n[export]\nformats = ["stl"]\n')
+    global_config('profile = "bambu_a1_mini"\n')
+    assert use_workshop_profile(tmp_path) == "bambu_a1_mini"
+    text = (tmp_path / "printer.toml").read_text()
+    assert "profile" not in text
+    assert "keep me" in text
+    assert 'formats = ["stl"]' in text
+    assert profile_choice(tmp_path) == ("bambu_a1_mini", "global")
+
+
+def test_using_the_workshop_default_drops_the_exception_machines_bed(tmp_path):
+    project(tmp_path, 'profile = "prusa_xl"\nbed = [300, 300, 330]\nmaterial = "pla"\n')
+    global_config('profile = "bambu_a1_mini"\n')
+
+    use_workshop_profile(tmp_path)
+
+    assert printer(tmp_path).bed == (180.0, 180.0, 180.0)
+    assert (tmp_path / "printer.toml").read_text() == 'material = "pla"\n'
+
+
+def test_using_the_workshop_default_removes_an_empty_override_file(tmp_path):
+    project(tmp_path, 'profile = "prusa_mk4s"\n')
+    global_config('profile = "bambu_a1_mini"\n')
+    use_workshop_profile(tmp_path)
+    assert not (tmp_path / "printer.toml").exists()
+
+
+def test_using_the_workshop_default_requires_one(tmp_path):
+    project(tmp_path, 'profile = "prusa_mk4s"\n')
+    with pytest.raises(ValueError, match="no default printer"):
+        use_workshop_profile(tmp_path)
 
 
 def test_printer_line_names_the_source_and_the_bed(tmp_path):

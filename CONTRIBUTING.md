@@ -52,7 +52,7 @@ A build error takes the same path: the traceback is trimmed to the user's own pa
 | `src/nurb/api.py` | the vocabulary, derived from `__all__` so it cannot drift |
 | `src/nurb/cli.py` | the command surface |
 | `src/nurb/doctrine.md` | the design doctrine, shipped in the package, printed by `nurb rules` |
-| `src/nurb/printers.toml` | shipped printer profiles |
+| `src/nurb/printers.toml` | read-only printer profiles shipped with nurb; user-created profiles live separately in `~/.config/nurb/printers.toml` |
 
 The public API is `src/nurb/__init__.py`: everything exported there is a promise, everything else is internal and free to change. The version lives in `pyproject.toml` and nowhere else.
 
