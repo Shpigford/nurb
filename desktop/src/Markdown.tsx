@@ -6,9 +6,10 @@ import { ReactNode } from "react";
 // half-streamed chunk looks like until its closing marker arrives.
 
 // Emphasis requires a flanking boundary so dimensions ("a 4*4 grid of 3*3
-// bays") stay literal.
+// bays") stay literal. The boundary is matched, not asserted via lookbehind,
+// since older WebKit can't parse that; inline() strips it back off below.
 const INLINE =
-  /(\*\*[^\n]+?\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\)|(?<=^|[\s(])\*[^\s*][^*\n]*\*(?=$|[\s).,;:!?]))/;
+  /(\*\*[^\n]+?\*\*|`[^`\n]+`|\[[^\]\n]+\]\([^)\s]+\)|(?:^|[\s(])\*[^\s*][^*\n]*\*(?=$|[\s).,;:!?]))/;
 
 function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
@@ -30,7 +31,10 @@ function inline(text: string): ReactNode[] {
       // The app promises no URLs, so a link degrades to its label.
       out.push(token.slice(1, token.indexOf("]")));
     } else {
-      out.push(<em key={key++}>{token.slice(1, -1)}</em>);
+      // Re-emit the matched boundary char, if any, as plain text.
+      const starIdx = token.indexOf("*");
+      if (starIdx > 0) out.push(token.slice(0, starIdx));
+      out.push(<em key={key++}>{token.slice(starIdx + 1, -1)}</em>);
     }
     rest = rest.slice(match.index + token.length);
   }
