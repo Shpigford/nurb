@@ -201,6 +201,7 @@ export default function Library({
   };
 
   const [renamingPart, setRenamingPart] = useState<string | null>(null);
+  const [scrolled, setScrolled] = useState(false);
   const endPartRename = (part: LibraryPart, name: string | null) => {
     setRenamingPart(null);
     if (!name) return;
@@ -415,45 +416,61 @@ export default function Library({
         </div>
       </aside>
 
-      <StageColumn>
+      {/* The column runs into the stage's bottom and right gutters: the grid scrolls off
+       * the window's own edge rather than stopping on a line in the air, and the
+       * scrollbar sits in the right gutter instead of over the cards. Children put the
+       * right gutter back with pr-4. */}
+      <StageColumn className="-mr-4 -mb-4">
         {importing ? (
-          <div className="shrink-0 pb-3">
+          <div className="shrink-0 pr-4 pb-3">
             <ProgressBar value={null} label="Importing folder" pendingLabel="Reading the parts" />
           </div>
         ) : null}
         {parts.length === 0 && showAll ? (
-          <EmptyShelf
-            firstRun={firstRun}
-            caption="Start a part and describe it, or import a folder of parts you already have."
-            primary={{ label: "New part", icon: "plus", onClick: onNewPart }}
-            secondary={{
-              label: importing ? "Importing…" : "Import folder",
-              icon: "folder",
-              onClick: onImportFolder,
-              disabled: importing,
-            }}
-          />
+          <div className="flex min-h-0 flex-1 flex-col pr-4 pb-4">
+            <EmptyShelf
+              firstRun={firstRun}
+              caption="Start a part and describe it, or import a folder of parts you already have."
+              primary={{ label: "New part", icon: "plus", onClick: onNewPart }}
+              secondary={{
+                label: importing ? "Importing…" : "Import folder",
+                icon: "folder",
+                onClick: onImportFolder,
+                disabled: importing,
+              }}
+            />
+          </div>
         ) : parts.length === 0 ? (
-          <EmptyShelf
-            caption="No parts in this project yet. Open a part and choose Add to project to put it here."
-            primary={{ label: "All parts", onClick: onSelectAll }}
-            secondary={{
-              label: importing ? "Importing…" : "Import folder",
-              icon: "folder",
-              onClick: onImportFolder,
-              disabled: importing,
-            }}
-          />
+          <div className="flex min-h-0 flex-1 flex-col pr-4 pb-4">
+            <EmptyShelf
+              caption="No parts in this project yet. Open a part and choose Add to project to put it here."
+              primary={{ label: "All parts", onClick: onSelectAll }}
+              secondary={{
+                label: importing ? "Importing…" : "Import folder",
+                icon: "folder",
+                onClick: onImportFolder,
+                disabled: importing,
+              }}
+            />
+          </div>
         ) : (
           <>
-            <div className="chrome flex h-[30px] shrink-0 items-center justify-between">
+            <div className="chrome flex h-[30px] shrink-0 items-center justify-between pr-4">
               <span className="mono-caption text-on-stage-muted">
                 {shown.length} {shown.length === 1 ? "part" : "parts"}
                 {showAll ? "" : project?.name ? ` · ${project.name}` : ""}
               </span>
               <span className="mono-caption text-on-stage-muted">Sort · Last built</span>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto pt-1 pb-1">
+            {/* The last row stops on the gutter, level with the sidebar's foot. */}
+            <div
+              onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
+              // Scrolled, the cards fade out under the count instead of being cut on a line.
+              className={clsx(
+                "min-h-0 flex-1 overflow-y-auto pt-1 pr-4 pb-4",
+                scrolled && "[mask-image:linear-gradient(to_bottom,transparent,black_20px)]",
+              )}
+            >
               {shown.length === 0 ? (
                 <p className="mono-caption pt-8 text-center text-on-stage-muted">
                   Nothing here matches {query.trim()}
