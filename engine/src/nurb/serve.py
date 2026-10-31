@@ -1429,6 +1429,49 @@ def _routes(conn, lock, server, token, pid):
     return manager, routes, events
 
 
+def next_unbuilt(conn, skip=()):
+    """(part id, revision id) of the next part whose current source has never been
+    built, projects in the order they arrived and parts by name, or None."""
+    skip = list(skip)
+    row = conn.execute(
+        "SELECT parts.id, parts.current_revision_id FROM parts"
+        " JOIN projects ON projects.id = parts.project_id"
+        " WHERE parts.kind = 'part' AND parts.current_revision_id IS NOT NULL"
+        " AND NOT EXISTS (SELECT 1 FROM build_runs WHERE build_runs.revision_id = parts.current_revision_id)"
+        f" AND parts.current_revision_id NOT IN ({','.join('?' * len(skip))})"
+        " ORDER BY projects.created_at, parts.name LIMIT 1",
+        skip,
+    ).fetchone()
+    return (row["id"], row["current_revision_id"]) if row else None
+
+
+def build_unbuilt(wake, stop):
+    """Build every part that has never been built, one at a time, so a library an
+    import just filled gets its pictures without anyone opening each part.
+
+    Its own connection, not the serve's lock: a cold kernel takes most of a minute,
+    and the page's reads must not wait on it. The warm worker builds one part at a
+    time anyway, so a build somebody asked for waits behind one of these at most. A
+    failed build still leaves its run row, and `tried` covers a build that raised
+    before writing one, so no revision is attempted twice.
+    """
+    conn = db.connect()
+    tried = set()
+    try:
+        while not stop.is_set():
+            wake.wait()
+            wake.clear()
+            while not stop.is_set() and (next_part := next_unbuilt(conn, tried)):
+                part_id, revision_id = next_part
+                tried.add(revision_id)
+                try:
+                    engine_run.run_build(conn, part_id)
+                except Exception as exc:
+                    print(f"  background build of {part_id} failed: {exc}", flush=True)
+    finally:
+        conn.close()
+
+
 def run(port=None):
     """Serve until interrupted. Raises AlreadyServing when another one holds the lock."""
     import uvicorn
@@ -1455,6 +1498,16 @@ def run(port=None):
     lock = threading.Lock()
     server = mcp_server.make_server(conn, url, lock=lock)
     manager, routes, events = _routes(conn, lock, server, token, os.getpid())
+    # Set once for whatever is already unbuilt, then again whenever a part lands.
+    wake, stop = threading.Event(), threading.Event()
+    wake.set()
+
+    def on_change(kind, row_id, project_id):
+        if kind in ("project", "part"):
+            wake.set()
+
+    db.listeners.append(on_change)
+    threading.Thread(target=build_unbuilt, args=(wake, stop), daemon=True).start()
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
@@ -1494,6 +1547,8 @@ def run(port=None):
         # A stale file after a crash is fine; leaving one behind on a clean exit is
         # a client waiting 20 seconds on a port nobody is listening to.
         (home / STATE).unlink(missing_ok=True)
+        stop.set()
+        wake.set()
         conn.close()
         os.close(fd)
         print("  stopped", flush=True)

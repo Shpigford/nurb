@@ -1386,3 +1386,49 @@ def test_the_workshop_holds_the_printers_and_names_the_default(home):
             post(f"{url}/api/printers/default", {"profile": "prusa_mk4s"})
         assert unowned.value.code == 400
         assert "Add it first" in json.loads(unowned.value.read())["error"]
+
+
+def test_unbuilt_parts_build_in_the_background_after_an_import(tmp_path, monkeypatch):
+    """A library an import just filled gets its pictures without anyone opening a part."""
+    import threading
+    import time
+
+    import shutil
+
+    from nurb import db, folder, serve
+
+    monkeypatch.setenv("NURB_HOME", str(tmp_path))
+    conn = db.connect()
+    project = tmp_path / "shop"
+    shutil.copytree(pathlib.Path(__file__).parents[1] / "examples" / "demo", project)
+    # A shared module is source the parts import, never something to build on its own.
+    (project / "system.py").write_text("WALL = 2.0\n", encoding="utf-8")
+    project_id, count = folder.import_folder(conn, project)
+    first = serve.next_unbuilt(conn)
+    assert first is not None
+    assert serve.next_unbuilt(conn, skip=[first[1]]) != first
+
+    wake, stop = threading.Event(), threading.Event()
+    wake.set()
+    worker = threading.Thread(target=serve.build_unbuilt, args=(wake, stop), daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 240
+    while serve.next_unbuilt(conn) is not None and time.monotonic() < deadline:
+        time.sleep(0.5)
+    stop.set()
+    wake.set()
+    worker.join(timeout=30)
+
+    assert serve.next_unbuilt(conn) is None
+    built = conn.execute(
+        "SELECT COUNT(*) FROM parts JOIN build_runs ON build_runs.revision_id = parts.current_revision_id"
+        " WHERE parts.project_id = ? AND parts.kind = 'part'",
+        (project_id,),
+    ).fetchone()[0]
+    assert built == count
+    modules = conn.execute(
+        "SELECT COUNT(*) FROM parts JOIN build_runs ON build_runs.revision_id = parts.current_revision_id"
+        " WHERE parts.kind = 'module'"
+    ).fetchone()[0]
+    assert modules == 0
+    conn.close()
