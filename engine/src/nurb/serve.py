@@ -912,6 +912,21 @@ def _routes(conn, lock, server, token, pid):
 
         return await acted(work)
 
+    async def part_rename(request):
+        """Call a part something else, in the words a person typed."""
+        sent = await body_of(request)
+
+        def work(conn):
+            part = _part_row(conn, request.path_params["part_id"])
+            name = db.part_name_from(word(sent, "name", "name must be what to call the part"))
+            try:
+                db.rename_part(conn, part["id"], name)
+            except ValueError as exc:
+                raise _Refused(400, str(exc)) from None
+            return {"id": part["id"], "name": name, "was": part["name"]}
+
+        return await acted(work)
+
     async def project_folder(request):
         """Promote a one-part container into a folder of parts, and name it."""
         sent = await body_of(request)
@@ -1450,6 +1465,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts", endpoint=parts),
         Route("/api/parts/{part_id}/project", endpoint=answering(part_move), methods=["POST"]),
         Route("/api/parts/{part_id}", endpoint=answering(part_delete), methods=["DELETE"]),
+        Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
         Route("/api/projects/{project_id}/printer", endpoint=answering(project_printer), methods=["POST"]),
         Route("/api/printers", endpoint=answering(printers_read)),

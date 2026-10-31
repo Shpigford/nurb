@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Icon from "./Icon"
 import IsoBox from "./IsoBox"
 import Menu, { type MenuItem } from "./Menu"
@@ -47,10 +47,15 @@ export default function PartCard({
   part,
   onOpen,
   menu,
+  renaming,
+  onRename,
 }: {
   part: PartCardPart
   onOpen: () => void
   menu?: MenuItem[]
+  /** The title is a field: Enter or leaving it hands back the name, Escape hands back null. */
+  renaming?: boolean
+  onRename?: (name: string | null) => void
 }) {
   const dims = formatBbox(part.bbox)
   const built = relativeTime(part.builtAt)
@@ -94,9 +99,13 @@ export default function PartCard({
       ) : null}
       <div className="flex flex-col gap-1.5 px-[13px] py-[11px]">
         <div className="flex items-center gap-2">
-          <h2 className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold tracking-[-0.01em] text-ink">
-            {part.name}
-          </h2>
+          {renaming ? (
+            <RenameField name={part.name} onDone={(name) => onRename?.(name)} />
+          ) : (
+            <h2 className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold tracking-[-0.01em] text-ink">
+              {part.name}
+            </h2>
+          )}
           {failed ? (
             <span className="text-warn"><Icon name="warning" /></span>
           ) : building ? (
@@ -121,5 +130,31 @@ export default function PartCard({
         </span>
       </div>
     </div>
+  )
+}
+
+// Above the card's open button, so a click in the field edits instead of opening.
+function RenameField({ name, onDone }: { name: string; onDone: (name: string | null) => void }) {
+  const [draft, setDraft] = useState(name)
+  const done = useRef(false)
+  const finish = (value: string | null) => {
+    if (done.current) return
+    done.current = true
+    onDone(value && value.trim() && value.trim() !== name ? value.trim() : null)
+  }
+  return (
+    <input
+      autoFocus
+      aria-label={`Rename ${name}`}
+      value={draft}
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => finish(draft)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(draft)
+        else if (e.key === "Escape") finish(null)
+      }}
+      className="relative z-20 h-[22px] min-w-0 flex-1 rounded-[2px] border border-accent bg-ground px-1 text-[13.5px] leading-[18px] font-semibold tracking-[-0.01em] text-ink focus:outline-none"
+    />
   )
 }

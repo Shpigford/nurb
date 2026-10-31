@@ -37,6 +37,7 @@ import {
   applyParams,
   buildWithParams,
   exportPart,
+  renamePart,
   type ApplyResult,
   type PartBuild,
   type Project,
@@ -123,6 +124,7 @@ export default function PartView({
   project,
   partName,
   onSelectPart,
+  onPartRenamed,
   header,
   chat,
   topInset,
@@ -133,6 +135,8 @@ export default function PartView({
   partName: string | null
   /** The header's part switcher changes parts, and whoever owns the selection is told. */
   onSelectPart?: (name: string) => void
+  /** A rename from the header. The host moves its selection (and any conversation) along. */
+  onPartRenamed?: (was: string, name: string) => void
   /** What the host adds to the floating header: the project picker, its own icons.
    * `before` sits ahead of the lockup (the desktop's traffic lights), `nav` between
    * the lockup and the part name (the way back), `start` after it (the served page's
@@ -154,6 +158,13 @@ export default function PartView({
 }) {
   const projectId = project?.id ?? null
   const [highlight, setHighlight] = useState<number | null>(null)
+  // A refused rename says why for a few seconds, then gets out of the way.
+  const [renameError, setRenameError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!renameError) return
+    const timer = setTimeout(() => setRenameError(null), 5000)
+    return () => clearTimeout(timer)
+  }, [renameError])
   const [camera, setCamera] = useState<CameraState | null>(null)
 
   const [values, setValues] = useState<Params>({})
@@ -413,7 +424,22 @@ export default function PartView({
            * no source yet wears its container's placeholder name until it has one. */}
           <HeaderStack
             label="PART"
-            value={part?.name ?? (project && !project.folder ? project.name : "No part yet")}
+            value={
+              part ? (
+                <PartName
+                  name={part.name}
+                  onRename={(name) =>
+                    renamePart(part.id, name)
+                      .then((renamed) => onPartRenamed?.(renamed.was, renamed.name))
+                      .catch((e) => setRenameError(e instanceof Error ? e.message : String(e)))
+                  }
+                />
+              ) : project && !project.folder ? (
+                project.name
+              ) : (
+                "No part yet"
+              )
+            }
           />
           <HeaderDivider />
           {header?.start ? (
@@ -514,6 +540,7 @@ export default function PartView({
             ) : null}
           </div>
         )}
+        {renameError ? <StageNotice>{renameError}</StageNotice> : null}
         {failedBuild ? (
           <StageNotice>
             {build?.shown_revision != null ? `Showing ${rev(build.shown_revision)} · ` : ""}
@@ -646,5 +673,51 @@ export default function PartView({
         />
       ) : null}
     </Stage>
+  )
+}
+
+// The part's name in the header, which is also where it is renamed: click it, type,
+// Enter. The engine turns what was typed into a part name, so "Shelf Bracket" works.
+function PartName({ name, onRename }: { name: string; onRename: (name: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+  const done = useRef(false)
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        title="Rename this part"
+        onClick={() => {
+          done.current = false
+          setDraft(name)
+          setEditing(true)
+        }}
+        className="chrome rounded-[2px] text-left decoration-line underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      >
+        {name}
+      </button>
+    )
+  }
+  const finish = (save: boolean) => {
+    if (done.current) return
+    done.current = true
+    setEditing(false)
+    const next = draft.trim()
+    if (save && next && next !== name) onRename(next)
+  }
+  return (
+    <input
+      autoFocus
+      aria-label={`Rename ${name}`}
+      value={draft}
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => finish(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") finish(true)
+        else if (e.key === "Escape") finish(false)
+      }}
+      className="mono-value -mx-1 h-[18px] w-[180px] rounded-[2px] border border-accent bg-ground px-1 text-ink focus:outline-none"
+    />
   )
 }

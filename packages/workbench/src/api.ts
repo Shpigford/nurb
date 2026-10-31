@@ -302,6 +302,19 @@ export function importFolder(path: string): Promise<{ id: string; name: string; 
 }
 
 /** Call a project something else. The name is a label, so nothing on disk moves. */
+/** Call a part something else. The engine turns what was typed into a part name
+ * ("Shelf Bracket" is shelf_bracket) and says what it was before. */
+export async function renamePart(id: string, name: string): Promise<{ id: string; name: string; was: string }> {
+  const url = `/api/parts/${encodeURIComponent(id)}`
+  const res = await fetch(base + url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+  return (await res.json()) as { id: string; name: string; was: string }
+}
+
 export async function renameProject(id: string, name: string): Promise<ProjectSummary> {
   const url = `/api/projects/${encodeURIComponent(id)}`
   const res = await fetch(base + url, {

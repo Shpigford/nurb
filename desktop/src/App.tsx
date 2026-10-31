@@ -242,6 +242,14 @@ function App() {
     void loadProjects();
   }, [missing, loadProjects]);
 
+  // A rename moves the part's conversation and, when it is the open part, the selection.
+  const partRenamed = (renamedIn: string, was: string, name: string) => {
+    invoke("rename_part_chat", { projectId: renamedIn, was, name }).catch((e) => setError(String(e)));
+    const dir = dirs[renamedIn];
+    setColumns((list) => list.map((col) => (col.path === dir && col.part === was ? { ...col, part: name } : col)));
+    if (renamedIn === projectId) setPartName((open) => (open === was ? name : open));
+  };
+
   useLive((event) => {
     // The library's part count and built time move on a build, not only on a
     // project event, so both refetch the list.
@@ -759,6 +767,7 @@ function App() {
           project={project}
           partName={partName}
           onSelectPart={setPartName}
+          onPartRenamed={(was, name) => projectId && partRenamed(projectId, was, name)}
           onManagePrinters={() => setSettingsSection("printers")}
           dragRegion
           header={{
@@ -856,6 +865,7 @@ function App() {
             setPicking(part);
           }}
           onImportFolder={() => void pickAndImport()}
+          onPartRenamed={partRenamed}
           onRemoved={(id) => {
             if (id === projectId) setProjectId(null);
             void loadProjects();

@@ -1,6 +1,7 @@
 """The store itself: schema, pragmas, and the few row helpers everything else uses."""
 
 import json
+import pathlib
 import sqlite3
 import stat
 
@@ -437,3 +438,29 @@ def test_moving_a_part_takes_its_history_and_its_chat(tmp_path):
             db.move_part(conn, other_id, "nosuchproject")
     finally:
         conn.close()
+
+
+def test_renaming_a_part_carries_its_transcript_and_its_function(tmp_path):
+    """The name is the file's name, so the turns about the part follow it, and the
+    @part function takes the new name so the source agrees with the part."""
+    conn = db.connect(tmp_path / "x.db")
+    project_id, _ = folder.import_folder(conn, pathlib.Path(__file__).parents[1] / "examples" / "demo")
+    part = conn.execute("SELECT id FROM parts WHERE name = 'bracket'").fetchone()
+    db.add_message(conn, project_id, "user", "make it taller", {}, part="bracket")
+
+    assert db.part_name_from("  Shelf Bracket! ") == "shelf_bracket"
+    db.rename_part(conn, part["id"], "shelf_bracket")
+
+    row = conn.execute(
+        "SELECT parts.name, part_revisions.source, part_revisions.note FROM parts"
+        " JOIN part_revisions ON part_revisions.id = parts.current_revision_id WHERE parts.id = ?",
+        (part["id"],),
+    ).fetchone()
+    assert row["name"] == "shelf_bracket"
+    assert "def shelf_bracket(" in row["source"] and "def bracket(" not in row["source"]
+    assert row["note"] == "Renamed from bracket"
+    assert conn.execute("SELECT part FROM messages WHERE project_id = ?", (project_id,)).fetchone()["part"] == "shelf_bracket"
+
+    with pytest.raises(ValueError, match="can't be a part name"):
+        db.rename_part(conn, part["id"], "9lives")
+    conn.close()

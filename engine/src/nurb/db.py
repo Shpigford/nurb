@@ -535,6 +535,47 @@ def rename_project(conn, project_id, name):
     return name
 
 
+def part_name_from(text):
+    """What a person typed, as a part name: "Bench Hook" is bench_hook."""
+    return re.sub(r"[^a-z0-9]+", "_", (text or "").strip().lower()).strip("_")
+
+
+def rename_part(conn, part_id, name):
+    """Call a part something else. The name is its file's name, so the transcript's
+    turns follow it, and the function that carries @part takes the name in a new
+    revision, so the source an agent reads agrees with the part it opened."""
+    if not PART_NAME.match(name or ""):
+        raise ValueError(f"{name or 'that'} can't be a part name: start with a letter, then use letters, numbers and underscores")
+    with transaction(conn):
+        part = conn.execute("SELECT project_id, name, kind FROM parts WHERE id = ?", (part_id,)).fetchone()
+        if part is None:
+            raise ValueError(f"no part {part_id!r}")
+        old = part["name"]
+        if old == name:
+            return name
+        if conn.execute(
+            "SELECT 1 FROM parts WHERE project_id = ? AND name = ? AND kind = ?",
+            (part["project_id"], name, part["kind"]),
+        ).fetchone():
+            raise ValueError(f"this project already has a part called {name}")
+        conn.execute("UPDATE parts SET name = ? WHERE id = ?", (name, part_id))
+        conn.execute(
+            "UPDATE messages SET part = ? WHERE project_id = ? AND part = ?", (name, part["project_id"], old)
+        )
+        current = conn.execute(
+            "SELECT part_revisions.source, part_revisions.card_md FROM parts"
+            " JOIN part_revisions ON part_revisions.id = parts.current_revision_id WHERE parts.id = ?",
+            (part_id,),
+        ).fetchone()
+    source = current["source"] if current else None
+    renamed = re.sub(rf"^def {re.escape(old)}\(", f"def {name}(", source or "", count=1, flags=re.M)
+    if source and renamed != source:
+        add_revision(conn, part_id, renamed, card_md=current["card_md"], note=f"Renamed from {old}")
+    else:
+        changed("part", part_id, part["project_id"])
+    return name
+
+
 def set_printer(conn, project_id, printer_toml):
     """Name the machine this project prints on."""
     with transaction(conn):

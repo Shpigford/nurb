@@ -29,6 +29,7 @@ import {
   absolute,
   deletePart,
   deleteProject,
+  renamePart,
   renameProject,
   type LibraryPart,
   type Part,
@@ -70,6 +71,8 @@ type Props = {
   onImportFolder: () => void;
   /** The project that went, or null when only a part inside one did. */
   onRemoved: (id: string | null) => void;
+  /** The shell moves the part's conversation and its selection to the new name. */
+  onPartRenamed: (projectId: string, was: string, name: string) => void;
   onSettings: () => void;
 };
 
@@ -120,6 +123,7 @@ export default function Library({
   onAddToProject,
   onImportFolder,
   onRemoved,
+  onPartRenamed,
   onSettings,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -196,6 +200,15 @@ export default function Library({
     }
   };
 
+  const [renamingPart, setRenamingPart] = useState<string | null>(null);
+  const endPartRename = (part: LibraryPart, name: string | null) => {
+    setRenamingPart(null);
+    if (!name) return;
+    renamePart(part.id, name)
+      .then((renamed) => onPartRenamed(part.project_id, renamed.was, renamed.name))
+      .catch((e) => setFailure(e instanceof Error ? e.message : String(e)));
+  };
+
   const startRename = (summary: ProjectSummary) => {
     settled.current = false;
     setDraft(summary.name);
@@ -222,6 +235,7 @@ export default function Library({
 
   // A part in a folder can move to another one; a loose part joins its first.
   const partMenu = (part: LibraryPart): MenuItem[] => [
+    { label: "Rename", onSelect: () => setRenamingPart(part.id) },
     { label: "Show in Finder", onSelect: () => void showInFinder(part.project_id) },
     {
       label: part.folder ? "Move to another project" : "Add to project",
@@ -461,6 +475,8 @@ export default function Library({
                         <PartCard
                           part={toCard(part, part.folder ? part.project_name : null)}
                           menu={partMenu(part)}
+                          renaming={renamingPart === part.id}
+                          onRename={(name) => endPartRename(part, name)}
                           onOpen={() => onOpenPart(part.project_id, part.name)}
                         />
                       </motion.div>

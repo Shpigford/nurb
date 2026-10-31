@@ -123,6 +123,27 @@ impl SessionStore {
         self.save_part_chats(&part_chats);
     }
 
+    /// A renamed part keeps its conversation: the pointer and every session that
+    /// last ran on it move to the new name.
+    pub fn rename_part(&self, project: &str, was: &str, name: &str) {
+        {
+            let mut part_chats = self.part_chats.lock().unwrap();
+            for chat in part_chats.iter_mut() {
+                if chat.project == project && chat.part == was {
+                    chat.part = name.to_string();
+                }
+            }
+            self.save_part_chats(&part_chats);
+        }
+        let mut sessions = self.sessions.lock().unwrap();
+        for meta in sessions.values_mut() {
+            if meta.part.as_deref() == Some(was) {
+                meta.part = Some(name.to_string());
+            }
+        }
+        self.save_sessions(&sessions);
+    }
+
     fn save_sessions(&self, sessions: &HashMap<String, SessionMeta>) {
         // Write-then-rename so a crash mid-write never eats the store.
         let tmp = self.file.with_extension("json.tmp");
@@ -186,5 +207,18 @@ mod tests {
         assert_eq!(reloaded.part_of("s2", project).as_deref(), Some("bracket"));
         assert_eq!(reloaded.part_of("s1", project), None);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_renamed_part_keeps_its_conversation() {
+        let dir = std::env::temp_dir().join(format!("nurb-rename-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = SessionStore::load(&dir);
+        store.record("s1", "claude", "p1", Some("bracket".into()));
+        store.rename_part("p1", "bracket", "shelf_bracket");
+        assert_eq!(store.saved_chat("p1", "shelf_bracket").map(|c| c.0), Some("s1".to_string()));
+        assert!(store.saved_chat("p1", "bracket").is_none());
+        assert_eq!(store.part_of("s1", "p1"), Some("shelf_bracket".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

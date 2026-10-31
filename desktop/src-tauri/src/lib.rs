@@ -91,6 +91,16 @@ fn saved_chat(
 }
 
 #[tauri::command]
+fn rename_part_chat(
+    sessions: State<sessions::SessionStore>,
+    project_id: String,
+    was: String,
+    name: String,
+) {
+    sessions.rename_part(&project_id, &was, &name);
+}
+
+#[tauri::command]
 fn select_part_chat(
     sessions: State<sessions::SessionStore>,
     project_id: String,
@@ -295,6 +305,7 @@ pub fn run() {
             project_dir,
             take_v1_folders,
             select_part_chat,
+            rename_part_chat,
             saved_chat,
             save_pasted_image,
             #[cfg(debug_assertions)]

@@ -75,6 +75,7 @@ export default function App() {
       project={project}
       partName={partName}
       onSelectPart={setPartName}
+      onPartRenamed={(_, name) => setPartName(name)}
       header={{
         start: (
           <HeaderStack
