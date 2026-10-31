@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import Menu from "./Menu"
 
 afterEach(cleanup)
@@ -43,5 +43,12 @@ describe("Menu", () => {
     fireEvent.change(find, { target: { value: "hin" } })
     fireEvent.keyDown(find, { key: "Enter" })
     expect(pick).toHaveBeenCalledWith("hinge")
+  })
+
+  it("leaves the page once it has closed, so nothing invisible catches clicks", async () => {
+    render(<Menu label="More" items={[{ label: "Rename", onSelect: () => {} }]} />)
+    fireEvent.click(screen.getByRole("button", { name: "More" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }))
+    await waitFor(() => expect(screen.queryByText("Rename")).toBeNull())
   })
 })

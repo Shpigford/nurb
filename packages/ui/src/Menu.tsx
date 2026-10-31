@@ -10,7 +10,7 @@ import {
   type RefObject,
 } from "react"
 import { createPortal } from "react-dom"
-import { AnimatePresence, motion, usePresence } from "motion/react"
+import { AnimatePresence, motion, useIsPresent } from "motion/react"
 import clsx from "clsx"
 import Icon, { type IconName } from "./Icon"
 import { duration, ease } from "./motion/tokens"
@@ -266,7 +266,9 @@ function Popover({
   className?: string
   children: ReactNode
 }) {
-  const [present] = usePresence()
+  // useIsPresent, not usePresence: the latter holds the node until a safeToRemove
+  // nobody calls, which left every closed menu on the page, invisible and catching clicks.
+  const present = useIsPresent()
   return (
     <motion.div
       id={id}
