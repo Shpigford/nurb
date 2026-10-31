@@ -294,6 +294,12 @@ Specific to OCCT, and measured on real parts rather than reasoned about.
   needs room to land" constraint at a different number. Deleting it would have been
   wrong; restating it as a rule was right.
 
+## Shared files
+
+When parts are meant to match, the geometry they must agree on lives in one shared file, imported by every part that uses it: a wall, a chamfer size, a mounting profile, the label recess. `write_shared_source` with the name `system` makes `system.py`, and a part reads it with `from system import WALL`. Changing it moves the whole family: the first part that imports it builds at once and the rest rebuild in the background, so one edit is how a set of bins gets thicker walls together.
+
+A system is extracted, never scaffolded. Build the first two or three parts plainly, then lift what they genuinely say twice. Two parts that happen to share a number are not yet a system; two parts that would both have to change when the number changes are. The test of a real extraction is what does not use it: a part that genuinely differs keeps its own geometry, and a helper with a flag for each exception is the wrong abstraction wearing the right name.
+
 ## Cards
 
 A part file carries geometry, not rationale. Every part worth keeping has a card next to

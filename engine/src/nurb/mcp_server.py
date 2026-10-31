@@ -59,7 +59,7 @@ SOURCE_PAGE_CHARS = 100000
 # The engine gets the time actually left after materialization, not a fresh 240 seconds.
 TOOL_TIMEOUT_SECONDS = 240
 TOOL_SAFETY_SECONDS = 15
-BUILD_TOOLS = {"write_part_source", "edit_part_source", "run_build"}
+BUILD_TOOLS = {"write_part_source", "edit_part_source", "write_shared_source", "edit_shared_source", "run_build"}
 
 DEFAULT_FINDINGS = 5
 MAX_FINDINGS = 20
@@ -743,6 +743,93 @@ def edit_part_source(conn, args, base_url, deadline=None):
     )
 
 
+def importers(conn, project_id, module_id):
+    """The project's parts that import a shared file, directly or through another one."""
+    rows = list(db.parts_of(conn, project_id))
+    modules, current = {}, {}
+    for row in rows:
+        if row["kind"] == "module":
+            modules[row["name"]] = row["id"]
+        elif row["kind"] == db.PARTS_MODULE_KIND:
+            modules[f"parts.{row['name']}"] = row["id"]
+            current[row["id"]] = f"parts.{row['name']}"
+    imports = {row["id"]: _module_imports(row["source"], modules, current.get(row["id"])) for row in rows}
+
+    def reaches(key, seen):
+        if key in seen:
+            return False
+        return any(dep == module_id or reaches(dep, {*seen, key}) for dep in imports.get(key, ()))
+
+    return [row for row in rows if row["kind"] == "part" and reaches(row["id"], set())]
+
+
+def _shared(conn, project_id, name):
+    """The project's shared file by name, or None."""
+    for row in db.parts_of(conn, project_id):
+        if row["name"] == name and row["kind"] == "module":
+            return row
+    return None
+
+
+def _save_shared(conn, project, name, source, note, tool, base_url, deadline):
+    """Save a shared file, build the first part that imports it now so a break shows
+    at once, and queue the rest for the background builder."""
+    try:
+        compile(source, f"{name}.py", "exec")
+    except SyntaxError as exc:
+        raise Refused(f"{name}.py does not parse: line {exc.lineno}: {exc.msg}") from None
+    row = _shared(conn, project["id"], name)
+    if row is None:
+        if _part(conn, project["id"], name) is not None:
+            raise Refused(f"{name} is a part in this project; pick another name for the shared file")
+        db.create_part(conn, project["id"], name, source, kind="module")
+    elif row["source"] == source:
+        return _ok({"changed": False, "note": "source unchanged from the current revision"})
+    else:
+        db.add_revision(conn, row["id"], source, note=note)
+    row = _shared(conn, project["id"], name)
+    using = importers(conn, project["id"], row["id"])
+    if not using:
+        _record(conn, project["id"], tool, note, f"{name}.py saved; no part imports it yet", {"shared_file": name})
+        return _ok({"changed": True, "importers": [], "note": f"no part imports {name} yet; import it from a part, then build that part"})
+    first, rest = using[0], using[1:]
+    engine_run.want_rebuild([other["id"] for other in rest], project["id"])
+    extra = {
+        "changed": True,
+        "importers": [other["name"] for other in using],
+        "note": f"built {first['name']} now; {len(rest)} more parts that import {name} are rebuilding in the background",
+    }
+    return _build_result(conn, project["id"], first, base_url, tool, note, deadline, extra)
+
+
+def write_shared_source(conn, args, base_url, deadline=None):
+    if deadline is None:
+        deadline = time.monotonic() + TOOL_TIMEOUT_SECONDS - TOOL_SAFETY_SECONDS
+    project = _project(conn, args["project_id"])
+    return _save_shared(
+        conn, project, args["name"], args["source"], args.get("note"), "write_shared_source", base_url, deadline
+    )
+
+
+def edit_shared_source(conn, args, base_url, deadline=None):
+    if deadline is None:
+        deadline = time.monotonic() + TOOL_TIMEOUT_SECONDS - TOOL_SAFETY_SECONDS
+    project = _project(conn, args["project_id"])
+    name, old = args["name"], args["old_string"]
+    row = _shared(conn, project["id"], name)
+    if row is None or row["source"] is None:
+        raise Refused(f"no shared file called {name}; call write_shared_source first")
+    if not old:
+        raise Refused("old_string is required")
+    count = row["source"].count(old)
+    if count == 0:
+        raise Refused("old_string not found in the current source")
+    if count > 1:
+        raise Refused(f"old_string matches {count} places; include more surrounding lines")
+    source = row["source"].replace(old, args["new_string"], 1)
+    return _save_shared(conn, project, name, source, args.get("note"), "edit_shared_source", base_url, deadline)
+
+
 def run_build(conn, args, base_url, deadline=None):
     if deadline is None:
         deadline = time.monotonic() + TOOL_TIMEOUT_SECONDS - TOOL_SAFETY_SECONDS
@@ -1040,6 +1127,8 @@ HANDLERS = {
     "record_measurement": record_measurement,
     "write_part_source": write_part_source,
     "edit_part_source": edit_part_source,
+    "write_shared_source": write_shared_source,
+    "edit_shared_source": edit_shared_source,
     "run_build": run_build,
     "read_findings": read_findings,
     "look": look,

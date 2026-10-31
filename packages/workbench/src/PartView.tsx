@@ -480,6 +480,7 @@ export default function PartView({
                 checked: p.name === part?.name,
                 onSelect: () => onSelectPart?.(p.name),
               }))}
+              footer={sharedLine(project.shared ?? [])}
             />
           ) : null}
           {header?.end ? <HeaderIcons>{header.end}</HeaderIcons> : null}
@@ -720,4 +721,15 @@ function PartName({ name, onRename }: { name: string; onRename: (name: string) =
       className="mono-value -mx-1 h-[18px] w-[180px] rounded-[2px] border border-accent bg-ground px-1 text-ink focus:outline-none"
     />
   )
+}
+
+// "1 shared file · 29 parts use it": the line that says this project is a system, so
+// one change to it moves the set. Nothing when the project shares nothing.
+function sharedLine(shared: { name: string; used_by: string[] }[]): string | undefined {
+  if (shared.length === 0) return undefined
+  const users = new Set(shared.flatMap((file) => file.used_by)).size
+  const files = shared.length === 1 ? "1 shared file" : `${shared.length} shared files`
+  if (users === 0) return `${files} · no part uses ${shared.length === 1 ? "it" : "them"} yet`
+  const parts = users === 1 ? "1 part uses" : `${users} parts use`
+  return `${files} · ${parts} ${shared.length === 1 ? "it" : "them"}`
 }

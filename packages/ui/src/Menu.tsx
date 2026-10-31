@@ -239,7 +239,7 @@ export default function Menu({
                 </Fragment>
               ))}
               {footer ? (
-                <div className="mt-1 border-t border-line-soft bg-raised px-3 py-2 font-mono text-[9.5px] leading-3 tracking-[0.08em] text-muted uppercase">
+                <div className="sticky bottom-0 mt-1 border-t border-line-soft bg-raised px-3 py-2 font-mono text-[9.5px] leading-3 tracking-[0.08em] text-muted uppercase">
                   {footer}
                 </div>
               ) : null}

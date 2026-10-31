@@ -743,6 +743,13 @@ def _project(conn, project_id, part=None):
             for m in db.measurements_of(conn, project_id)
         ],
         "parts": parts,
+        # The family's shared files and which parts import each, so the page can say
+        # that one edit moves the set.
+        "shared": [
+            {"name": entry["name"], "used_by": [user["name"] for user in mcp_server.importers(conn, project_id, entry["id"])]}
+            for entry in db.parts_of(conn, project_id)
+            if entry["kind"] == "module"
+        ],
         "messages": [_message(conn, message) for message in messages],
     }
 
@@ -1508,7 +1515,8 @@ def next_unbuilt(conn, skip=()):
 
 def build_unbuilt(wake, stop):
     """Build every part that has never been built, one at a time, so a library an
-    import just filled gets its pictures without anyone opening each part.
+    import just filled gets its pictures without anyone opening each part, then every
+    part a shared file change queued.
 
     Its own connection, not the serve's lock: a cold kernel takes most of a minute,
     and the page's reads must not wait on it. The warm worker builds one part at a
@@ -1522,9 +1530,18 @@ def build_unbuilt(wake, stop):
         while not stop.is_set():
             wake.wait()
             wake.clear()
-            while not stop.is_set() and (next_part := next_unbuilt(conn, tried)):
-                part_id, revision_id = next_part
-                tried.add(revision_id)
+            while not stop.is_set():
+                # Never-built parts first, then the ones a shared file change left behind.
+                next_part = next_unbuilt(conn, tried)
+                if next_part:
+                    part_id, revision_id = next_part
+                    tried.add(revision_id)
+                else:
+                    part_id = engine_run.take_rebuild()
+                    if part_id is None:
+                        break
+                    if conn.execute("SELECT 1 FROM parts WHERE id = ?", (part_id,)).fetchone() is None:
+                        continue
                 try:
                     engine_run.run_build(conn, part_id)
                 except Exception as exc:

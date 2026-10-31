@@ -8727,7 +8727,7 @@ function u0({
                 }
               )
             ] }, L)),
-            o ? /* @__PURE__ */ c("div", { className: "mt-1 border-t border-line-soft bg-raised px-3 py-2 font-mono text-[9.5px] leading-3 tracking-[0.08em] text-muted uppercase", children: o }) : null
+            o ? /* @__PURE__ */ c("div", { className: "sticky bottom-0 mt-1 border-t border-line-soft bg-raised px-3 py-2 font-mono text-[9.5px] leading-3 tracking-[0.08em] text-muted uppercase", children: o }) : null
           ]
         }
       ) : null })

@@ -114,6 +114,8 @@ export interface Project {
   spec: Spec | null
   measurements: ProjectMeasurement[]
   parts: Part[]
+  /** The family's shared files (system.py and the like) and the parts that import each. */
+  shared?: { name: string; used_by: string[] }[]
   messages: Message[]
 }
 

@@ -597,6 +597,91 @@
   }
  },
  {
+  "name": "write_shared_source",
+  "title": "Write a shared file",
+  "description": "Save the complete source of a project's shared file, the module its parts import (system.py is `from system import ...`). Use it for geometry a family of parts must agree on: a wall, a chamfer, a mounting profile. Build two or three parts plainly first and lift only what they genuinely repeat. Every part that imports the file, directly or through another shared file, is out of date once it changes: the first one builds now and its result comes back here (findings, stats, the picture); the rest rebuild in the background, and `importers` names them all. Send the whole file, never a diff; for a fix prefer edit_shared_source.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "name",
+    "source"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The shared file's name without .py, as parts import it: `system` is system.py, read with `from system import ...`."
+    },
+    "source": {
+     "type": "string",
+     "description": "The complete Python source of the shared file."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "edit_shared_source",
+  "title": "Edit a shared file",
+  "description": "Replace one exact snippet of a project's shared file and save it as a new revision. old_string must appear exactly once. As with write_shared_source, the first part that imports the file builds now and the rest rebuild in the background; `importers` names them all.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "name",
+    "old_string",
+    "new_string"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The shared file's name without .py, as parts import it: `system` is system.py, read with `from system import ...`."
+    },
+    "old_string": {
+     "type": "string",
+     "description": "The exact text to replace, matching the current source byte for byte (indentation included)."
+    },
+    "new_string": {
+     "type": "string",
+     "description": "The replacement text."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
   "name": "run_build",
   "title": "Build the part",
   "description": "Build the current source again without changing it and run every check. Every write_part_source and edit_part_source already builds, so this is only for a rebuild of unchanged source. Returns status, findings, stats, and inspect (the inspect report: findings resolved to faces, the largest faces, the concave edges). The build passes when there is no error and no finding with severity \"fail\". A passing build also returns one picture, the part from four angles (iso, back, top, under), and a link to the full-size iso render; the other views are MCP resources under nurb://render/.",

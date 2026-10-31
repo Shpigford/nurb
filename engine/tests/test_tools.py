@@ -821,3 +821,48 @@ def test_a_refused_tool_call_leaves_a_failed_step(conn):
     step = serve._message(conn, rows[1])["payload"]["step"]
     assert step["status"] == "failed"
     assert step["verb"] == "run"
+
+
+SHELF = """from nurb import *
+from system import WALL
+
+
+@part
+def {name}(width=20.0):
+    return Box(width, width, WALL)
+"""
+
+
+def test_a_shared_file_change_builds_one_importer_now_and_queues_the_rest(conn):
+    """One edit to the family's shared file moves every part that imports it."""
+    from nurb import engine_run
+
+    project_id = new_project(conn)
+    first = payload(call(conn, "write_shared_source", {"project_id": project_id, "name": "system", "source": "WALL = 2.0\n"}))
+    assert first["importers"] == [] and "no part imports system" in first["note"]
+    for name in ("bin_a", "bin_b"):
+        payload(call(conn, "write_part_source", {"project_id": project_id, "part_name": name, "source": SHELF.format(name=name)}))
+    while engine_run.take_rebuild():
+        pass
+
+    result = payload(
+        call(conn, "edit_shared_source", {"project_id": project_id, "name": "system", "old_string": "WALL = 2.0", "new_string": "WALL = 3.0"})
+    )
+    assert result["importers"] == ["bin_a", "bin_b"]
+    assert result["status"] == "ok"
+    assert result["stats"]["bbox"][2] == pytest.approx(3.0)
+    queued = engine_run.take_rebuild()
+    assert queued is not None and engine_run.take_rebuild() is None
+    names = {row["id"]: row["name"] for row in db.parts_of(conn, project_id)}
+    assert names[queued] == "bin_b"
+
+
+def test_a_shared_file_refuses_bad_source_and_a_parts_name(conn):
+    project_id = new_project(conn)
+    payload(call(conn, "write_part_source", {"project_id": project_id, "part_name": "cube", "source": CUBE}))
+    assert "does not parse: line 1" in message(
+        call(conn, "write_shared_source", {"project_id": project_id, "name": "system", "source": "WALL = (\n"})
+    )
+    assert "is a part in this project" in message(
+        call(conn, "write_shared_source", {"project_id": project_id, "name": "cube", "source": "WALL = 2.0\n"})
+    )

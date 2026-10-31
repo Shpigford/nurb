@@ -338,6 +338,27 @@ class _EngineWorker:
 
 _WORKER = _EngineWorker()
 _WORKER_LOCK = threading.Lock()
+
+# Parts whose own source did not change but whose build is out of date, because a
+# shared file they import did. The serve's background builder works through them.
+_REBUILD = []
+_REBUILD_LOCK = threading.Lock()
+
+
+def want_rebuild(part_ids, project_id):
+    """Queue parts for the background builder, and wake it."""
+    with _REBUILD_LOCK:
+        for part_id in part_ids:
+            if part_id not in _REBUILD:
+                _REBUILD.append(part_id)
+    if part_ids:
+        db.changed("part", part_ids[0], project_id)
+
+
+def take_rebuild():
+    """The next queued part id, or None."""
+    with _REBUILD_LOCK:
+        return _REBUILD.pop(0) if _REBUILD else None
 atexit.register(_WORKER._stop)
 
 
