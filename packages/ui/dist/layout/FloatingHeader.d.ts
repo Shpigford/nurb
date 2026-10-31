@@ -28,15 +28,6 @@ export declare function HeaderStatus({ tone, label, detail, className, }: {
     detail?: string;
     className?: string;
 }): import("react").JSX.Element;
-export interface HeaderTab {
-    name: string;
-    active?: boolean;
-    onSelect: () => void;
-}
-export declare function HeaderTabs({ items, label }: {
-    items: HeaderTab[];
-    label?: string;
-}): import("react").JSX.Element | null;
 export declare function HeaderIcons({ children, className }: {
     children: ReactNode;
     className?: string;

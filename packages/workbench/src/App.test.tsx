@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import App from "./App"
 import { messages, part, project, summaries } from "./fixtures"
@@ -39,9 +39,10 @@ describe("workbench", () => {
   it("selects the project and part named in the query string", async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText("Project")).toHaveValue("p2"))
-    // Parts are the floating header's tabs now, not a list of buttons in a panel.
-    const lid = await screen.findByRole("tab", { name: "lid" })
-    expect(lid).toHaveAttribute("aria-selected", "true")
+    // The project's parts live behind one switcher in the header, the open one checked.
+    fireEvent.click(await screen.findByRole("button", { name: "Parts in Second" }))
+    expect(await screen.findByRole("menuitemradio", { name: "lid" })).toHaveAttribute("aria-checked", "true")
+    expect(screen.getByRole("menuitemradio", { name: "body" })).toHaveAttribute("aria-checked", "false")
     expect(screen.getByTestId("stage")).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1")
   })
 

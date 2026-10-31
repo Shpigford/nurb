@@ -100,35 +100,6 @@ export function HeaderStatus({
   )
 }
 
-export interface HeaderTab {
-  name: string
-  active?: boolean
-  onSelect: () => void
-}
-
-export function HeaderTabs({ items, label = "Parts" }: { items: HeaderTab[]; label?: string }) {
-  if (items.length === 0) return null
-  return (
-    <div className="flex h-full items-center gap-0.5 px-3" role="tablist" aria-label={label}>
-      {items.map((tab) => (
-        <button
-          key={tab.name}
-          type="button"
-          role="tab"
-          aria-selected={Boolean(tab.active)}
-          onClick={tab.onSelect}
-          className={clsx(
-            "mono-id flex h-7 items-center rounded-[3px] px-[11px] transition-colors",
-            tab.active ? "bg-raised font-medium text-ink" : "text-muted hover:text-ink"
-          )}
-        >
-          {tab.name}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 // The icon cluster. The consumer drops IconButtons in; the cell only spaces them.
 export function HeaderIcons({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={clsx("flex h-full items-center gap-1 px-3", className)}>{children}</div>

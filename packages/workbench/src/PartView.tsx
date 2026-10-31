@@ -10,8 +10,9 @@ import {
   HeaderIcons,
   HeaderStack,
   HeaderStatus,
-  HeaderTabs,
+  Icon,
   Lockup,
+  Menu,
   ParamRail,
   ParamsPanel,
   RailDisclosure,
@@ -130,17 +131,16 @@ export default function PartView({
 }: {
   project: Project | null
   partName: string | null
-  /** The header's tabs switch parts, and whoever owns the selection is told. */
+  /** The header's part switcher changes parts, and whoever owns the selection is told. */
   onSelectPart?: (name: string) => void
   /** What the host adds to the floating header: the project picker, its own icons.
    * `before` sits ahead of the lockup (the desktop's traffic lights), `nav` between
    * the lockup and the part name (the way back), `start` after it (the served page's
-   * project picker), and `crumb` ahead of the part tabs. */
+   * project picker). */
   header?: {
     before?: ReactNode
     nav?: ReactNode
     start?: ReactNode
-    crumb?: ReactNode
     end?: ReactNode
   }
   /** The conversation column, 372 wide, left of the stage. */
@@ -427,17 +427,35 @@ export default function PartView({
       }
       end={
         <>
-          {header?.crumb}
-          {/* A project with a dozen parts would run the tabs off the header. */}
-          <div className="flex min-w-0 items-center overflow-x-auto">
-            <HeaderTabs
+          {/* One cell names the project and opens its parts, because a row of tabs
+           * runs off the header once a project holds a dozen. */}
+          {project && parts.length > 1 ? (
+            <Menu
+              label={`Parts in ${project.name}`}
+              portal
+              filter={parts.length > 8 ? "Find a part" : undefined}
+              menuClassName="w-[260px] max-h-[min(420px,70vh)] overflow-y-auto!"
+              triggerClassName="h-[50px] rounded-none border-l border-line"
+              trigger={(open) => (
+                <span
+                  className={
+                    open
+                      ? "flex h-full items-center gap-2 bg-raised px-3.5 text-ink"
+                      : "flex h-full items-center gap-2 px-3.5 text-muted transition-colors hover:text-ink"
+                  }
+                >
+                  <Icon name="folder" />
+                  <span className="mono-label">In {project.name}</span>
+                  <Icon name="chevron-down" />
+                </span>
+              )}
               items={parts.map((p) => ({
-                name: p.name,
-                active: p.name === part?.name,
+                label: p.name,
+                checked: p.name === part?.name,
                 onSelect: () => onSelectPart?.(p.name),
               }))}
             />
-          </div>
+          ) : null}
           {header?.end ? <HeaderIcons>{header.end}</HeaderIcons> : null}
         </>
       }

@@ -19,7 +19,7 @@ export interface MenuItem {
     /** Hover text, for a note too long to sit in the row. */
     title?: string;
 }
-export default function Menu({ label, items, align, className, menuClassName, trigger, footer, portal, disabled, triggerClassName, onOpenChange, }: {
+export default function Menu({ label, items, align, className, menuClassName, trigger, footer, portal, disabled, triggerClassName, onOpenChange, filter, }: {
     label: string;
     items: MenuItem[];
     align?: "left" | "right";
@@ -37,4 +37,6 @@ export default function Menu({ label, items, align, className, menuClassName, tr
     onOpenChange?: (open: boolean) => void;
     /** Replaces the trigger's own size and shape classes; the chrome and focus ring stay. */
     triggerClassName?: string;
+    /** A find field above the items, with this placeholder, for a list too long to scan. */
+    filter?: string;
 }): import("react").JSX.Element;

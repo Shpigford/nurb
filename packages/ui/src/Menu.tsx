@@ -52,6 +52,7 @@ export default function Menu({
   disabled,
   triggerClassName,
   onOpenChange,
+  filter,
 }: {
   label: string
   items: MenuItem[]
@@ -70,8 +71,11 @@ export default function Menu({
   onOpenChange?: (open: boolean) => void
   /** Replaces the trigger's own size and shape classes; the chrome and focus ring stay. */
   triggerClassName?: string
+  /** A find field above the items, with this placeholder, for a list too long to scan. */
+  filter?: string
 }) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
   const [anchor, setAnchor] = useState<CSSProperties>()
   const rootRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -82,7 +86,12 @@ export default function Menu({
   openChange.current = onOpenChange
   useEffect(() => {
     openChange.current?.(open)
+    if (!open) setQuery("")
   }, [open])
+  const needle = query.trim().toLowerCase()
+  const shown = needle
+    ? items.filter((item) => typeof item.label === "string" && item.label.toLowerCase().includes(needle))
+    : items
 
   useLayoutEffect(() => {
     if (!open || !portal) return
@@ -161,9 +170,32 @@ export default function Menu({
                 menuClassName,
               )}
             >
-              {items.map((item, index) => (
+              {filter ? (
+                <div className="sticky top-0 z-10 -mt-1 mb-1 flex h-8 items-center gap-2 border-b border-line-soft bg-ground px-3">
+                  <Icon name="search" className="text-muted" />
+                  <input
+                    autoFocus
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Enter takes the first match, so a typed name is one keystroke from open.
+                      if (e.key === "Enter" && shown[0]) {
+                        shown[0].onSelect()
+                        setOpen(false)
+                      }
+                    }}
+                    placeholder={filter}
+                    aria-label={filter}
+                    className="mono-id min-w-0 flex-1 bg-transparent text-ink outline-none placeholder:text-faint"
+                  />
+                </div>
+              ) : null}
+              {filter && shown.length === 0 ? (
+                <div className="mono-id flex h-7 items-center px-3 text-faint">Nothing matches</div>
+              ) : null}
+              {shown.map((item, index) => (
                 <Fragment key={index}>
-                  {item.section && item.section !== items[index - 1]?.section ? (
+                  {item.section && item.section !== shown[index - 1]?.section ? (
                     <>
                       {index > 0 ? (
                         <div className="my-1 border-t border-line-soft" role="separator" />

@@ -15,7 +15,6 @@ import {
   HeaderIcons,
   HeaderStack,
   HeaderStatus,
-  HeaderTabs,
   Icon,
   IconButton,
   Lockup,
@@ -283,12 +282,21 @@ function WorkspaceHeader({
           {tabs ? (
             <>
               <HeaderDivider />
-              <HeaderTabs
-                items={[
-                  { name: "rail_bracket", active: true, onSelect: noop },
-                  { name: "shelf_pin", onSelect: noop },
-                  { name: "wall_plate", onSelect: noop },
-                ]}
+              <Menu
+                label="Parts in Bench shelf"
+                triggerClassName="h-[50px] rounded-none"
+                trigger={() => (
+                  <span className="flex h-full items-center gap-2 px-3.5 text-muted">
+                    <Icon name="folder" />
+                    <span className="mono-label">In Bench shelf</span>
+                    <Icon name="chevron-down" />
+                  </span>
+                )}
+                items={["rail_bracket", "shelf_pin", "wall_plate"].map((name) => ({
+                  label: name,
+                  checked: name === "rail_bracket",
+                  onSelect: noop,
+                }))}
               />
             </>
           ) : null}

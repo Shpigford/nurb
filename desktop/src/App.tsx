@@ -780,20 +780,6 @@ function App() {
                 <span className="mono-label">Library</span>
               </button>
             ),
-            crumb:
-              project?.folder ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPartName(null);
-                    setScreen("library");
-                    setShowAll(false);
-                  }}
-                  className="chrome flex h-full items-center px-3 text-muted transition-colors hover:text-ink"
-                >
-                  <span className="mono-label">In {project.name}</span>
-                </button>
-              ) : undefined,
             end: <IconButton icon="gear" label="Settings" onClick={() => setSettingsSection("agents")} />,
           }}
           chat={

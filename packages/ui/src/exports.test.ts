@@ -28,7 +28,6 @@ it.each([
   "FloatingHeader",
   "HeaderStack",
   "HeaderStatus",
-  "HeaderTabs",
   "ChatPanel",
   "ParamRail",
   "RailDisclosure",

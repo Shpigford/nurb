@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest"
+import { describe, it, expect, afterEach, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import Menu from "./Menu"
 
@@ -22,5 +22,26 @@ describe("Menu", () => {
     expect(screen.getByRole("menu")).toBeTruthy()
     fireEvent.keyDown(document, { key: "Escape" })
     expect(screen.queryByRole("menu")).toBeNull()
+  })
+
+  it("filters a long list by name and takes the first match on Enter", () => {
+    const pick = vi.fn()
+    render(
+      <Menu
+        label="Parts"
+        filter="Find a part"
+        items={["bin", "hook", "hinge"].map((name) => ({ label: name, checked: name === "bin", onSelect: () => pick(name) }))}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Parts" }))
+    const find = screen.getByRole("textbox", { name: "Find a part" })
+    fireEvent.change(find, { target: { value: "h" } })
+    expect(screen.queryByRole("menuitemradio", { name: "bin" })).toBeNull()
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(2)
+    fireEvent.change(find, { target: { value: "zzz" } })
+    expect(screen.getByText("Nothing matches")).toBeTruthy()
+    fireEvent.change(find, { target: { value: "hin" } })
+    fireEvent.keyDown(find, { key: "Enter" })
+    expect(pick).toHaveBeenCalledWith("hinge")
   })
 })

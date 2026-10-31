@@ -1,7 +1,6 @@
-import { describe, it, expect, afterEach, vi } from "vitest"
+import { describe, it, expect, afterEach } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
-import FloatingHeader, { HeaderCell, HeaderDivider, HeaderIcons, HeaderStack, HeaderStatus, HeaderTabs } from "./FloatingHeader"
+import FloatingHeader, { HeaderCell, HeaderDivider, HeaderStack, HeaderStatus } from "./FloatingHeader"
 
 afterEach(cleanup)
 
@@ -27,27 +26,5 @@ describe("FloatingHeader", () => {
     const { container } = render(<FloatingHeader cells={<HeaderStatus tone="pass" label="Built rev 04" detail="0:47" />} />)
     expect(container.querySelector(".bg-pass")).toBeTruthy()
     expect(screen.getByText("0:47")).toBeTruthy()
-  })
-
-  it("selects a part tab", async () => {
-    const onSelect = vi.fn()
-    render(
-      <FloatingHeader
-        end={
-          <>
-            <HeaderTabs items={[{ name: "shelf", active: true, onSelect: () => {} }, { name: "clip", onSelect }]} />
-            <HeaderIcons>
-              <button type="button">ICON</button>
-            </HeaderIcons>
-          </>
-        }
-      />
-    )
-    const tabs = screen.getAllByRole("tab")
-    expect(tabs[0].getAttribute("aria-selected")).toBe("true")
-    expect(tabs[0].className).toContain("bg-raised")
-    await userEvent.click(tabs[1])
-    expect(onSelect).toHaveBeenCalled()
-    expect(screen.getByText("ICON")).toBeTruthy()
   })
 })
