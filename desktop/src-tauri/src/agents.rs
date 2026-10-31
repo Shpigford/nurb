@@ -72,8 +72,8 @@ impl AgentKind {
     /// release weekly, so no ranges. None for the ACP-native CLIs.
     pub fn adapter(self) -> Option<&'static str> {
         match self {
-            Self::Codex => Some("@agentclientprotocol/codex-acp@1.13.0"),
-            Self::Gemini => Some("@google/gemini-cli@0.55.1"),
+            Self::Codex => Some("@agentclientprotocol/codex-acp@2.5.0"),
+            Self::Gemini => Some("@google/gemini-cli@0.66.0"),
             Self::Claude | Self::Cursor | Self::Grok => None,
         }
     }
@@ -95,7 +95,10 @@ impl AgentKind {
             // The driver builds its own argv, so the pair carries the binary
             // name and nothing else.
             Self::Claude => Some(("claude", &[] as &[&str])),
-            Self::Cursor => Some(("agent", &["acp"])),
+            // `cursor-agent`, not `agent`: Cursor's installer links both, but
+            // Grok's installer also claims `agent`, so only the long name is
+            // sure to be Cursor's.
+            Self::Cursor => Some(("cursor-agent", &["acp"])),
             Self::Grok => Some(("grok", &["agent", "stdio"])),
             Self::Codex | Self::Gemini => None,
         }
@@ -114,15 +117,7 @@ impl AgentKind {
             Self::Codex | Self::Gemini => return None,
         };
         let home = PathBuf::from(std::env::var("HOME").ok()?);
-        for dir in install_dirs {
-            let default = home.join(dir).join(name);
-            if default.is_file() {
-                return Some(default);
-            }
-        }
-        std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|dir| dir.join(name))
-            .find(|candidate| candidate.is_file())
+        find_bin(name, &home, install_dirs, std::env::var_os("PATH"))
     }
 
     /// What a signed-out user needs, in the pane and the chat column.
@@ -147,6 +142,23 @@ impl AgentKind {
             Self::Codex | Self::Gemini => None,
         }
     }
+}
+
+fn find_bin(
+    name: &str,
+    home: &std::path::Path,
+    install_dirs: &[&str],
+    path: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    for dir in install_dirs {
+        let default = home.join(dir).join(name);
+        if default.is_file() {
+            return Some(default);
+        }
+    }
+    std::env::split_paths(&path?)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 #[derive(serde::Serialize)]
@@ -315,7 +327,7 @@ fn security_interactive_argument(value: &str) -> Result<String, String> {
     ))
 }
 
-/// `agent status` prints "Not logged in" signed out and account details
+/// `cursor-agent status` prints "Not logged in" signed out and account details
 /// signed in, with no JSON form, so the text is the signal and anything
 /// unrecognizable is honestly unknown rather than guessed.
 fn cursor_auth_status(kind: AgentKind) -> (Option<bool>, Option<String>) {
@@ -493,6 +505,26 @@ mod tests {
             assert_eq!(manifest["dependencies"][package], version);
             assert_eq!(locked[package], version);
         }
+    }
+
+    /// Grok's installer links `~/.local/bin/agent` to Grok, so a machine
+    /// with only that name has no Cursor; Cursor's installer always adds
+    /// `cursor-agent` beside it.
+    #[test]
+    fn cursor_is_found_by_its_own_name_not_groks_agent_alias() {
+        let home = std::env::temp_dir().join(format!("nurb-cursor-bin-{}", std::process::id()));
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("agent"), b"").unwrap();
+        let (name, _) = AgentKind::Cursor.native_command().unwrap();
+        assert_eq!(super::find_bin(name, &home, &[".local/bin"], None), None);
+
+        std::fs::write(bin.join("cursor-agent"), b"").unwrap();
+        assert_eq!(
+            super::find_bin(name, &home, &[".local/bin"], None),
+            Some(bin.join("cursor-agent"))
+        );
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     /// `agent_login` hands Codex a CODEX_PATH pointing at `.bin/codex`, which

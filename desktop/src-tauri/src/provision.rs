@@ -23,11 +23,13 @@ use crate::agents;
 use crate::env::{uv_sidecar, Launcher, Paths, NODE_VERSION};
 
 const PYTHON_VERSION: &str = "3.13";
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
-// Generous because the first exec of a freshly written binary can stall for
-// many seconds while macOS assesses it (Gatekeeper/XProtect), and these CLIs
-// are large.
-const NATIVE_CLI_HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
+// Generous, because a slow check costs only time while a failed one throws the
+// whole chat runtime away and reinstalls it on every launch (issue #278).
+// Gemini's `--version` parses a ~100 MB bundle: 0.65 s on an M3 Max, past 2 s
+// on the Intel Mac in that issue. The first exec of a freshly written Codex
+// binary can stall for seconds while macOS assesses it (Gatekeeper/XProtect).
+// A healthy check returns as soon as the process exits; only a hung one waits.
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
 const NPM_CI_ARGS: &[&str] = &["ci", "--include=optional", "--no-fund", "--no-audit"];
 static PROBE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -211,7 +213,7 @@ fn chat_runtime_check(paths: &Paths) -> Result<(), String> {
     // cannot be stamped healthy and surface later as a misleading auth error.
     let mut codex = Command::new(paths.node_bin());
     codex.arg(paths.codex_cli()).arg("--version");
-    probe_output(codex, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
+    probe_output(codex, paths.data(), HEALTH_TIMEOUT)
         .map_err(|why| format!("the Codex CLI check failed: {why}"))?;
     Ok(())
 }
@@ -788,12 +790,12 @@ mod tests {
                 r#"#!/bin/sh
 case "$*" in
   "--version") echo "{NODE_VERSION}" ;;
-  *"codex-acp --version"*) echo "codex-acp 1.13.0" ;;
-    *"gemini --version"*) echo "0.55.1" ;;
+  *"codex-acp --version"*) echo "@agentclientprotocol/codex-acp 2.5.0" ;;
+    *"gemini --version"*) echo "0.66.0" ;;
   *"/codex --version"*)
     [ ! -f "$0.missing-codex" ] || exit 1
     [ ! -f "$0.slow-codex" ] || sleep 3
-    echo "codex-cli 0.155.1"
+    echo "codex-cli 0.165.0"
     ;;
   *) exit 1 ;;
 esac
