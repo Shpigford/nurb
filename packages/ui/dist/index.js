@@ -9070,6 +9070,7 @@ function Cy({
           alt: "",
           width: 4,
           height: 3,
+          placeholder: "transparent",
           className: "h-full rounded-none! [&_img]:object-contain [&_img]:p-2"
         }
       )

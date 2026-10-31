@@ -36,6 +36,8 @@ export interface PartBuild {
   stats: { bbox?: [number, number, number]; volume?: number; ms?: number; [key: string]: unknown }
   glb_url: string | null
   render_url: string | null
+  // One view on a transparent ground, for a library card.
+  thumbnail_url: string | null
   // The revision whose geometry the URLs point at: the run's own, or the last one that built.
   shown_revision: number | null
   stale: boolean

@@ -74,6 +74,8 @@ export default function PartCard({
             alt=""
             width={4}
             height={3}
+            // The picture has no ground of its own, so the card's shows through it.
+            placeholder="transparent"
             className="h-full rounded-none! [&_img]:object-contain [&_img]:p-2"
           />
         ) : (

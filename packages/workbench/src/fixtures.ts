@@ -28,6 +28,7 @@ export function part(name: string, glb: string): Part {
       stats: {},
       glb_url: glb,
       render_url: null,
+      thumbnail_url: null,
     shown_revision: 1,
       stale: false,
       slice: null,

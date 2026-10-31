@@ -263,6 +263,27 @@ def _render_url(project_id, name, run):
     return f"/render/{project_id}/{name}.png?run={run['id']}"
 
 
+def _thumbnail_url(project_id, name, run):
+    return f"/thumbnail/{project_id}/{name}.png?run={run['id']}"
+
+
+# Run id to the library card's picture. A run's geometry never changes, so neither
+# does its picture, and a library that redraws on every build asks for each again.
+THUMBNAILS = {}
+
+
+def _thumbnail_glb(conn, project_id, name, run_id):
+    """The GLB of one successful run of this part, or None."""
+    row = conn.execute(
+        "SELECT build_runs.glb FROM build_runs"
+        " JOIN part_revisions ON part_revisions.id = build_runs.revision_id"
+        " JOIN parts ON parts.id = part_revisions.part_id"
+        " WHERE build_runs.id = ? AND parts.project_id = ? AND parts.name = ? AND build_runs.status = 'ok'",
+        (run_id, project_id, name),
+    ).fetchone()
+    return row["glb"] if row else None
+
+
 def _elapsed(started, finished):
     if not started or not finished:
         return None
@@ -617,6 +638,7 @@ def _part_build(conn, project_id, part, run):
         # mesh in place; the URLs point at that run while the status says why.
         "glb_url": _glb_url(project_id, part["name"], shown) if shown else None,
         "render_url": _render_url(project_id, part["name"], shown) if shown else None,
+        "thumbnail_url": _thumbnail_url(project_id, part["name"], shown) if shown else None,
         "shown_revision": _revision_ordinal(conn, shown["revision_id"]) if shown else None,
         "stale": run["revision_id"] != part["current_revision_id"]
         or (shown is not None and shown["id"] != run["id"]),
@@ -1312,6 +1334,28 @@ def _routes(conn, lock, server, token, pid):
             return PlainTextResponse("no render", status_code=404)
         return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
+    async def thumbnail(request):
+        """The library card's picture: the part alone from the front-left corner, on
+        nothing, so the card's own ground shows through. Rendered off the lock, because
+        a library full of new builds asks for dozens at once."""
+        from . import raster
+
+        project_id, name = request.path_params["project_id"], request.path_params["part"]
+        run_id = request.query_params.get("run", "")
+        png = THUMBNAILS.get(run_id)
+        if png is None:
+            glb = await query(lambda conn: _thumbnail_glb(conn, project_id, name, run_id))
+            if glb is None:
+                return PlainTextResponse("no thumbnail", status_code=404)
+            try:
+                png = await anyio.to_thread.run_sync(lambda: raster.render(glb, width=640, height=480, view="iso"))
+            except Exception:
+                return PlainTextResponse("no thumbnail", status_code=404)
+            if len(THUMBNAILS) > 1000:
+                THUMBNAILS.clear()
+            THUMBNAILS[run_id] = png
+        return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=31536000, immutable"})
+
     async def projects(request):
         return JSONResponse({"projects": await query(_projects)})
 
@@ -1420,6 +1464,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}/slice", endpoint=answering(part_slice), methods=["POST"]),
         Route("/glb/{project_id}/{part}.glb", endpoint=glb),
         Route("/render/{project_id}/{part}.png", endpoint=render),
+        Route("/thumbnail/{project_id}/{part}.png", endpoint=thumbnail),
         WebSocketRoute("/ws", endpoint=ws),
         Route("/", endpoint=index),
         # Last: a Mount matches everything under its prefix, and check_dir is off

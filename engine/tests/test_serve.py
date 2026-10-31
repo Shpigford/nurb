@@ -1432,3 +1432,33 @@ def test_unbuilt_parts_build_in_the_background_after_an_import(tmp_path, monkeyp
     ).fetchone()[0]
     assert modules == 0
     conn.close()
+
+
+def test_library_thumbnail_is_one_view_on_a_transparent_ground(tmp_path, monkeypatch):
+    """The card's picture is the part alone, so the card's own ground shows through."""
+    import io
+
+    from PIL import Image
+    from starlette.testclient import TestClient
+
+    from nurb import db, engine_run, folder, serve
+
+    monkeypatch.setenv("NURB_HOME", str(tmp_path))
+    conn = db.connect(check_same_thread=False)
+    project_id, _ = folder.import_folder(conn, pathlib.Path(__file__).parents[1] / "examples" / "demo")
+    part = conn.execute("SELECT id, name FROM parts WHERE kind = 'part'").fetchone()
+    run_id, _ = engine_run.run_build(conn, part["id"])
+    serve.THUMBNAILS.clear()
+
+    from starlette.applications import Starlette
+
+    _, routes, _ = serve._routes(conn, __import__("threading").Lock(), None, "t", 0)
+    client = TestClient(Starlette(routes=[r for r in routes if getattr(r, "path", "").startswith("/thumbnail")]))
+    response = client.get(f"/thumbnail/{project_id}/{part['name']}.png?run={run_id}")
+    assert response.status_code == 200
+    image = Image.open(io.BytesIO(response.content))
+    assert image.mode == "RGBA" and image.size == (640, 480)
+    assert image.getpixel((0, 0))[3] == 0
+    assert run_id in serve.THUMBNAILS
+    assert client.get(f"/thumbnail/{project_id}/{part['name']}.png?run=nope").status_code == 404
+    conn.close()

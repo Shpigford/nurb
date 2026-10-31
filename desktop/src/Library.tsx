@@ -95,7 +95,7 @@ function toCard(part: Part, folder?: string | null): PartCardPart {
     revision: part.revision,
     builtAt: build?.finished_at ?? null,
     buildingSince: status === "building" ? build?.started_at ?? null : null,
-    thumbnailUrl: build?.render_url ? absolute(build.render_url) : null,
+    thumbnailUrl: build?.thumbnail_url ? absolute(build.thumbnail_url) : null,
     folder: folder ?? null,
   };
 }
