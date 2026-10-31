@@ -164,7 +164,7 @@ def test_checkout_writes_the_project_out_as_a_folder(home, tmp_path):
         with pytest.raises(urllib.error.HTTPError) as refused:
             post(f"{url}/api/projects/{project_id}/checkout", {"directory": str(target)})
         assert refused.value.code == 400
-        assert "is not empty" in json.loads(refused.value.read())["error"]
+        assert "already has files in it" in json.loads(refused.value.read())["error"]
 
         with pytest.raises(urllib.error.HTTPError) as missing:
             post(f"{url}/api/projects/nosuchproject/checkout", {"directory": str(tmp_path / "nope")})

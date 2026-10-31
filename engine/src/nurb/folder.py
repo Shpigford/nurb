@@ -151,7 +151,7 @@ def checkout(conn, project_id, directory):
     """Write a project out as a v1 folder, into a directory that is empty or absent."""
     root = pathlib.Path(directory)
     if root.exists() and any(root.iterdir()):
-        raise ValueError(f"{root} is not empty")
+        raise ValueError(f"{root.name} already has files in it, so export to a new folder")
     parts = root / "parts"
     parts.mkdir(parents=True, exist_ok=True)
 

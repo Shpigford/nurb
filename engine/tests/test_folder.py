@@ -139,7 +139,7 @@ def test_checkout_refuses_a_used_directory(conn, tmp_path):
     project_id, _ = folder.import_folder(conn, DEMO)
     (tmp_path / "out").mkdir()
     (tmp_path / "out" / "something.txt").write_text("mine")
-    with pytest.raises(ValueError, match="not empty"):
+    with pytest.raises(ValueError, match="already has files in it"):
         folder.checkout(conn, project_id, tmp_path / "out")
 
 

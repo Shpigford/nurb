@@ -302,6 +302,19 @@ export function importFolder(path: string): Promise<{ id: string; name: string; 
 }
 
 /** Call a project something else. The name is a label, so nothing on disk moves. */
+/** Write a project out as a folder of part files (the 0.x layout) at `directory`,
+ * which must be empty or not exist yet. */
+export async function exportProject(id: string, directory: string): Promise<{ directory: string; parts: string[] }> {
+  const url = `/api/projects/${encodeURIComponent(id)}/checkout`
+  const res = await fetch(base + url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ directory }),
+  })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+  return (await res.json()) as { directory: string; parts: string[] }
+}
+
 /** Call a part something else. The engine turns what was typed into a part name
  * ("Shelf Bracket" is shelf_bracket) and says what it was before. */
 export async function renamePart(id: string, name: string): Promise<{ id: string; name: string; was: string }> {

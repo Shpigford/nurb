@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import clsx from "clsx";
@@ -29,6 +29,7 @@ import {
   absolute,
   deletePart,
   deleteProject,
+  exportProject,
   renamePart,
   renameProject,
   type LibraryPart,
@@ -191,10 +192,15 @@ export default function Library({
     rows[rows.indexOf(from) + delta]?.focus();
   };
 
-  const showInFinder = async (id: string) => {
+  // The database is the project; files are something you take out of it. The save
+  // panel names the new folder, the engine writes the 0.x layout there, and Finder
+  // shows the result.
+  const exportFolder = async (summary: ProjectSummary) => {
     try {
-      const dir = await invoke<string>("project_dir", { projectId: id });
-      await revealItemInDir(dir).catch(() => openPath(dir));
+      const target = await saveDialog({ title: "Export as folder", defaultPath: summary.name, canCreateDirectories: true });
+      if (!target) return;
+      const written = await exportProject(summary.id, target);
+      await revealItemInDir(written.directory).catch(() => openPath(written.directory));
     } catch (e) {
       setFailure(e instanceof Error ? e.message : String(e));
     }
@@ -230,14 +236,13 @@ export default function Library({
 
   const projectMenu = (summary: ProjectSummary): MenuItem[] => [
     { label: "Rename", onSelect: () => startRename(summary) },
-    { label: "Show in Finder", onSelect: () => void showInFinder(summary.id) },
+    { label: "Export as folder…", onSelect: () => void exportFolder(summary) },
     { label: "Remove from library", tone: "danger", separated: true, onSelect: () => setConfirm({ project: summary }) },
   ];
 
   // A part in a folder can move to another one; a loose part joins its first.
   const partMenu = (part: LibraryPart): MenuItem[] => [
     { label: "Rename", onSelect: () => setRenamingPart(part.id) },
-    { label: "Show in Finder", onSelect: () => void showInFinder(part.project_id) },
     {
       label: part.folder ? "Move to another project" : "Add to project",
       onSelect: () => onAddToProject(part),
