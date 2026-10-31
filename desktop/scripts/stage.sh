@@ -9,7 +9,7 @@ set -eu
 
 here="$(cd "$(dirname "$0")" && pwd)"
 tauri="$here/../src-tauri"
-repo="$here/../.."
+repo="$here/../../engine"
 adapter_runtime="$here/../adapter-runtime"
 UV_VERSION=0.12.1
 

@@ -35,7 +35,6 @@ async-process = "2"
 futures-lite = "2"
 sha2 = "0.10"
 tauri-plugin-clipboard-manager = "2"
-tauri-plugin-deep-link = "2"
 # The page saves exports through the dialog and fs plugins.
 tauri-plugin-fs = "2"
 

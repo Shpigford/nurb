@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ChatPanel, EmptyShelf, HeaderStack, Stage, StageEmpty } from "@nurb/ui"
 import { fetchProjects, type ProjectSummary } from "./api"
 import { useLive } from "./live"
 import { readSelection, writeSelection } from "./selection"
-import PartList from "./PartList"
 import PartView from "./PartView"
 import Transcript from "./Transcript"
 import { useProject } from "./useProject"
@@ -48,6 +48,7 @@ export default function App() {
 
   const parts = project?.parts ?? []
   const part = parts.find((p) => p.name === partName) ?? parts[0] ?? null
+  const messages = project?.messages ?? []
 
   useEffect(() => {
     // Until the project has loaded there is no resolved part, and writing then
@@ -58,49 +59,56 @@ export default function App() {
 
   if (loadedProjects && projects.length === 0) {
     return (
-      <main className="flex h-dvh items-center justify-center p-8">
-        <div className="panel flex max-w-sm flex-col gap-2 p-6 text-center">
-          <h1 className="mono-value text-ink">No projects yet</h1>
-          <p className="mono-caption text-muted">
-            Add the nurb connection to your agent and ask it to create a project.
+      <Stage>
+        <StageEmpty>
+          <EmptyShelf />
+          <p className="mono-caption max-w-[40ch] text-center text-on-stage-muted">
+            Add the nurb connection to your agent, then ask it for a part.
           </p>
-        </div>
-      </main>
+        </StageEmpty>
+      </Stage>
     )
   }
 
   return (
-    <main className="flex h-dvh flex-col gap-4 p-4">
-      <PartView
-        project={project}
-        partName={partName}
-        headerStart={
-          <label className="mono-caption flex items-center gap-2 text-muted">
-            <span>Project</span>
-            <select
-              aria-label="Project"
-              value={projectId ?? ""}
-              onChange={(e) => {
-                setProjectId(e.target.value)
-                setPartName(null)
-              }}
-              className="mono-value rounded-control border border-line bg-ground px-2 py-1 text-ink"
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        }
-        aside={
-          <div className="panel flex w-[372px] shrink-0 flex-col overflow-hidden max-lg:order-last max-lg:w-full">
-            <PartList parts={parts} selected={part} onSelect={setPartName} />
-            <Transcript messages={project?.messages ?? []} />
-          </div>
-        }
-      />
-    </main>
+    <PartView
+      project={project}
+      partName={partName}
+      onSelectPart={setPartName}
+      header={{
+        start: (
+          <HeaderStack
+            label="PROJECT"
+            value={
+              <select
+                aria-label="Project"
+                value={projectId ?? ""}
+                onChange={(e) => {
+                  setProjectId(e.target.value)
+                  setPartName(null)
+                }}
+                className="mono-value -mx-1 max-w-[180px] rounded-control bg-transparent px-1 text-ink hover:bg-raised"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            }
+          />
+        ),
+      }}
+      chat={
+        <ChatPanel
+          strip={{ label: "Conversation", trailing: `${messages.length} turns` }}
+          composer={
+            <p className="mono-caption text-muted">The agent talks here through the nurb connection.</p>
+          }
+        >
+          <Transcript messages={messages} />
+        </ChatPanel>
+      }
+    />
   )
 }

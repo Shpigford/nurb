@@ -6,24 +6,8 @@ export interface ProjectSummary {
   created_at: string
   parts: number
   last_built: string | null
-}
-
-/** What the solver said about one shape under one weight. */
-export interface StressResult {
-  kg: number
-  material: string
-  max_mpa: number
-  across_mpa: number
-  deflection_mm: number
-  elements: number
-  pitch_mm: number
-  holds_kg: number
-  /** Null when the load barely registers; the headline says so rather than a number. */
-  factor: number | null
-  /** "layers" when the seams part first, which is what reorienting the print fixes. */
-  gives: string
-  glb_hash: string
-  run_id: string
+  /** False for the invisible container that holds one part and nothing else. */
+  folder: boolean
 }
 
 /** What the slicer said, or why it could not say anything. Only "slice" is a number. */
@@ -52,8 +36,9 @@ export interface PartBuild {
   stats: { bbox?: [number, number, number]; volume?: number; ms?: number; [key: string]: unknown }
   glb_url: string | null
   render_url: string | null
+  // The revision whose geometry the URLs point at: the run's own, or the last one that built.
+  shown_revision: number | null
   stale: boolean
-  stress: StressResult | null
   slice: SliceResult | null
 }
 
@@ -85,10 +70,42 @@ export interface Printer {
   bed: number[] | null
 }
 
+/** A machine on the bench. The workshop list, not the project's one choice. */
+export interface PrinterProfile {
+  name: string
+  label: string
+  brand: string
+  bed: number[]
+  default: boolean
+}
+
+/** A shipped profile nobody has added yet. */
+export interface PrinterCatalogueEntry {
+  name: string
+  label: string
+  brand: string
+  bed: number[]
+}
+
+/** The slicer this Mac has, which is where weight and print time come from. */
+export interface Slicer {
+  name: string
+  path: string
+}
+
+/** Everything the printer surfaces read: the bench, the catalogue, the slicer. */
+export interface Workshop {
+  printers: PrinterProfile[]
+  catalogue: PrinterCatalogueEntry[]
+  slicer: Slicer | null
+}
+
 export interface Project {
   id: string
   name: string
   created_at: string
+  /** False for the invisible container that holds one part and nothing else. */
+  folder: boolean
   printer: Printer | null
   /** Every profile the project could name, whether or not it has named one. */
   printers: string[]
@@ -96,6 +113,14 @@ export interface Project {
   measurements: ProjectMeasurement[]
   parts: Part[]
   messages: Message[]
+}
+
+/** One part anywhere in the library, carrying the project it sits in. */
+export interface LibraryPart extends Part {
+  project_id: string
+  project_name: string
+  /** Whether that project is a folder the person named, or a container for this part alone. */
+  folder: boolean
 }
 
 export interface ApplyResult {
@@ -176,13 +201,21 @@ async function post<T>(url: string, body: unknown, signal?: AbortSignal): Promis
 }
 
 const partUrl = (id: string, tail: string) => `/api/parts/${encodeURIComponent(id)}/${tail}`
+const projectUrl = (id: string, tail: string) => `/api/projects/${encodeURIComponent(id)}/${tail}`
 
 export function fetchProjects(): Promise<{ projects: ProjectSummary[] }> {
   return get("/api/projects")
 }
 
-export function fetchProject(id: string): Promise<Project> {
-  return get(`/api/projects/${encodeURIComponent(id)}`)
+/** One project. Naming a part narrows the transcript to that part's conversation. */
+export function fetchProject(id: string, part?: string): Promise<Project> {
+  const tail = part === undefined ? "" : `?part=${encodeURIComponent(part)}`
+  return get(`/api/projects/${encodeURIComponent(id)}${tail}`)
+}
+
+/** Every part in the library, whichever project holds it. */
+export function listParts(): Promise<{ parts: LibraryPart[] }> {
+  return get("/api/parts")
 }
 
 export function buildWithParams(
@@ -207,38 +240,75 @@ export async function exportPart(partId: string, format: ExportFormat, values: P
   return res.blob()
 }
 
-export function stressPart(
-  partId: string,
-  kg: number,
-  material: string,
-  values: Params
-): Promise<StressResult> {
-  return post(partUrl(partId, "stress"), { kg, material, values })
-}
-
 export function slicePart(partId: string): Promise<SliceResult> {
   return post(partUrl(partId, "slice"), {})
+}
+
+export function fetchPrinters(): Promise<Workshop> {
+  return get("/api/printers")
+}
+
+export function addPrinter(profile: string): Promise<Workshop> {
+  return post("/api/printers", { profile })
+}
+
+export function setDefaultPrinter(profile: string): Promise<Workshop> {
+  return post("/api/printers/default", { profile })
+}
+
+export async function removePrinter(profile: string): Promise<Workshop> {
+  const url = `/api/printers/${encodeURIComponent(profile)}`
+  const res = await fetch(base + url, { method: "DELETE" })
+  if (!res.ok) throw await refusal(res, "That printer did not come off the list.")
+  return (await res.json()) as Workshop
 }
 
 export function setPrinter(projectId: string, profile: string): Promise<{ printer: Printer }> {
   return post(`/api/projects/${encodeURIComponent(projectId)}/printer`, { profile })
 }
 
-/** Put one line of the conversation in the project's own transcript. */
+/**
+ * Put one line of the conversation in the transcript. Naming a part files the
+ * line under that part; without one it belongs to the folder's own conversation.
+ */
 export function addMessage(
   projectId: string,
   role: "user" | "assistant",
-  content: string
+  content: string,
+  part?: string | null
 ): Promise<Message> {
-  return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, { role, content })
+  return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, { role, content, part })
 }
 
-export function createProject(name?: string): Promise<{ id: string; name: string }> {
-  return post("/api/projects", name === undefined ? {} : { name })
+/** A folder is a project the person named; without one the project holds a single part. */
+export function createProject(name?: string, folder = false): Promise<{ id: string; name: string }> {
+  return post("/api/projects", name === undefined ? { folder } : { name, folder })
+}
+
+/** Give the part's own container a name, and it becomes a folder others can join. */
+export function promoteToFolder(id: string, name: string): Promise<ProjectSummary> {
+  return post(projectUrl(id, "folder"), { name })
+}
+
+/** Move one part into another project. Refused when that project has the name already. */
+export function movePart(partId: string, projectId: string): Promise<{ id: string; project_id: string }> {
+  return post(partUrl(partId, "project"), { project_id: projectId })
 }
 
 export function importFolder(path: string): Promise<{ id: string; name: string; parts: number }> {
   return post("/api/import", { path })
+}
+
+/** Call a project something else. The name is a label, so nothing on disk moves. */
+export async function renameProject(id: string, name: string): Promise<ProjectSummary> {
+  const url = `/api/projects/${encodeURIComponent(id)}`
+  const res = await fetch(base + url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+  return (await res.json()) as ProjectSummary
 }
 
 export async function deleteProject(id: string): Promise<void> {
@@ -247,6 +317,10 @@ export async function deleteProject(id: string): Promise<void> {
   if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
 }
 
-export function openPublic(src: string): Promise<{ project_id: string; part: string }> {
-  return post("/api/open", { src })
+/** Delete a part and its revisions. A part alone in its container takes the container with it. */
+export async function deletePart(id: string): Promise<{ project_id: string; project_deleted: boolean }> {
+  const url = `/api/parts/${encodeURIComponent(id)}`
+  const res = await fetch(base + url, { method: "DELETE" })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+  return (await res.json()) as { project_id: string; project_deleted: boolean }
 }

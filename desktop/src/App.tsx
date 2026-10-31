@@ -4,22 +4,24 @@ import { listen } from "@tauri-apps/api/event";
 import { ask, message, open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import { Icon } from "@nurb/ui";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { cue, duration, ease, Icon, IconButton, LiveActivity, UpdateCard, useLiveActivity } from "@nurb/ui";
 import {
   configure,
   createProject,
   fetchProjects,
   importFolder,
-  openPublic,
+  listParts,
+  movePart,
+  promoteToFolder,
+  type LibraryPart,
   type ProjectSummary,
 } from "@nurb/workbench/api";
 import { reconnect, useLive } from "@nurb/workbench/live";
 import { useProject } from "@nurb/workbench/useProject";
 import PartView from "@nurb/workbench/PartView";
-import About from "./About";
-import AgentsHelp from "./AgentsHelp";
+import AddAgent from "./AddAgent";
 import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
-import GeminiKeyDialog from "./GeminiKeyDialog";
 import {
   chatKey,
   markChatSeen,
@@ -27,19 +29,17 @@ import {
   updateChatActivity,
   type ChatColumn,
 } from "./chatColumns";
+import EngineStarting from "./EngineStarting";
 import { createLatestRequestGate } from "./latestRequest";
-import { srcOf } from "./openLink";
-import ProjectsRail from "./ProjectsRail";
+import Library from "./Library";
+import { messagesForPart, moveTargets, titleCase } from "./parts";
+import ProjectPicker from "./ProjectPicker";
 import Setup from "./Setup";
-import Settings from "./Settings";
+import Settings, { type AboutInfo, type SettingsSection } from "./Settings";
+import { broughtOver, importV1Folders } from "./v1Import";
 
-type AboutInfo = {
-  appVersion: string;
-  nurbVersion: string;
-  occtVersion: string | null;
-  osVersion: string;
-  arch: string;
-};
+/** What the picker needs to know about the part it is placing. */
+type PickTarget = { id: string | null; name: string; project_id: string; folder: boolean };
 
 type ServeInfo = {
   url: string;
@@ -60,6 +60,17 @@ type AgentStatus = {
 
 const PROJECT_KEY = "nurb.project";
 
+// motion's types want a tuple; ease.out is a plain number[].
+const OUT = ease.out as [number, number, number, number];
+
+/** What a part page asks for when it starts or finishes work the window should show. */
+type ActivityDetail = {
+  id: string;
+  title: string;
+  detail?: string;
+  tone: "working" | "done" | "fail";
+};
+
 const readProject = () => {
   try {
     return localStorage.getItem(PROJECT_KEY);
@@ -77,95 +88,8 @@ const writeProject = (id: string | null) => {
   }
 };
 
-/// Waiting for the serve, or reporting why it never came up.
-function EngineStarting({ error, onRetry }: { error: string | null; onRetry: () => void }) {
-  const [seconds, setSeconds] = useState(0);
-  useEffect(() => {
-    if (error) return;
-    const timer = setInterval(() => setSeconds((s) => s + 1), 1000);
-    return () => clearInterval(timer);
-  }, [error]);
-  return (
-    <div className="flex h-dvh flex-col items-center justify-center gap-3 bg-stage p-8" data-tauri-drag-region>
-      {error ? (
-        <>
-          <p className="text-chat max-w-sm text-center text-ink">{error}</p>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="btn-label chrome h-8 rounded-control bg-accent px-4 text-white hover:bg-accent-hover"
-          >
-            Retry
-          </button>
-        </>
-      ) : (
-        <>
-          <p className="text-chat text-ink">Starting the CAD engine…</p>
-          {seconds >= 10 && (
-            <p className="mono-caption text-on-stage-muted">
-              {seconds}s · a cold start can take a few minutes when the computer is busy
-            </p>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function EmptyState({
-  small,
-  onNew,
-  onImport,
-  busy,
-  error,
-}: {
-  small: boolean;
-  onNew: () => void;
-  onImport: () => void;
-  busy: boolean;
-  error: string | null;
-}) {
-  return (
-    <div className="flex min-h-0 flex-1 items-center justify-center">
-      <div className="panel flex max-w-[420px] flex-col gap-3 p-6">
-        {small ? (
-          <p className="text-chat text-muted">
-            No parts in this project yet. Ask your agent for one, or import a folder.
-          </p>
-        ) : (
-          <>
-            <h1 className="font-display text-[20px] leading-6 text-ink">Nothing on the plate yet</h1>
-            <p className="text-chat text-muted">
-              Start a project and describe the part you want. Or point nurb at a folder you already have.
-            </p>
-          </>
-        )}
-        <div className="flex gap-2">
-          {!small && (
-            <button
-              type="button"
-              onClick={onNew}
-              className="btn-label chrome h-8 rounded-control bg-accent px-4 text-white hover:bg-accent-hover"
-            >
-              New project
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onImport}
-            disabled={busy}
-            className="btn-label chrome h-8 rounded-control border border-line bg-ground px-4 text-ink-soft hover:bg-raised disabled:text-faint"
-          >
-            {busy ? "Importing…" : "Import folder"}
-          </button>
-        </div>
-        {error && <p className="mono-caption text-fail">{error}</p>}
-      </div>
-    </div>
-  );
-}
-
 function App() {
+  const reduced = useReducedMotion() === true;
   // null while the check runs, false when first-launch provisioning has work
   // to do, true once the environment is healthy and the app can start.
   const [ready, setReady] = useState<boolean | null>(null);
@@ -173,14 +97,26 @@ function App() {
   // Settings hands this endpoint to a coding assistant on the same Mac.
   const [serveInfo, setServeInfo] = useState<ServeInfo | null>(null);
   const [serveError, setServeError] = useState<string | null>(null);
+  const [serveLog, setServeLog] = useState<string | null>(null);
+
+  // The app is two screens: the library it opens on, and the workspace a part
+  // card leads into. Settings takes the whole window over both.
+  const [screen, setScreen] = useState<"library" | "workspace">("library");
 
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  // The library opens on every part at once; a folder narrows it.
+  const [allParts, setAllParts] = useState<LibraryPart[]>([]);
+  const [showAll, setShowAll] = useState(true);
+  // The part waiting for a project, and what the picker has to say about it. A
+  // part the person has not described yet has no row of its own, so the picker
+  // works from the container it would live in.
+  const [picking, setPicking] = useState<PickTarget | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(readProject);
   const [partName, setPartName] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [importing, setImporting] = useState(false);
-  const [emptyError, setEmptyError] = useState<string | null>(null);
-  const [railStatus, setRailStatus] = useState<string | null>(null);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
   const listSeq = useRef(0);
 
   // The agent's working directory for each project, resolved once and reused:
@@ -203,14 +139,20 @@ function App() {
   );
 
   const [about, setAbout] = useState<AboutInfo | null>(null);
-  const [showAbout, setShowAbout] = useState(false);
-  const [showAgentsHelp, setShowAgentsHelp] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+  const [showAddAgent, setShowAddAgent] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const geminiKeyResolver = useRef<((key: string | null) => void) | null>(null);
 
+  // One pod for work the window should mention: an export the part page started,
+  // a build that landed on a part nobody is looking at.
+  const { activity, start: startActivity, succeed: activityDone, fail: activityFailed, dismiss: dismissActivity } =
+    useLiveActivity({ linger: 2000 });
+  const activityId = useRef<string | null>(null);
+
   const [update, setUpdate] = useState<Update | null>(null);
   const [updating, setUpdating] = useState(false);
+  const [updateDismissed, setUpdateDismissed] = useState(false);
   const found = useRef<{ update: Update; ready: Promise<boolean> } | null>(null);
 
   useEffect(() => {
@@ -240,6 +182,10 @@ function App() {
       setServed(true);
     } catch (e) {
       setServeError(String(e));
+      // The log is what the failed-start screen shows behind "Show log".
+      invoke<string>("serve_log")
+        .then((text) => setServeLog(text || null))
+        .catch(() => setServeLog(null));
     }
   }, []);
 
@@ -249,8 +195,13 @@ function App() {
 
   const loadProjects = useCallback(async () => {
     const seq = ++listSeq.current;
-    const data = await fetchProjects().catch(() => null);
-    if (!data || seq !== listSeq.current) return;
+    const [data, library] = await Promise.all([
+      fetchProjects().catch(() => null),
+      listParts().catch(() => null),
+    ]);
+    if (seq !== listSeq.current) return;
+    if (library) setAllParts(library.parts);
+    if (!data) return;
     setProjects(data.projects);
     setProjectId((current) =>
       current && data.projects.some((p) => p.id === current)
@@ -263,27 +214,107 @@ function App() {
     if (served) void loadProjects();
   }, [served, loadProjects]);
 
+  // nurb 0.x listed its folders in a file the database never read. The shell
+  // hands that list over once, so this does its work on the first launch after
+  // the update and on no other.
+  useEffect(() => {
+    if (!served) return;
+    void (async () => {
+      const folders = await invoke<string[]>("take_v1_folders").catch(() => []);
+      if (!folders.length) return;
+      const count = await importV1Folders(folders, importFolder, (text) => console.warn(text));
+      if (!count) return;
+      await loadProjects();
+      activityId.current = "v1-import";
+      startActivity({ title: broughtOver(count) });
+      activityDone();
+    })();
+  }, [served, loadProjects, startActivity, activityDone]);
+
   const { project, missing } = useProject(served ? projectId : null);
 
-  // A remembered id whose project is gone clears itself.
+  // A remembered id whose project is gone clears itself, and the workspace it
+  // was showing has nothing left to show.
   useEffect(() => {
     if (!missing) return;
     setProjectId(null);
+    setScreen("library");
     void loadProjects();
   }, [missing, loadProjects]);
 
   useLive((event) => {
-    // The rail's part count and built time move on a build, not only on a
+    // The library's part count and built time move on a build, not only on a
     // project event, so both refetch the list.
     if (event.kind === "project" || event.kind === "build") void loadProjects();
   });
 
   useEffect(() => writeProject(projectId), [projectId]);
 
+  // The part page speaks to the window through one event, so a panel deep in the
+  // workbench can put its work in the pod without knowing the shell exists.
+  useEffect(() => {
+    const onActivity = (event: Event) => {
+      const said = (event as CustomEvent<ActivityDetail>).detail;
+      if (!said?.id || !said.title) return;
+      // A result for work this pod never showed still needs something to patch.
+      if (activityId.current !== said.id) {
+        activityId.current = said.id;
+        startActivity({ title: said.title, detail: said.detail });
+      }
+      if (said.tone === "done") {
+        activityDone({ title: said.title, detail: said.detail });
+        cue("success");
+      } else if (said.tone === "fail") {
+        activityFailed({ title: said.title, detail: said.detail });
+        cue("error");
+      }
+    };
+    window.addEventListener("nurb:activity", onActivity);
+    return () => window.removeEventListener("nurb:activity", onActivity);
+  }, [startActivity, activityDone, activityFailed]);
+
+  // Part id to the build it was last seen finishing. Null until the first list
+  // arrives, because a library that has just loaded is history, not news.
+  const seenBuilds = useRef<Map<string, string> | null>(null);
+  useEffect(() => {
+    const before = seenBuilds.current;
+    seenBuilds.current = new Map(
+      allParts.map((part) => [part.id, part.build?.finished_at ? part.build.id : ""]),
+    );
+    if (!before) return;
+    for (const part of allParts) {
+      const build = part.build;
+      if (!build?.finished_at) continue;
+      const last = before.get(part.id);
+      if (last === undefined || last === build.id) continue;
+      // The workspace shows its own project's result in the viewer already.
+      if (screen === "workspace" && part.project_id === projectId) continue;
+      const ok = build.status === "ok";
+      activityId.current = `build-${build.id}`;
+      startActivity({ title: titleCase(part.name), detail: ok ? "Built" : "Did not build" });
+      if (ok) {
+        activityDone();
+        cue("success");
+      } else {
+        activityFailed();
+        cue("error");
+      }
+      break;
+    }
+  }, [allParts, screen, projectId, startActivity, activityDone, activityFailed]);
+
   const selectProject = useCallback((id: string) => {
     setProjectId(id);
     setPartName(null);
-    setRailStatus(null);
+    setShowAll(false);
+    setLibraryError(null);
+  }, []);
+
+  // A part card is the door into the workspace, wherever the card was shown.
+  const openPart = useCallback((id: string, name: string | null) => {
+    setProjectId(id);
+    setPartName(name);
+    setScreen("workspace");
   }, []);
 
   useEffect(() => {
@@ -296,26 +327,31 @@ function App() {
       .catch((e) => setError(String(e)));
   }, [projectId, dirs, projects]);
 
-  // One chat per project, mounted for as long as its turn runs.
+  // A folder keeps a conversation for each part in it, plus one about the folder
+  // itself. A project holding a single part has one conversation, and the part
+  // and the project are the same thing, so it is the project's.
+  const chatPart = project?.folder ? partName ?? PROJECT_CHAT : PROJECT_CHAT;
+
+  // One chat per conversation, mounted for as long as its turn runs.
   useEffect(() => {
     if (!projectId || !dirs[projectId]) return;
     const dir = dirs[projectId];
     // The last conversation picks up where it left off, under the agent that
-    // ran it; a project with no saved chat starts fresh with the default.
+    // ran it; a part with no saved chat starts fresh with the default.
     invoke<{ sessionId: string; agent: string } | null>("saved_chat", {
       projectId,
-      part: PROJECT_CHAT,
+      part: chatPart,
     })
       .catch(() => null)
       .then((saved) =>
         setColumns((list) =>
-          list.some((col) => col.path === dir)
+          list.some((col) => col.path === dir && col.part === chatPart)
             ? list
             : [
                 ...list,
                 {
                   path: dir,
-                  part: PROJECT_CHAT,
+                  part: chatPart,
                   agent: saved?.agent ?? null,
                   resume: saved?.sessionId ?? null,
                   gen: 0,
@@ -324,7 +360,7 @@ function App() {
               ],
         ),
       );
-  }, [projectId, dirs]);
+  }, [projectId, dirs, chatPart]);
 
   const activeDir = projectId ? dirs[projectId] ?? null : null;
 
@@ -333,8 +369,13 @@ function App() {
   }, [activeDir]);
 
   useEffect(() => {
-    if (activeDir) setColumns((list) => markChatSeen(list, activeDir, PROJECT_CHAT));
-  }, [activeDir]);
+    // Seen means looked at, and the library is not the workspace: a turn that
+    // finished while the library was up stays unseen until the chat is on screen,
+    // or retainChatColumns would keep its adapter alive after a project switch.
+    if (activeDir && screen === "workspace") {
+      setColumns((list) => markChatSeen(list, activeDir, chatPart));
+    }
+  }, [activeDir, screen, chatPart]);
 
   const findUpdate = useCallback(async () => {
     if (!import.meta.env.PROD || found.current) return found.current?.update ?? null;
@@ -372,32 +413,33 @@ function App() {
     }
   }, [updating]);
 
-  // The macOS "Check for Updates…" item lives in Rust; the update state lives
-  // here, so the click arrives as an event.
-  useEffect(() => {
-    const unlisten = listen("menu:check-updates", async () => {
-      if (!import.meta.env.PROD) return;
-      try {
-        const next = await findUpdate();
-        if (!next) {
-          await message("You're on the newest version.", { title: "nurb" });
-        } else if (
-          await ask(`nurb ${next.version} is ready to install.`, {
-            title: "nurb",
-            okLabel: "Restart & Update",
-            cancelLabel: "Later",
-          })
-        ) {
-          await installUpdate();
-        }
-      } catch (e) {
-        setError(String(e));
+  // Asked for by the macOS menu item, which lives in Rust, and by About.
+  const checkUpdatesNow = useCallback(async () => {
+    if (!import.meta.env.PROD) return;
+    try {
+      const next = await findUpdate();
+      if (!next) {
+        await message("You're on the newest version.", { title: "nurb" });
+      } else if (
+        await ask(`nurb ${next.version} is ready to install.`, {
+          title: "nurb",
+          okLabel: "Restart & Update",
+          cancelLabel: "Later",
+        })
+      ) {
+        await installUpdate();
       }
-    });
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [findUpdate, installUpdate]);
+
+  useEffect(() => {
+    const unlisten = listen("menu:check-updates", () => void checkUpdatesNow());
     return () => {
       unlisten.then((fn) => fn()).catch(() => {});
     };
-  }, [findUpdate, installUpdate]);
+  }, [checkUpdatesNow]);
 
   const refreshAgents = useCallback(async () => {
     const isLatest = agentStatusRequests.current.begin();
@@ -459,29 +501,68 @@ function App() {
     }
   };
 
-  const newProject = useCallback(async () => {
-    setEmptyError(null);
+  // A new part is its own container until the person puts it in a project, so
+  // the library never shows an empty shelf waiting to be filled.
+  const newPart = useCallback(async () => {
+    setLibraryError(null);
     try {
-      const created = await createProject();
+      const created = await createProject(undefined, false);
       await loadProjects();
-      selectProject(created.id);
+      setProjectId(created.id);
+      setPartName(null);
+      setShowAll(true);
+      setScreen("workspace");
       return created.id;
     } catch (e) {
-      setEmptyError(e instanceof Error ? e.message : String(e));
+      setLibraryError(e instanceof Error ? e.message : String(e));
       return null;
     }
-  }, [loadProjects, selectProject]);
+  }, [loadProjects]);
+
+  // The part's own container becomes the folder when it has no project yet;
+  // otherwise the folder is made and the part moves into it.
+  const addToProject = useCallback(
+    async (part: PickTarget, target: { id: string } | { name: string }) => {
+      setMoving(true);
+      setMoveError(null);
+      try {
+        let projectTarget = "id" in target ? target.id : null;
+        if (!projectTarget && "name" in target) {
+          if (!part.folder) {
+            const folder = await promoteToFolder(part.project_id, target.name);
+            projectTarget = folder.id;
+          } else {
+            const folder = await createProject(target.name, true);
+            projectTarget = folder.id;
+          }
+        }
+        if (part.id && projectTarget && projectTarget !== part.project_id) {
+          await movePart(part.id, projectTarget);
+        }
+        await loadProjects();
+        setPicking(null);
+        setProjectId(projectTarget);
+        setPartName(part.id ? part.name : null);
+        setShowAll(false);
+      } catch (e) {
+        setMoveError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setMoving(false);
+      }
+    },
+    [loadProjects],
+  );
 
   const runImport = useCallback(
     async (path: string) => {
-      setEmptyError(null);
+      setLibraryError(null);
       setImporting(true);
       try {
         const imported = await importFolder(path);
         await loadProjects();
         selectProject(imported.id);
       } catch (e) {
-        setEmptyError(e instanceof Error ? e.message : String(e));
+        setLibraryError(e instanceof Error ? e.message : String(e));
       } finally {
         setImporting(false);
       }
@@ -493,35 +574,6 @@ function App() {
     const picked = await pickFolder({ directory: true, title: "Choose a folder to import" });
     if (typeof picked === "string") await runImport(picked);
   }, [runImport]);
-
-  // Deep links: the ones the app launched with, then the live ones.
-  const openSrc = useCallback(
-    async (url: string) => {
-      const src = srcOf(url);
-      if (!src) return;
-      try {
-        const opened = await openPublic(src);
-        await loadProjects();
-        setProjectId(opened.project_id);
-        setPartName(opened.part);
-        setRailStatus(null);
-      } catch (e) {
-        setRailStatus(e instanceof Error ? e.message : String(e));
-      }
-    },
-    [loadProjects],
-  );
-
-  useEffect(() => {
-    if (!served) return;
-    invoke<string[]>("pending_open_urls")
-      .then((urls) => urls.forEach((url) => void openSrc(url)))
-      .catch(() => {});
-    const unlisten = listen<string>("nurb-open", (event) => void openSrc(event.payload));
-    return () => {
-      unlisten.then((fn) => fn()).catch(() => {});
-    };
-  }, [served, openSrc]);
 
   // Patched once for the life of the page. Inside the listener effect below
   // these would stack: one more wrapper and one more listener per refetch.
@@ -545,6 +597,8 @@ function App() {
   // listeners below subscribe once instead of on every refetch.
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
+  const partsRef = useRef(allParts);
+  partsRef.current = allParts;
 
   // The debug hook on 127.0.0.1:7399, so a test can drive the app without
   // touching the keyboard or the mouse.
@@ -553,11 +607,12 @@ function App() {
     const offs = [
       listen<string>("test-create", async (event) => {
         try {
-          const created = await createProject(event.payload);
+          // A named project is a folder; a part's own container is never named.
+          const created = await createProject(event.payload, true);
           await loadProjects();
           selectProject(created.id);
         } catch (e) {
-          setEmptyError(String(e));
+          setLibraryError(String(e));
         }
       }),
       listen<string>("test-open", (event) => {
@@ -565,7 +620,10 @@ function App() {
         if (found) selectProject(found.id);
       }),
       listen<string>("test-import", (event) => void runImport(event.payload)),
-      listen<string>("test-part", (event) => setPartName(event.payload)),
+      listen<string>("test-part", (event) => {
+        const found = partsRef.current.find((p) => p.name === event.payload);
+        if (found) openPart(found.project_id, found.name);
+      }),
       listen<string>("test-param", (event) => {
         // The range input's own events, through React's native setter, so the
         // page sees exactly what a drag produces.
@@ -585,7 +643,7 @@ function App() {
       // page must not carry an unhandled rejection for a teardown that worked.
       offs.forEach((off) => off.then((fn) => fn()).catch(() => {}));
     };
-  }, [served, loadProjects, selectProject, runImport]);
+  }, [served, loadProjects, selectProject, runImport, openPart]);
 
   const startFresh = async (path: string, part: string, agent: string | null = null) => {
     if (!projectId) return;
@@ -636,10 +694,11 @@ function App() {
   };
 
   if (ready === null) return null;
-  if (ready === false) return <Setup onDone={() => setReady(true)} />;
-  if (!served) return <EngineStarting error={serveError} onRetry={() => void startServe()} />;
 
-  const parts = project?.parts ?? [];
+  // Three screens stand in front of the app, and each one hands over rather than
+  // cutting: the window dissolves from setup, to the engine starting, to the app.
+  const gate = ready === false ? "setup" : !served ? "engine" : "app";
+
   const chatAgents = agentStatuses
     .filter((status) => status.installed)
     .map((status) => ({
@@ -648,155 +707,235 @@ function App() {
       loggedIn: status.loggedIn,
     }));
 
-  return (
-    <div className="flex h-dvh flex-col bg-stage">
-      {/* The traffic lights sit at (18,22) over the page, so the top strip is
-          both their room and the window's drag handle. */}
-      <div className="h-[44px] shrink-0" data-tauri-drag-region />
-      <div className="flex min-h-0 flex-1 gap-4 px-4 pb-4">
-        <ProjectsRail
-          projects={projects}
-          projectId={projectId}
+  // The one overlay in the app. It doubles as the Gemini key prompt, because
+  // that key is the last step of adding Gemini.
+  const addAgent =
+    showAddAgent || showGeminiKey ? (
+      <AddAgent
+        missing={agentStatuses.filter((status) => !status.installed)}
+        onSubmitGeminiKey={showGeminiKey ? finishGeminiKey : undefined}
+        onClose={() => {
+          setShowAddAgent(false);
+          if (showGeminiKey) finishGeminiKey(null);
+          refreshAgents().catch(() => {});
+        }}
+      />
+    ) : null;
+
+  // Sheet 28: the downloaded update, offered over the rail footer. The presence
+  // lives here so the card can leave the way it arrived, wherever it is rendered.
+  const updateCard = (
+    <AnimatePresence>
+      {update && !updateDismissed ? (
+        <UpdateCard
+          version={update.version}
+          installing={updating}
+          onLater={() => setUpdateDismissed(true)}
+          onInstall={() => void installUpdate()}
+          className="absolute bottom-[68px] left-4 z-20"
+        />
+      ) : null}
+    </AnimatePresence>
+  );
+
+  // Every screen stays mounted. A conversation lives in its Chat component, and
+  // unmounting one ends the turn it is running, so leaving the workspace hides
+  // it rather than tearing it down.
+  const app = (
+    <>
+      <div data-screen="workspace" hidden={screen !== "workspace"}>
+        {error ? (
+          <div
+            role="alert"
+            className="panel fixed top-[76px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 px-3 py-2"
+          >
+            <span className="mono-label text-fail">{error}</span>
+            <button type="button" className="btn-label text-muted hover:text-ink" onClick={() => setError(null)}>
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+        <PartView
           project={project}
           partName={partName}
-          collapsed={collapsed}
-          onToggle={(id) => setCollapsed((map) => ({ ...map, [id]: !map[id] }))}
-          onSelectProject={selectProject}
           onSelectPart={setPartName}
-          onNewProject={() => void newProject()}
+          onManagePrinters={() => setSettingsSection("printers")}
+          dragRegion
+          header={{
+            before: (
+              <>
+                {/* The window's own buttons are painted here by macOS. */}
+                <div className="h-full w-[92px] shrink-0" data-tauri-drag-region />
+                <div className="h-full w-px bg-line" />
+              </>
+            ),
+            nav: (
+              <button
+                type="button"
+                aria-label="Back to library"
+                onClick={() => setScreen("library")}
+                className="chrome flex h-full items-center gap-1.5 px-4 text-muted transition-colors hover:text-ink"
+              >
+                <Icon name="chevron-left" />
+                <span className="mono-label">Library</span>
+              </button>
+            ),
+            crumb:
+              project?.folder ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPartName(null);
+                    setScreen("library");
+                    setShowAll(false);
+                  }}
+                  className="chrome flex h-full items-center px-3 text-muted transition-colors hover:text-ink"
+                >
+                  <span className="mono-label">In {project.name}</span>
+                </button>
+              ) : undefined,
+            end: <IconButton icon="gear" label="Settings" onClick={() => setSettingsSection("agents")} />,
+          }}
+          chat={
+            <>
+              {columns.map((col) => {
+                const agent = col.agent ?? defaultAgent;
+                const visible =
+                  col.path === activeDir && col.part === chatPart && screen === "workspace";
+                return (
+                  <Chat
+                    key={`${col.path}:${col.part}:${col.gen}:${agent}`}
+                    path={col.path}
+                    part={col.part}
+                    // A folder's own conversation speaks of the folder; every
+                    // other column speaks of the part it belongs to.
+                    wholeProject={Boolean(project?.folder) && col.part === PROJECT_CHAT}
+                    subject={
+                      col.part === PROJECT_CHAT
+                        ? project?.folder
+                          ? project.name
+                          : project?.parts[0]?.name ?? "this part"
+                        : col.part
+                    }
+                    // The selected project's transcript, whichever screen is up:
+                    // an empty list resets the column's sequence floor, and a step
+                    // recorded against zero is pruned the moment the list returns.
+                    messages={
+                      col.path === activeDir
+                        ? messagesForPart(
+                            project?.messages ?? [],
+                            col.part === PROJECT_CHAT ? null : col.part,
+                            project?.folder ?? false,
+                          )
+                        : []
+                    }
+                    agent={agent}
+                    agents={chatAgents}
+                    resume={col.resume}
+                    hidden={!visible}
+                    onSession={(id) => chatStarted(col.path, col.part, id, agent)}
+                    onFresh={() => startFresh(col.path, col.part)}
+                    onAgent={(id, unstarted) => {
+                      if (unstarted) chooseAgent(id);
+                      startFresh(col.path, col.part, id);
+                    }}
+                    onBusy={(busy) => chatBusy(col.path, col.part, agent, busy, visible)}
+                    onSignIn={signInAgent}
+                  />
+                );
+              })}
+            </>
+          }
+        />
+      </div>
+
+      <div data-screen="library" hidden={screen !== "library"}>
+        <Library
+          projects={projects}
+          allParts={allParts}
+          showAll={showAll}
+          projectId={projectId}
+          project={project}
+          updateReady={Boolean(update)}
+          updateCard={updateCard}
+          onShowUpdate={() => setUpdateDismissed(false)}
+          importing={importing}
+          error={libraryError ?? error}
+          onSelectProject={selectProject}
+          onSelectAll={() => setShowAll(true)}
+          onOpenPart={openPart}
+          onNewPart={() => void newPart()}
+          onAddToProject={(part) => {
+            setMoveError(null);
+            setPicking(part);
+          }}
           onImportFolder={() => void pickAndImport()}
           onRemoved={(id) => {
             if (id === projectId) setProjectId(null);
             void loadProjects();
           }}
-          status={railStatus ?? error}
-          busy={importing}
-          footer={
-            <div className="flex flex-col gap-1 border-t border-line-soft p-2">
-              {update && (
-                <button
-                  type="button"
-                  className="btn-label chrome rounded-control bg-accent px-2 py-1.5 text-white hover:bg-accent-hover"
-                  disabled={updating}
-                  onClick={() => void installUpdate()}
-                >
-                  {updating ? "Updating…" : `Update to ${update.version}`}
-                </button>
-              )}
-              <div className="flex items-center gap-2">
-                {about && (
-                  <button
-                    type="button"
-                    className="mono-caption chrome rounded-control px-1 text-faint hover:text-ink"
-                    onClick={() => setShowAbout(true)}
-                  >
-                    nurb {about.appVersion}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  aria-label="Settings"
-                  title="Settings"
-                  className="ml-auto grid size-6 place-items-center rounded-control text-faint hover:bg-raised hover:text-ink"
-                  onClick={() => setShowSettings(true)}
-                >
-                  <Icon name="gear" className="size-3.5" />
-                </button>
-              </div>
-            </div>
-          }
+          onSettings={() => setSettingsSection("agents")}
         />
-
-        {projectId && activeDir && (
-          <section className="panel flex w-[372px] shrink-0 flex-col overflow-hidden">
-            {columns.map((col) => {
-              const agent = col.agent ?? defaultAgent;
-              const visible = col.path === activeDir;
-              return (
-                <Chat
-                  key={`${col.path}:${col.gen}:${agent}`}
-                  path={col.path}
-                  part={col.part}
-                  messages={visible ? project?.messages ?? [] : []}
-                  agent={agent}
-                  agents={chatAgents}
-                  resume={col.resume}
-                  hidden={!visible}
-                  onSession={(id) => chatStarted(col.path, col.part, id, agent)}
-                  onFresh={() => startFresh(col.path, col.part)}
-                  onAgent={(id, unstarted) => {
-                    if (unstarted) chooseAgent(id);
-                    startFresh(col.path, col.part, id);
-                  }}
-                  onBusy={(busy) => chatBusy(col.path, col.part, agent, busy, visible)}
-                  onSignIn={signInAgent}
-                />
-              );
-            })}
-          </section>
-        )}
-
-        {projects.length === 0 ? (
-          <EmptyState
-            small={false}
-            onNew={() => void newProject()}
-            onImport={() => void pickAndImport()}
-            busy={importing}
-            error={emptyError}
-          />
-        ) : parts.length === 0 ? (
-          <EmptyState
-            small
-            onNew={() => void newProject()}
-            onImport={() => void pickAndImport()}
-            busy={importing}
-            error={emptyError}
-          />
-        ) : (
-          <PartView project={project} partName={partName} />
-        )}
       </div>
 
-      {showSettings && (
-        <Settings
-          agents={agentStatuses.filter((status) => status.installed)}
-          agentStatusState={agentStatusState}
-          signingIn={signingIn}
-          serve={serveInfo}
-          onSignIn={signInAgent}
-          onMoreAgents={() => {
-            setShowSettings(false);
-            setShowAgentsHelp(true);
-          }}
-          onClose={() => setShowSettings(false)}
+      {settingsSection ? (
+        <div data-screen="settings" className="fixed inset-0 z-30">
+          <Settings
+            agents={agentStatuses.filter((status) => status.installed)}
+            agentStatusState={agentStatusState}
+            signingIn={signingIn}
+            serve={serveInfo}
+            about={about}
+            onCheckUpdates={import.meta.env.PROD ? () => void checkUpdatesNow() : undefined}
+            initialSection={settingsSection}
+            onSignIn={signInAgent}
+            onMoreAgents={() => setShowAddAgent(true)}
+            onClose={() => setSettingsSection(null)}
+          />
+        </div>
+      ) : null}
+
+      {picking ? (
+        <ProjectPicker
+          partName={picking.name}
+          targets={moveTargets(projects, picking)}
+          busy={moving}
+          error={moveError}
+          onPick={(id) => void addToProject(picking, { id })}
+          onCreate={(name) => void addToProject(picking, { name })}
+          onCancel={() => setPicking(null)}
         />
-      )}
-      {showGeminiKey && (
-        <GeminiKeyDialog
-          onSubmit={(key) => finishGeminiKey(key)}
-          onClose={() => finishGeminiKey(null)}
-        />
-      )}
-      {showAbout && about && (
-        <About
-          appVersion={about.appVersion}
-          nurbVersion={about.nurbVersion}
-          occtVersion={about.occtVersion}
-          osVersion={about.osVersion}
-          arch={about.arch}
-          onClose={() => setShowAbout(false)}
-        />
-      )}
-      {showAgentsHelp && (
-        <AgentsHelp
-          missing={agentStatuses.filter((status) => !status.installed)}
-          onClose={() => {
-            setShowAgentsHelp(false);
-            refreshAgents().catch(() => {});
-          }}
-        />
-      )}
-    </div>
+      ) : null}
+
+      {addAgent}
+
+      {/* Work the window should mention, over everything and out of the way. */}
+      <LiveActivity
+        activity={activity}
+        onDismiss={dismissActivity}
+        className="fixed inset-x-0 bottom-5 z-40"
+      />
+    </>
+  );
+
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={gate}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: reduced ? 0 : duration.arrive, ease: OUT }}
+      >
+        {gate === "setup" ? (
+          <Setup onDone={() => setReady(true)} />
+        ) : gate === "engine" ? (
+          <EngineStarting error={serveError} log={serveLog} onRetry={() => void startServe()} />
+        ) : (
+          app
+        )}
+      </motion.div>
+    </AnimatePresence>
   );
 }
 

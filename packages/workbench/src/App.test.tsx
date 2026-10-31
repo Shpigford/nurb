@@ -39,8 +39,9 @@ describe("workbench", () => {
   it("selects the project and part named in the query string", async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByLabelText("Project")).toHaveValue("p2"))
-    const lid = await screen.findByRole("button", { name: /lid/ })
-    expect(lid).toHaveAttribute("aria-pressed", "true")
+    // Parts are the floating header's tabs now, not a list of buttons in a panel.
+    const lid = await screen.findByRole("tab", { name: "lid" })
+    expect(lid).toHaveAttribute("aria-selected", "true")
     expect(screen.getByTestId("stage")).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1")
   })
 

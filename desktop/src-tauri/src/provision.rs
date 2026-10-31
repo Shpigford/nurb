@@ -206,16 +206,9 @@ fn chat_runtime_check(paths: &Paths) -> Result<(), String> {
             .map_err(|why| format!("the {} adapter check failed: {why}", kind.label()))?;
     }
 
-    // Adapter --version never loads the native CLIs supplied as optional npm
-    // packages. Exercise the two platform-specific binaries so a skipped package
+    // Adapter --version never loads the native CLI supplied as an optional npm
+    // package. Exercise that platform-specific binary so a skipped package
     // cannot be stamped healthy and surface later as a misleading auth error.
-    let mut claude = Command::new(paths.node_bin());
-    claude
-        .arg(paths.adapter_script(crate::agents::AgentKind::ClaudeAcp))
-        .args(["--cli", "--version"]);
-    probe_output(claude, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
-        .map_err(|why| format!("the Claude CLI check failed: {why}"))?;
-
     let mut codex = Command::new(paths.node_bin());
     codex.arg(paths.codex_cli()).arg("--version");
     probe_output(codex, paths.data(), NATIVE_CLI_HEALTH_TIMEOUT)
@@ -778,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn chat_health_exercises_the_native_agent_clis() {
+    fn chat_health_exercises_the_native_agent_cli() {
         let dir = std::env::temp_dir().join(format!(
             "nurb-chat-health-{}-{}",
             std::process::id(),
@@ -795,17 +788,12 @@ mod tests {
                 r#"#!/bin/sh
 case "$*" in
   "--version") echo "{NODE_VERSION}" ;;
-  *"claude-agent-acp --cli --version"*)
-    [ ! -f "$0.missing-claude" ] || exit 1
-    [ ! -f "$0.slow-claude" ] || sleep 3
-    echo "2.1.257 (Claude Code)"
-    ;;
-  *"claude-agent-acp --version"*) echo "claude-agent-acp 0.74.0" ;;
-  *"codex-acp --version"*) echo "codex-acp 1.11.0" ;;
+  *"codex-acp --version"*) echo "codex-acp 1.13.0" ;;
     *"gemini --version"*) echo "0.55.1" ;;
   *"/codex --version"*)
     [ ! -f "$0.missing-codex" ] || exit 1
-    echo "codex-cli 0.153.4"
+    [ ! -f "$0.slow-codex" ] || sleep 3
+    echo "codex-cli 0.155.1"
     ;;
   *) exit 1 ;;
 esac
@@ -814,20 +802,15 @@ esac
         )
         .unwrap();
         std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
-        for agent in ["claude-agent-acp", "codex-acp", "gemini", "codex"] {
+        for agent in ["codex-acp", "gemini", "codex"] {
             std::fs::write(paths.adapters().join("node_modules/.bin").join(agent), b"").unwrap();
         }
 
         assert!(chat_runtime_ok(&paths));
-        let slow_claude = format!("{}.slow-claude", node.display());
-        std::fs::write(&slow_claude, b"").unwrap();
+        let slow_codex = format!("{}.slow-codex", node.display());
+        std::fs::write(&slow_codex, b"").unwrap();
         assert!(chat_runtime_ok(&paths));
-        std::fs::remove_file(slow_claude).unwrap();
-        let missing_claude = format!("{}.missing-claude", node.display());
-        std::fs::write(&missing_claude, b"").unwrap();
-        let why = chat_runtime_check(&paths).unwrap_err();
-        assert!(why.starts_with("the Claude CLI check failed:"), "{why}");
-        std::fs::remove_file(missing_claude).unwrap();
+        std::fs::remove_file(slow_codex).unwrap();
         std::fs::write(format!("{}.missing-codex", node.display()), b"").unwrap();
         let why = chat_runtime_check(&paths).unwrap_err();
         assert!(why.starts_with("the Codex CLI check failed:"), "{why}");

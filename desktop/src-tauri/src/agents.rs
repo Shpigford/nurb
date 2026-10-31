@@ -2,11 +2,10 @@
 //! how their ACP process starts, display name, sign-in state, and the login
 //! flow.
 //!
-//! Claude and Codex run through npm adapters the app provisions; each bundles
-//! its agent's real CLI (claude-agent-acp carries the native Claude Code
-//! binary, codex-acp carries @openai/codex). Gemini's official CLI speaks ACP
-//! itself and is provisioned beside them, so nothing has to be on the user's
-//! PATH except node/npx. Cursor and Grok ship CLIs that speak ACP natively, so the app never installs those: it finds the binary the
+//! Codex runs through an npm adapter the app provisions, and that adapter
+//! bundles its agent's real CLI (codex-acp carries @openai/codex). Gemini's
+//! official CLI speaks ACP itself and is provisioned beside it, so nothing has
+//! to be on the user's PATH except node/npx. Cursor and Grok ship CLIs that speak ACP natively, and Claude's CLI is driven directly in stream-json (see claude.rs), so the app never installs those three: it finds the binary the
 //! vendor's own installer put on the machine. Signing in through the app
 //! shares credentials with any terminal install either way, because every
 //! agent reads its own store (~/.claude, ~/.codex, Cursor's, ~/.grok).
@@ -21,18 +20,14 @@ use std::time::Duration;
 pub enum AgentKind {
     /// The user's own Claude Code CLI, driven directly (see claude.rs).
     Claude,
-    /// The same CLI behind the ACP adapter, kept for the sessions and the
-    /// picker the driver does not speak yet.
-    ClaudeAcp,
     Codex,
     Gemini,
     Cursor,
     Grok,
 }
 
-pub const ALL: [AgentKind; 6] = [
+pub const ALL: [AgentKind; 5] = [
     AgentKind::Claude,
-    AgentKind::ClaudeAcp,
     AgentKind::Codex,
     AgentKind::Gemini,
     AgentKind::Cursor,
@@ -43,7 +38,6 @@ impl AgentKind {
     pub fn parse(id: &str) -> Result<Self, String> {
         match id {
             "claude" => Ok(Self::Claude),
-            "claude-acp" => Ok(Self::ClaudeAcp),
             "codex" => Ok(Self::Codex),
             "gemini" => Ok(Self::Gemini),
             "cursor" => Ok(Self::Cursor),
@@ -55,7 +49,6 @@ impl AgentKind {
     pub fn id(self) -> &'static str {
         match self {
             Self::Claude => "claude",
-            Self::ClaudeAcp => "claude-acp",
             Self::Codex => "codex",
             Self::Gemini => "gemini",
             Self::Cursor => "cursor",
@@ -68,7 +61,6 @@ impl AgentKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Claude => "Claude",
-            Self::ClaudeAcp => "Claude (adapter)",
             Self::Codex => "Codex",
             Self::Gemini => "Gemini",
             Self::Cursor => "Cursor",
@@ -80,8 +72,7 @@ impl AgentKind {
     /// release weekly, so no ranges. None for the ACP-native CLIs.
     pub fn adapter(self) -> Option<&'static str> {
         match self {
-            Self::ClaudeAcp => Some("@agentclientprotocol/claude-agent-acp@0.74.0"),
-            Self::Codex => Some("@agentclientprotocol/codex-acp@1.11.0"),
+            Self::Codex => Some("@agentclientprotocol/codex-acp@1.13.0"),
             Self::Gemini => Some("@google/gemini-cli@0.55.1"),
             Self::Claude | Self::Cursor | Self::Grok => None,
         }
@@ -91,7 +82,6 @@ impl AgentKind {
     /// of the provisioned runtime without npx.
     pub fn adapter_bin(self) -> Option<&'static str> {
         match self {
-            Self::ClaudeAcp => Some("claude-agent-acp"),
             Self::Codex => Some("codex-acp"),
             Self::Gemini => Some("gemini"),
             Self::Claude | Self::Cursor | Self::Grok => None,
@@ -107,7 +97,7 @@ impl AgentKind {
             Self::Claude => Some(("claude", &[] as &[&str])),
             Self::Cursor => Some(("agent", &["acp"])),
             Self::Grok => Some(("grok", &["agent", "stdio"])),
-            Self::ClaudeAcp | Self::Codex | Self::Gemini => None,
+            Self::Codex | Self::Gemini => None,
         }
     }
 
@@ -121,7 +111,7 @@ impl AgentKind {
             Self::Claude => &[".local/bin", ".claude/local"],
             Self::Cursor => &[".local/bin"],
             Self::Grok => &[".grok/bin"],
-            Self::ClaudeAcp | Self::Codex | Self::Gemini => return None,
+            Self::Codex | Self::Gemini => return None,
         };
         let home = PathBuf::from(std::env::var("HOME").ok()?);
         for dir in install_dirs {
@@ -138,7 +128,7 @@ impl AgentKind {
     /// What a signed-out user needs, in the pane and the chat column.
     pub fn subscription_note(self) -> &'static str {
         match self {
-            Self::Claude | Self::ClaudeAcp => "works with a Claude subscription (Pro, from $20/month)",
+            Self::Claude => "works with a Claude subscription (Pro, from $20/month)",
             Self::Codex => "works with a ChatGPT subscription (Go, from $8/month)",
             Self::Gemini => "works with a Gemini API key from Google AI Studio",
             Self::Cursor => "works with a Cursor subscription (Pro, from $20/month)",
@@ -154,7 +144,7 @@ impl AgentKind {
             Self::Claude => Some("curl -fsSL https://claude.ai/install.sh | bash"),
             Self::Cursor => Some("curl https://cursor.com/install -fsSL | bash"),
             Self::Grok => Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
-            Self::ClaudeAcp | Self::Codex | Self::Gemini => None,
+            Self::Codex | Self::Gemini => None,
         }
     }
 }
@@ -188,7 +178,6 @@ pub async fn agent_statuses(app: tauri::AppHandle) -> Vec<AgentStatus> {
             let (logged_in, detail) = if installed {
                 match agent {
                     AgentKind::Claude => driver_auth_status(),
-                    AgentKind::ClaudeAcp => claude_auth_status(&launcher),
                     AgentKind::Codex => (Some(auth_file(".codex").is_file()), None),
                     AgentKind::Gemini => (Some(gemini_api_key().is_ok()), None),
                     AgentKind::Cursor => cursor_auth_status(agent),
@@ -245,33 +234,6 @@ fn driver_auth_status() -> (Option<bool>, Option<String>) {
         .and_then(|v| v.as_str())
         .map(|plan| format!("{plan} plan"));
     (Some(logged_in), detail.filter(|_| logged_in))
-}
-
-/// The authoritative check, through the adapter's bundled Claude Code:
-/// `auth status --json` prints `{"loggedIn": bool, ...}` and exits 0 in both
-/// states, so only the JSON is trusted. Cheaper file checks lie: macOS
-/// installs may hold credentials in the keychain, the file, or both.
-fn claude_auth_status(launcher: &crate::env::Launcher) -> (Option<bool>, Option<String>) {
-    let (program, mut args) = launcher.adapter(AgentKind::Claude);
-    args.extend(["--cli", "auth", "status", "--json"].map(String::from));
-    let mut command = Command::new(program);
-    command.args(args);
-    if let Some(path) = launcher.adapter_path() {
-        command.env("PATH", path);
-    }
-    let output = command.output();
-    let Ok(output) = output else {
-        return (None, None);
-    };
-    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
-        return (None, None);
-    };
-    let logged_in = parsed.get("loggedIn").and_then(|v| v.as_bool());
-    let detail = parsed
-        .get("subscriptionType")
-        .and_then(|v| v.as_str())
-        .map(|plan| format!("{plan} plan"));
-    (logged_in, detail.filter(|_| logged_in == Some(true)))
 }
 
 /// Codex and Grok keep no status subcommand worth trusting, but both write
@@ -430,9 +392,6 @@ pub async fn agent_login(
         _ => None,
     };
     match kind {
-        AgentKind::ClaudeAcp => {
-            args.extend(["--cli", "auth", "login", "--claudeai"].map(String::from))
-        }
         AgentKind::Codex => args.push("login".into()),
         // Native CLIs: drop the ACP args the launcher put on, login is its
         // own subcommand.

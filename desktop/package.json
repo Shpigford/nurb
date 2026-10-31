@@ -13,29 +13,28 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@nurb/ui": "1.0.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
-    "@tauri-apps/plugin-deep-link": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-fs": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1",
+    "clsx": "^2.1.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@nurb/ui": "1.0.0-alpha.1",
-    "clsx": "^2.1.1",
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.1.13",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
+    "@types/three": "^0.185.4",
     "@vitejs/plugin-react": "^4.6.0",
-    "typescript": "~5.8.3",
-    "vite": "^7.0.4",
-    "@tailwindcss/vite": "^4.1.13",
     "tailwindcss": "^4.1.13",
-    "@types/three": "^0.185.4"
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
   }
 }

@@ -24,8 +24,10 @@ impl Launcher {
     pub fn resolve(data: PathBuf) -> Self {
         #[cfg(debug_assertions)]
         if std::env::var_os("NURB_DESKTOP_PROVISIONED").is_none() {
+            // The uv project is engine/, not the monorepo root: that is where
+            // `uv run --project` finds nurb and where the venv lives.
             return Self::Checkout {
-                repo: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."),
+                repo: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../engine"),
             };
         }
         Self::Provisioned {

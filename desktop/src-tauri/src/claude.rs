@@ -27,12 +27,25 @@ use crate::prefs::{ConfigChoice, ConfigRow, PrefStore};
 const MINIMUM: (u32, u32, u32) = (2, 1, 221);
 
 /// The models the picker offers. The CLI resolves an alias against the user's
-/// plan, which is why there is no hardcoded model id here.
+/// plan, which is why there is no hardcoded model id here. Fable is the
+/// suggestion: on nurb's own parts it holds one coherent form where Opus
+/// builds a plinth and a cradle.
 const MODELS: [(&str, &str); 4] = [
-    ("default", "Default (recommended)"),
+    ("default", "Default"),
     ("fable", "Fable"),
     ("opus", "Opus"),
     ("sonnet", "Sonnet"),
+];
+
+/// How hard the model thinks, the CLI's `--effort` levels. Default leaves the
+/// flag off and lets the CLI decide.
+const EFFORTS: [(&str, &str); 6] = [
+    ("default", "Default"),
+    ("low", "Low"),
+    ("medium", "Medium"),
+    ("high", "High"),
+    ("xhigh", "Extra high"),
+    ("max", "Max"),
 ];
 
 pub struct Drivers {
@@ -283,7 +296,9 @@ pub(crate) fn spawn_args(
     mcp_url: &str,
     token: &str,
     project_id: &str,
+    part: Option<&str>,
     model: Option<&str>,
+    effort: Option<&str>,
     session: &str,
     resume: bool,
 ) -> Vec<String> {
@@ -320,14 +335,25 @@ pub(crate) fn spawn_args(
         args.push("--model".into());
         args.push(model.to_string());
     }
+    if let Some(effort) = effort.filter(|effort| *effort != "default") {
+        args.push("--effort".into());
+        args.push(effort.to_string());
+    }
     // The CLI says nothing, not even init, until the first prompt arrives on
     // stdin, so the session id is minted here and handed to it rather than
     // read back. A resume carries the id it was born with.
     args.push(if resume { "--resume" } else { "--session-id" }.into());
     args.push(session.to_string());
+    // Each chat column belongs to one part, and the session is started per
+    // column, so the part it is about rides in the prompt the session is born
+    // with. The project-wide conversation names no part.
+    let selected = match part.filter(|name| *name != crate::acp::PROJECT_CHAT) {
+        Some(name) => format!(" This conversation is about the part \"{name}\", which is on screen beside the chat."),
+        None => String::new(),
+    };
     args.push("--append-system-prompt".into());
     args.push(format!(
-        "You are inside the nurb desktop app, working on nurb project_id \"{project_id}\". \
+        "You are inside the nurb desktop app, working on nurb project_id \"{project_id}\".{selected} \
          Everything goes through the nurb tools; there are no files to edit. \
          Call read_guide once before writing a part. \
          The user is a hobbyist with a 3D printer: plain words, no code and no file names unless asked."
@@ -397,6 +423,7 @@ fn is_current(version: &str) -> bool {
 pub(crate) async fn start(
     app: tauri::AppHandle,
     project: PathBuf,
+    part: Option<String>,
     channel: Channel<ChatEvent>,
     resume: Option<String>,
 ) -> Result<String, String> {
@@ -410,12 +437,15 @@ pub(crate) async fn start(
         .await
         .map_err(|e| e.to_string())??
     };
-    let model = app
-        .state::<PrefStore>()
-        .chosen(AgentKind::Claude.id())
-        .into_iter()
-        .find(|(category, _)| category == "model")
-        .map(|(_, value)| value);
+    let chosen = app.state::<PrefStore>().chosen(AgentKind::Claude.id());
+    let pick = |category: &str| {
+        chosen
+            .iter()
+            .find(|(key, _)| key == category)
+            .map(|(_, value)| value.clone())
+    };
+    let model = pick("model");
+    let effort = pick("thought_level");
     let project_id = crate::acp::project_key(&project);
     let session_id = resume
         .clone()
@@ -424,7 +454,9 @@ pub(crate) async fn start(
         &serve.url,
         &serve.token,
         &project_id,
+        part.as_deref(),
         model.as_deref(),
+        effort.as_deref(),
         &session_id,
         resume.is_some(),
     );
@@ -577,29 +609,35 @@ fn drain_stderr(stderr: Option<tokio::process::ChildStderr>) {
     });
 }
 
-/// The driver's picker: a model row and nothing else. Effort is the CLI's own
-/// business here, since print mode takes no effort flag.
+/// The driver's picker: the model and how hard it thinks, both passed at
+/// spawn, so a pick lands on the next session.
 pub(crate) fn config_rows(prefs: &PrefStore) -> Vec<ConfigRow> {
-    let chosen = prefs
-        .chosen(AgentKind::Claude.id())
-        .into_iter()
-        .find(|(category, _)| category == "model")
-        .map(|(_, value)| value)
-        .unwrap_or_else(|| "default".into());
-    vec![ConfigRow {
-        id: "model".into(),
-        category: "model".into(),
-        name: "Model".into(),
-        value: chosen,
-        options: MODELS
+    let chosen = prefs.chosen(AgentKind::Claude.id());
+    let pick = |category: &str| {
+        chosen
             .iter()
-            .map(|(value, name)| ConfigChoice {
+            .find(|(key, _)| key == category)
+            .map(|(_, value)| value.clone())
+            .unwrap_or_else(|| "default".into())
+    };
+    let row = |category: &str, name: &str, options: &[(&str, &str)], suggested: &str| ConfigRow {
+        id: category.into(),
+        category: category.into(),
+        name: name.into(),
+        value: pick(category),
+        options: options
+            .iter()
+            .map(|(value, label)| ConfigChoice {
                 value: (*value).into(),
-                name: (*name).into(),
-                description: None,
+                name: (*label).into(),
+                description: (*value == suggested).then(|| "recommended".into()),
             })
             .collect(),
-    }]
+    };
+    vec![
+        row("model", "Model", &MODELS, "fable"),
+        row("thought_level", "Thinking", &EFFORTS, "default"),
+    ]
 }
 
 #[cfg(test)]
@@ -663,7 +701,7 @@ mod tests {
 
     #[test]
     fn the_tools_are_the_nurb_server_and_nothing_else() {
-        let args = spawn_args("http://127.0.0.1:7373", "secret", "box", Some("opus"), "sid", false);
+        let args = spawn_args("http://127.0.0.1:7373", "secret", "box", Some("lip"), Some("opus"), Some("high"), "sid", false);
         let joined = args.join(" ");
         assert!(joined.contains("--strict-mcp-config"));
         assert!(joined.contains("http://127.0.0.1:7373/mcp"));
@@ -671,9 +709,10 @@ mod tests {
         assert!(joined.contains("--allowedTools mcp__nurb__*"));
         assert!(joined.contains("--model opus"));
         assert!(joined.contains("project_id \"box\""));
+        assert!(joined.contains("the part \"lip\""));
         assert!(joined.contains("--session-id sid"));
         // The default alias is the CLI's own choice, so it is never passed.
-        let default = spawn_args("http://x", "t", "box", Some("default"), "sid", true);
+        let default = spawn_args("http://x", "t", "box", None, Some("default"), Some("default"), "sid", true);
         assert!(!default.join(" ").contains("--model"));
         assert!(default.join(" ").contains("--resume sid"));
     }
@@ -701,7 +740,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let args = spawn_args("http://127.0.0.1:7373", "t", "box", None, "sid", false);
+        let args = spawn_args("http://127.0.0.1:7373", "t", "box", None, None, None, "sid", false);
         let mut child = spawn(&script, args, &dir, &dir).unwrap();
         let mut stdin = child.stdin.take().unwrap();
         stdin.write_all(b"{\"type\":\"user\"}\n").await.unwrap();

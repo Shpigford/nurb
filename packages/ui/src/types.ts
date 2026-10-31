@@ -125,4 +125,6 @@ export interface Message {
   attachments?: MessageAttachment[]
   sequence_number?: number
   created_at: string
+  /** The part this line belongs to. Null is a folder's project-wide conversation. */
+  part?: string | null
 }

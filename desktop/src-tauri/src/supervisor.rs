@@ -293,7 +293,7 @@ impl Supervisor {
         serde_json::from_str(&text).ok()
     }
 
-    fn home(&self) -> PathBuf {
+    pub fn home(&self) -> PathBuf {
         if let Some(home) = &self.home {
             return home.clone();
         }

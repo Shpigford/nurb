@@ -82,7 +82,7 @@ fn tool_names() -> &'static [String] {
     use std::sync::OnceLock;
     static NAMES: OnceLock<Vec<String>> = OnceLock::new();
     NAMES.get_or_init(|| {
-        let raw = include_str!("../../../../src/nurb/tools.json");
+        let raw = include_str!("../../../../engine/src/nurb/tools.json");
         serde_json::from_str::<Vec<serde_json::Value>>(raw)
             .unwrap_or_default()
             .iter()

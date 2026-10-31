@@ -1,7 +1,7 @@
 import { it, expect } from "vitest"
 import * as ui from "./index"
 
-// CONTRACT §3's component set, in full. Nothing here is pending.
+// The package's component set, in full: the original contract plus the Phase 32 design components.
 it.each([
   "Icon",
   "ViewerIsland",
@@ -13,6 +13,48 @@ it.each([
   "AssistantMarkdown",
   "ToolStepCard",
   "ToolStepGroup",
+  "Button",
+  "IconButton",
+  "PanelStrip",
+  "IsoBox",
+  "Menu",
+  "ConfirmDialog",
+  "Lockup",
+  "PartCard",
+  "EmptyShelf",
+  "EmptyProject",
+  "Stage",
+  "StageColumn",
+  "FloatingHeader",
+  "HeaderStack",
+  "HeaderStatus",
+  "HeaderTabs",
+  "ChatPanel",
+  "ParamRail",
+  "RailDisclosure",
+  "FindingsList",
+  "BuildFailedBanner",
+  "StageNotice",
+  "UpdateCard",
+  "LoadingButton",
+  "HoldToConfirm",
+  "DetentMarks",
+  "ValueFlash",
+  "SkeletonSwap",
+  "ProgressBar",
+  "CollapsibleBanner",
+  "LiveActivity",
+  "NewItemsPill",
+  "SegmentedControl",
+  "BlurUpImage",
+  "TaskSteps",
+  "IconMorph",
+  "ApprovalCard",
+  "EditChips",
+  "DropHint",
+  "CyclingPlaceholder",
 ])("exports %s as a component", (name) => {
-  expect(typeof (ui as Record<string, unknown>)[name]).toBe("function")
+  // forwardRef components are objects with a render function; plain components are functions.
+  const value = (ui as Record<string, unknown>)[name] as { render?: unknown } | undefined
+  expect(typeof value === "function" || typeof value?.render === "function").toBe(true)
 })

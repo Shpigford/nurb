@@ -6,9 +6,9 @@ mod prefs;
 mod provision;
 mod sessions;
 mod supervisor;
+mod v1;
 
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 use supervisor::{ServeInfo, Supervisor};
 use tauri::{AppHandle, Manager, RunEvent, State};
@@ -17,9 +17,6 @@ use tauri::{AppHandle, Manager, RunEvent, State};
 /// a directory on disk read it from here rather than resolving it again.
 struct AppData(PathBuf);
 
-/// Deep links that arrived before the page was listening.
-struct OpenUrls(Mutex<Vec<String>>);
-
 /// The serve every project in this window talks to. Blocking, because a cold
 /// start pays for the OCCT import before it answers.
 #[tauri::command]
@@ -27,6 +24,28 @@ async fn serve_info(app: AppHandle) -> Result<ServeInfo, String> {
     tauri::async_runtime::spawn_blocking(move || app.state::<Supervisor>().ensure())
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// The tail of the serve's own log, for the screen that says the engine did
+/// not start. Bounded so a runaway log cannot flood the page.
+#[tauri::command]
+fn serve_log(app: AppHandle) -> String {
+    let text = std::fs::read_to_string(app.state::<Supervisor>().home().join("serve.log"))
+        .unwrap_or_default();
+    log_tail(&text, 4000).to_string()
+}
+
+fn log_tail(text: &str, keep: usize) -> &str {
+    if text.len() <= keep {
+        return text;
+    }
+
+    let mut cut = text.len() - keep;
+    while !text.is_char_boundary(cut) {
+        cut += 1;
+    }
+    let start = text[cut..].find('\n').map(|i| cut + i + 1).unwrap_or(cut);
+    &text[start..]
 }
 
 /// A working directory for one project's chat agents. They have no nurb tools
@@ -47,10 +66,10 @@ fn project_dir(data: State<AppData>, project_id: String) -> Result<String, Strin
     Ok(dir.to_string_lossy().into_owned())
 }
 
-/// Deep links the OS delivered before the page could listen, drained once.
+/// The folders nurb 0.x listed, handed over once for the page to import.
 #[tauri::command]
-fn pending_open_urls(urls: State<OpenUrls>) -> Vec<String> {
-    std::mem::take(&mut *urls.0.lock().unwrap())
+fn take_v1_folders(data: State<AppData>) -> Vec<String> {
+    v1::take_folders(&data.0)
 }
 
 #[derive(serde::Serialize)]
@@ -227,7 +246,7 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
                 return;
             }
             "help:github" => "https://github.com/Shpigford/nurb",
-            "help:issue" => "https://github.com/Shpigford/nurb/issues/new",
+            "help:issue" => "https://github.com/Shpigford/nurb/issues/new/choose",
             _ => return,
         };
         let _ = app.opener().open_url(url, None::<&str>);
@@ -244,14 +263,11 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_deep_link::init())
         .manage(acp::Chats::new())
         .manage(claude::Drivers::new())
         .manage(agents::Logins::new())
         .manage(provision::Provisioner::new())
-        .manage(OpenUrls(Mutex::new(Vec::new())))
         .setup(|app| {
-            use tauri_plugin_deep_link::DeepLinkExt;
             let dir = app.path().app_data_dir()?;
             // Debug-only override so tests can point the whole app (sessions,
             // projects, provisioned env, the serve's home) at a scratch
@@ -268,31 +284,6 @@ pub fn run() {
             app.manage(sessions::SessionStore::load(&dir));
             app.manage(prefs::PrefStore::load(&dir));
             app.manage(AppData(dir));
-            // A cold launch is the OS starting us with the URL in hand; the
-            // page has not mounted yet, so it drains these on startup.
-            if let Ok(Some(urls)) = app.deep_link().get_current() {
-                let state = app.state::<OpenUrls>();
-                let mut pending = state.0.lock().unwrap();
-                pending.extend(urls.iter().map(|url| url.to_string()));
-            }
-            // macOS hands a second `open` to the running instance, so the
-            // warm case is an event rather than a new process.
-            let handle = app.handle().clone();
-            app.deep_link().on_open_url(move |event| {
-                use tauri::Emitter;
-                // The page is listening, so a warm link is only emitted; putting it
-                // in the pending vec too would replay it on the next drain.
-                for url in event.urls() {
-                    let _ = handle.emit("nurb-open", url.to_string());
-                }
-            });
-            // A dev run has no bundle, so the scheme is only ever registered
-            // at runtime there; on macOS this is expected to fail, and the
-            // cold-launch path is tested against a debug bundle instead.
-            #[cfg(debug_assertions)]
-            if let Err(error) = app.deep_link().register("nurb") {
-                eprintln!("[deep-link] runtime register failed: {error}");
-            }
             install_menu(app.handle())?;
             #[cfg(debug_assertions)]
             test_hook(app.handle().clone());
@@ -300,8 +291,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             serve_info,
+            serve_log,
             project_dir,
-            pending_open_urls,
+            take_v1_folders,
             select_part_chat,
             saved_chat,
             save_pasted_image,
@@ -313,6 +305,7 @@ pub fn run() {
             acp::cancel_turn,
             acp::respond_permission,
             acp::chat_config,
+            acp::probe_chat_config,
             acp::set_chat_config,
             acp::close_chat,
             agents::agent_statuses,
@@ -336,7 +329,17 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::write_pasted_image;
+    use super::{log_tail, write_pasted_image};
+
+    #[test]
+    fn log_tail_never_splits_utf8() {
+        let text = format!("{}x", "é".repeat(2500));
+        let tail = log_tail(&text, 4000);
+
+        assert!(tail.len() <= 4000);
+        assert!(tail.ends_with('x'));
+        assert!(tail.starts_with('é'));
+    }
 
     #[test]
     fn pasted_images_land_in_unique_files_with_honest_extensions() {

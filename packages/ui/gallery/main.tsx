@@ -1,4 +1,4 @@
-import { StrictMode, useState, type ReactNode } from "react"
+import { StrictMode, useEffect, useState, type ReactNode } from "react"
 import { createRoot } from "react-dom/client"
 import clsx from "clsx"
 import { Icon, AssistantMarkdown, type IconName } from "../src/index"
@@ -11,12 +11,13 @@ import { ParamsPanel, ExportMenu, type ExportResult, type Params } from "../src/
 import { panelParams, panelStats } from "./fixtures"
 import { flaggedFindings } from "./fixtures"
 import Workbench from "./Workbench"
+import { SHEETS } from "./sheets"
 import "./gallery.css"
 
 const ICON_NAMES: IconName[] = [
   "chevron-left", "chevron-down", "chevron-up", "check", "warning", "lock", "plus", "minus",
   "camera", "search", "xmark", "image", "download", "expand", "eye", "arrow-up", "link",
-  "stop", "loader", "chat", "dots", "trash", "ruler", "gear", "user", "logout", "box",
+  "stop", "loader", "chat", "dots", "trash", "ruler", "gear", "user", "logout", "box", "copy",
 ]
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -94,7 +95,6 @@ function ExportMenuDemo() {
       <ExportMenu
         partId="shelf-bracket"
         export={slowExport}
-        profiles={["Bambu P1S 0.4", "Prusa MK4 0.4"]}
         status={{ state: "succeeded", grams: 42.4, seconds: 5400 }}
         revision={26}
       />
@@ -252,8 +252,56 @@ function Gallery() {
   )
 }
 
+// Hash routing, no router: "#/" is the index, "#/components" the scrolling
+// component gallery, "#/sheet/NN" one design sheet at 1440x900.
+function useHash() {
+  const [hash, setHash] = useState(() => window.location.hash || "#/")
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash || "#/")
+    window.addEventListener("hashchange", onHash)
+    return () => window.removeEventListener("hashchange", onHash)
+  }, [])
+  return hash
+}
+
+function Index() {
+  return (
+    <div className="min-h-dvh bg-stage p-8">
+      <h1 className="font-display chrome mb-6 text-[20px] text-ink">@nurb/ui gallery</h1>
+      <ul className="flex flex-col gap-1">
+        <li>
+          <a href="#/components" className="mono-label text-accent-ink">
+            #/components · the scrolling component gallery
+          </a>
+        </li>
+        {SHEETS.map((sheet) => (
+          <li key={sheet.id}>
+            <a href={`#/sheet/${sheet.id}`} className="mono-label text-ink-soft hover:text-ink">
+              #/sheet/{sheet.id} · {sheet.title}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function App() {
+  const hash = useHash()
+  const sheetId = hash.startsWith("#/sheet/") ? hash.slice("#/sheet/".length) : null
+  if (sheetId) {
+    const sheet = SHEETS.find((s) => s.id === sheetId)
+    if (!sheet) return <Index />
+    // A sheet holds hooks, so it is rendered as a component, not called inline.
+    const View = sheet.View
+    return <View />
+  }
+  if (hash.startsWith("#/components")) return <Gallery />
+  return <Index />
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Gallery />
+    <App />
   </StrictMode>
 )

@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react"
 import { apiBase, resolveBase } from "./api"
 
 export interface LiveEvent {
-  kind: "project" | "part" | "build" | "message"
+  /** "workshop" is the bench itself: a printer added, removed or made the default. */
+  kind: "project" | "part" | "build" | "message" | "workshop"
   id: string
   project_id: string
 }

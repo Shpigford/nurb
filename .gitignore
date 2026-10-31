@@ -1,30 +1,17 @@
-# Python-generated files
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-
-# three.js ships its own build/ directory and the pattern above swallows it. Without
-# this the viewer's importmap points at a file that is not in the repo, which fails as
-# a blank canvas rather than as an error.
-!src/nurb/vendor/**/build/
-
-# Virtual environments
-.venv
-
-# Per-worktree dev server state written by the SessionStart hook
-.DS_Store
-
-# Conductor's local, per-checkout settings (not meant to be shared/committed)
-.conductor/
+*.pyc
+.env
+.design-audit/
 
 # npm workspace root; desktop/ and packages/* hoist here
 node_modules/
-
-# Gallery build output for @nurb/ui
 gallery-dist/
 
-# The workbench page nurb serve shows at /, built by Vite from packages/workbench
-src/nurb/workbench/
+# engine: venv, wheel builds, and the workbench page Vite writes from packages/workbench
+engine/.venv/
+engine/dist/
+engine/build/
+engine/*.egg-info
+engine/src/nurb/workbench/
+.DS_Store
+.context/

@@ -124,7 +124,7 @@ function Transcript() {
   )
 }
 
-// The reference layout the local workbench page and nurb.app both copy: transcript,
+// The reference layout the local workbench page and the desktop app both copy: transcript,
 // stage, rail. Every side is fixture-driven, so Apply and Download are local state.
 export default function Workbench() {
   const [params, setParams] = useState<Param[]>(panelParams)
@@ -186,7 +186,6 @@ export default function Workbench() {
                 <ExportMenu
                   partId="shelf-bracket"
                   export={fakeExport}
-                  profiles={["Bambu P1S 0.4", "Prusa MK4 0.4"]}
                   status={{ state: "succeeded", grams: 42.4, seconds: 5400 }}
                   revision={REVISION}
                 />

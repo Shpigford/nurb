@@ -9,7 +9,7 @@ import type { ReactNode, SVGProps } from "react"
 // 11810 download · 11809 expand · 12597 eye · 61037 link · 2020 chevron-up
 // 1903 minus · 11742 arrow-up · 61842 media-stop (glyph) · 62372 loader
 // 11984 chat-bubble · 12594 dots · 1897 trash · 12065 ruler · 12602 gear
-// 12383 user · 60577 rect-logout · 1942 box.
+// 12383 user · 60577 rect-logout · 1942 box · 12591 copy · 1976 folder.
 
 export type IconName =
   | "chevron-left"
@@ -39,6 +39,8 @@ export type IconName =
   | "user"
   | "logout"
   | "box"
+  | "copy"
+  | "folder"
 
 const PATHS: Record<IconName, ReactNode> = {
   "chevron-left": <polyline points="7.75 1.75 3.5 6 7.75 10.25" />,
@@ -205,6 +207,18 @@ const PATHS: Record<IconName, ReactNode> = {
       <line x1="6" y1=".75" x2="6" y2="3.75" />
       <line x1="3.75" y1="8.25" x2="5.25" y2="8.25" />
       <path d="m1.25,3.75l1.461-2.504c.179-.307.508-.496.864-.496h4.851c.356,0,.685.189.864.496l1.461,2.504v5c0,1.105-.895,2-2,2H3.25c-1.105,0-2-.895-2-2V3.75Z" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect x="3.25" y=".75" width="8" height="8" rx="1.5" ry="1.5" />
+      <path d="m8.25,11.25H2.25c-.828,0-1.5-.672-1.5-1.5V3.75" />
+    </>
+  ),
+  folder: (
+    <>
+      <path d="m.75,7.25V3.25c0-1.105.895-2,2-2h1.701c.607,0,1.18.275,1.56.748l.603.752h2.636c1.105,0,2,.895,2,2v2.5" />
+      <path d="m2.75,5.25h6.5c1.105,0,2,.895,2,2v1.5c0,1.105-.895,2-2,2H2.75c-1.105,0-2-.895-2-2v-1.5c0-1.105.895-2,2-2Z" />
     </>
   ),
 }

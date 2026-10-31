@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "nurb",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0",
   "identifier": "dev.nurb.desktop",
   "build": {
     "beforeDevCommand": "npm run stage && npm run dev",
@@ -17,12 +17,12 @@
         "theme": "Light",
         "hiddenTitle": true,
         "trafficLightPosition": {
-          "x": 18,
-          "y": 22
+          "x": 33,
+          "y": 44
         },
         "backgroundColor": "#e5f0fb",
-        "width": 1360,
-        "height": 860,
+        "width": 1440,
+        "height": 900,
         "minWidth": 1200,
         "minHeight": 640
       }
@@ -52,13 +52,6 @@
       "endpoints": [
         "https://github.com/Shpigford/nurb/releases/download/desktop-latest/latest.json"
       ]
-    },
-    "deep-link": {
-      "desktop": {
-        "schemes": [
-          "nurb"
-        ]
-      }
     }
   },
   "bundle": {

@@ -1,9 +1,10 @@
-import { useEffect, useId, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import clsx from "clsx"
 import Icon from "../Icon"
+import Floating from "../layout/Floating"
 import { rev } from "../format"
 
-export type ExportFormat = "3mf" | "stl" | "step" | "glb"
+export type ExportFormat = "3mf" | "stl" | "step"
 
 export interface ExportResult {
   /** Where the finished file lives. The menu hands it to the user as a link. */
@@ -23,9 +24,7 @@ export interface ExportMenuProps {
   /** Stable identity of the part being exported. */
   partId: string
   /** Builds the file. The menu shows a pending state until this settles. */
-  export: (format: ExportFormat, profile?: string) => Promise<ExportResult>
-  /** Printer profiles the host offers; the first is selected. */
-  profiles?: string[]
+  export: (format: ExportFormat) => Promise<ExportResult>
   /** The slicer estimate for the export just handed out. */
   status?: ExportStatus | null
   revision?: number
@@ -37,7 +36,6 @@ const ROWS: { format: ExportFormat; caption: string; recommended?: boolean }[] =
   { format: "3mf", caption: "Print-ready, keeps units and orientation.", recommended: true },
   { format: "stl", caption: "Print-ready mesh. Works in every slicer." },
   { format: "step", caption: "Solid model, for another CAD tool." },
-  { format: "glb", caption: "Mesh for a viewer or a render." },
 ]
 
 function estimateLine(status: ExportStatus): string {
@@ -53,21 +51,17 @@ function estimateLine(status: ExportStatus): string {
 // The DOWNLOAD button opens a popover above it: one row per format, the file
 // built on demand. The finished file arrives as a link rather than an automatic
 // save, because the file belongs to the user's click, not to the menu's.
-export default function ExportMenu({ partId, export: runExport, profiles, status, revision, runId }: ExportMenuProps) {
+export default function ExportMenu({ partId, export: runExport, status, revision, runId }: ExportMenuProps) {
   const [open, setOpen] = useState(false)
   const [preparing, setPreparing] = useState<ExportFormat | null>(null)
   const [ready, setReady] = useState<{ format: ExportFormat; result: ExportResult } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  // The host may name the printer after this menu mounts, so the choice falls back
-  // to the first offered rather than freezing at whatever was there on the first render.
-  const [picked, setPicked] = useState<string>()
-  const profile = picked ?? profiles?.[0]
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
   const requestIdRef = useRef(0)
   const previousGeometryRef = useRef({ partId, revision, runId })
-  const profileId = useId()
 
   // A prepared file describes one build. The menu stays open through a rebuild,
   // because the user opened it; only the file it is offering goes.
@@ -89,7 +83,10 @@ export default function ExportMenu({ partId, export: runExport, profiles, status
   useEffect(() => {
     if (!open) return
     const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
+      // The popover is drawn on the body, so it is no longer inside the trigger's box.
+      const target = event.target as Node
+      if (rootRef.current?.contains(target) || popRef.current?.contains(target)) return
+      setOpen(false)
     }
     // Arrows walk the formats, the way any open menu does; without them the only way
     // through the list is Tab, which walks out of the popover as readily as down it.
@@ -124,7 +121,7 @@ export default function ExportMenu({ partId, export: runExport, profiles, status
     setError(null)
     setReady(null)
     try {
-      const result = await runExport(format, profile)
+      const result = await runExport(format)
       if (requestId !== requestIdRef.current) return
       setReady({ format, result })
     } catch (failure) {
@@ -150,35 +147,20 @@ export default function ExportMenu({ partId, export: runExport, profiles, status
         <Icon name="chevron-down" />
       </button>
 
+      {/* Portalled: the rail's footer scroller clips, and the first row was cut at its edge. */}
       {open ? (
-        <div
-          className="absolute bottom-full left-0 z-10 mb-2 w-[254px] overflow-hidden rounded-content border border-panel-edge bg-ground shadow-[var(--shadow-panel)]"
+        <Floating
+          ref={popRef}
+          anchor={triggerRef}
+          width={254}
+          align="left"
+          gap={8}
+          className="z-30 overflow-hidden rounded-content border border-panel-edge bg-ground shadow-[var(--shadow-panel)]"
         >
           <div className="chrome flex h-[30px] items-center justify-between border-b border-line-soft px-3">
             <span className="mono-label text-muted">Download</span>
             {revision != null ? <span className="mono-caption text-muted">{rev(revision)}</span> : null}
           </div>
-
-          {profiles && profiles.length > 1 ? (
-            <div className="flex items-center gap-2 border-b border-line-soft px-3 py-2">
-              <label htmlFor={profileId} className="mono-caption text-muted">
-                Printer
-              </label>
-              <select
-                id={profileId}
-                value={profile}
-                onChange={(e) => setPicked(e.target.value)}
-                className="mono-value ml-auto rounded-control border border-line bg-ground px-1.5 py-0.5 text-ink"
-              >
-                {/* A profile name is a filename; a machine is a thing on a bench. */}
-                {profiles.map((name) => (
-                  <option key={name} value={name}>
-                    {name.replace(/_/g, " ")}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
 
           {error ? (
             <div className="border-b border-line-soft bg-fail-wash px-3 py-2 text-[11px] leading-4 text-ink-soft">
@@ -241,7 +223,7 @@ export default function ExportMenu({ partId, export: runExport, profiles, status
               <span className="mono-caption text-muted">{estimateLine(status)}</span>
             </div>
           ) : null}
-        </div>
+        </Floating>
       ) : null}
     </div>
   )

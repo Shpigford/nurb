@@ -3,13 +3,18 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import App from "./App"
 import { part, project, summaries } from "./fixtures"
-import type { Part, Project, StressResult } from "./api"
+import type { Part, Project } from "./api"
 import { FakeSocket, installSocket } from "./socket-stub"
 
 // The real island needs WebGL; the stage's data attribute is what the tests read.
+const heard = vi.hoisted(() => [] as string[])
 vi.mock("@nurb/ui", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@nurb/ui")>()
-  return { ...actual, ViewerIsland: () => <div data-testid="viewer" /> }
+  return {
+    ...actual,
+    ViewerIsland: () => <div data-testid="viewer" />,
+    cue: (name: string) => heard.push(name),
+  }
 })
 
 interface Call {
@@ -47,6 +52,7 @@ function install(routes: Record<string, (body: Record<string, unknown> | null) =
 
 beforeEach(() => {
   calls = []
+  heard.length = 0
   state = withPart({})
   installSocket()
   URL.createObjectURL = vi.fn(() => "blob:lid") as never
@@ -86,6 +92,49 @@ describe("sliders", () => {
     expect(sent("/params")[0].body).toEqual({ values: { ribs: 6, wall: 3 } })
   })
 
+  it("cues once when a rebuild the user watched comes back passing", async () => {
+    state = withPart({ params: [{ name: "wall", kind: "float", default: 2 }] })
+    install({ "POST /api/parts/part-lid/params": () => ({ build: base.build }) })
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByLabelText("wall")).toBeInTheDocument())
+    // Opening a part that was already built is not news, so nothing has sounded yet.
+    expect(heard).not.toContain("ready")
+
+    vi.useFakeTimers()
+    fireEvent.change(screen.getByLabelText("wall"), { target: { value: "3" } })
+    act(() => void vi.advanceTimersByTime(300))
+    vi.useRealTimers()
+    // One cue per build, not one per frame of the drag.
+    await waitFor(() => expect(heard.filter((c) => c === "ready")).toHaveLength(1))
+  })
+
+  it("locks a dimension the spec pinned instead of offering it as a slider", async () => {
+    state = {
+      ...withPart({
+        params: [
+          { name: "wall", kind: "float", default: 2 },
+          { name: "rail_width", kind: "float", default: 25.16 },
+        ],
+      }),
+      spec: {
+        part_name: "lid",
+        summary: "A lid",
+        params: [],
+        dimensions: [{ name: "rail_width", value_mm: 25.16, how: "calipers", provisional: false }],
+        acceptance: [],
+        conventions: { expose_params: true, parameter_style: "keyword" },
+      },
+    }
+    install()
+    render(<App />)
+
+    await screen.findByLabelText("wall")
+    expect(screen.getByText("Pinned by spec")).toBeInTheDocument()
+    expect(screen.getByText("25.16 mm")).toBeInTheDocument()
+    expect(screen.queryByLabelText("rail_width")).toBeNull()
+  })
+
   it("drops a queued rebuild when the view goes away", async () => {
     install({ "POST /api/parts/part-lid/params": () => ({ build: base.build }) })
     const view = render(<App />)
@@ -116,7 +165,12 @@ describe("sliders", () => {
     act(() => void vi.advanceTimersByTime(300))
     vi.useRealTimers()
 
-    expect(await screen.findByText("build lid once before changing its parameters")).toBeInTheDocument()
+    // The refusal renders after the response body is read; a loaded CI runner has
+    // missed the default one-second window, so wait for the request first.
+    await waitFor(() => expect(sent("/params")).toHaveLength(1))
+    expect(
+      await screen.findByText("build lid once before changing its parameters", {}, { timeout: 5000 })
+    ).toBeInTheDocument()
     expect(screen.getByLabelText("wall")).toBeInTheDocument()
   })
 
@@ -168,37 +222,18 @@ describe("apply", () => {
   })
 })
 
-describe("stress", () => {
-  const answer: StressResult = {
-    kg: 2,
-    material: "PLA",
-    max_mpa: 8.1,
-    across_mpa: 3.2,
-    deflection_mm: 0.4,
-    elements: 12000,
-    pitch_mm: 1.2,
-    holds_kg: 12,
-    factor: 6,
-    gives: "layers",
-    glb_hash: "h1",
-    run_id: "b1",
-  }
-
-  it("drops the answer when the shape changes under it", async () => {
-    state = withPart({ build: { ...base.build!, stress: answer } })
-    install()
-    render(<App />)
-    expect(await screen.findByText(/holds up to about 12 kg \(26 lb\)/)).toBeInTheDocument()
-
-    state = withPart({ build: { ...base.build!, id: "b2", glb_url: "/glb/p2/lid.glb?run=b2" } })
-    FakeSocket.instances[0].emit({ kind: "build", id: "b2", project_id: "p2" })
-
-    await waitFor(() =>
-      expect(screen.getByText("the shape changed · run stress again")).toBeInTheDocument()
-    )
-    expect(screen.queryByText(/holds up to about/)).toBeNull()
-  })
-})
+const BENCH = {
+  printers: [
+    { name: "bambu_x1c", label: "Bambu Lab X1 Carbon", brand: "Bambu Lab", bed: [256, 256, 256], default: true },
+    { name: "prusa_mk4", label: "Prusa MK4", brand: "Prusa", bed: [250, 210, 220], default: false },
+  ],
+  catalogue: [
+    { name: "bambu_x1c", label: "Bambu Lab X1 Carbon", brand: "Bambu Lab", bed: [256, 256, 256] },
+    { name: "prusa_mk4", label: "Prusa MK4", brand: "Prusa", bed: [250, 210, 220] },
+    { name: "ender_3", label: "Creality Ender 3", brand: "Creality", bed: [220, 220, 250] },
+  ],
+  slicer: { name: "OrcaSlicer", path: "/Applications/OrcaSlicer.app" },
+}
 
 describe("print time", () => {
   it("asks which printer, then names one and slices again", async () => {
@@ -206,17 +241,127 @@ describe("print time", () => {
       build: { ...base.build!, slice: { kind: "choose", profiles: ["bambu_x1c", "prusa_mk4"] } },
     })
     install({
+      "GET /api/printers": () => BENCH,
       "POST /api/projects/p2/printer": () => ({ printer: { name: "prusa_mk4", bed: [250, 210, 220] } }),
     })
     render(<App />)
 
-    expect(await screen.findByText("which printer is this for?")).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: "choose your printer…" }))
-    await userEvent.click(screen.getByRole("button", { name: "prusa mk4" }))
+    expect(await screen.findByText("Which printer is this part for?")).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole("button", { name: "choose a printer" }))
+    await userEvent.click(await screen.findByRole("menuitemradio", { name: /Prusa MK4/ }))
 
     await waitFor(() => expect(sent("/printer")).toHaveLength(1))
     expect(sent("/printer")[0].body).toEqual({ profile: "prusa_mk4" })
     expect(sent("/api/parts/part-lid/slice")).toHaveLength(1)
+  })
+
+  it("offers the catalogue when the bench is empty, and adds the one picked", async () => {
+    state = { ...withPart({ build: { ...base.build!, slice: null } }), printer: null, printers: [] }
+    install({
+      "GET /api/printers": () => ({ ...BENCH, printers: [] }),
+      "POST /api/printers": () => BENCH,
+      "POST /api/projects/p2/printer": () => ({ printer: { name: "prusa_mk4", bed: [250, 210, 220] } }),
+      "POST /api/parts/part-lid/slice": () => ({ kind: "slice", profile: "prusa_mk4", grams: 42 }),
+    })
+    render(<App />)
+
+    // The closed row says NO PRINTER; the answer to it is inside.
+    await userEvent.click(await screen.findByRole("button", { name: /SLICE/ }))
+    expect(await screen.findByText(/No printer yet/)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole("button", { name: "Add a printer" }))
+    await userEvent.click(await screen.findByRole("button", { name: /Prusa MK4/ }))
+    await userEvent.click(screen.getByRole("button", { name: "Add printer" }))
+
+    await waitFor(() => expect(sent("/api/printers")).toHaveLength(1))
+    expect(sent("/api/printers")[0].body).toEqual({ profile: "prusa_mk4" })
+    await waitFor(() => expect(sent("/printer")).toHaveLength(1))
+  })
+
+  it("shuts the picker on a second press of CHANGE", async () => {
+    state = {
+      ...withPart({
+        build: { ...base.build!, slice: { kind: "slice", profile: "prusa_mk4", grams: 42, seconds: 4320 } },
+      }),
+      printer: { name: "prusa_mk4", bed: [250, 210, 220] },
+      printers: ["prusa_mk4"],
+    }
+    install({ "GET /api/printers": () => BENCH })
+    render(<App />)
+
+    const change = await screen.findByRole("button", { name: "change" })
+    await userEvent.click(change)
+    expect(await screen.findByRole("menu", { name: "Print on" })).toBeInTheDocument()
+
+    // The outside-click listener must not eat the press that the trigger toggles on.
+    await userEvent.click(change)
+    await waitFor(() => expect(screen.queryByRole("menu", { name: "Print on" })).toBeNull())
+  })
+
+  it("puts a failure after the add in the row, not in a dialog that has gone", async () => {
+    state = { ...withPart({ build: { ...base.build!, slice: null } }), printer: null, printers: [] }
+    install({
+      "GET /api/printers": () => ({ ...BENCH, printers: [] }),
+      "POST /api/printers": () => BENCH,
+      "POST /api/projects/p2/printer": () =>
+        new Response(JSON.stringify({ error: "prusa_mk4 is not on your bench" }), { status: 400 }),
+    })
+    render(<App />)
+
+    await userEvent.click(await screen.findByRole("button", { name: /SLICE/ }))
+    await userEvent.click(await screen.findByRole("button", { name: "Add a printer" }))
+    await userEvent.click(await screen.findByRole("button", { name: /Prusa MK4/ }))
+    await userEvent.click(screen.getByRole("button", { name: "Add printer" }))
+
+    expect(await screen.findByText("prusa_mk4 is not on your bench")).toBeInTheDocument()
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("keeps the part's own printer out of the empty-bench state", async () => {
+    state = {
+      ...withPart({ build: { ...base.build!, slice: { kind: "slicer" } } }),
+      printer: { name: "prusa_mk4", bed: [250, 210, 220] },
+      printers: ["prusa_mk4"],
+    }
+    install({ "GET /api/printers": () => ({ ...BENCH, printers: [] }) })
+    render(<App />)
+
+    expect(await screen.findByText("no slicer found")).toBeInTheDocument()
+    expect(screen.queryByText(/No printer yet/)).toBeNull()
+  })
+
+  it("leaves a way back to another printer when the slicer refuses this one", async () => {
+    state = {
+      ...withPart({
+        build: {
+          ...base.build!,
+          slice: { kind: "profile", error: "OrcaSlicer has no profile for prusa_mk4." },
+        },
+      }),
+      printer: { name: "prusa_mk4", bed: [250, 210, 220] },
+      printers: ["prusa_mk4"],
+    }
+    install({ "GET /api/printers": () => BENCH })
+    render(<App />)
+
+    expect(await screen.findByText("OrcaSlicer has no profile for prusa_mk4.")).toBeInTheDocument()
+    expect(await screen.findByText("Prusa MK4")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "change" })).toBeInTheDocument()
+  })
+
+  it("refetches the bench when a printer changes in Settings", async () => {
+    state = {
+      ...withPart({
+        build: { ...base.build!, slice: { kind: "slice", profile: "prusa_mk4", grams: 42, seconds: 4320 } },
+      }),
+      printer: { name: "prusa_mk4", bed: [250, 210, 220] },
+      printers: ["prusa_mk4"],
+    }
+    install({ "GET /api/printers": () => BENCH })
+    render(<App />)
+
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/printers")).toHaveLength(1))
+    FakeSocket.instances[0].emit({ kind: "workshop", id: "prusa_mk4", project_id: "" })
+    await waitFor(() => expect(calls.filter((c) => c.url === "/api/printers").length).toBeGreaterThan(1))
   })
 })
 
@@ -231,6 +376,23 @@ describe("download", () => {
     const link = await screen.findByRole("link", { name: /lid.3mf/ })
     expect(link).toHaveAttribute("href", "blob:lid")
     expect(sent("/export")[0].body).toEqual({ format: "3mf", values: {} })
+  })
+
+  it("tells the shell the export started and landed, under one id", async () => {
+    install({ "POST /api/parts/part-lid/export": () => new Response("3mf bytes") })
+    const said: { id: string; title: string; detail?: string; tone: string }[] = []
+    const listen = (event: Event) => said.push((event as CustomEvent<(typeof said)[number]>).detail)
+    window.addEventListener("nurb:activity", listen)
+    render(<App />)
+
+    await userEvent.click(await screen.findByRole("button", { name: /Download/ }))
+    await userEvent.click(screen.getByRole("menuitem", { name: /3mf/i }))
+    await screen.findByRole("link", { name: /lid.3mf/ })
+    window.removeEventListener("nurb:activity", listen)
+
+    expect(said.map((a) => a.tone)).toEqual(["working", "done"])
+    expect(said[0].title).toBe("Exporting lid.3mf")
+    expect(said[1]).toMatchObject({ id: said[0].id, detail: "Saved" })
   })
 
   it("keeps the menu open when a rebuild lands under it, and drops the stale file", async () => {
@@ -248,5 +410,35 @@ describe("download", () => {
     await waitFor(() => expect(screen.queryByRole("link", { name: /lid.3mf/ })).toBeNull())
     expect(screen.getByRole("menuitem", { name: /3mf/i })).toBeInTheDocument()
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:lid")
+  })
+})
+
+describe("rail rows", () => {
+  it("opens the row that has something to say and leaves the others closed", async () => {
+    state = withPart({
+      build: {
+        ...base.build!,
+        findings: [{ rule: "overhang", severity: "warn", message: "chamfer to 45° for support-free" }],
+      },
+    })
+    install()
+    render(<App />)
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /CHECKS/ })).toHaveAttribute("aria-expanded", "true")
+    )
+  })
+
+  it("keeps CHECKS closed on a clean build, and opens SLICE on a seeded price", async () => {
+    state = withPart({
+      build: { ...base.build!, slice: { kind: "slice", seconds: 4320, grams: 42, run_id: "b1" } },
+    })
+    install()
+    render(<App />)
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /SLICE/ })).toHaveAttribute("aria-expanded", "true")
+    )
+    expect(screen.getByRole("button", { name: /CHECKS/ })).toHaveAttribute("aria-expanded", "false")
   })
 })

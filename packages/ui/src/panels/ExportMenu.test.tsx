@@ -21,7 +21,7 @@ describe("ExportMenu", () => {
   it("offers every print format", async () => {
     render(<ExportMenu partId="shelf" export={vi.fn()} />)
     await open()
-    for (const format of ["3mf", "stl", "step", "glb"]) {
+    for (const format of ["3mf", "stl", "step"]) {
       expect(screen.getByRole("menuitem", { name: new RegExp(format, "i") })).toBeInTheDocument()
     }
   })
@@ -45,13 +45,12 @@ describe("ExportMenu", () => {
     expect(screen.queryByText("preparing")).toBeNull()
   })
 
-  it("passes the chosen format and printer profile to the host", async () => {
+  it("passes the chosen format to the host", async () => {
     const run = vi.fn().mockResolvedValue({ url: "/exports/a.stl" })
-    render(<ExportMenu partId="shelf" export={run} profiles={["Bambu P1S 0.4", "Prusa MK4 0.4"]} />)
+    render(<ExportMenu partId="shelf" export={run} />)
     await open()
-    await userEvent.selectOptions(screen.getByLabelText("Printer"), "Prusa MK4 0.4")
     await userEvent.click(screen.getByRole("menuitem", { name: /stl/i }))
-    await waitFor(() => expect(run).toHaveBeenCalledWith("stl", "Prusa MK4 0.4"))
+    await waitFor(() => expect(run).toHaveBeenCalledWith("stl"))
   })
 
   it("shows the reason when the export rejects", async () => {
@@ -137,15 +136,6 @@ describe("ExportMenu", () => {
     await userEvent.keyboard("{ArrowDown}")
     await userEvent.keyboard("{Escape}")
     expect(screen.getByRole("button", { name: /Download/ })).toHaveFocus()
-  })
-
-  it("takes the first printer offered after the project names one", async () => {
-    const run = vi.fn().mockResolvedValue({ url: "/exports/a.stl" })
-    const { rerender } = render(<ExportMenu partId="shelf" export={run} />)
-    await open()
-    rerender(<ExportMenu partId="shelf" export={run} profiles={["bambu_x1c", "prusa_mk4s"]} />)
-    await userEvent.click(screen.getByRole("menuitem", { name: /stl/i }))
-    await waitFor(() => expect(run).toHaveBeenCalledWith("stl", "bambu_x1c"))
   })
 
   it("drops the prepared file when a new build lands, without closing the menu", async () => {

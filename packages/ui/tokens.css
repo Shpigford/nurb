@@ -2,11 +2,18 @@
 
 /* ---------------------------------------------------------------------------
    Fonts. Satoshi announces, Instrument Sans speaks, JetBrains Mono measures.
-   Satoshi is referenced by name only: its Fontshare license forbids
-   redistribution, so the consuming app supplies the file. The other two ship
-   with this package under the OFL. Never italic (DESIGN.md §3).
+   All three ship as variable TTFs with this package so nothing depends on a
+   third-party CDN: Instrument Sans and JetBrains Mono under the OFL, Satoshi
+   under the Fontshare EULA (fonts/SATOSHI-LICENSE.md). Never italic
+   (DESIGN.md §3).
    --------------------------------------------------------------------------- */
 
+@font-face {
+  font-family: "Satoshi";
+  src: url("./fonts/Satoshi-Variable.ttf") format("truetype");
+  font-weight: 300 900;
+  font-display: swap;
+}
 @font-face {
   font-family: "Instrument Sans";
   src: url("./fonts/InstrumentSans-Variable.ttf") format("truetype");
@@ -75,6 +82,17 @@
   --shadow-panel: 0 1px 2px rgb(24 42 74 / 0.08), 0 3px 8px rgb(24 42 74 / 0.06);
   --shadow-control: 0 1px 2px rgb(24 42 74 / 0.08);
 
+  /* Motion. Tailwind 4 turns --ease-* into ease-* utilities; the durations are
+     named, not numbered, because one 150ms everywhere is what makes an interface
+     feel like a spreadsheet. A press answers (tick), a panel settles, a result
+     arrives, a build pulse coasts. Pick by what the motion means. */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-tick: 90ms;
+  --duration-settle: 240ms;
+  --duration-arrive: 420ms;
+  --duration-coast: 1400ms;
+
   --breakpoint-md: 768px;
   --breakpoint-lg: 1024px;
 }
@@ -139,10 +157,10 @@
   text-transform: uppercase;
 }
 
-/* Chat prose: 13.5 / 20. */
+/* Chat prose: 12.5 / 18. Transcripts run long, so this sits under the 13.5 body size. */
 @utility text-chat {
-  font-size: 13.5px;
-  line-height: 20px;
+  font-size: 12.5px;
+  line-height: 18px;
 }
 
 /* Headline: Satoshi, never italic. */
@@ -155,6 +173,63 @@
 @utility chrome {
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* Parameter sliders. Native input[type=range] keeps the platform keyboard map
+   and assistive-tech behaviour; only the paint is ours. The filled portion has
+   no cross-browser pseudo-element, so the track is a gradient stopped under
+   the thumb's centre: --pct (0–1, set by the component on every value change)
+   of the thumb's travel, which is the track less one thumb width. */
+.param-slider {
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+.param-slider:focus {
+  outline: none;
+}
+.param-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) calc(6px + (100% - 12px) * var(--pct, 0)),
+    var(--color-line) calc(6px + (100% - 12px) * var(--pct, 0))
+  );
+}
+.param-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -4px;
+  height: 12px;
+  width: 12px;
+  border-radius: 9999px;
+  background: var(--color-ground);
+  border: 1.5px solid var(--color-accent);
+}
+.param-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--color-accent-wash);
+}
+.param-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-line);
+}
+.param-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+.param-slider::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border-radius: 9999px;
+  background: var(--color-ground);
+  border: 1.5px solid var(--color-accent);
+}
+.param-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--color-accent-wash);
 }
 
 /* Streaming caret for markdown replies: rides on the last rendered node so it

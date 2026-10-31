@@ -1,7 +1,10 @@
-import { useEffect, useId, useState } from "react"
+import { useEffect, useId, useState, type ReactNode } from "react"
+import { motion, useReducedMotion } from "motion/react"
 import clsx from "clsx"
 import Icon from "./Icon"
 import { elapsedLabel } from "./format"
+import { useAutoHeight } from "./motion/useAutoHeight"
+import { duration, ease } from "./motion/tokens"
 import type { ToolStep } from "./types"
 
 // One tool call as a row: verb, object, elapsed. Liveness is the counter, never a
@@ -29,6 +32,37 @@ function Elapsed({ startedAt, className }: { startedAt: string; className?: stri
   }, [])
   const s = Math.max(0, (now - new Date(startedAt).getTime()) / 1000)
   return <span aria-hidden="true" className={className}>{elapsedLabel(s)}</span>
+}
+
+/** The disclosure arrow. It turns at the tick, the shortest step we have. */
+function Chevron({ open }: { open: boolean }) {
+  const reduced = useReducedMotion() === true
+  return (
+    <motion.span
+      aria-hidden="true"
+      className="flex shrink-0 items-center text-faint"
+      animate={{ rotate: open ? 0 : -90 }}
+      transition={{ duration: reduced ? 0 : duration.tick, ease: ease.out as [number, number, number, number] }}
+    >
+      <Icon name="chevron-down" />
+    </motion.span>
+  )
+}
+
+/**
+ * The detail travels to a measured height and then settles back to auto. The
+ * children stay unmounted while it is shut, so a closed row holds no text: the
+ * wrapper is what is measured, and it is empty until the row opens.
+ */
+function Expand({ open, id, className, children }: { open: boolean; id: string; className?: string; children: ReactNode }) {
+  const h = useAutoHeight(open)
+  return (
+    <motion.div id={id} style={h.style} animate={h.animate} transition={h.transition} onAnimationComplete={h.onAnimationComplete}>
+      <div ref={h.ref} className={className}>
+        {open ? children : null}
+      </div>
+    </motion.div>
+  )
 }
 
 function describe(step: ToolStep): string {
@@ -83,40 +117,29 @@ export function ToolStepCard({ step, defaultOpen }: { step: ToolStep; defaultOpe
             {elapsedLabel(seconds(step, Date.now()))}
           </span>
         )}
-        {expandable ? (
-          <span
-            aria-hidden="true"
-            className={clsx("flex shrink-0 items-center text-faint transition-transform duration-[120ms]", !open && "-rotate-90")}
-          >
-            <Icon name="chevron-down" />
-          </span>
-        ) : null}
+        {expandable ? <Chevron open={open} /> : null}
         <span className="sr-only">{describe(step)}</span>
       </button>
 
-      {open && expandable ? (
-        <div id={bodyId} className="relative flex flex-col gap-1.5 pt-1.5 pr-2 pb-2.5 pl-7">
-          <span aria-hidden="true" className="absolute top-0 bottom-0 left-[13px] w-px bg-line-soft" />
-          {input ? (
-            <div className="flex flex-col gap-1">
-              <span className="mono-label text-muted">INPUT</span>
-              <pre className="max-h-[216px] overflow-y-auto rounded-[6px] bg-raised px-2.5 py-2 font-mono text-[11.5px] leading-[17px] break-words whitespace-pre-wrap text-ink-soft">
-                {input}
-              </pre>
-            </div>
-          ) : null}
-          {output ? (
-            <div className="flex flex-col gap-1">
-              <span className="mono-label text-muted">OUTPUT</span>
-              <pre className="max-h-[216px] overflow-y-auto rounded-[6px] bg-raised px-2.5 py-2 font-mono text-[11.5px] leading-[17px] break-words whitespace-pre-wrap text-ink-soft">
-                {output}
-              </pre>
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <div id={bodyId} hidden />
-      )}
+      <Expand open={open && expandable} id={bodyId} className="relative flex flex-col gap-1.5 pt-1.5 pr-2 pb-2.5 pl-7">
+        <span aria-hidden="true" className="absolute top-0 bottom-0 left-[13px] w-px bg-line-soft" />
+        {input ? (
+          <div className="flex flex-col gap-1">
+            <span className="mono-label text-muted">INPUT</span>
+            <pre className="max-h-[216px] overflow-y-auto rounded-[6px] bg-raised px-2.5 py-2 font-mono text-[11.5px] leading-[17px] break-words whitespace-pre-wrap text-ink-soft">
+              {input}
+            </pre>
+          </div>
+        ) : null}
+        {output ? (
+          <div className="flex flex-col gap-1">
+            <span className="mono-label text-muted">OUTPUT</span>
+            <pre className="max-h-[216px] overflow-y-auto rounded-[6px] bg-raised px-2.5 py-2 font-mono text-[11.5px] leading-[17px] break-words whitespace-pre-wrap text-ink-soft">
+              {output}
+            </pre>
+          </div>
+        ) : null}
+      </Expand>
     </div>
   )
 }
@@ -170,16 +193,15 @@ function Group({ steps, defaultCollapsed }: { steps: ToolStep[]; defaultCollapse
           <span aria-hidden="true">· </span>
           {elapsedLabel(total)}
         </span>
-        <span
-          aria-hidden="true"
-          className={clsx("ml-1.5 flex shrink-0 items-center text-faint transition-transform duration-[120ms]", !open && "-rotate-90")}
-        >
-          <Icon name="chevron-down" />
+        <span aria-hidden="true" className="ml-1.5 flex items-center">
+          <Chevron open={open} />
         </span>
       </button>
-      <div id={bodyId} hidden={!open} className="flex flex-col gap-[2px]">
-        {open ? steps.map((step) => <ToolStepCard key={step.id} step={step} />) : null}
-      </div>
+      <Expand open={open} id={bodyId} className="flex flex-col gap-[2px]">
+        {steps.map((step) => (
+          <ToolStepCard key={step.id} step={step} />
+        ))}
+      </Expand>
     </div>
   )
 }

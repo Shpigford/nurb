@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { act, cleanup, render } from "@testing-library/react"
-import { ViewerIsland } from "./ViewerIsland"
+import { ViewerIsland, crossfadeGroups } from "./ViewerIsland"
 import type { Finding } from "../types"
-import { Box3, type Object3D, type Vector3 } from "three"
+import { Box3, Group, Mesh, MeshStandardMaterial, BoxGeometry, type Object3D, type Vector3 } from "three"
+import { duration } from "../motion/tokens"
 
 // jsdom has no WebGL and no GLTF, and its ResizeObserver does not exist at all. Those
 // three are mocked; every other piece of three.js is the real thing, because the point
@@ -116,13 +117,15 @@ type Holder = {
   camera: {
     updateMatrixWorld: (f?: boolean) => void
     matrixWorld: { elements: number[] }
-    position: { set: (x: number, y: number, z: number) => void }
+    position: { set: (x: number, y: number, z: number) => void; x: number; y: number }
   }
   controls: { dispatchEvent: (e: { type: string }) => void; target: { set: (x: number, y: number, z: number) => void }; update: () => boolean }
   plane: { constant: number }
+  root: { children: Object3D[] }
   part: { getWorldPosition: (v: Vector3) => Vector3; children: Object3D[] } | null
   box: Box3
   glows: { material: { opacity: number }; children: unknown[] }[]
+  purge: Object3D | null
 }
 const viewer = (container: HTMLElement): Holder =>
   (container.firstElementChild as HTMLElement & { __nurbViewer: Holder }).__nurbViewer
@@ -134,6 +137,13 @@ const matrix = (h: Holder) => {
 
 const settle = async () => {
   await act(async () => {})
+}
+
+// The crossfade runs on real rAF, so the outgoing group only goes back after it lands.
+const faded = async () => {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, duration.settle * 1000 + 120))
+  })
 }
 
 it("keeps the camera when a rebuild swaps in the same shape", async () => {
@@ -150,7 +160,11 @@ it("keeps the camera when a rebuild swaps in the same shape", async () => {
   const before = matrix(h)
   view.rerender(<ViewerIsland glbUrl="/b.glb" bed={[256, 256]} />)
   await settle()
-  expect(matrix(h)).toEqual(before)
+  // Each on-demand frame round-trips the camera through OrbitControls' spherical, so a kept
+  // view is kept to a float. A reframe would move it by tens of mm, not by 1e-13.
+  matrix(h).forEach((v, i) => expect(v).toBeCloseTo(before[i], 6))
+  expect(loads.disposed).not.toContain("/a.glb") // still dissolving, so still drawn
+  await faded()
   expect(loads.disposed).toContain("/a.glb")
 })
 
@@ -276,4 +290,144 @@ it("holds new findings until the part they describe has loaded", async () => {
     await new Promise((r) => setTimeout(r, 10)) // the held loader polls a real timer
   })
   expect(h.glows).toHaveLength(2)
+})
+
+it("keeps the old part in the scene until the new GLB is in it too", async () => {
+  const view = render(<ViewerIsland glbUrl="/a.glb" />)
+  await settle()
+  const h = viewer(view.container)
+  const parts = () => h.root.children.filter((c) => c.type === "Group" && c.children.length > 0)
+  expect(parts()).toHaveLength(1)
+  loads.hold = true
+  view.rerender(<ViewerIsland glbUrl="/b.glb" />)
+  await settle()
+  expect(parts()).toHaveLength(1) // the old one, never a blank stage
+  loads.hold = false
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 10))
+  })
+  expect(parts()).toHaveLength(2) // both, for the length of the dissolve
+  await faded()
+  expect(parts()).toHaveLength(1)
+})
+
+const fadeGroup = (opacity: number, transparent: boolean) => {
+  const group = new Group()
+  group.add(new Mesh(new BoxGeometry(1, 1, 1), new MeshStandardMaterial({ opacity, transparent })))
+  return group
+}
+const only = (group: Group) => (group.children[0] as Mesh).material as MeshStandardMaterial
+
+it("crossfades one group into another and hands back the survivor's own sorting", () => {
+  const from = fadeGroup(1, false)
+  const to = fadeGroup(0.3, true) // a context mesh, which is translucent on purpose
+  let clock = 0
+  const steps: (() => void)[] = []
+  const render = vi.fn()
+  const onDone = vi.fn()
+  crossfadeGroups(from, to, {
+    seconds: 0.24,
+    render,
+    onDone,
+    now: () => clock,
+    schedule: (step) => {
+      steps.push(step)
+      return steps.length
+    },
+    unschedule: () => {},
+  })
+  expect(only(to).opacity).toBe(0)
+  expect(only(from).depthWrite).toBe(false)
+
+  clock = 120
+  steps.pop()!()
+  expect(only(to).opacity).toBeCloseTo(0.15)
+  expect(only(from).opacity).toBeCloseTo(0.5)
+  expect(onDone).not.toHaveBeenCalled()
+
+  clock = 240
+  steps.pop()!()
+  expect(onDone).toHaveBeenCalledTimes(1)
+  // The survivor goes back to what it was, so depth sorting is not degraded for good.
+  expect(only(to).opacity).toBe(0.3)
+  expect(only(to).transparent).toBe(true)
+  expect(only(to).depthWrite).toBe(true)
+  expect(render).toHaveBeenCalled()
+})
+
+it("cancels a crossfade without calling onDone and leaves the survivor whole", () => {
+  const from = fadeGroup(1, false)
+  const to = fadeGroup(1, false)
+  const steps: (() => void)[] = []
+  const onDone = vi.fn()
+  const cancel = crossfadeGroups(from, to, {
+    seconds: 0.24,
+    render: () => {},
+    onDone,
+    now: () => 0,
+    schedule: (step) => {
+      steps.push(step)
+      return steps.length
+    },
+    unschedule: () => {},
+  })
+  cancel()
+  expect(onDone).not.toHaveBeenCalled()
+  expect(only(to).opacity).toBe(1)
+  expect(only(to).transparent).toBe(false)
+  steps.pop()!() // a frame that lands after the cancel does nothing
+  expect(only(to).opacity).toBe(1)
+})
+
+it("shows the gridfinity grid and its label for the length of the event", async () => {
+  vi.useFakeTimers()
+  const view = render(<ViewerIsland glbUrl="/a.glb" bed={[256, 256]} />)
+  await act(async () => {
+    await vi.runAllTimersAsync()
+  })
+  expect(view.container.textContent).not.toContain("GRID 42.0 MM")
+  act(() => {
+    window.dispatchEvent(new CustomEvent("nurb:gridfinity"))
+  })
+  expect(view.container.textContent).toContain("GRID 42.0 MM")
+  act(() => {
+    vi.advanceTimersByTime(4100)
+  })
+  expect(view.container.textContent).not.toContain("GRID 42.0 MM")
+})
+
+it("nudges the azimuth a notch on a new settleKey and leaves the camera there", async () => {
+  const view = render(<ViewerIsland glbUrl="/a.glb" settleKey={1} />)
+  await settle()
+  const h = viewer(view.container)
+  const angle = () => Math.atan2(h.camera.position.y, h.camera.position.x)
+  const before = angle()
+  view.rerender(<ViewerIsland glbUrl="/a.glb" settleKey={1} />)
+  await settle()
+  expect(angle()).toBeCloseTo(before) // the same key is not a request to move
+
+  view.rerender(<ViewerIsland glbUrl="/a.glb" settleKey={2} />)
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 1600))
+  })
+  expect(angle() - before).toBeCloseTo(Math.PI / 12, 3)
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 120))
+  })
+  expect(angle() - before).toBeCloseTo(Math.PI / 12, 3) // no snap back
+})
+
+it("lays the purge line once the part lands, with no bed set", async () => {
+  const view = render(<ViewerIsland glbUrl="/a.glb" purge />)
+  const h = viewer(view.container)
+  // No bed and no geometry is no plate, so the greeting has nothing to wipe across yet.
+  expect(h.purge).toBeNull()
+  await settle()
+  const drawn = h.purge
+  expect(drawn).not.toBeNull()
+
+  // And it is spent: the next build does not greet the user again.
+  view.rerender(<ViewerIsland glbUrl="/b.glb" purge />)
+  await settle()
+  expect(h.purge).toBe(drawn)
 })

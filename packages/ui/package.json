@@ -1,6 +1,6 @@
 {
   "name": "@nurb/ui",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0",
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -9,12 +9,14 @@
       "import": "./dist/index.js"
     },
     "./tokens.css": "./tokens.css",
-    "./fonts/*": "./fonts/*"
+    "./fonts/*": "./fonts/*",
+    "./brand/*": "./brand/*"
   },
   "files": [
     "dist",
     "tokens.css",
-    "fonts"
+    "fonts",
+    "brand"
   ],
   "scripts": {
     "build": "vite build",
@@ -22,6 +24,7 @@
     "test": "vitest run",
     "gallery": "vite --config gallery/vite.config.ts",
     "gallery:build": "vite build --config gallery/vite.config.ts",
+    "gallery:shots": "node gallery/shots.mjs",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
@@ -31,6 +34,8 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
+    "cuelume": "^0.2.2",
+    "motion": "^13.4.0",
     "react-markdown": "^10.1.0"
   },
   "devDependencies": {
@@ -38,6 +43,7 @@
     "@testing-library/jest-dom": "^6.8.0",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^22.20.3",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@types/three": "^0.185.4",

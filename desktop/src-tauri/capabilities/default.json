@@ -10,15 +10,27 @@
     "core:window:allow-start-dragging",
     "core:event:default",
     "opener:default",
+    "opener:allow-reveal-item-in-dir",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        }
+      ]
+    },
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "cursor://*" }]
+      "allow": [
+        {
+          "url": "cursor://*"
+        }
+      ]
     },
     "dialog:default",
     "updater:default",
     "process:allow-restart",
     "clipboard-manager:allow-write-text",
-    "deep-link:default",
     "fs:allow-write-file"
   ]
 }

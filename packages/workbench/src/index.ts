@@ -13,11 +13,9 @@ export {
   fetchProject,
   fetchProjects,
   importFolder,
-  openPublic,
   resolveBase,
   setPrinter,
   slicePart,
-  stressPart,
   type ApplyResult,
   type Part,
   type PartBuild,
@@ -26,7 +24,6 @@ export {
   type ProjectMeasurement,
   type ProjectSummary,
   type SliceResult,
-  type StressResult,
 } from "./api"
 export { reconnect, subscribe, useLive, type LiveEvent } from "./live"
 export { useProject } from "./useProject"

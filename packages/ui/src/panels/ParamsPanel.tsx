@@ -1,11 +1,44 @@
-import { useId, useMemo, useRef, useState } from "react"
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent,
+} from "react"
 import clsx from "clsx"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import Icon from "../Icon"
+import LoadingButton from "../motion/LoadingButton"
+import { duration, ease } from "../motion/tokens"
+import { DetentMarks, useSliderDetents } from "../motion/useSliderDetents"
+import { cue } from "../sound"
 import type { BuildStats, Param, Params } from "../types"
-import { adjustable, decimals, dirtyValues, sliderRange, tidy } from "./paramsState"
+import { adjustable, decimals, detentsFor, dirtyValues, rangeFor, tidy, type Measurement } from "./paramsState"
+
+// motion wants a tuple; ease.out is a plain number[].
+const OUT = ease.out as [number, number, number, number]
+
+// No part declares a unit. Every dimension the engine reports is millimetres.
+const UNIT = "mm"
+
+// Horizontal travel that buys one step when scrubbing the number field.
+const SCRUB_PX = 4
+// Quiet enough that a fast scrub ticks, not buzzes.
+const TICK_MS = 60
+// How far past the end of the track a drag has to travel before it counts as a
+// push rather than a thumb parked on the last stop.
+const OVERSHOOT_PX = 6
 
 export interface ParamsPanelProps {
   params: Param[]
+  /** Project measurements. Each one inside a float slider's range becomes a stop on it. */
+  measurements?: Measurement[]
+  /** Nozzle width in mm, which sets where the whole-line stops fall on a wall. */
+  nozzle?: number
   /** Session values keyed by parameter name; anything missing reads its default. */
   values: Params
   onChange: (values: Params) => void
@@ -32,16 +65,6 @@ function label(name: string) {
   return name.replace(/_/g, " ")
 }
 
-// A param may annotate its own range; otherwise it is guessed from the default.
-function rangeFor(param: Param, int: boolean) {
-  const guess = sliderRange(param.default as number, int)
-  return {
-    lo: param.min ?? guess.lo,
-    hi: param.max ?? guess.hi,
-    step: param.step ?? guess.step,
-  }
-}
-
 function SectionRule({ children }: { children: string }) {
   return (
     <div className="chrome flex items-center gap-2 px-4 pt-[11px] pb-2">
@@ -65,18 +88,22 @@ function ResetDot({ param, onReset }: { param: Param; onReset: () => void }) {
 }
 
 // Label and value on one baseline, the slider beneath. The value is still a
-// field: click it to type an exact number.
+// field: click it to type an exact number, or drag it sideways to scrub.
 function NumberRow({
   id,
   param,
   value,
   dirty,
+  measurements,
+  nozzle,
   onValue,
 }: {
   id: string
   param: Param
   value: number
   dirty: boolean
+  measurements?: Measurement[]
+  nozzle?: number
   onValue: (value: number) => void
 }) {
   const int = param.kind === "int"
@@ -92,6 +119,87 @@ function NumberRow({
     if (shown !== text) setText(shown)
   }
 
+  const reduced = useReducedMotion()
+  const detents = useMemo(() => detentsFor(param, measurements, nozzle), [param, measurements, nozzle])
+  const slider = useSliderDetents({
+    value,
+    onValueChange: onValue,
+    min: lo,
+    max: hi,
+    step,
+    detents,
+    pull: (hi - lo) * 0.045,
+  })
+
+  // The end of the track, said once. A native range clamps in silence, so without
+  // this the thumb simply stops and never says why it stopped there.
+  const [limit, setLimit] = useState<{ end: "min" | "max" } | null>(null)
+  const [bump, setBump] = useState(0)
+  useEffect(() => {
+    if (!limit) return
+    setBump(limit.end === "max" ? 3 : -3)
+    const spring = setTimeout(() => setBump(0), reduced ? 0 : duration.tick * 1000)
+    const hide = setTimeout(() => setLimit(null), 1200)
+    return () => {
+      clearTimeout(spring)
+      clearTimeout(hide)
+    }
+  }, [limit, reduced])
+  // A fresh object every time, so pushing at the end twice replays the nudge.
+  const flash = (end: "min" | "max") => setLimit({ end })
+
+  const onSliderChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (int) {
+      onValue(Math.round(Number(event.target.value)))
+      return
+    }
+    slider.onChange(event)
+  }
+
+  // A range at its bound emits no change event, so a drag that keeps pushing is
+  // silent to onChange. The pointer's own position is what says the push happened.
+  const dragging = useRef(false)
+  const outside = useRef(false)
+
+  const onTrackPointerDown = (event: PointerEvent<HTMLInputElement>) => {
+    if (event.button !== 0) return
+    dragging.current = true
+    outside.current = false
+  }
+
+  const onTrackPointerMove = (event: PointerEvent<HTMLInputElement>) => {
+    if (!dragging.current) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    const past =
+      event.clientX > rect.right + OVERSHOOT_PX ? "max" : event.clientX < rect.left - OVERSHOOT_PX ? "min" : null
+    if (!past) {
+      // Back over the track. The next push out earns its own line.
+      outside.current = false
+      return
+    }
+    if (outside.current) return
+    if (past === "max" && value >= hi) {
+      outside.current = true
+      flash("max")
+    } else if (past === "min" && value <= lo) {
+      outside.current = true
+      flash("min")
+    }
+  }
+
+  const endTrackDrag = () => {
+    dragging.current = false
+    outside.current = false
+  }
+
+  const onSliderKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    const up = event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "PageUp"
+    const down = event.key === "ArrowLeft" || event.key === "ArrowDown" || event.key === "PageDown"
+    if (up && value >= hi) flash("max")
+    else if (down && value <= lo) flash("min")
+    slider.onKeyDown(event)
+  }
+
   const commitText = () => {
     editing.current = false
     const parsed = Number(text)
@@ -100,6 +208,52 @@ function NumberRow({
       return
     }
     onValue(int ? Math.round(parsed) : parsed)
+  }
+
+  // The grid is passed in, never read at the time of the move: a gesture that
+  // crosses a decimal boundary would otherwise finish on a step ten times the one
+  // it started with, and jump.
+  const stepFrom = (from: number, steps: number, grid: number) => {
+    const next = int ? Math.round(from + steps * grid) : tidy(from + steps * grid, grid)
+    if (next !== value) onValue(next)
+    return next
+  }
+
+  // Scrubbing the field. Nothing is captured until the pointer actually travels,
+  // so a plain click still places the caret and typing works as it always did.
+  const drag = useRef<{ x: number; from: number; step: number; scrubbing: boolean } | null>(null)
+  const ticked = useRef(0)
+
+  const onFieldPointerDown = (event: PointerEvent<HTMLInputElement>) => {
+    if (event.button !== 0) return
+    drag.current = { x: event.clientX, from: value, step, scrubbing: false }
+  }
+
+  const onFieldPointerMove = (event: PointerEvent<HTMLInputElement>) => {
+    const held = drag.current
+    if (!held) return
+    const dx = event.clientX - held.x
+    if (!held.scrubbing) {
+      if (Math.abs(dx) < SCRUB_PX) return
+      held.scrubbing = true
+      event.currentTarget.setPointerCapture?.(event.pointerId)
+    }
+    const before = value
+    const next = stepFrom(held.from, Math.round(dx / SCRUB_PX), held.step)
+    if (next === before) return
+    const now = Date.now()
+    if (now - ticked.current >= TICK_MS) {
+      ticked.current = now
+      cue("tick")
+    }
+  }
+
+  const onFieldPointerUp = (event: PointerEvent<HTMLInputElement>) => {
+    const held = drag.current
+    drag.current = null
+    if (held?.scrubbing && event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
   }
 
   return (
@@ -115,40 +269,86 @@ function NumberRow({
           </label>
           {dirty ? <ResetDot param={param} onReset={() => onValue(param.default as number)} /> : null}
         </div>
-        <input
-          value={text}
-          onChange={(e) => {
-            editing.current = true
-            setText(e.target.value)
-          }}
-          onBlur={commitText}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") commitText()
-            if (e.key === "Escape") {
-              editing.current = false
-              setText(formatValue(value, int, step))
-            }
-          }}
-          inputMode={int ? "numeric" : "decimal"}
-          aria-label={`${param.name} value`}
-          className={clsx(
-            "mono-value w-16 rounded-control border-0 bg-transparent p-0 text-right focus:bg-raised focus:outline-1 focus:outline-accent",
-            dirty ? "text-accent-ink" : "text-ink"
-          )}
-        />
+        <div className="flex shrink-0 items-baseline gap-1.5">
+          {slider.activeLabel ? <span className="mono-caption text-faint">{slider.activeLabel}</span> : null}
+          <input
+            value={text}
+            onChange={(e) => {
+              editing.current = true
+              setText(e.target.value)
+            }}
+            onBlur={commitText}
+            onPointerDown={onFieldPointerDown}
+            onPointerMove={onFieldPointerMove}
+            onPointerUp={onFieldPointerUp}
+            onPointerCancel={onFieldPointerUp}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitText()
+              if (e.key === "Escape") {
+                // Escape mid-scrub puts back the number the drag started from.
+                const held = drag.current
+                drag.current = null
+                editing.current = false
+                if (held?.scrubbing) onValue(held.from)
+                else setText(formatValue(value, int, step))
+              }
+              // Up and down step the value. Left and right stay with the caret,
+              // because this is still a field someone types into.
+              if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                e.preventDefault()
+                stepFrom(value, (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1), step)
+              }
+            }}
+            inputMode={int ? "numeric" : "decimal"}
+            aria-label={`${param.name} value`}
+            className={clsx(
+              "mono-value w-16 cursor-ew-resize rounded-control border-0 bg-transparent p-0 text-right focus:bg-raised focus:outline-1 focus:outline-accent",
+              dirty ? "text-accent-ink" : "text-ink"
+            )}
+          />
+        </div>
       </div>
-      <input
-        id={id}
-        type="range"
-        min={lo}
-        max={hi}
-        step={step}
-        value={value}
-        onChange={(e) => onValue(int ? Math.round(Number(e.target.value)) : tidy(Number(e.target.value), step))}
-        aria-label={label(param.name)}
-        aria-valuetext={`${value}`}
-        className="w-full accent-accent"
-      />
+      <motion.div
+        className="relative"
+        animate={{ x: bump }}
+        transition={{ duration: reduced ? 0 : duration.tick, ease: OUT }}
+      >
+        <input
+          id={id}
+          type="range"
+          min={lo}
+          max={hi}
+          step={step}
+          value={value}
+          onChange={onSliderChange}
+          onKeyDown={onSliderKeyDown}
+          onPointerDown={onTrackPointerDown}
+          onPointerMove={onTrackPointerMove}
+          onPointerUp={endTrackDrag}
+          onPointerCancel={endTrackDrag}
+          onLostPointerCapture={endTrackDrag}
+          aria-label={label(param.name)}
+          aria-valuetext={`${value}`}
+          className="param-slider w-full"
+          style={{ "--pct": hi === lo ? 0 : (value - lo) / (hi - lo) } as CSSProperties}
+        />
+        <DetentMarks detents={slider.detents} min={lo} max={hi} activeDetent={slider.activeDetent} />
+      </motion.div>
+      <AnimatePresence>
+        {limit ? (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduced ? 0 : duration.settle, ease: OUT }}
+            className="mono-caption text-accent-ink"
+          >
+            {limit.end === "max"
+              ? `${formatValue(hi, int, step)} ${UNIT} · widest this will go`
+              : `${formatValue(lo, int, step)} ${UNIT} · thinnest this will go`}
+          </motion.p>
+        ) : null}
+      </AnimatePresence>
     </div>
   )
 }
@@ -205,6 +405,8 @@ function BoolRow({
 // is what gets written into the part's keyword defaults.
 export default function ParamsPanel({
   params,
+  measurements,
+  nozzle,
   values,
   onChange,
   onApply,
@@ -280,6 +482,8 @@ export default function ParamsPanel({
               param={param}
               value={(values[param.name] ?? param.default) as number}
               dirty={param.name in dirty}
+              measurements={measurements}
+              nozzle={nozzle}
               onValue={(v) => setValue(param.name, v)}
             />
           ))}
@@ -316,15 +520,18 @@ export default function ParamsPanel({
           >
             Reset
           </button>
-          <button
-            type="button"
-            onClick={() => onApply(dirty)}
-            disabled={applying}
-            title="Save these values as the part's defaults."
-            className="mono-label rounded-control bg-ink px-2.5 py-1.5 text-white transition-colors hover:bg-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60"
-          >
-            {applying ? "Applying…" : "Apply"}
-          </button>
+          <span className="inline-flex" title="Save these values as the part's defaults.">
+            <LoadingButton
+              label="Apply"
+              pendingLabel="Applying"
+              successLabel="Applied"
+              errorLabel="Try again"
+              resetAfter={1400}
+              variant="ink"
+              disabled={applying}
+              onAction={() => onApply(dirty)}
+            />
+          </span>
         </div>
       ) : null}
     </div>

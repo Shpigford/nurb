@@ -1,6 +1,7 @@
+import type { Verdict } from "@nurb/ui"
 import type { PartBuild } from "./api"
 
-export type Verdict = "pass" | "warn" | "fail" | "none"
+export type { Verdict }
 
 export function verdictOf(build: PartBuild | null | undefined): Verdict {
   if (!build) return "none"

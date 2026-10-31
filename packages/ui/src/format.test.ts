@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { clock, elapsedLabel } from "./format"
+import { clock, elapsedLabel, formatBbox, initials, relativeTime } from "./format"
 
 describe("elapsedLabel", () => {
   it("reads 0.0s at the start of a run", () => {
@@ -37,5 +37,48 @@ describe("clock", () => {
 
   it("rounds to the nearest second", () => {
     expect(clock(59.6)).toBe("1:00")
+  })
+})
+
+describe("relativeTime", () => {
+  const now = Date.parse("2026-09-16T12:00:00.000Z")
+
+  it("says just now inside the first minute", () => {
+    expect(relativeTime("2026-09-16T11:59:30.000Z", now)).toBe("just now")
+  })
+
+  it("climbs through minutes, hours, days and weeks", () => {
+    expect(relativeTime("2026-09-16T11:20:00.000Z", now)).toBe("40m ago")
+    expect(relativeTime("2026-09-16T05:00:00.000Z", now)).toBe("7h ago")
+    expect(relativeTime("2026-09-14T12:00:00.000Z", now)).toBe("2d ago")
+    expect(relativeTime("2026-08-26T12:00:00.000Z", now)).toBe("3w ago")
+    expect(relativeTime("2026-06-16T12:00:00.000Z", now)).toBe("3mo ago")
+  })
+
+  it("has nothing to say about nothing", () => {
+    expect(relativeTime(null)).toBe(null)
+  })
+})
+
+describe("formatBbox", () => {
+  it("rounds each axis to a tenth", () => {
+    expect(formatBbox([80.04, 40, 19.96])).toBe("80 × 40 × 20")
+  })
+
+  it("refuses anything that is not three axes", () => {
+    expect(formatBbox([80, 40])).toBe(null)
+    expect(formatBbox(null)).toBe(null)
+  })
+})
+
+describe("initials", () => {
+  it("takes the first letter of two words", () => {
+    expect(initials("Josh Pigford")).toBe("JP")
+  })
+
+  it("falls back to the email local part, then to a dot", () => {
+    expect(initials("ada@example.com")).toBe("AD")
+    expect(initials("Ada")).toBe("AD")
+    expect(initials(null)).toBe("·")
   })
 })

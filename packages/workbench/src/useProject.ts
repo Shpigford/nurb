@@ -50,8 +50,9 @@ export function useProject(projectId: string | null): {
   useEffect(reload, [reload])
 
   useLive((event) => {
-    // A reconnect arrives with no project, so it refetches too.
-    if (!event.project_id || event.project_id === projectId) reload()
+    // A reconnect arrives with no project, so it refetches too. So does a bench
+    // change, because it can move the printer this project prices against.
+    if (!event.project_id || event.kind === "workshop" || event.project_id === projectId) reload()
   })
 
   return { project, missing, reload }

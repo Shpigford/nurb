@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import Logo from "./Logo";
+import { brand, Button, TaskSteps } from "@nurb/ui";
 import { setupReportUrl } from "./setupReport";
 
 type ProvisionEvent =
@@ -16,6 +16,16 @@ const STAGE_COPY: Record<string, string> = {
   warmup: "Preparing the CAD engine",
   chat: "Setting up the AI assistant",
 };
+
+// Sheet 23: the four stages as a checklist, in the order provision.rs runs
+// them. The short label is what the row shows; STAGE_COPY is the sentence
+// under the bar.
+const STAGES = [
+  { id: "python", label: "Runtime" },
+  { id: "deps", label: "Engine" },
+  { id: "warmup", label: "Warm-up" },
+  { id: "chat", label: "Chat" },
+];
 
 /// First-launch provisioning screen. Mounts once, starts the install, and
 /// hands the window back the moment the environment is healthy.
@@ -78,40 +88,66 @@ export default function Setup({ onDone }: { onDone: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Before the first stage event the first row is the one in flight.
+  const current = Math.max(0, STAGES.findIndex((s) => s.id === stage));
+
   return (
-    <div className="setup" data-tauri-drag-region>
-      <div className="setup-card">
-        <div className="setup-logo">
-          <Logo size={40} />
+    <div
+      className="relative isolate flex h-dvh flex-col items-center justify-center overflow-hidden bg-stage"
+      data-tauri-drag-region
+    >
+      <img
+        src={brand.authPlane}
+        alt=""
+        aria-hidden="true"
+        className="pointer-events-none absolute top-1/2 left-1/2 -z-10 h-[900px] w-[1440px] max-w-none -translate-1/2 select-none"
+      />
+      <div className="panel flex w-[440px] flex-col overflow-hidden">
+        <div className="flex h-[30px] shrink-0 items-center border-b border-line-soft px-4">
+          <span className="mono-label chrome text-muted">Setting up</span>
         </div>
-        <div className="setup-title">nurb</div>
-        {error ? (
-          <>
-            <div className="setup-error">{error}</div>
-            <div className="setup-actions">
-              <button className="setup-retry" onClick={start}>
-                try again
-              </button>
-              <button className="setup-retry" onClick={report}>
-                report this
-              </button>
+        <div className="flex flex-col p-7">
+          <img src={brand.markSmall} alt="" aria-hidden="true" className="size-10 shrink-0" />
+          <h1 className="font-display mt-5 text-[22px] leading-7 tracking-[-0.02em] text-ink">Setting up your workshop</h1>
+          <p className="mt-2 text-[14px] leading-[22px] text-ink-soft">Takes a minute the first time. Your parts stay on this Mac.</p>
+          <TaskSteps
+            className="mt-6"
+            label="Setup progress"
+            steps={STAGES}
+            current={current}
+            failed={Boolean(error)}
+          />
+          {error ? (
+            <div className="mt-5 flex flex-col">
+              <div className="flex flex-col rounded-content bg-fail-wash p-3">
+                <div className="btn-label text-fail">Setup did not finish</div>
+                <p className="mt-1.5 text-[13px] leading-5 text-ink-soft">{error}</p>
+              </div>
+              <div className="mt-5 flex items-center gap-2">
+                <Button variant="accent" size="md" className="px-[18px]" onClick={start}>
+                  Try again
+                </Button>
+                <Button variant="outline" size="md" className="px-[18px]" onClick={report}>
+                  Report this
+                </Button>
+              </div>
             </div>
-          </>
-        ) : (
-          <>
-            <div className="setup-stage">
-              {(STAGE_COPY[stage ?? ""] ?? "Checking what's installed") + "…"}
+          ) : (
+            <div className="mt-5 flex flex-col">
+              <div className="relative h-[3px] shrink-0 overflow-hidden rounded-full bg-line-soft">
+                <div className="animate-slide absolute top-0 left-0 h-[3px] w-24 rounded-full bg-accent" />
+              </div>
+              <p className="mt-3 font-mono text-[10.5px] leading-[14px] font-medium tracking-[0.04em] text-muted">
+                {`${STAGE_COPY[stage ?? ""] ?? "Checking what's installed"}…`}
+              </p>
+              {/* The installer's own output, under the sentence rather than in
+                  place of it, so the hobbyist words are always the ones on top. */}
+              {line ? (
+                <p className="mt-1 truncate font-mono text-[10.5px] leading-[14px] text-faint">{line}</p>
+              ) : null}
             </div>
-            <div className="setup-bar">
-              <div className="setup-bar-fill" />
-            </div>
-            <div className="setup-detail">{line}</div>
-            <div className="setup-note">
-              First launch downloads the CAD engine and the AI assistant (a few
-              hundred megabytes, one time).
-            </div>
-          </>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );

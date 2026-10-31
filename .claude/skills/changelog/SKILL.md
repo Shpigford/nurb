@@ -7,28 +7,29 @@ description: Write nurb.dev changelog entries from the releases since the last p
 
 One surface: `site/changelog.html`, the static page behind nurb.dev/changelog. One `<article class="release">` per released version, newest first. There is no build step and no data file; the HTML is the data.
 
-Releases are the unit. A nurb release is a version bump merged to main; the publish workflow tags it and creates a GitHub release whose generated notes list the merged PRs. The changelog entry for a version is written from those PRs, filtered hard.
+Releases are the unit. A nurb release is a version bump merged to main; `desktop/scripts/release.sh` tags it and publishes it as a GitHub release. Final releases use the same spelling everywhere (`v1.0.0`); prerelease git tags use PEP 440 (`v1.0.0a1`) while the app and changelog use SemVer (`v1.0.0-alpha.1`). The changelog entry for a version is written from the commits merged between one git tag and the next, filtered hard.
 
 ## Step 1: Find the gap
 
-The newest `id="vX.Y.Z"` in `site/changelog.html` is the high-water mark.
+The newest `id="vX.Y.Z"` in `site/changelog.html` is the high-water mark in SemVer spelling. Map prereleases to PEP 440 before looking for their git tag: `v1.0.0-alpha.1` maps to `v1.0.0a1`, `beta` to `b`, and `rc` loses only the hyphen and dot (`v1.0.0-rc.1` to `v1.0.0rc1`).
 
 ```bash
 grep -m1 'id="v' site/changelog.html
-gh release list --limit 20
+git fetch --tags && git tag --sort=-v:refname | head -20
 ```
 
 Every tagged release newer than the high-water mark needs an entry. If the user describes a feature in free text instead, write that one entry into the version it shipped in (or the pending version if it hasn't shipped yet) and skip the sweep.
 
-When /release invokes this before the bump PR merges, the newest version has no tag or GitHub release yet. Write its entry anyway: source it from the PRs merged since the last release (`gh pr list --state merged --base main --json title,number,mergedAt`) plus whatever the release branch itself ships, date it today, and keep the tag link, which goes live when the release publishes. The entry lands as part of the release PR, so commit it there instead of leaving it uncommitted.
+When /release invokes this before the bump PR merges, the newest version has no tag or GitHub release yet. Write its entry anyway: source it from the PRs merged since the last release (`gh pr list --state merged --base main --json title,number,mergedAt`) plus whatever the release branch itself ships, date it today, and write the version as plain text, like every entry already on the page. The entry lands as part of the release PR, so commit it there instead of leaving it uncommitted.
 
 For each missing version:
 
 ```bash
-gh release view vX.Y.Z --json publishedAt,body
+git for-each-ref --format='%(creatordate:iso-strict)' refs/tags/vPEP440
+git log --format='%h %s' vPREVIOUS_PEP440..vPEP440
 ```
 
-The body lists the PRs. Read a PR (`gh pr view N`) whenever its title alone doesn't tell you what a user would notice.
+The tag date is the publish date and the commits between tags are the release contents. Read a PR (`gh pr view N`) whenever a commit or PR title alone doesn't tell you what a user would notice.
 
 ## Step 2: Filter to what earns a line
 
@@ -57,7 +58,7 @@ Insert the new `<article class="release" id="vX.Y.Z">` at the **top** of `<main>
 
 ```html
 <article class="release" id="v0.9.0">
-  <div class="meta"><span class="ver"><a href="https://github.com/Shpigford/nurb/releases/tag/v0.9.0">v0.9.0</a></span><time datetime="2026-07-31">July 31, 2026</time></div>
+  <div class="meta"><span class="ver">v0.9.0</span><time datetime="2026-07-31">July 31, 2026</time></div>
   <ul>
     <li><b class="tag new">new</b><span><b>Diagonal printing.</b> A part that prints better tilted...</span></li>
     <li><b class="tag">fixed</b><span>...</span></li>
@@ -65,7 +66,7 @@ Insert the new `<article class="release" id="vX.Y.Z">` at the **top** of `<main>
 </article>
 ```
 
-The date is the release's `publishedAt` date, not today (a pre-merge entry uses today, which becomes the publish date when the PR merges). Never reword or delete an already-published entry; its `id` is a live anchor.
+The date is the annotated tag's creator date, not today (a pre-merge entry uses today, which becomes the release date when the PR merges). Never reword or delete an already-published entry; its `id` is a live anchor.
 
 ## Step 5: Verify
 
@@ -73,7 +74,7 @@ Look at the page, don't just lint it: serve `site/` (`python3 -m http.server 787
 
 ```bash
 git diff -U0 site/changelog.html | grep '^+.*—'   # em-dashes in what you added
-grep -o 'id="v[0-9.]*"' site/changelog.html | uniq -d  # duplicate versions
+grep -o 'id="v[^"]*"' site/changelog.html | uniq -d  # duplicate versions
 ```
 
 And confirm by eye that versions still descend down the page.

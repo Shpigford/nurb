@@ -2,8 +2,8 @@ import type { Message } from "@nurb/ui"
 import type { Part, Project, ProjectSummary } from "./api"
 
 export const summaries: ProjectSummary[] = [
-  { id: "p1", name: "First", created_at: "2026-09-01T00:00:00Z", parts: 1, last_built: null },
-  { id: "p2", name: "Second", created_at: "2026-09-02T00:00:00Z", parts: 1, last_built: null },
+  { id: "p1", name: "First", created_at: "2026-09-01T00:00:00Z", parts: 1, last_built: null, folder: true },
+  { id: "p2", name: "Second", created_at: "2026-09-02T00:00:00Z", parts: 1, last_built: null, folder: true },
 ]
 
 export function part(name: string, glb: string): Part {
@@ -28,8 +28,8 @@ export function part(name: string, glb: string): Part {
       stats: {},
       glb_url: glb,
       render_url: null,
+    shown_revision: 1,
       stale: false,
-      stress: null,
       slice: null,
     },
   }
@@ -98,6 +98,7 @@ export function project(id: string, name: string, parts: Part[], msgs: Message[]
     id,
     name,
     created_at: "2026-09-01T00:00:00Z",
+    folder: true,
     printer: { name: "bambu_x1c", bed: [256, 256, 256] },
     printers: ["bambu_x1c", "prusa_mk4"],
     spec: null,

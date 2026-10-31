@@ -90,7 +90,7 @@ use events::{forward, permission_choice, permission_title, wire_string};
 
 /// The whole-project conversation rides the per-part session plumbing under a
 /// name no part file can have. The twin constant lives in desktop/src/Chat.tsx.
-const PROJECT_CHAT: &str = "//project";
+pub(crate) const PROJECT_CHAT: &str = "//project";
 
 /// The project id an agent working directory belongs to; the app hands agents
 /// <appdata>/projects/<id> as their cwd, so the last segment is the id.
@@ -385,6 +385,7 @@ pub async fn start_chat(
     app: tauri::AppHandle,
     path: String,
     agent: String,
+    part: Option<String>,
     on_event: Channel<ChatEvent>,
     resume: Option<String>,
 ) -> Result<String, String> {
@@ -396,7 +397,7 @@ pub async fn start_chat(
     // Claude runs as a driver, not an adapter: its own CLI, spoken to in
     // stream-json (see claude.rs).
     if kind == AgentKind::Claude {
-        return crate::claude::start(app, project, on_event, resume).await;
+        return crate::claude::start(app, project, part, on_event, resume).await;
     }
     let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
     let (ready_tx, ready_rx) = oneshot::channel();
@@ -669,8 +670,8 @@ pub async fn send_prompt(
     // product that promises not to have one.
     let project_name = project_key(&project);
     let selected = match part.as_deref() {
-        // The rail's project row; the twin constant lives in Chat.tsx.
-        Some(PROJECT_CHAT) => " This conversation is about the whole project rather than one part.".to_string(),
+        // A folder's own conversation; the twin constant lives in Chat.tsx.
+        Some(PROJECT_CHAT) => " This conversation is about the project as a whole rather than one part.".to_string(),
         Some(part) => format!(" This conversation is about the part \"{part}\", which is on screen beside the chat."),
         None => String::new(),
     };
@@ -1415,6 +1416,37 @@ pub fn chat_config(
     Ok(app.state::<PrefStore>().rows(kind.id()))
 }
 
+/// The picker looking at an agent this project has never run: rows from the
+/// cache when it has them, else one throwaway session asks the agent what it
+/// offers, exactly as `list_sessions` does for every agent at once. The error
+/// is the user's answer (a signed-out Codex says so), not a silent empty list.
+#[tauri::command]
+pub async fn probe_chat_config(
+    app: tauri::AppHandle,
+    agent: String,
+    path: String,
+) -> Result<Vec<ConfigRow>, String> {
+    use tauri::Manager;
+    let kind = AgentKind::parse(&agent)?;
+    if kind == AgentKind::Claude {
+        return Ok(crate::claude::config_rows(&app.state::<PrefStore>()));
+    }
+    let cached = app.state::<PrefStore>().rows(kind.id());
+    if !cached.is_empty() {
+        return Ok(cached);
+    }
+    let launcher = app.state::<crate::env::Launcher>().inner().clone();
+    let serve = serve_entry(&app, false).await;
+    let (_, config, model_rows) =
+        agent_sessions(&launcher, kind, PathBuf::from(path), serve).await?;
+    let prefs = app.state::<PrefStore>();
+    prefs.cache(kind.id(), config);
+    if kind == AgentKind::Grok {
+        prefs.cache_model_rows(kind.id(), model_rows);
+    }
+    Ok(prefs.rows(kind.id()))
+}
+
 /// Remember a pick and, when a session is running, move it there now. The
 /// choice is stored either way, so it still lands on the next session if this
 /// chat has not started one yet. Addressed by category, since that is the key
@@ -1956,9 +1988,8 @@ mod tests {
         assert!(friendly(AgentKind::Claude, error).starts_with("auth_required:"));
     }
 
-    /// What claude-agent-acp 0.64.2 actually answers session/new with, captured
-    /// off the wire. Mode, fast, and agent ride along and must not reach the
-    /// picker.
+    /// What Claude actually answers session/new with, captured off the wire.
+    /// Mode, fast, and agent ride along and must not reach the picker.
     const CLAUDE: &str = r#"[
       {"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"default",
        "options":[{"value":"default","name":"Default"},{"value":"plan","name":"Plan"}]},

@@ -2,6 +2,7 @@ import {
   AlwaysStencilFunc,
   BackSide,
   Box3,
+  BoxGeometry,
   BufferAttribute,
   BufferGeometry,
   DecrementWrapStencilOp,
@@ -30,20 +31,26 @@ import { Frustum } from "three"
 import type { OrbitControls } from "three/addons/controls/OrbitControls.js"
 import type { Severity } from "../types"
 
-// The light palette, decided in PROGRESS.md Phase 7. v1's viewer is dark only, so these
-// are the token colors rather than a port: an orange part would hide a red fail glow.
+// The light palette, decided in PROGRESS.md Phase 7. The part wears the brand accent, as
+// the design draws it: --color-accent for the material, --color-part-edge for the outline.
+// The lit faces then land on the design's own three tones, top #ff7050, front #f0421f,
+// side #c42d12, which is what createLights() is tuned for.
 export const palette = {
   stage: 0xe5f0fb,
-  part: 0xaab6c6,
-  edge: 0x121821,
-  gridMinor: 0xd5e4f2,
-  gridMajor: 0xc9dcee,
+  part: 0xff5230,
+  // Scenery stays neutral, and its albedo is pre-darkened because the key is bright enough
+  // to clip the part's red: 0x78818d lit from above reads as the grey-blue token, 0xaab6c6.
+  context: 0x78818d,
+  edge: 0xa32409,
+  gridMinor: 0xcfe0f1,
+  gridMajor: 0xbcd2e8,
   gridBorder: 0x9fb6cd,
   accent: 0xff5230,
   fail: 0xcf1228,
   warn: 0xe08700,
-  ghost: 0xb8823f,
-  cap: 0x9a8fdb,
+  // Amber and violet are lit by the same key, so both are pre-darkened the same way.
+  ghost: 0x835b2a,
+  cap: 0x6d659c,
 } as const
 
 export type Palette = typeof palette
@@ -56,10 +63,18 @@ const EDGE_ANGLE = 25
 
 const severityColor = (severity: Severity, pal: Palette) => (severity === "fail" ? pal.fail : pal.warn)
 
+/**
+ * One bright key, a little ambient. The key is steep and strong on purpose: the part's own
+ * color is the accent, and only an exposure that clips its red lifts the top face to the
+ * design's #ff7050 while the side falls to #c42d12. The hemisphere is moved to Z, which is
+ * up in this scene, so that gradient runs top to bottom rather than front to back.
+ */
 export function createLights(): Light[] {
-  const key = new DirectionalLight(0xffffff, 1.5)
-  key.position.set(1, -1.4, 2)
-  return [new HemisphereLight(0xffffff, palette.gridMajor, 1.6), key]
+  const key = new DirectionalLight(0xffffff, 6)
+  key.position.set(0.4, -0.9, 2.9)
+  const sky = new HemisphereLight(0xffffff, palette.gridMajor, 1)
+  sky.position.set(0, 0, 1)
+  return [sky, key]
 }
 
 const segments = (points: number[], material: LineBasicMaterial) => {
@@ -68,18 +83,24 @@ const segments = (points: number[], material: LineBasicMaterial) => {
   return new LineSegments(geometry, material)
 }
 
-/** The build plate at the printer's bed size. A bed is a rectangle, which is why this is not a GridHelper (v1:744-768). */
-export function plate([w, d]: [number, number]): Group {
+/**
+ * The build plate at the printer's bed size. A bed is a rectangle, which is why this is not
+ * a GridHelper (v1:744-768). `pitch` is the minor spacing in mm, every fifth line heavier,
+ * so a gridfinity plate is the same call with 42.
+ */
+export function plate([w, d]: [number, number], pitch = 10): Group {
   const hw = w / 2
   const hd = d / 2
+  const step = pitch > 0 ? pitch : 10
+  const heavy = step * 5
   const minor: number[] = []
   const major: number[] = []
-  for (let x = 10; x < hw; x += 10) {
-    const into = x % 50 === 0 ? major : minor
+  for (let x = step; x < hw; x += step) {
+    const into = x % heavy === 0 ? major : minor
     into.push(x, -hd, 0, x, hd, 0, -x, -hd, 0, -x, hd, 0)
   }
-  for (let y = 10; y < hd; y += 10) {
-    const into = y % 50 === 0 ? major : minor
+  for (let y = step; y < hd; y += step) {
+    const into = y % heavy === 0 ? major : minor
     into.push(-hw, y, 0, hw, y, 0, -hw, -y, 0, hw, -y, 0)
   }
   const cross = [0, -hd, 0, 0, hd, 0, -hw, 0, 0, hw, 0, 0] // where a part lands
@@ -95,6 +116,23 @@ export function plate([w, d]: [number, number]): Group {
     segments(cross, new LineBasicMaterial({ color: palette.accent, transparent: true, opacity: 0.35 }))
   )
   return group
+}
+
+/** The purge line is one first-layer bead wide, the way a printer actually lays it. */
+export const PURGE_WIDTH = 1.2
+
+/**
+ * The bead a printer wipes along the front of the bed before it starts. Unit length in X so
+ * the caller scales it in mm, and parked a bead in from the border so it reads as on the plate
+ * rather than as part of the frame.
+ */
+export function purgeBead(d: number): Mesh {
+  const bead = new Mesh(
+    new BoxGeometry(1, PURGE_WIDTH, PURGE_WIDTH),
+    new MeshBasicMaterial({ color: palette.accent, transparent: true, opacity: 0.9 })
+  )
+  bead.position.set(0, -d / 2 + PURGE_WIDTH * 2, PURGE_WIDTH / 2)
+  return bead
 }
 
 const spanOf = (box: Box3) => {
@@ -154,8 +192,9 @@ export function buildPartGroup(gltfScene: Object3D, plane: Plane, pal: Palette):
     if (!geometry.attributes.normal) geometry.computeVertexNormals() // never render unlit
     const material = new MeshStandardMaterial({
       color: pal.part,
-      metalness: 0.04,
-      roughness: 0.55,
+      // Flat and matte: printed plastic, no specular sheen over the accent.
+      metalness: 0,
+      roughness: 0.85,
       // Pushed back a hair so the edge overlay draws without z-fighting the surface.
       polygonOffset: true,
       polygonOffsetFactor: 1,
@@ -168,13 +207,15 @@ export function buildPartGroup(gltfScene: Object3D, plane: Plane, pal: Palette):
     for (const m of ([] as Material[]).concat(src.material)) m.dispose() // the GLB's own, never drawn
     mesh.name = src.name || src.parent?.name || ""
     if (mesh.name === "context") {
-      // Obstacles are scenery: the machine a part mounts to, the wall behind it.
+      // Obstacles are scenery: the machine a part mounts to, the wall behind it. Grey-blue,
+      // never the accent, because only the part being made is the part.
+      material.color.setHex(pal.context)
       material.transparent = true
       material.opacity = 0.3
     } else {
       const outline = new LineSegments(
         new EdgesGeometry(geometry, EDGE_ANGLE),
-        new LineBasicMaterial({ color: pal.edge, transparent: true, opacity: 0.2, clippingPlanes: [plane] })
+        new LineBasicMaterial({ color: pal.edge, transparent: true, opacity: 0.35, clippingPlanes: [plane] })
       )
       mesh.add(outline)
     }
@@ -257,7 +298,7 @@ export function capMesh(): Mesh {
     new PlaneGeometry(1, 1),
     new MeshStandardMaterial({
       // Violet, because the cap is the one surface that is not part material and must not
-      // impersonate a signal: amber is a warn, red a fail, orange the accent.
+      // impersonate a signal: amber is a warn, red a fail, orange the part itself.
       color: palette.cap,
       metalness: 0,
       roughness: 0.85,

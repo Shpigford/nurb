@@ -27,3 +27,34 @@ export function elapsedLabel(seconds: number): string {
   if (s < 59.95) return `${s.toFixed(1)}s`
   return clock(s) as string
 }
+
+export function relativeTime(iso: string | null | undefined, now = Date.now()): string | null {
+  if (!iso) return null
+  const seconds = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000))
+  if (seconds < 60) return "just now"
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  if (days < 7) return `${days}d ago`
+  const weeks = Math.round(days / 7)
+  if (weeks < 8) return `${weeks}w ago`
+  const months = Math.round(days / 30)
+  return `${months}mo ago`
+}
+
+export function formatBbox(bbox?: number[] | null): string | null {
+  if (!bbox || bbox.length !== 3) return null
+  return bbox.map((n) => Math.round(n * 10) / 10).join(" × ")
+}
+
+// Two letters for the avatar: first letters of a name's first two words, or
+// the start of the email's local part when there is no name.
+export function initials(nameOrEmail: string | null | undefined): string {
+  if (!nameOrEmail) return "·"
+  if (nameOrEmail.includes("@")) return nameOrEmail.split("@")[0].slice(0, 2).toUpperCase()
+  const words = nameOrEmail.trim().split(/\s+/)
+  const letters = words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)
+  return letters.toUpperCase()
+}

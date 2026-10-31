@@ -1,0 +1,45 @@
+[project]
+name = "nurb"
+version = "1.0.0"
+description = "Agentic CAD for 3D printing"
+authors = [
+    { name = "Josh Pigford", email = "josh@joshpigford.com" }
+]
+requires-python = ">=3.13"
+keywords = ["cad", "3d-printing", "parametric", "build123d", "occt"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Manufacturing",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "build123d>=0.11.1",
+    "mcp>=2.2.0",
+    "pillow>=11.0",
+    "trimesh>=4.12.2",
+    "websockets>=16.1.1",
+]
+
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-xdist>=3.8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["uv_build>=0.11.26,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "nurb"
+source-include = [
+    "src/nurb/doctrine.md",
+    "src/nurb/printers.toml",
+    "src/nurb/tools.json",
+    "src/nurb/workbench/**/*",
+]

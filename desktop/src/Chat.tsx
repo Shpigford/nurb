@@ -1,7 +1,9 @@
 import {
   ClipboardEvent,
+  DragEvent,
   FormEvent,
   KeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -11,13 +13,25 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
+import clsx from "clsx";
 import {
+  ApprovalCard,
   AssistantMarkdown,
   BuildCard,
+  Button,
+  ChatPanel,
+  CyclingPlaceholder,
+  DropHint,
+  EditChips,
   Icon,
+  IconButton,
   MeasurementCard,
+  Menu,
+  NewItemsPill,
   SpecCard,
   ToolStepCard,
+  cue,
+  type MenuItem,
   type Message,
 } from "@nurb/ui";
 import { absolute, addMessage } from "@nurb/workbench/api";
@@ -31,7 +45,6 @@ import {
   pruneLanded,
   withNote,
 } from "./chatItems";
-import { playChime, shouldPlayCompletionChime } from "./chime";
 import { AttachmentDraft, restoreDraftText } from "./chatDraft";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
@@ -60,8 +73,11 @@ export const AGENT_LABEL: Record<string, string> = {
   gemini: "Gemini",
   cursor: "Cursor",
   grok: "Grok",
-  "claude-acp": "Claude (adapter)",
 };
+
+// The agents name these rows differently (Codex says "Reasoning effort"); the
+// menu says one thing for one idea.
+const SECTION_LABEL: Record<string, string> = { model: "Model", thought_level: "Thinking" };
 
 const basename = (path: string) => path.split("/").pop() ?? path;
 
@@ -73,24 +89,77 @@ function summarize(config: ConfigRow[]): string {
     .join(" · ");
 }
 
+// A plan entry reads by its state alone, so the three states stay separable
+// without a legend.
+const PLAN_TONE: Record<string, string> = {
+  completed: "text-faint line-through",
+  in_progress: "text-ink",
+  pending: "text-muted",
+};
+
+// The ACP kind decides the weight: standing permission is the loud one, this
+// once is the quiet allow, and everything else (the refusals) is plain text.
+function permissionVariant(kind: string): "accent" | "outline" | "ghost" {
+  if (kind === "allow_always") return "accent";
+  if (kind === "allow_once") return "outline";
+  return "ghost";
+}
+
+// The first conversation on this Mac gets examples instead of an instruction: the
+// hard part of a first part is believing it can be asked for in plain words.
+const PRIMED_KEY = "nurb-composer-primed";
+const FIRST_RUN_PLACEHOLDERS = [
+  "a bracket for the 25 mm rail above my bench",
+  "a knob to replace the one I snapped off",
+  "a bin that fits the drawer, not the other way round",
+];
+
+// A locked-down webview throws on plain access, so an unreadable store counts as
+// primed: an example reel is a nicety, and showing it forever is worse than never.
+function readPrimed(): boolean {
+  try {
+    return localStorage.getItem(PRIMED_KEY) !== null;
+  } catch {
+    return true;
+  }
+}
+
+// How far up the transcript counts as reading rather than following.
+const PINNED_SLACK_PX = 24;
+// The viewer resnaps its grid on this, so a held key cannot make it stutter.
+const GRIDFINITY_GAP_MS = 10_000;
+
 const CLAUDE_SIGN_IN =
   "Sign in to Claude Code first: open a terminal, run claude, and follow the prompts. Then come back here.";
 
+/** A turn: who spoke and its number over the prose itself. */
+function Turn({ who, n, children }: { who: string; n?: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between">
+        <span className="mono-label text-muted">{who}</span>
+        {n ? <span className="mono-caption text-faint [letter-spacing:0.1em]">{n}</span> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 /** One row of the project's own transcript. */
-function Stored({ message }: { message: Message }) {
+function Stored({ message, who, n }: { message: Message; who: string; n?: string }) {
   const payload = message.payload;
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {message.content ? (
-        message.role === "user" ? (
-          <p className="text-chat ml-8 rounded-content bg-raised px-3 py-2 text-ink">
-            {message.content}
-          </p>
-        ) : (
-          <div className="text-chat text-ink-soft">
-            <AssistantMarkdown content={message.content} />
-          </div>
-        )
+        <Turn who={message.role === "user" ? "You" : who} n={n}>
+          {message.role === "user" ? (
+            <p className="text-chat whitespace-pre-wrap text-ink-soft">{message.content}</p>
+          ) : (
+            <div className="text-chat text-ink-soft">
+              <AssistantMarkdown content={message.content} />
+            </div>
+          )}
+        </Turn>
       ) : null}
       {payload?.type === "build" && (
         // The serve's render path is relative to the serve, not to this page.
@@ -105,7 +174,12 @@ function Stored({ message }: { message: Message }) {
         <SpecCard spec={payload.spec} model={payload.model} effort={payload.effort} />
       )}
       {payload?.type === "measurement" && <MeasurementCard measurement={payload.measurement} />}
-      {payload?.type === "step" && <ToolStepCard step={payload.step} />}
+      {payload?.type === "step" && (
+        <div className="flex flex-col gap-1.5">
+          <ToolStepCard step={payload.step} />
+          <EditChips input={payload.step.input} className="pl-7" />
+        </div>
+      )}
     </div>
   );
 }
@@ -113,6 +187,8 @@ function Stored({ message }: { message: Message }) {
 function Chat({
   path,
   part,
+  subject,
+  wholeProject,
   messages,
   agent,
   agents,
@@ -133,6 +209,12 @@ function Chat({
   // The column's identity: this is the part's conversation, whatever the
   // viewer shows by the time a reply lands.
   part: string;
+  // What the copy calls this conversation: the part, or the folder when the
+  // conversation is about every part in it.
+  subject?: string | null;
+  // True only for a folder's own conversation. A project holding one part has a
+  // single conversation, and it is that part's.
+  wholeProject?: boolean;
   // Fixed for the life of the conversation: a resumed session keeps the agent
   // that ran it, a fresh one takes the default from the agents pane.
   agent: string;
@@ -156,9 +238,11 @@ function Chat({
   const label = AGENT_LABEL[agent] ?? agent;
   // Known signed out, not merely unknown: an unknown status stays quiet.
   const signedOut = agents.find((option) => option.id === agent)?.loggedIn === false;
-  // The sentinel never reaches copy: everywhere the column says its name, the
-  // project conversation speaks of the project.
+  // The sentinel never reaches copy: everywhere the column says its name, it
+  // says the name the owner gave it.
   const isProject = part === PROJECT_CHAT;
+  const aboutProject = wholeProject ?? isProject;
+  const spoken = subject ?? (isProject ? "this project" : part);
   // Claude runs through the app's own driver, which stores the conversation in
   // the project rather than replaying one of its own.
   const isClaude = agent === "claude";
@@ -181,11 +265,19 @@ function Chat({
   }
   const attachmentDraft = attachmentDraftRef.current;
   const [dropping, setDropping] = useState(false);
+  // One drag over the composer fires enter and leave for every child it crosses,
+  // so the hint follows a depth count rather than the last event seen.
+  const dragDepth = useRef(0);
+  // The transcript follows the reply only while the reader is at the end of it.
+  // Scrolling up is deliberate, so a reply that lands then offers a pill.
+  const pinnedRef = useRef(true);
+  const [newReply, setNewReply] = useState(false);
+  const [primed, setPrimed] = useState(readPrimed);
+  const [empty, setEmpty] = useState(true);
+  const gridfinityAt = useRef(0);
   // The project's transcript in the order it was written, then whatever this
   // turn has produced that has not reached the store yet.
-  const ordered = [...messages].sort(
-    (a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0),
-  );
+  const ordered = [...messages].sort((a, b) => (a.sequence_number ?? 0) - (b.sequence_number ?? 0));
   const said = messages.length > 0 || items.length > 0;
   // The newest stored row, read at event time so a step remembers where the
   // transcript stood when it was called.
@@ -197,8 +289,6 @@ function Chat({
   // The model and effort this conversation runs on. Empty before the agent has
   // ever reported its lists, which is only ever the first chat on this Mac.
   const [config, setConfig] = useState<ConfigRow[]>([]);
-  const [picking, setPicking] = useState(false);
-  const [switching, setSwitching] = useState(false);
   const sessionRef = useRef<string | null>(null);
   // A resume id is single-use after the adapter accepts it. Authentication
   // failures retain it; a dead resumed session must not replay it again.
@@ -214,6 +304,16 @@ function Chat({
   const startRef = useRef<Promise<string> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // The composer grows with its text, two lines at rest and twelve at most,
+  // then scrolls. Called after every programmatic write too, because only
+  // typing fires onInput.
+  const grow = () => {
+    const box = inputRef.current;
+    if (!box) return;
+    box.style.height = "auto";
+    box.style.height = `${box.scrollHeight}px`;
+    setEmpty(box.value.trim().length === 0);
+  };
   // Latest callbacks behind stable refs so ensureSession never goes stale.
   const onSessionRef = useRef(onSession);
   onSessionRef.current = onSession;
@@ -239,9 +339,47 @@ function Chat({
   }, []);
 
   useEffect(() => {
-    const pane = scrollRef.current;
-    if (pane) pane.scrollTop = pane.scrollHeight;
+    // The scroller is ChatPanel's own column; the ref rides the transcript it
+    // wraps, since the panel shell keeps that element to itself.
+    const pane = scrollRef.current?.parentElement;
+    if (!pane) return;
+    const onScroll = () => {
+      const atEnd = pane.scrollHeight - pane.scrollTop - pane.clientHeight <= PINNED_SLACK_PX;
+      if (atEnd === pinnedRef.current) return;
+      pinnedRef.current = atEnd;
+      if (atEnd) setNewReply(false);
+    };
+    onScroll();
+    pane.addEventListener("scroll", onScroll, { passive: true });
+    return () => pane.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    // Follow the end of the transcript, and only from the end of it.
+    const pane = scrollRef.current?.parentElement;
+    if (pane && pinnedRef.current) pane.scrollTop = pane.scrollHeight;
   }, [messages, items, permissions, busy]);
+
+  // Everything the agent has put on screen, counted so a reply that is still
+  // streaming moves the number. The user's own lines are not news to the user.
+  const replyMark =
+    messages.filter((m) => m.role !== "user").length +
+    items.reduce(
+      (n, item) => n + (item.kind === "agent" ? item.text.length : item.kind === "user" ? 0 : 1),
+      0,
+    );
+  useEffect(() => {
+    if (!pinnedRef.current) setNewReply(true);
+  }, [replyMark]);
+
+  const jumpToLatest = () => {
+    const pane = scrollRef.current?.parentElement;
+    pinnedRef.current = true;
+    setNewReply(false);
+    // Instant, not smooth: every intermediate frame of a smooth scroll is a
+    // scroll event away from the end, which unpins and re-arms the pill mid-jump.
+    if (pane) pane.scrollTop = pane.scrollHeight;
+  };
 
   useEffect(() => {
     // Dev-only test hook: the Rust side forwards loopback-socket text here so
@@ -249,6 +387,7 @@ function Chat({
     if (!import.meta.env.DEV) return;
     const unlisten = listen<string>("test-type", (event) => {
       if (inputRef.current) inputRef.current.value = event.payload;
+      grow();
     });
     return () => {
       unlisten.then((stop) => stop()).catch(() => {});
@@ -278,6 +417,7 @@ function Chat({
       if (box.value !== seed && !box.value.endsWith(`\n${seed}`)) {
         box.value = box.value.trim() ? `${box.value}\n${seed}` : seed;
       }
+      grow();
       box.focus();
     }
     onSeed?.();
@@ -323,11 +463,11 @@ function Chat({
           if (isClaude) {
             // Drop the streaming copy only once the row exists, or the text
             // blinks out for the refetch's round trip.
-            addMessage(projectId, "assistant", event.text)
-              .then(() => setItems((list) => applyChatEvent(list, event, Date.now(), seqRef.current)))
-              .catch((e) =>
-                setItems((list) => [...list, { kind: "note", text: String(e) }]),
-              );
+            addMessage(projectId, "assistant", event.text, isProject ? null : part)
+              .then(() =>
+                setItems((list) => applyChatEvent(list, event, Date.now(), seqRef.current)),
+              )
+              .catch((e) => setItems((list) => [...list, { kind: "note", text: String(e) }]));
             return;
           }
           break;
@@ -352,9 +492,14 @@ function Chat({
 
   const refreshConfig = useCallback(() => {
     invoke<ConfigRow[]>("chat_config", { agent, sessionId: sessionRef.current })
+      // An agent this project has never run has no cached lists yet; one
+      // throwaway session fills them, so the very first menu has models in it.
+      .then((rows) =>
+        rows.length > 0 ? rows : invoke<ConfigRow[]>("probe_chat_config", { agent, path }),
+      )
       .then(setConfig)
       .catch(() => {});
-  }, [agent]);
+  }, [agent, path]);
 
   useEffect(refreshConfig, [refreshConfig]);
 
@@ -372,9 +517,7 @@ function Chat({
     async (category: string, value: string) => {
       // Optimistic: the round trip goes through the adapter, and a select that
       // lags behind the click reads as a dropped one.
-      setConfig((rows) =>
-        rows.map((row) => (row.category === category ? { ...row, value } : row)),
-      );
+      setConfig((rows) => rows.map((row) => (row.category === category ? { ...row, value } : row)));
       try {
         setConfig(
           await invoke<ConfigRow[]>("set_chat_config", {
@@ -406,6 +549,7 @@ function Chat({
         const session = await invoke<string>("start_chat", {
           path,
           agent,
+          part,
           onEvent,
           resume: requestedResume,
         });
@@ -456,7 +600,6 @@ function Chat({
   const send = useCallback(
     async (text: string, files: string[]) => {
       sendingRef.current = true;
-      const startedAt = Date.now();
       const localId = nextLocalIdRef.current++;
       // Claude's turn is stored, not replayed, so the line comes back from the
       // project instead of living here for the session.
@@ -473,13 +616,16 @@ function Chat({
       }
       setBusy(true);
       onBusyRef.current(true);
+      // The send is the only half of the turn that makes a sound. Stopping is
+      // the user changing their mind, which is not news to them.
+      cue("press");
       setAuthNeeded("none");
       let completed = false;
       let stored = false;
       try {
         const session = await ensureSession();
         if (isClaude) {
-          await addMessage(projectId, "user", text);
+          await addMessage(projectId, "user", text, isProject ? null : part);
           stored = true;
         }
         await invoke<string>("send_prompt", {
@@ -501,6 +647,7 @@ function Chat({
             );
             if (inputRef.current) {
               inputRef.current.value = restoreDraftText(text, inputRef.current.value);
+              grow();
             }
             attachmentDraft.restore(files);
           }
@@ -514,9 +661,11 @@ function Chat({
         setBusy(false);
         onBusyRef.current(false);
         setPermissions([]);
-        // Only successful turns long enough to wander away from earn a chime;
-        // quick back-and-forth and failures should stay quiet.
-        if (shouldPlayCompletionChime(completed, Date.now() - startedAt)) playChime();
+        // Every completed turn gets a cue, where the old chime waited 8s: the cue
+        // is short enough that a short reply can have one, and it marks the beat.
+        // Two of them: "ready" is for someone watching the part, "arrival"
+        // carries to another window, where the reply is news rather than a beat.
+        if (completed) cue(document.hasFocus() ? "ready" : "arrival");
       }
     },
     [ensureSession, part, attachmentDraft, isClaude, projectId],
@@ -539,11 +688,22 @@ function Chat({
     // Reserve the turn before waiting: a second Enter must not queue another
     // send while a pasted image is still crossing the IPC boundary.
     sendingRef.current = true;
-    if (box) box.value = "";
+    if (box) {
+      box.value = "";
+      grow();
+    }
     const files = await attachmentDraft.take();
     if (!text && files.length === 0) {
       sendingRef.current = false;
       return;
+    }
+    if (!primed) {
+      try {
+        localStorage.setItem(PRIMED_KEY, "1");
+      } catch {
+        // The examples stay for another session; nothing else depends on this.
+      }
+      setPrimed(true);
     }
     send(text, files);
   };
@@ -574,9 +734,43 @@ function Chat({
         ),
       ),
     );
-    attachmentDraft.track(saved).catch((e) =>
-      setItems((list) => [...list, { kind: "note", text: String(e) }]),
-    );
+    attachmentDraft
+      .track(saved)
+      .catch((e) => setItems((list) => [...list, { kind: "note", text: String(e) }]));
+  };
+
+  // The viewer listens for this and snaps its grid to the standard pitch. Once
+  // every ten seconds at most, because it fires on every keystroke of the word.
+  const nudgeGridfinity = (text: string) => {
+    if (!/gridfinity/i.test(text)) return;
+    const now = Date.now();
+    if (now - gridfinityAt.current < GRIDFINITY_GAP_MS) return;
+    gridfinityAt.current = now;
+    window.dispatchEvent(new CustomEvent("nurb:gridfinity"));
+  };
+
+  const typed = (event: FormEvent<HTMLTextAreaElement>) => {
+    grow();
+    nudgeGridfinity(event.currentTarget.value);
+  };
+
+  const dragEnter = (event: DragEvent<HTMLFormElement>) => {
+    if (!event.dataTransfer?.types.includes("Files")) return;
+    dragDepth.current += 1;
+    setDropping(true);
+  };
+
+  const dragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDropping(false);
+  };
+
+  const dragDrop = (event: DragEvent<HTMLFormElement>) => {
+    // Without this the WKWebView navigates to a URL dragged in from Mail or
+    // Notes, and there is no back button to come home with.
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDropping(false);
   };
 
   const keydown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -590,6 +784,147 @@ function Chat({
     const session = sessionRef.current;
     if (session) invoke("cancel_turn", { sessionId: session }).catch(() => {});
   };
+
+  // One menu: which agent, then that agent's own settings (its model, and how
+  // hard it thinks). Picking an agent only turns the menu to it, because the
+  // real switch remounts this column and would take the open menu with it;
+  // the switch lands when the menu closes.
+  const [focus, setFocus] = useState<string | null>(null);
+  const [focusRows, setFocusRows] = useState<ConfigRow[]>([]);
+  const [focusState, setFocusState] = useState<"ready" | "loading" | "error">("ready");
+  const [focusError, setFocusError] = useState("");
+  useEffect(() => {
+    if (!focus) return;
+    let stale = false;
+    setFocusRows([]);
+    setFocusState("loading");
+    // The cache answers at once for an agent this project has run; a first
+    // look at Codex costs one throwaway session, which is why it is asked
+    // for only when the menu turns to it.
+    invoke<ConfigRow[]>("chat_config", { agent: focus, sessionId: null })
+      .then((rows) =>
+        rows.length > 0 ? rows : invoke<ConfigRow[]>("probe_chat_config", { agent: focus, path }),
+      )
+      .then((rows) => {
+        if (stale) return;
+        setFocusRows(rows);
+        setFocusState("ready");
+      })
+      .catch((error) => {
+        if (stale) return;
+        setFocusError(String(error));
+        setFocusState("error");
+      });
+    return () => {
+      stale = true;
+    };
+  }, [focus, path]);
+
+  const looking = focus ?? agent;
+  const lookingLabel = AGENT_LABEL[looking] ?? looking;
+  const shownRows = focus ? focusRows : config;
+  const pickFor = useCallback(
+    async (category: string, value: string) => {
+      if (!focus) return pick(category, value);
+      setFocusRows((rows) =>
+        rows.map((row) => (row.category === category ? { ...row, value } : row)),
+      );
+      try {
+        setFocusRows(
+          await invoke<ConfigRow[]>("set_chat_config", {
+            agent: focus,
+            sessionId: null,
+            category,
+            value,
+          }),
+        );
+      } catch {
+        // The optimistic value stands; the next open reloads the rows.
+      }
+    },
+    [focus, pick],
+  );
+  const pickerItems: MenuItem[] = [
+    // Starting over belongs beside the agent, because switching agents starts a
+    // fresh conversation too.
+    ...(said
+      ? [
+          {
+            section: "Conversation",
+            label: "New conversation",
+            disabled: busy || starting,
+            onSelect: onFresh,
+          },
+        ]
+      : []),
+    ...(agents.length > 1
+      ? agents.map((option) => ({
+          section: "Agent",
+          label: option.label,
+          checked: option.id === looking,
+          keepOpen: true,
+          trailing:
+            option.loggedIn === false ? (
+              <span className="rounded-[2px] border border-line px-1 py-px font-mono text-[9px] leading-3 font-medium tracking-[0.1em] text-faint uppercase">
+                sign in
+              </span>
+            ) : undefined,
+          onSelect: () => setFocus(option.id === agent ? null : option.id),
+        }))
+      : []),
+    ...shownRows.flatMap((row) =>
+      row.options.map((option) => {
+        // A word fits beside the name; Codex's sentences go on hover.
+        const short = option.description && option.description.length <= 16;
+        return {
+          section: SECTION_LABEL[row.category] ?? row.name,
+          label: option.name,
+          checked: option.value === row.value,
+          keepOpen: true,
+          trailing: short ? (
+            <span className="mono-caption text-faint">{option.description}</span>
+          ) : undefined,
+          title: short ? undefined : option.description,
+          onSelect: () => pickFor(row.category, option.value),
+        };
+      }),
+    ),
+    ...(focus && focusState === "loading"
+      ? [
+          {
+            section: "Model",
+            label: `Asking ${lookingLabel} for its models…`,
+            disabled: true,
+            keepOpen: true,
+            onSelect: () => {},
+          },
+        ]
+      : []),
+    ...(focus && focusState === "error"
+      ? [
+          {
+            section: "Model",
+            label: focusError,
+            disabled: true,
+            keepOpen: true,
+            onSelect: () => {},
+          },
+        ]
+      : []),
+  ];
+  // The menu closing is the commit: the agent it was turned to takes over.
+  const menuClosed = () => {
+    if (focus && focus !== agent) onAgent(focus, !said);
+    setFocus(null);
+  };
+  const footer =
+    focus && focus !== agent
+      ? said
+        ? `${lookingLabel} starts a fresh conversation`
+        : `Switches to ${lookingLabel} when this closes`
+      : shownRows.length > 0
+        ? "Bigger models use up your plan"
+        : undefined;
 
   const signIn = async () => {
     const needsResend = authNeeded === "resend";
@@ -609,11 +944,23 @@ function Chat({
     } catch (e) {
       setItems((list) => [...list, { kind: "note", text: String(e) }]);
       // Keep retry visible even though the failure adds an item to the transcript.
-      setAuthNeeded((state) => state === "none" ? "sign-in" : state);
+      setAuthNeeded((state) => (state === "none" ? "sign-in" : state));
     } finally {
       setSigningIn(false);
     }
   };
+
+  // The permission event carries no tool kind, so only pattern matches
+  // translate; anything else reads as "use: <title>". The Rust fallback title
+  // is already a full sentence.
+  const askedFor = (title: string) => {
+    if (title.startsWith(`${label} `)) return title;
+    const asked = describe(title, undefined, 1);
+    return asked === title ? `${label} wants to use: ${title}` : `${label} wants to ${asked}`;
+  };
+
+  // First run, an idle composer, nothing typed: the examples have the floor.
+  const priming = !primed && !busy && !starting && empty;
 
   const answerPermission = (permission: Permission, optionId: string) => {
     const session = sessionRef.current;
@@ -626,141 +973,205 @@ function Chat({
     }).catch(() => {});
   };
 
+  // Turn numbers run across the stored transcript and whatever this turn has
+  // produced that has not reached the store yet.
+  let counted = 0;
+  const nextTurn = () => String(++counted).padStart(2, "0");
+
   return (
-    <section className={hidden ? "chat chat-hidden" : "chat"}>
-      <div className="chat-header" data-tauri-drag-region>
-        {/* The part name is the only thing here allowed to truncate, so the
-            switcher lives beside it rather than inside it. */}
-        <span className="chat-header-left">
-          <span className="chat-header-label">{isProject ? "project" : part}</span>
-          <span aria-hidden="true">·</span>
-          {agents.length > 1 ? (
-            <span className="chat-switcher">
-              <button
-                type="button"
-                className="chat-switcher-button"
-                aria-expanded={switching}
-                disabled={busy || starting}
-                title={
-                  said
-                    ? "switch agents, which starts a fresh conversation"
-                    : "switch agents"
-                }
-                onClick={() => setSwitching((open) => !open)}
-              >
-                {label}
-                <Icon name="chevron-down" className="size-3" />
-              </button>
-              {switching && (
-                <>
-                  <div className="chat-switcher-away" onClick={() => setSwitching(false)} />
-                  <div className="chat-switcher-menu">
-                    {agents.map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        className={
-                          option.id === agent ? "chat-switcher-item current" : "chat-switcher-item"
-                        }
-                        onClick={() => {
-                          setSwitching(false);
-                          if (option.id !== agent) onAgent(option.id, !said);
-                        }}
-                      >
-                        {option.label}
-                        {option.loggedIn === false && (
-                          <span className="chat-switcher-hint">sign in</span>
-                        )}
-                      </button>
-                    ))}
-                    {said && (
-                      <p className="chat-switcher-note">
-                        Switching starts a fresh conversation. This one is kept.
-                      </p>
-                    )}
-                  </div>
-                </>
+    <ChatPanel
+      hidden={hidden}
+      dragRegion
+      strip={{ label: "Conversation" }}
+      picker={
+        <Menu
+          label={config.length > 0 ? `${label} is set to ${summarize(config)}` : "switch agents"}
+          disabled={busy || starting}
+          triggerClassName="mono-caption h-[22px] max-w-[212px] gap-1.5 border border-line pr-1.5 pl-2 font-medium text-ink [letter-spacing:0.1em] hover:border-panel-edge disabled:opacity-40"
+          trigger={() => (
+            <>
+              <span className="shrink-0">{label}</span>
+              {config.length > 0 && (
+                <span className="truncate font-normal text-muted">· {summarize(config)}</span>
               )}
-            </span>
-          ) : (
-            <span>{label}</span>
+              <Icon name="chevron-down" className="shrink-0 text-muted" />
+            </>
           )}
-        </span>
-        {said && (
-          <button
-            className="chat-fresh"
-            title="set this conversation aside and start a fresh one"
-            disabled={busy || starting}
-            onClick={onFresh}
-          >
-            <Icon name="chat" className="size-3.5" />
-            start fresh
-          </button>
-        )}
-      </div>
-      <div className="chat-transcript" ref={scrollRef}>
-        {!said && !busy && (
-          <div className="chat-empty">
-            {isProject
-              ? `This conversation covers the whole project. Ask ${label} for new parts, or for changes every part should share.`
-              : `You're chatting with ${part}. Describe it or ask for changes, and ${label} will model it in the viewer.`}
+          menuClassName="w-[240px] normal-case"
+          items={pickerItems}
+          footer={footer}
+          onOpenChange={(open) => {
+            if (!open) menuClosed();
+          }}
+        />
+      }
+      composer={
+        <form
+          onSubmit={submit}
+          onDragEnter={dragEnter}
+          onDragOver={(event) => event.preventDefault()}
+          onDragLeave={dragLeave}
+          onDrop={dragDrop}
+          className={clsx(
+            "relative flex flex-col gap-2.5 rounded-[6px] border pt-2.5 pr-2.5 pb-2 pl-3 transition-colors",
+            dropping ? "border-accent bg-accent-wash" : "border-line bg-ground",
+          )}
+        >
+          <DropHint active={dropping} />
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {attachments.map((path) => (
+                <span
+                  key={path}
+                  className="mono-id inline-flex items-center gap-1 rounded-[3px] bg-raised px-1.5 py-0.5 text-muted"
+                >
+                  <span className="max-w-[140px] truncate">{basename(path)}</span>
+                  <button
+                    type="button"
+                    className="text-faint hover:text-ink"
+                    aria-label={`remove ${basename(path)}`}
+                    onClick={() => attachmentDraft.remove(path)}
+                  >
+                    <Icon name="xmark" className="size-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <span className="relative block">
+            <textarea
+              ref={inputRef}
+              className="text-chat max-h-[216px] min-h-[36px] w-full resize-none overflow-y-auto bg-transparent text-ink placeholder:text-faint focus:outline-none disabled:text-muted"
+              placeholder={
+                priming
+                  ? ""
+                  : busy
+                    ? `${label} is working…`
+                    : starting
+                      ? restoringRef.current
+                        ? "Restoring conversation…"
+                        : `Starting ${label}…`
+                      : `Describe or change ${spoken}…`
+              }
+              rows={2}
+              disabled={starting}
+              onInput={typed}
+              onKeyDown={keydown}
+              onPaste={paste}
+            />
+            <CyclingPlaceholder
+              lines={FIRST_RUN_PLACEHOLDERS}
+              active={priming}
+              className="text-chat text-faint"
+            />
+          </span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-0.5">
+              <IconButton
+                icon="plus"
+                label="attach photos or files"
+                className="size-6.5"
+                disabled={starting}
+                onClick={attach}
+              />
+            </div>
+            {busy ? (
+              <Button variant="accent" onClick={cancel}>
+                stop
+              </Button>
+            ) : (
+              <Button type="submit" variant="ink" trailingIcon="arrow-up" disabled={starting}>
+                send
+              </Button>
+            )}
           </div>
+        </form>
+      }
+    >
+      <div ref={scrollRef} className="flex flex-col gap-4 px-4 pt-3.5 pb-3">
+        {!said && !busy && (
+          <p className="text-chat text-muted">
+            {aboutProject
+              ? `This conversation covers every part in ${spoken}. Ask ${label} for a new part, or for a change they should all share.`
+              : `You're chatting with ${spoken}. Describe it or ask for changes, and ${label} will model it in the viewer.`}
+          </p>
         )}
         {/* Nothing said yet and the agent is known to be signed out: ask before the first message bounces. */}
         {!said && !starting && authNeeded === "none" && signedOut && (
-          <div className="chat-auth">
-            {isClaude ? (
-              CLAUDE_SIGN_IN
-            ) : (
-              <>
-                Sign in to {label} to start.{" "}
-                <button className="chat-auth-button" disabled={signingIn} onClick={signIn}>
-                  {signingIn ? "signing in…" : "sign in"}
-                </button>
-              </>
+          <div className="flex flex-col items-start gap-2 rounded-[6px] bg-raised p-3">
+            <p className="text-chat text-muted">
+              {isClaude ? CLAUDE_SIGN_IN : `Sign in to ${label} to start.`}
+            </p>
+            {!isClaude && (
+              <Button variant="accent" disabled={signingIn} onClick={signIn}>
+                {signingIn ? "signing in…" : "sign in"}
+              </Button>
             )}
           </div>
         )}
         {ordered.map((message) => (
-          <Stored key={message.id} message={message} />
+          <Stored
+            key={message.id}
+            message={message}
+            who={label}
+            n={message.content ? nextTurn() : undefined}
+          />
         ))}
         {items.map((item, index) => {
           switch (item.kind) {
             case "user":
               return (
-                <div key={index} className="chat-user">
-                  {item.text}
+                <Turn key={index} who="You" n={nextTurn()}>
+                  <p className="text-chat whitespace-pre-wrap text-ink-soft">{item.text}</p>
                   {item.files && (
-                    <span className="chat-user-files">
+                    <span className="mt-1.5 flex flex-wrap gap-1">
                       {item.files.map((name, i) => (
-                        <span key={i} className="chat-user-file">
+                        <span
+                          key={i}
+                          className="mono-id rounded-[3px] bg-raised px-1.5 py-0.5 text-muted"
+                        >
                           {name}
                         </span>
                       ))}
                     </span>
                   )}
-                </div>
+                </Turn>
               );
             case "agent":
               return (
-                <div key={index} className="text-chat text-ink-soft">
-                  <AssistantMarkdown content={item.text} streaming />
-                </div>
+                <Turn key={index} who={label} n={nextTurn()}>
+                  <div className="text-chat text-ink-soft">
+                    <AssistantMarkdown content={item.text} streaming />
+                  </div>
+                </Turn>
               );
             case "thought":
               return (
-                <details key={index} className="chat-thought">
-                  <summary>thinking</summary>
-                  <div>{item.text}</div>
+                <details key={index} className="group">
+                  <summary className="mono-label chrome cursor-default list-none text-faint hover:text-muted">
+                    Thinking
+                  </summary>
+                  <div className="mt-1.5 text-[12.5px] leading-[18px] text-faint">{item.text}</div>
                 </details>
               );
             case "step":
-              return <ToolStepCard key={item.step.id} step={item.step} />;
+              return (
+                <div key={item.step.id} className="flex flex-col gap-1.5">
+                  <ToolStepCard step={item.step} />
+                  <EditChips input={item.step.input} className="pl-7" />
+                </div>
+              );
             case "plan":
               return (
-                <ul key={index} className="chat-plan">
+                <ul key={index} className="flex flex-col gap-1">
                   {item.entries.map((entry, i) => (
-                    <li key={i} className={entry.status}>
+                    <li
+                      key={i}
+                      className={clsx(
+                        "text-[12.5px] leading-[18px]",
+                        PLAN_TONE[entry.status] ?? "text-muted",
+                      )}
+                    >
                       {entry.content}
                     </li>
                   ))}
@@ -768,170 +1179,59 @@ function Chat({
               );
             case "note":
               return (
-                <div key={index} className="chat-note">
+                <p key={index} className="text-chat text-muted">
                   {item.text}
-                </div>
+                </p>
               );
           }
         })}
         {starting && (
-          <div className="chat-status">
+          <p className="mono-caption text-muted">
             {restoringRef.current ? "restoring conversation…" : `starting ${label}…`}
-          </div>
+          </p>
         )}
         {/* A first build can run ten minutes or more; a silent transcript
             reads as a hang, so the turn keeps a heartbeat on screen. Hidden
             while a dialog is up, since then it is the user's move. */}
         {busy && !starting && permissions.length === 0 && (
-          <div className="chat-working">
-            <span className="chat-working-dot" aria-hidden="true" />
+          <p className="mono-caption flex items-center gap-2 text-muted">
+            <span
+              className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
+              aria-hidden="true"
+            />
             {label} is working…
-          </div>
+          </p>
         )}
         {authNeeded !== "none" && (
-          <div className="chat-auth">
-            {label} isn't signed in on this Mac.{" "}
-            <button
-              className="chat-auth-button"
-              disabled={signingIn}
-              onClick={signIn}
-            >
+          <div className="flex flex-col items-start gap-2 rounded-[6px] bg-raised p-3">
+            <p className="text-chat text-muted">{label} isn't signed in on this Mac.</p>
+            <Button variant="accent" disabled={signingIn} onClick={signIn}>
               {signingIn ? "signing in…" : "sign in"}
-            </button>
+            </Button>
           </div>
         )}
-        {permissions.map((permission) => (
-          <div key={permission.id} className="chat-permission">
-            <div className="chat-permission-title">
-              {(() => {
-                // The permission event carries no tool kind, so only pattern
-                // matches translate; anything else reads as "use: <title>".
-                // The Rust fallback title is already a full sentence.
-                if (permission.title.startsWith(`${label} `)) return permission.title;
-                const asked = describe(permission.title, undefined, 1);
-                return asked === permission.title
-                  ? `${label} wants to use: ${permission.title}`
-                  : `${label} wants to ${asked}`;
-              })()}
-            </div>
-            <div className="chat-permission-options">
-              {permission.options.map((option) => (
-                <button
-                  key={option.optionId}
-                  className={`chat-permission-button ${option.kind}`}
-                  onClick={() => answerPermission(permission, option.optionId)}
-                >
-                  {option.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-      <form
-        className={dropping ? "chat-composer dropping" : "chat-composer"}
-        onSubmit={submit}
-      >
-        {attachments.length > 0 && (
-          <div className="chat-attachments">
-            {attachments.map((path) => (
-              <span key={path} className="chat-attachment">
-                <span className="chat-attachment-name">{basename(path)}</span>
-                <button
-                  type="button"
-                  className="chat-attachment-remove"
-                  aria-label={`remove ${basename(path)}`}
-                  onClick={() => attachmentDraft.remove(path)}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-        <textarea
-          ref={inputRef}
-          className="chat-input"
-          placeholder={
-            busy
-              ? `${label} is working…`
-              : starting
-                ? restoringRef.current
-                  ? "Restoring conversation…"
-                  : `Starting ${label}…`
-                : `Describe or change ${isProject ? "the project" : part}…`
-          }
-          rows={2}
-          disabled={starting}
-          onKeyDown={keydown}
-          onPaste={paste}
+        <ApprovalCard
+          questions={permissions.map((permission) => ({
+            id: permission.id,
+            title: askedFor(permission.title),
+            actions: permission.options.map((option) => ({
+              id: option.optionId,
+              label: option.name,
+              variant: permissionVariant(option.kind),
+            })),
+          }))}
+          onAnswer={(id, optionId) => {
+            const permission = permissions.find((p) => p.id === id);
+            if (permission) answerPermission(permission, optionId);
+          }}
         />
-        <div className="chat-composer-controls">
-          <button
-            type="button"
-            className="chat-attach"
-            title="attach photos or files"
-            aria-label="attach photos or files"
-            disabled={starting}
-            onClick={attach}
-          >
-            <Icon name="plus" className="size-3.5" />
-          </button>
-          {config.length > 0 && (
-            <div className="chat-config">
-              <button
-                type="button"
-                className="chat-config-button"
-                aria-expanded={picking}
-                title={`${label} is set to ${summarize(config)}`}
-                onClick={() => setPicking((open) => !open)}
-              >
-                {summarize(config)}
-              </button>
-              {picking && (
-                <>
-                  {/* Click-away, rather than a document listener that has to be
-                      taught which clicks are its own. */}
-                  <div className="chat-config-away" onClick={() => setPicking(false)} />
-                  <div className="chat-config-menu">
-                    {config.map((row) => (
-                      <label key={row.category} className="chat-config-row">
-                        <span>{row.name}</span>
-                        <select
-                          value={row.value}
-                          disabled={busy || starting}
-                          onChange={(event) => pick(row.category, event.target.value)}
-                        >
-                          {row.options.map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
-                    <p className="chat-config-note">
-                      {busy
-                        ? `Wait for ${label} to finish to change these.`
-                        : "Bigger models and higher effort use up your plan faster."}
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-          {busy ? (
-            <button type="button" className="chat-send chat-stop" onClick={cancel}>
-              stop
-            </button>
-          ) : (
-            <button type="submit" className="chat-send" disabled={starting}>
-              send
-            </button>
-          )}
+        {/* The pill rides the end of the transcript, so a reply that lands while
+            the user is reading further up is an offer rather than a jump. */}
+        <div className="sticky bottom-2 z-10 h-0">
+          <NewItemsPill count={newReply ? 1 : 0} onClick={jumpToLatest} label={() => "New reply"} />
         </div>
-      </form>
-    </section>
+      </div>
+    </ChatPanel>
   );
 }
 

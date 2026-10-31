@@ -5,10 +5,10 @@ body:
   - type: dropdown
     id: surface
     attributes:
-      label: How do you run nurb?
+      label: Where did it happen?
       options:
         - Desktop app
-        - Terminal, or an AI agent using the terminal
+        - An agent connected through Settings > Connect
         - Other
     validations:
       required: true
@@ -16,7 +16,7 @@ body:
     id: version
     attributes:
       label: nurb version
-      description: Desktop app; open About nurb from the menu bar and click "copy debug info", then paste it here. CLI; run `nurb --version`.
+      description: Open About nurb from the menu bar, click "Copy debug info", and paste it here.
       placeholder: "0.18.0"
     validations:
       required: true

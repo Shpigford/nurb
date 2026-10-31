@@ -8,7 +8,7 @@ nurb turns the AI you already pay for into a CAD partner for 3D printing. You de
 
 ## Get it
 
-[**Download the app**](https://github.com/Shpigford/nurb/releases) for your Mac, open it, and describe what you want to print. Everything is in that one window: your projects, the conversation, and the live viewer. It sets itself up the first time you open it and updates itself after that. Windows and Linux builds follow.
+[**Download the app**](https://github.com/Shpigford/nurb/releases/latest/download/nurb.dmg) for Apple silicon ([Intel Macs here](https://github.com/Shpigford/nurb/releases/latest/download/nurb-intel.dmg)) , open it, and describe what you want to print. Everything is in that one window: your projects, the conversation, and the live viewer. It sets itself up the first time you open it and updates itself after that. Windows and Linux builds follow.
 
 Then say something like:
 
@@ -18,17 +18,15 @@ The part appears while you read the reply. When it looks right: drag the sliders
 
 ## Bring your own AI
 
-The app talks to a part on its own, and it also opens the door the other way. In **Settings > Connect** there is one copyable command each for Claude Code, the Codex CLI, and Cursor. Paste it into that tool once and it can design parts in your projects, with the same live viewer showing you what it does.
+The chat inside the app runs the agent you already have: Claude Code, Codex, Gemini, Cursor or Grok, on your own subscription. Prefer your own terminal? **Settings > Connect** has one copyable command each for Claude Code, the Codex CLI, and Cursor. Paste it once and that tool designs parts in your projects through the same tools the app uses, with the same live viewer showing you what it does.
 
-**Already have a nurb project folder?** Use **Import** in the app once and it comes across, parts, notes, measurements and all.
+**Already have a nurb project folder from 0.x?** Use **Import folder** in the app once and it comes across, parts, notes, measurements and all.
 
 **It works offline.** Modelling, checking, the viewer, and export all run on your computer, with no account and no cloud, so it works on a plane or in a workshop with bad wifi.
 
-**Sharing is coming.** Publishing a part to nurb.app, so anyone can open it and set its dimensions, is next.
-
 ## What you get
 
-**A live view of every change.** Every edit updates the viewer without moving your camera. Cut the part open with a section plane, orbit it, watch it evolve as you talk.
+**A live view of every change.** Every edit updates the viewer without moving your camera. Orbit it and watch it evolve as you talk, and a build that fails leaves the last good version on screen.
 
 **Sliders for every dimension.** Each parameter of the part gets a slider. Drag until it looks right, click `Apply`, and the change is saved where the AI sees it too.
 
@@ -38,9 +36,7 @@ The app talks to a part on its own, and it also opens the door the other way. In
 
 **A 3MF that opens ready to print.** Exports default to 3MF with the print settings the part justifies already embedded: infill, walls, and a brim when the checks say the corners will lift. Your slicer opens it tuned. STL, STEP, and GLB are one click away.
 
-**"Will it hold?" gets a number.** Click the stress button, and a voxel simulation shows where the load concentrates, how far the part sags, and the weight it breaks at, quoted against layer adhesion because that is where FDM prints actually fail.
-
-**Parts that fit the real world.** Scan a real object with your phone or measure a downloaded model, record the dimensions that matter, and nurb refuses to let the AI guess them. A part with a target mesh gets deviation reports in both directions, so added material is caught as loudly as missing material.
+**Parts that fit the real world.** The dimensions that matter are recorded with how they were measured, and nurb refuses to let the AI guess them. A guess has to be marked as one, and stays marked until somebody picks up a caliper. Paste a photo into the chat and the AI can look at it to recognise the product or standard it has to fit.
 
 **Real CAD underneath.** Parts are true B-rep solids on the OCCT kernel, the same math as commercial CAD, not meshes. Chamfers and fillets are real operations, and STEP export means the part opens in Fusion or FreeCAD.
 
@@ -74,13 +70,13 @@ build_volume      does it fit the printer at all
 
 Findings never block the work. They are there so the AI can fix a problem before you meet it on the bed.
 
-## Your printer, your plastic
+## Your printer
 
-Name your machine once and every project on this computer knows the bed: the checks size themselves to it, the viewer labels the plate with it, and slicing and export use it. Name your plastic too, and the warp rules tighten to match how hard that material shrinks. The first time the viewer needs to know which printer this is for, it asks, and that answer is remembered.
+Name your machine once and every project on this computer knows the bed: the checks size themselves to it, the viewer labels the plate with it, and slicing and export use it. The first time the viewer needs to know which printer this is for, it asks, and that answer is remembered.
 
 ## Memory between sessions
 
-AIs forget everything between sessions, so each part carries a note: what it is, why, and what was tried and rejected. Dimensions that came from the real world are recorded with how they were obtained, and asking for one that was never measured raises an error instead of letting the model guess. No geometry check can catch a wrong guess; that failure only shows up when the printed part meets the real object.
+AIs forget everything between sessions, so each part keeps its own history: every revision of its source, every build, and the conversation that made it. Dimensions that came from the real world are recorded with how they were obtained, and asking for one that was never measured raises an error instead of letting the model guess. No geometry check can catch a wrong guess; that failure only shows up when the printed part meets the real object.
 
 ## How parts are described
 
@@ -94,8 +90,6 @@ def hose_adapter(vac_end=57.6, tool_end=35.0, wall=2.4):
     ...
 ```
 
-Because a part is a function, the same part flexes into variants: a shelf can declare a `shelf_3x2` version with three columns by two, and every check, export, and baseline walks variants like parts.
-
 ## Troubleshooting
 
 **The first build takes about 45 seconds.** That is the CAD kernel loading cold. It stays loaded, and every change after that lands in well under a second.
@@ -103,6 +97,12 @@ Because a part is a function, the same part flexes into variants: a shelf can de
 **Print time says no slicer.** It drives an installed OrcaSlicer or Bambu Studio; install either and it is found automatically. Export still writes the 3MF either way.
 
 **A check passed but the print failed on a thin wall.** `min_wall` samples faces, so a pinch nothing lands near can be missed. A clean result means "no thin walls found", not "no thin walls".
+
+## Coming from 0.x
+
+1.0 is the app. The `nurb` command line, the skill file and the PyPI package are gone: a project now lives in a database on your computer instead of a folder of files, which is what gives every part its revision history and keeps the app and the agent from overwriting each other. Your old folders come across with **Import folder**, and an agent in your terminal reaches the same parts through **Settings > Connect**.
+
+Some 0.x tools are not in 1.0 yet: the stress button, reading phone scans and target meshes, the section plane, card variants and the hinge slider for assemblies.
 
 ## Contributing
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX } from "react"
+import { useEffect, useRef, useState, type JSX } from "react"
 import clsx from "clsx"
 import {
   Box3,
@@ -19,6 +19,7 @@ import type { BufferGeometry, Material, Object3D } from "three"
 import { OrbitControls } from "three/addons/controls/OrbitControls.js"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import type { Finding } from "../types"
+import { duration, ease } from "../motion/tokens"
 import {
   HIGHLIGHT_OPACITY,
   buildPartGroup,
@@ -34,6 +35,7 @@ import {
   plate,
   plateGroup,
   printedBox,
+  purgeBead,
   saneCamera,
   stencilWriters,
 } from "./scene"
@@ -71,6 +73,10 @@ export interface ViewerIslandProps {
   camera?: CameraState | null
   /** The user's orbits, debounced 250 ms after the last one. The component's own framing never reports. */
   onCamera?: (state: CameraState) => void
+  /** Bump to nudge the view a notch around the part. Any new value nudges once; the first value never does. */
+  settleKey?: number
+  /** True once, on a project's first build, to lay the purge line across the front of the bed. */
+  purge?: boolean
   className?: string
 }
 
@@ -78,6 +84,132 @@ export interface ViewerIslandProps {
 const PARKED = 1e6
 
 const AXES = { x: [1, 0, 0], y: [0, 1, 0], z: [0, 0, 1] } as const
+
+/** The plate's normal minor spacing, in mm. */
+const MM = 10
+/** Gridfinity's unit, shown for GRIDFINITY_MS when the app asks for it. */
+const GRIDFINITY_PITCH = 42
+const GRIDFINITY_MS = 4000
+/** A notch of azimuth, enough to read as a new angle without losing the pose you had. */
+const NUDGE = Math.PI / 12
+const PURGE_DRAW = 1.8
+const PURGE_HOLD = 2
+const PURGE_OPACITY = 0.9
+
+/** matchMedia is missing in jsdom and in a locked-down webview, and no answer means no preference. */
+const reducedMotion = (): boolean => {
+  try {
+    return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false
+  } catch {
+    return false
+  }
+}
+
+/** Solves a CSS cubic-bezier for y at x, so an rAF loop can move on the same curve the CSS tokens do. */
+function eased(x: number, curve: readonly [number, number, number, number]): number {
+  if (x <= 0) return 0
+  if (x >= 1) return 1
+  const [x1, y1, x2, y2] = curve
+  const at = (t: number, a: number, b: number) => 3 * (1 - t) ** 2 * t * a + 3 * (1 - t) * t ** 2 * b + t ** 3
+  let t = x
+  for (let i = 0; i < 8; i++) {
+    const dx = at(t, x1, x2) - x
+    if (Math.abs(dx) < 1e-4) break
+    const slope = 3 * (1 - t) ** 2 * x1 + 6 * (1 - t) * t * (x2 - x1) + 3 * t ** 2 * (1 - x2)
+    if (Math.abs(slope) < 1e-6) break
+    t -= dx / slope
+  }
+  return at(t, y1, y2)
+}
+
+type Fading = Material & { opacity: number; transparent: boolean; depthWrite: boolean }
+
+interface Saved {
+  material: Fading
+  opacity: number
+  transparent: boolean
+  depthWrite: boolean
+}
+
+const collectMaterials = (root: Object3D): Saved[] => {
+  const saved: Saved[] = []
+  root.traverse((o) => {
+    const held = (o as Mesh).material
+    if (!held) return
+    for (const material of (Array.isArray(held) ? held : [held]) as Fading[]) {
+      saved.push({ material, opacity: material.opacity, transparent: material.transparent, depthWrite: material.depthWrite })
+    }
+  })
+  return saved
+}
+
+const restoreMaterials = (saved: Saved[]) => {
+  for (const s of saved) {
+    s.material.opacity = s.opacity
+    s.material.transparent = s.transparent
+    s.material.depthWrite = s.depthWrite
+  }
+}
+
+export interface CrossfadeOptions {
+  seconds: number
+  render: () => void
+  /** Called once the fade lands, so the caller can remove and dispose the outgoing group. */
+  onDone: () => void
+  /** Injected by the tests; the component uses the real clock and rAF. */
+  now?: () => number
+  schedule?: (step: () => void) => number
+  unschedule?: (id: number) => void
+}
+
+/**
+ * Dissolves one group into another in place. Both keep their own transparency settings:
+ * `transparent` is switched on only for the fade, because leaving it on would sort the part
+ * against the whole scene for the rest of the session, and the outgoing group stops writing
+ * depth so it cannot punch holes in the arriving one. Returns a cancel that restores the
+ * survivor without calling onDone.
+ */
+export function crossfadeGroups(from: Object3D | null, to: Object3D | null, opts: CrossfadeOptions): () => void {
+  const now = opts.now ?? (() => performance.now())
+  const schedule = opts.schedule ?? ((step: () => void) => requestAnimationFrame(() => step()))
+  const unschedule = opts.unschedule ?? ((id: number) => cancelAnimationFrame(id))
+  const incoming = to ? collectMaterials(to) : []
+  const outgoing = from ? collectMaterials(from) : []
+  for (const s of incoming) {
+    s.material.transparent = true
+    s.material.opacity = 0
+  }
+  for (const s of outgoing) {
+    s.material.transparent = true
+    s.material.depthWrite = false
+  }
+  const start = now()
+  const ms = Math.max(1, opts.seconds * 1000)
+  let id = 0
+  let live = true
+  const step = () => {
+    id = 0
+    if (!live) return
+    const p = Math.min(1, (now() - start) / ms)
+    for (const s of incoming) s.material.opacity = s.opacity * p
+    for (const s of outgoing) s.material.opacity = s.opacity * (1 - p)
+    opts.render()
+    if (p < 1) {
+      id = schedule(step)
+      return
+    }
+    live = false
+    restoreMaterials(incoming)
+    opts.onDone()
+  }
+  id = schedule(step)
+  return () => {
+    if (!live) return
+    live = false
+    if (id) unschedule(id)
+    restoreMaterials(incoming)
+  }
+}
 
 interface Holder {
   renderer: WebGLRenderer | null
@@ -89,8 +221,14 @@ interface Holder {
   marks: Group
   cap: Mesh
   part: Group | null
+  /** The previous part, still drawn while it dissolves into the new one. */
+  fading: { group: Group; cancel: () => void } | null
   ghost: Mesh | null
   plate: Group | null
+  plateSize: [number, number] | null
+  /** The plate's minor spacing in mm, normally MM and GRIDFINITY_PITCH while the app asks. */
+  pitch: number
+  purge: Mesh | null
   writers: Mesh[]
   glows: Mesh[]
   box: Box3
@@ -108,6 +246,8 @@ interface Holder {
   lastW: number
   lastH: number
   raf: number
+  nudgeRaf: number
+  purgeRaf: number
   camTimer: ReturnType<typeof setTimeout> | null
   render: () => void
 }
@@ -162,6 +302,33 @@ function dropDamping(h: Holder): void {
   held._scale = 1
 }
 
+/**
+ * The grid lives under the part whether or not the project has picked a printer. With a bed
+ * it is that bed; without one it is a square big enough to read as ground under what is
+ * loaded, in 50mm steps. Nothing loaded and no bed draws nothing, because the workbench only
+ * mounts the viewer once there is geometry to show.
+ */
+function syncPlate(h: Holder, bed: [number, number] | null | undefined): void {
+  if (h.plate) {
+    h.scene.remove(h.plate)
+    disposeGroup(h.plate)
+    h.plate = null
+  }
+  const size = bed ?? fittedBed(h)
+  h.plateSize = size
+  if (!size) return
+  h.plate = plate(size, h.pitch)
+  h.scene.add(h.plate)
+}
+
+function fittedBed(h: Holder): [number, number] | null {
+  if (!h.part) return null
+  // World space, because the root is rotated when the part's own up is not Z.
+  const size = new Box3().setFromObject(h.part).getSize(new Vector3())
+  const side = Math.max(100, Math.ceil((Math.max(size.x, size.y) * 1.8) / 50) * 50)
+  return [side, side]
+}
+
 /** Plate the part and decide the camera: keep it when it still sees the part, else restore the caller's, else frame. */
 function settle(h: Holder, wanted: CameraState | null | undefined): void {
   if (!h.part) return
@@ -172,6 +339,90 @@ function settle(h: Holder, wanted: CameraState | null | undefined): void {
   if (!taken && h.controls) frameCamera(h.camera, h.controls, h.box)
   h.quiet = false
   h.framed = true
+}
+
+/** A fade belongs to the generation that started it, so a newer build ends it now rather than stacking stale geometry. */
+function finishFade(h: Holder): void {
+  const held = h.fading
+  if (!held) return
+  h.fading = null
+  held.cancel()
+  h.root.remove(held.group)
+  disposeGroup(held.group)
+}
+
+/**
+ * A notch of azimuth around the part, on the coast curve. The camera stays where it lands:
+ * a nudge is a look at the part from a new angle, and snapping back would undo the look.
+ */
+function nudgeAzimuth(h: Holder): void {
+  const controls = h.controls
+  if (!controls || reducedMotion()) return
+  if (h.nudgeRaf) cancelAnimationFrame(h.nudgeRaf)
+  const target = controls.target.clone()
+  const base = h.camera.position.clone().sub(target)
+  const axis = h.camera.up.clone().normalize()
+  const start = performance.now()
+  const ms = duration.coast * 1000
+  h.quiet = true
+  const step = () => {
+    h.nudgeRaf = 0
+    const p = Math.min(1, (performance.now() - start) / ms)
+    if (p >= 1) h.quiet = false // the resting pose is the user's now, so it reports
+    h.camera.position.copy(base).applyAxisAngle(axis, NUDGE * eased(p, ease.out)).add(target)
+    controls.update()
+    h.render()
+    if (p < 1) h.nudgeRaf = requestAnimationFrame(step)
+  }
+  h.nudgeRaf = requestAnimationFrame(step)
+}
+
+function dropPurge(h: Holder): void {
+  if (h.purgeRaf) cancelAnimationFrame(h.purgeRaf)
+  h.purgeRaf = 0
+  if (!h.purge) return
+  h.scene.remove(h.purge)
+  disposeGroup(h.purge)
+  h.purge = null
+}
+
+/** The printer's first move, once: a bead of accent wiped left to right along the front of the bed. */
+function runPurge(h: Holder): boolean {
+  if (!h.plate || !h.plateSize || reducedMotion()) return false
+  const [w, d] = h.plateSize
+  const bead = purgeBead(d)
+  h.purge = bead
+  h.scene.add(bead)
+  const material = bead.material as Fading
+  const start = performance.now()
+  const step = () => {
+    h.purgeRaf = 0
+    const t = (performance.now() - start) / 1000
+    const length = Math.max(1e-3, w * eased(t / PURGE_DRAW, ease.out))
+    bead.scale.x = length
+    bead.position.x = -w / 2 + length / 2 // extruded from the left edge, never from the middle
+    const out = t - PURGE_DRAW - PURGE_HOLD
+    material.opacity = out <= 0 ? PURGE_OPACITY : PURGE_OPACITY * (1 - Math.min(1, out / duration.settle))
+    h.render()
+    if (out < duration.settle) {
+      h.purgeRaf = requestAnimationFrame(step)
+      return
+    }
+    dropPurge(h)
+    h.render()
+  }
+  h.purgeRaf = requestAnimationFrame(step)
+  return true
+}
+
+/**
+ * The greeting is spent only once it has actually drawn. Before the GLB lands and
+ * with no printer bed set there is no plate under it, so the run is tried again
+ * when the part arrives.
+ */
+function tryPurge(h: Holder, wanted: boolean | undefined, done: { current: boolean }): void {
+  if (!wanted || done.current) return
+  done.current = runPurge(h)
 }
 
 function clearWriters(h: Holder) {
@@ -279,13 +530,15 @@ function rebuildMarks(h: Holder, findings: Finding[], highlight: number | null |
 }
 
 export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
-  const { glbUrl, targetUrl, targetOffset, findings, highlight, bed, up, section, camera, className } = props
+  const { glbUrl, targetUrl, targetOffset, findings, highlight, bed, up, section, camera, settleKey, purge, className } = props
+  const [gridfinity, setGridfinity] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const holderRef = useRef<Holder | null>(null)
   const downRef = useRef<[number, number] | null>(null)
   const appliedCamera = useRef<CameraState | null>(null)
   const latest = useRef(props)
   latest.current = props
+  const purged = useRef(false)
 
   useEffect(() => {
     const container = containerRef.current
@@ -313,8 +566,12 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
       marks,
       cap,
       part: null,
+      fading: null,
       ghost: null,
       plate: null,
+      plateSize: null,
+      pitch: MM,
+      purge: null,
       writers: [],
       glows: [],
       box: new Box3(),
@@ -330,6 +587,8 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
       lastW: 0,
       lastH: 0,
       raf: 0,
+      nudgeRaf: 0,
+      purgeRaf: 0,
       camTimer: null,
       render: () => {},
     }
@@ -357,7 +616,10 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
       container.appendChild(canvas)
       h.controls = new OrbitControls(view, canvas)
       h.controls.enableDamping = true
-      h.controls.dampingFactor = 0.12
+      // A release coasts for duration.coast. Damping is exponential, the residual velocity
+      // times (1 - f) per update, so reaching 1% of the release velocity after 1.4 s at
+      // 60 fps (84 frames) wants f = 1 - 0.01 ** (1 / 84) = 0.0533.
+      h.controls.dampingFactor = 0.0533
     }
 
     // Render on demand. Damping needs frames, so the loop keeps going only while
@@ -414,13 +676,16 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
       // StrictMode mounts, unmounts and mounts again, so a leaked context here is two contexts.
       observer.disconnect()
       if (h.raf) cancelAnimationFrame(h.raf)
+      if (h.nudgeRaf) cancelAnimationFrame(h.nudgeRaf)
       if (h.camTimer) clearTimeout(h.camTimer)
       h.generation++
       h.targetGeneration++
       h.controls?.removeEventListener("change", onChange)
       h.controls?.dispose()
       clearWriters(h)
+      dropPurge(h)
       for (const child of marks.children) disposeGroup(child)
+      finishFade(h) // a group still dissolving is still geometry to give back
       if (h.part) disposeGroup(h.part)
       if (h.ghost) {
         h.ghost.geometry.dispose()
@@ -441,6 +706,7 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
     const h = holderRef.current
     if (!h || !h.controls) return
     const generation = ++h.generation
+    finishFade(h) // an in-flight fade is a picture of two builds ago
     const drop = () => {
       if (!h.part) return
       h.root.remove(h.part)
@@ -450,6 +716,7 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
     }
     if (!glbUrl) {
       drop()
+      syncPlate(h, latest.current.bed)
       clearWriters(h)
       rebuildMarks(h, [], null)
       applySection(h, latest.current.section)
@@ -464,23 +731,48 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
           return
         }
         const part = buildPartGroup(gltf.scene, h.plane, palette)
-        drop()
         h.loaded = generation
         if (!part.children.length) {
           // A GLB with no mesh would plate to NaN and blank the viewer for good.
+          drop()
+          disposeGroup(part)
           clearWriters(h)
           rebuildMarks(h, [], null)
           applySection(h, latest.current.section)
           return
         }
+        // The old part stays in the scene until the new one is in it too: dropping it first
+        // is what made every rebuild blink.
+        const previous = h.part
+        if (previous && h.ghost) previous.remove(h.ghost)
         if (h.ghost) part.add(h.ghost)
         h.root.add(part)
         h.part = part
         settle(h, latest.current.camera)
+        syncPlate(h, latest.current.bed)
+        tryPurge(h, latest.current.purge, purged)
         appliedCamera.current = latest.current.camera ?? null
         attachWriters(h)
         applySection(h, latest.current.section)
         rebuildMarks(h, latest.current.findings ?? [], latest.current.highlight)
+        if (previous && reducedMotion()) {
+          h.root.remove(previous)
+          disposeGroup(previous)
+        } else if (previous) {
+          h.fading = {
+            group: previous,
+            cancel: crossfadeGroups(previous, part, {
+              seconds: duration.settle,
+              render: h.render,
+              onDone: () => {
+                h.fading = null
+                h.root.remove(previous)
+                disposeGroup(previous)
+                h.render()
+              },
+            }),
+          }
+        }
         h.render()
       })
       .catch((error: unknown) => {
@@ -513,7 +805,7 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
         const geometry = firstGeometry(gltf.scene)
         if (!geometry) return
         if (!geometry.attributes.normal) geometry.computeVertexNormals()
-        // Amber against the part's grey-blue, double-sided because a scan can be an open
+        // Amber against the part's orange, double-sided because a scan can be an open
         // surface, and never writing depth so the part reads through it (v1:843-848).
         const ghost = new Mesh(
           geometry,
@@ -547,17 +839,47 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
   useEffect(() => {
     const h = holderRef.current
     if (!h) return
-    if (h.plate) {
-      h.scene.remove(h.plate)
-      disposeGroup(h.plate)
-      h.plate = null
-    }
-    if (bed) {
-      h.plate = plate(bed)
-      h.scene.add(h.plate)
-    }
+    syncPlate(h, bed)
     h.render()
   }, [bed?.[0], bed?.[1], !bed])
+
+  const nudgedFrom = useRef(settleKey)
+  useEffect(() => {
+    const h = holderRef.current
+    const previous = nudgedFrom.current
+    nudgedFrom.current = settleKey
+    // The value the component mounted with is the starting pose, not a request to move.
+    if (!h || settleKey === undefined || settleKey === previous) return
+    nudgeAzimuth(h)
+  }, [settleKey])
+
+  useEffect(() => {
+    const h = holderRef.current
+    if (!h) return
+    tryPurge(h, purge, purged) // a bed that is not there yet still gets its one run later
+  }, [purge, bed?.[0], bed?.[1]])
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const onGridfinity = () => {
+      setGridfinity(true)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => setGridfinity(false), GRIDFINITY_MS)
+    }
+    window.addEventListener("nurb:gridfinity", onGridfinity)
+    return () => {
+      window.removeEventListener("nurb:gridfinity", onGridfinity)
+      if (timer) clearTimeout(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    const h = holderRef.current
+    if (!h) return
+    h.pitch = gridfinity ? GRIDFINITY_PITCH : MM
+    syncPlate(h, latest.current.bed)
+    h.render()
+  }, [gridfinity])
 
   const upKey = (up ?? [0, 0, 1]).join(",")
   useEffect(() => {
@@ -569,6 +891,7 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
     h.root.updateMatrixWorld(true)
     if (h.part) {
       settle(h, latest.current.camera)
+      syncPlate(h, latest.current.bed)
       applySection(h, latest.current.section)
       rebuildMarks(h, latest.current.findings ?? [], latest.current.highlight)
     }
@@ -619,7 +942,13 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
           .find((i) => !h.cutting || h.plane.distanceToPoint(i.point) >= 0)
         report(hit ? (hit.object.userData.finding as number) : null)
       }}
-    />
+    >
+      {gridfinity && (
+        <div className="mono-caption pointer-events-none absolute bottom-3 left-3 text-faint [letter-spacing:0.12em]">
+          GRID 42.0 MM
+        </div>
+      )}
+    </div>
   )
 }
 

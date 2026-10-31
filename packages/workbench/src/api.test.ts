@@ -6,7 +6,6 @@ import {
   deleteProject,
   fetchProjects,
   importFolder,
-  openPublic,
 } from "./api"
 
 interface Call {
@@ -50,18 +49,16 @@ describe("api", () => {
     expect(absolute("blob:nothing")).toBe("blob:nothing")
   })
 
-  it("posts a project, an import and an open, and deletes by id", async () => {
+  it("posts a project and an import, and deletes by id", async () => {
     const calls = stubFetch({ id: "p1", name: "First" })
     await createProject()
-    await createProject("Second")
+    await createProject("Second", true)
     await importFolder("/Users/someone/parts")
-    await openPublic("https://example.com/thing.stl")
     await deleteProject("p 1")
     expect(calls).toEqual([
-      { url: "/api/projects", method: "POST", body: {} },
-      { url: "/api/projects", method: "POST", body: { name: "Second" } },
+      { url: "/api/projects", method: "POST", body: { folder: false } },
+      { url: "/api/projects", method: "POST", body: { name: "Second", folder: true } },
       { url: "/api/import", method: "POST", body: { path: "/Users/someone/parts" } },
-      { url: "/api/open", method: "POST", body: { src: "https://example.com/thing.stl" } },
       { url: "/api/projects/p%201", method: "DELETE", body: null },
     ])
   })

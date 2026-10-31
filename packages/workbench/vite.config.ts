@@ -7,7 +7,7 @@ export default defineConfig({
   // The workspace symlink can resolve a second copy of these; two Reacts break hooks.
   resolve: { dedupe: ["react", "react-dom", "three"] },
   // The page ships inside the Python package, so the bundle lands there directly.
-  build: { outDir: "../../src/nurb/workbench", emptyOutDir: true },
+  build: { outDir: "../../engine/src/nurb/workbench", emptyOutDir: true },
   server: {
     proxy: {
       "/api": "http://127.0.0.1:7373",
