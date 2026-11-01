@@ -711,11 +711,11 @@ def _project(conn, project_id, part=None):
     row = db.get_project(conn, project_id)
     if row is None:
         return None
-    parts = [
-        _part_entry(conn, project_id, entry)
-        for entry in db.parts_of(conn, project_id)
-        if entry["kind"] == "part"
-    ]
+    # Which parts read each measurement, so a part's page can list only its own.
+    rows = list(db.parts_of(conn, project_id))
+    reads = mcp_server._measurement_uses(rows, db.project_files_of(conn, project_id))
+    names = {entry["id"]: entry["name"] for entry in rows if entry["kind"] == "part"}
+    parts = [_part_entry(conn, project_id, entry) for entry in rows if entry["kind"] == "part"]
     if part is None:
         messages = conn.execute(
             "SELECT * FROM messages WHERE project_id = ? ORDER BY sequence_number", (project_id,)
@@ -741,6 +741,7 @@ def _project(conn, project_id, part=None):
                 "how": m["how"],
                 "provisional": bool(m["provisional"]),
                 "value_changed_at": m["value_changed_at"],
+                "used_by": [names[part_id] for part_id, used in reads.items() if part_id in names and m["name"] in used],
             }
             for m in db.measurements_of(conn, project_id)
         ],

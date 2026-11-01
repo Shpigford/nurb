@@ -67,6 +67,8 @@ export interface ProjectMeasurement {
   how: string
   provisional: boolean
   value_changed_at: string | null
+  /** The parts that read it, directly or through a shared file. */
+  used_by: string[]
 }
 
 export interface Printer {

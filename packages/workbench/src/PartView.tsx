@@ -193,6 +193,7 @@ export default function PartView({
 
   const parts = project?.parts ?? []
   const part = parts.find((p) => p.name === partName) ?? parts[0] ?? null
+  const readsMeasured = part ? (project?.measurements ?? []).filter((m) => m.used_by?.includes(part.name)) : []
   const build = part?.build ?? null
   const verdict = verdictOf(build)
   const glbUrl = build?.glb_url ?? null
@@ -636,25 +637,21 @@ export default function PartView({
                   )}
                 </div>
               </RailDisclosure>
-              {/* The numbers someone measured are standing reference, so they keep a surface in the rail. */}
-              {project && project.measurements.length > 0 ? (
+              {/* The numbers this part was built from: the whole project's list is the project panel's. */}
+              {readsMeasured.length > 0 ? (
                 <RailDisclosure
                   label="MEASUREMENTS"
-                  summary={String(project.measurements.length)}
+                  summary={String(readsMeasured.length)}
                   open={measurementsOpen}
                   onToggle={() => setMeasurementsOpen((v) => !v)}
                 >
                   <ul className="flex flex-col gap-1 px-4 py-2">
-                    {project.measurements.map((m) => (
-                      <li key={m.name} className="flex items-baseline gap-2">
-                        <span className="mono-label truncate text-muted">{m.name}</span>
-                        <span className="flex-1" />
-                        <span className="mono-value text-ink">
+                    {readsMeasured.map((m) => (
+                      <li key={m.name} className="flex items-baseline gap-3" title={m.how}>
+                        <span className="mono-label min-w-0 flex-1 truncate text-muted">{m.name}</span>
+                        <span className="mono-value shrink-0 whitespace-nowrap text-ink">
                           {m.provisional ? "~" : ""}
                           {m.value_mm} {m.unit ?? "mm"}
-                        </span>
-                        <span className="mono-caption w-16 truncate text-right text-faint" title={m.how}>
-                          {m.how}
                         </span>
                       </li>
                     ))}
