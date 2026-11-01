@@ -1,6 +1,7 @@
 {
   "name": "@nurb/ui",
   "version": "1.0.0",
+  "private": true,
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -20,11 +21,13 @@
   ],
   "scripts": {
     "build": "vite build",
+    "fonts:fetch": "sh scripts/fetch-satoshi.sh",
     "prepublishOnly": "npm run build",
     "test": "vitest run",
     "gallery": "vite --config gallery/vite.config.ts",
     "gallery:build": "vite build --config gallery/vite.config.ts",
     "gallery:shots": "node gallery/shots.mjs",
+    "site:hero": "node gallery/shots.mjs --site",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {

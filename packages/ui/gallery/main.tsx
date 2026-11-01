@@ -7,7 +7,7 @@ import { markdownFixture, specFixture, measurementRecorded, measurementChanged }
 import { BuildCard, ToolStepCard, ToolStepGroup } from "../src/index"
 import { buildPassed, buildRunning, buildFailed, groupSteps, stepDone, stepRunning, stepFailed } from "./fixtures"
 import { ViewerIsland, type Section as Cut } from "../src/index"
-import { ParamsPanel, ExportMenu, type ExportResult, type Params } from "../src/index"
+import { ParamsPanel, ExportMenu, type Params } from "../src/index"
 import { panelParams, panelStats } from "./fixtures"
 import { flaggedFindings } from "./fixtures"
 import Workbench from "./Workbench"
@@ -84,12 +84,9 @@ function ParamsPanelDemo() {
   )
 }
 
-// The export takes 1500 ms so the preparing row is visible on the way to the link.
+// The export takes 1500 ms so the preparing row is visible.
 function ExportMenuDemo() {
-  const slowExport = (format: string): Promise<ExportResult> =>
-    new Promise((resolve) =>
-      setTimeout(() => resolve({ url: `/exports/shelf_bracket.${format}`, filename: `shelf_bracket.${format}` }), 1500)
-    )
+  const slowExport = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 1500))
   return (
     <div className="flex h-[240px] w-[254px] items-end">
       <ExportMenu

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "sh ../ui/scripts/fetch-satoshi.sh",
     "build": "vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

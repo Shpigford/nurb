@@ -4,7 +4,7 @@ import type { Spec, SpecDimension } from "./types"
 
 // The pinned spec, rendered as a card in the transcript: what gets built, from which
 // numbers, and where each number came from. Where a number came from is the point
-// (DESIGN.md §1), said the way the person would say it, since they are not engineers.
+// said the way the person would say it, since they are not engineers.
 
 const SOURCE_LABELS: Record<string, string> = {
   standard: "Published",

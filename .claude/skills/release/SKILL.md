@@ -54,7 +54,9 @@ Run `npm install --package-lock-only` at the repository root after those edits, 
 
 Then write the changelog into the same PR: run /changelog for the pending version. Pre-merge there is no tag yet, so it draws from the PRs merged since the last tag plus this branch's own changes, dated today.
 
-Prove the agreement before pushing: `cd engine && uv run pytest tests/test_version.py -q`, then run `npm ci --ignore-scripts` at the repository root to prove a clean workspace install. Commit the bump, lockfile and changelog together with a plain-sentence message, push, and open the PR against main with the release summary as the body (what shipped, in user-visible terms). Then stop and hand the merge to the user.
+Refresh the site's hero in the same PR: `npm run site:hero --workspace packages/ui`. It draws the `hero` sheet in `packages/ui/gallery/sheets.tsx` from the components the app ships and writes `site/app.jpg`, so nurb.dev shows the app as it is in this release. Look at `site/app.jpg` before committing it. If the part, the conversation or the numbers on that sheet no longer match what the app does, fix the sheet, not the image.
+
+Prove the agreement before pushing: `cd engine && uv run pytest tests/test_version.py -q`, then run `npm ci --ignore-scripts` at the repository root to prove a clean workspace install. Commit the bump, lockfile, changelog and hero images together with a plain-sentence message, push, and open the PR against main with the release summary as the body (what shipped, in user-visible terms). Then stop and hand the merge to the user.
 
 ## Step 3: After the merge
 

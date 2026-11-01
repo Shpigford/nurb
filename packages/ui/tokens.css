@@ -2,10 +2,10 @@
 
 /* ---------------------------------------------------------------------------
    Fonts. Satoshi announces, Instrument Sans speaks, JetBrains Mono measures.
-   All three ship as variable TTFs with this package so nothing depends on a
-   third-party CDN: Instrument Sans and JetBrains Mono under the OFL, Satoshi
-   under the Fontshare EULA (fonts/SATOSHI-LICENSE.md). Never italic
-   (DESIGN.md §3).
+   All three are local variable TTFs so nothing depends on a third-party CDN.
+   Instrument Sans and JetBrains Mono ship here under the OFL. Satoshi's license
+   keeps it out of a public repository, so scripts/fetch-satoshi.sh fetches it
+   before a build (fonts/SATOSHI-LICENSE.md). Never italic.
    --------------------------------------------------------------------------- */
 
 @font-face {
@@ -28,7 +28,7 @@
 }
 
 /* ---------------------------------------------------------------------------
-   nurb design tokens — docs/core/DESIGN.md §2–§4, mirrored from the Paper file
+   nurb design tokens, mirrored from the Paper file
    "nurb — product design". One cool slate ramp, one accent, three semantics.
    `static` so a consumer gets every variable even where its scanner never sees
    the utility that would have pulled it in.

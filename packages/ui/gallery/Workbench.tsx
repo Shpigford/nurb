@@ -12,7 +12,6 @@ import {
   ViewerIsland,
   rev,
   type ExportFormat,
-  type ExportResult,
   type Param,
   type Params,
 } from "../src/index"
@@ -31,10 +30,9 @@ const REVISION = 27
 // The header dot is the verdict of the same findings the rail lists.
 const WORST = flaggedFindings.some((f) => f.severity === "fail") ? "fail" : flaggedFindings.length ? "warn" : "pass"
 
-// The export is fixture-driven: nothing is built, the link is a placeholder, and
-// the delay is only there so the menu's preparing row is reachable.
-const fakeExport = (format: ExportFormat): Promise<ExportResult> =>
-  new Promise((resolve) => setTimeout(() => resolve({ url: "#", filename: `shelf_gridfinity.${format}` }), 1500))
+// The export is fixture-driven: nothing is built, and the delay is only there so
+// the menu's preparing row is reachable.
+const fakeExport = (_format: ExportFormat): Promise<void> => new Promise((resolve) => setTimeout(resolve, 1500))
 
 function severityText(severity: string) {
   return severity === "fail" ? "text-fail" : "text-warn"
