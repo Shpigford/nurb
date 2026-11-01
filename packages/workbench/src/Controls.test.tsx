@@ -215,7 +215,7 @@ describe("apply", () => {
     })
     render(<App />)
 
-    await userEvent.click(await screen.findByRole("button", { name: "Apply" }))
+    await userEvent.click(await screen.findByRole("button", { name: "Save as default" }))
     await waitFor(() => expect(sent("/apply")).toHaveLength(1))
     expect(sent("/apply")[0].body).toEqual({ values: { wall: 3 } })
     expect(await screen.findByText("Saved as rev 4. wall 2 → 3")).toBeInTheDocument()

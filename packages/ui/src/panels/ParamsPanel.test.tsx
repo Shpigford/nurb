@@ -62,7 +62,7 @@ describe("ParamsPanel", () => {
     expect(screen.queryByLabelText("finish value")).toBeNull()
   })
 
-  it("calls onApply with the edited values when Apply is clicked", async () => {
+  it("calls onApply with the edited values when Save as default is clicked", async () => {
     const onApply = vi.fn()
     render(<Host onApply={onApply} />)
 
@@ -74,7 +74,7 @@ describe("ParamsPanel", () => {
     await userEvent.click(screen.getByRole("switch", { name: "draft" }))
 
     expect(screen.getByText("2 changes")).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: "Apply" }))
+    await userEvent.click(screen.getByRole("button", { name: "Save as default" }))
     expect(onApply).toHaveBeenCalledWith({ width: 55, draft: true })
   })
 
@@ -101,7 +101,7 @@ describe("ParamsPanel", () => {
     const { rerender } = render(
       <ParamsPanel params={params} values={{ width: 40 }} onChange={onChange} onApply={vi.fn()} />
     )
-    expect(screen.queryByRole("button", { name: "Apply" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Save as default" })).toBeNull()
 
     rerender(<ParamsPanel params={params} values={{ width: 52 }} onChange={onChange} onApply={vi.fn()} />)
     expect(screen.getByText("1 change")).toBeInTheDocument()
@@ -281,8 +281,8 @@ describe("ParamsPanel", () => {
     fireEvent.change(screen.getByLabelText("width value"), { target: { value: "55" } })
     fireEvent.blur(screen.getByLabelText("width value"))
 
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }))
-    await waitFor(() => expect(screen.getByRole("button", { name: "Applied" })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: "Save as default" }))
+    await waitFor(() => expect(screen.getByRole("button", { name: "Saved" })).toBeInTheDocument())
   })
 
   it("renders nothing when no param is adjustable", () => {

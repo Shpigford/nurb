@@ -516,23 +516,25 @@ export default function ParamsPanel({
       </p>
 
       {dirtyCount > 0 ? (
-        <div className="chrome mx-4 mb-3 flex h-9 shrink-0 items-center gap-2 rounded-content bg-accent-wash px-3">
-          <span className="size-1.5 shrink-0 rounded-full bg-accent" />
-          <span className="mono-id flex-1 uppercase text-accent-ink tabular-nums [letter-spacing:0.08em]">
-            {dirtyCount} {dirtyCount === 1 ? "change" : "changes"}
-          </span>
-          <button
-            type="button"
-            onClick={() => onChange({})}
-            className="mono-label rounded-control px-2 py-1 text-ink-soft transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            Reset
-          </button>
-          <span className="inline-flex" title="Save these values as the part's defaults.">
+        <div className="chrome mx-4 mb-3 flex flex-col gap-2 rounded-content bg-accent-wash p-2 pl-3">
+          <div className="flex h-6 items-center gap-2">
+            <span className="size-1.5 shrink-0 rounded-full bg-accent" />
+            <span className="mono-id flex-1 whitespace-nowrap uppercase text-accent-ink tabular-nums [letter-spacing:0.08em]">
+              {dirtyCount} {dirtyCount === 1 ? "change" : "changes"}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange({})}
+              className="mono-label shrink-0 rounded-control px-2 py-1 text-ink-soft transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            >
+              Reset
+            </button>
+          </div>
+          <span className="flex [&>*]:w-full" title="Make these values the part's defaults, so it opens and downloads this way.">
             <LoadingButton
-              label="Apply"
-              pendingLabel="Applying"
-              successLabel="Applied"
+              label="Save as default"
+              pendingLabel="Saving"
+              successLabel="Saved"
               errorLabel="Try again"
               resetAfter={1400}
               variant="ink"

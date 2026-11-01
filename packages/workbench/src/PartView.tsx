@@ -304,9 +304,12 @@ export default function PartView({
       const partId = part?.id
       if (!partId) return
       if (paramsTimer.current) clearTimeout(paramsTimer.current)
-      paramsTimer.current = setTimeout(() => void sendParams(partId, next), DEBOUNCE_MS)
+      // The wait is for a drag settling; a switch is one click, so it builds at once.
+      const changed = Object.keys({ ...values, ...next }).filter((key) => values[key] !== next[key])
+      const flipped = changed.length > 0 && changed.every((key) => typeof (next[key] ?? values[key]) === "boolean")
+      paramsTimer.current = setTimeout(() => void sendParams(partId, next), flipped ? 0 : DEBOUNCE_MS)
     },
-    [part?.id, sendParams]
+    [part?.id, sendParams, values]
   )
 
   const onApply = useCallback(
