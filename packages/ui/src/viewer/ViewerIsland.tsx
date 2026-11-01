@@ -64,6 +64,8 @@ export interface ViewerIslandProps {
   highlight?: number | null
   /** Called when the user clicks a finding's glow (index) or empty space (null). */
   onHighlight?: (index: number | null) => void
+  /** While set, a click on the part reports that spot instead, in the part's own mm. */
+  onPick?: ((pick: { point: Vec3; normal: Vec3 }) => void) | null
   /** Printer bed [width, depth] in mm; null hides the plate. */
   bed?: [number, number] | null
   /** Print-up axis of the part's coordinates. Default [0,0,1]. */
@@ -918,7 +920,7 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
   return (
     <div
       ref={containerRef}
-      className={clsx("relative block h-full w-full", className)}
+      className={clsx("relative block h-full w-full", props.onPick && "cursor-crosshair", className)}
       onPointerDown={(e) => {
         downRef.current = [e.clientX, e.clientY]
       }}
@@ -926,9 +928,9 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
         const down = downRef.current
         downRef.current = null
         const h = holderRef.current
-        const report = latest.current.onHighlight
+        const { onHighlight: report, onPick: pick } = latest.current
         // 5 px tells a click from the end of an orbit (v1's pick gate).
-        if (!down || !h || !report || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return
+        if (!down || !h || (!report && !pick) || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5) return
         const rect = e.currentTarget.getBoundingClientRect()
         if (!rect.width || !rect.height) return
         const ndc = new Vector2(
@@ -937,6 +939,21 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
         )
         const ray = new Raycaster()
         ray.setFromCamera(ndc, h.camera)
+        if (pick) {
+          // The part's own meshes, never the scenery around it. Their vertices are the
+          // GLB's, so the local hit point is the part's coordinates in mm.
+          const meshes = (h.part?.children ?? []).filter((o) => (o as Mesh).isMesh && o.name !== "context")
+          const spot = ray
+            .intersectObjects(meshes, false)
+            .find((i) => !h.cutting || h.plane.distanceToPoint(i.point) >= 0)
+          if (spot?.face) {
+            const at = spot.object.worldToLocal(spot.point.clone())
+            const n = spot.face.normal
+            pick({ point: [at.x, at.y, at.z], normal: [n.x, n.y, n.z] })
+          }
+          return
+        }
+        if (!report) return
         const hit = ray
           .intersectObjects(h.glows, false)
           .find((i) => !h.cutting || h.plane.distanceToPoint(i.point) >= 0)

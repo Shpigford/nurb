@@ -22,6 +22,11 @@ export interface ViewerIslandProps {
     highlight?: number | null;
     /** Called when the user clicks a finding's glow (index) or empty space (null). */
     onHighlight?: (index: number | null) => void;
+    /** While set, a click on the part reports that spot instead, in the part's own mm. */
+    onPick?: ((pick: {
+        point: Vec3;
+        normal: Vec3;
+    }) => void) | null;
     /** Printer bed [width, depth] in mm; null hides the plate. */
     bed?: [number, number] | null;
     /** Print-up axis of the part's coordinates. Default [0,0,1]. */

@@ -47,6 +47,7 @@ import {
 import { activity } from "./activity"
 import { loadCamera, saveCamera } from "./camera"
 import Slice from "./Slice"
+import { spotText } from "./spot"
 import { verdictOf, type Verdict } from "./verdict"
 
 // A drag lands many values a second; one rebuild per quarter second is the most a
@@ -142,6 +143,7 @@ export default function PartView({
   dragRegion,
   onManagePrinters,
   onSaveFile,
+  onPointAt,
 }: {
   project: Project | null
   partName: string | null
@@ -172,6 +174,8 @@ export default function PartView({
   /** Puts a downloaded file somewhere and says where. The desktop writes it to
    * Downloads and shows it in Finder; without one the browser downloads it. */
   onSaveFile?: (filename: string, blob: Blob) => Promise<string | void>
+  /** Puts a sentence naming a clicked spot on the part into this part's chat. */
+  onPointAt?: (text: string) => void
 }) {
   const projectId = project?.id ?? null
   const [highlight, setHighlight] = useState<number | null>(null)
@@ -355,6 +359,17 @@ export default function PartView({
     [part?.id, part?.name, values, onSaveFile]
   )
 
+  // One click on the part, then back to orbiting: pointing is a single question.
+  const [pointing, setPointing] = useState(false)
+  useEffect(() => setPointing(false), [part?.id])
+  const onPick = useCallback(
+    ({ point, normal }: { point: [number, number, number]; normal: [number, number, number] }) => {
+      setPointing(false)
+      onPointAt?.(spotText(point, normal))
+    },
+    [onPointAt]
+  )
+
   const onCamera = useCallback(
     (state: CameraState) => {
       if (projectId && part) saveCamera(projectId, part.name, state)
@@ -515,6 +530,7 @@ export default function PartView({
             findings={findings}
             highlight={highlight}
             onHighlight={setHighlight}
+            onPick={pointing ? onPick : null}
             bed={bedOf(project)}
             camera={camera}
             settleKey={settleKey}
@@ -550,6 +566,13 @@ export default function PartView({
             ) : null}
           </div>
         )}
+        {onPointAt && glbUrl ? (
+          <div className="absolute right-4 bottom-4 z-10">
+            <Button variant={pointing ? "accent" : "outline"} size="md" onClick={() => setPointing((v) => !v)}>
+              {pointing ? "Click a spot on the part" : "Point at the part"}
+            </Button>
+          </div>
+        ) : null}
         <StageBuilding open={building && !!glbUrl} expected={seconds} />
         {renameError ? <StageNotice>{renameError}</StageNotice> : null}
         {failedBuild ? (
