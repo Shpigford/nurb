@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { folders, messagesForPart, moveTargets } from "../src/parts.ts";
+import { folders, messagesForPart, moveTargets, sortParts } from "../src/parts.ts";
 import type { Message } from "@nurb/ui";
 import type { LibraryPart, ProjectSummary } from "@nurb/workbench/api";
 
@@ -60,4 +60,14 @@ test("a project holding one part shows every line", () => {
     messagesForPart(all, null, false).map((m) => m.id),
     ["1", "2"],
   );
+});
+
+test("the library sorts by newest build, or by the name on the card", () => {
+  const parts = [
+    { name: "zeta", build: { finished_at: "2026-11-01T10:00:00Z" } },
+    { name: "alpha", build: null },
+    { name: "mid", title: "Drill Bits", build: { finished_at: "2026-11-01T11:00:00Z" } },
+  ];
+  assert.deepEqual(sortParts(parts, "built").map((p) => p.name), ["mid", "zeta", "alpha"]);
+  assert.deepEqual(sortParts(parts, "name").map((p) => p.name), ["alpha", "mid", "zeta"]);
 });

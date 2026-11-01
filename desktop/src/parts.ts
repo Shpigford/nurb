@@ -40,3 +40,18 @@ export function messagesForPart(
   if (!folder) return messages;
   return messages.filter((message) => (message.part ?? null) === part);
 }
+
+export type LibrarySort = "built" | "name";
+
+type Sortable = { name: string; title?: string | null; build?: { finished_at: string | null } | null };
+const cardName = (part: Sortable) => part.title ?? titleCase(part.name);
+const builtAt = (part: Sortable) => part.build?.finished_at ?? "";
+
+/** Newest build first, never-built last; or by the name on the card. */
+export function sortParts<T extends Sortable>(parts: T[], sort: LibrarySort): T[] {
+  return [...parts].sort((a, b) =>
+    sort === "built" && builtAt(a) !== builtAt(b)
+      ? builtAt(b).localeCompare(builtAt(a))
+      : cardName(a).localeCompare(cardName(b)),
+  );
+}

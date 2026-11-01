@@ -37,7 +37,20 @@ import {
   type Project,
   type ProjectSummary,
 } from "@nurb/workbench/api";
-import { folders, titleCase } from "./parts";
+import { folders, sortParts, titleCase, type LibrarySort } from "./parts";
+
+const SORTS: Record<LibrarySort, string> = { built: "Last built", name: "Name" };
+const SORT_KEY = "nurb.librarySort";
+
+function readSort(): LibrarySort {
+  try {
+    const saved = localStorage.getItem(SORT_KEY);
+    if (saved === "built" || saved === "name") return saved;
+  } catch {
+    // Storage can be off; the default is the right answer then.
+  }
+  return "built";
+}
 
 // motion's types want a tuple; ease.out is a plain number[].
 const OUT = ease.out as [number, number, number, number];
@@ -183,11 +196,21 @@ export default function Library({
     }));
   }, [showAll, allParts, project]);
 
+  const [sort, setSort] = useState<LibrarySort>(readSort);
+  const chooseSort = (next: LibrarySort) => {
+    setSort(next);
+    try {
+      localStorage.setItem(SORT_KEY, next);
+    } catch {
+      // Remembered for this session only.
+    }
+  };
+
   const shown = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return parts;
-    return parts.filter((p) => p.name.toLowerCase().includes(needle));
-  }, [parts, query]);
+    const found = needle ? parts.filter((p) => p.name.toLowerCase().includes(needle)) : parts;
+    return sortParts(found, sort);
+  }, [parts, query, sort]);
 
   // One tab stop for the whole list; the arrows walk it from there.
   const move = (from: HTMLElement, delta: number) => {
@@ -469,7 +492,22 @@ export default function Library({
                 {shown.length} {shown.length === 1 ? "part" : "parts"}
                 {showAll ? "" : project?.name ? ` · ${project.name}` : ""}
               </span>
-              <span className="mono-caption text-on-stage-muted">Sort · Last built</span>
+              <Menu
+                portal
+                label="Sort parts"
+                triggerClassName="h-6 rounded-control px-1.5"
+                trigger={() => (
+                  <span className="mono-caption flex items-center gap-1 text-on-stage-muted transition-colors hover:text-ink">
+                    Sort · {SORTS[sort]}
+                    <Icon name="chevron-down" />
+                  </span>
+                )}
+                items={(Object.keys(SORTS) as LibrarySort[]).map((key) => ({
+                  label: SORTS[key],
+                  checked: key === sort,
+                  onSelect: () => chooseSort(key),
+                }))}
+              />
             </div>
             {/* The last row stops on the gutter, level with the sidebar's foot. */}
             <div
