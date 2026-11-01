@@ -1,34 +1,20 @@
-import { message, save } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { downloadDir, join } from "@tauri-apps/api/path";
+import { exists, writeFile } from "@tauri-apps/plugin-fs";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
-// The workbench's export menu hands the browser an `<a download>` on a blob
-// URL, and WKWebView drops those on the floor. Catch the click before it gets
-// there and route the bytes through a native save panel instead.
-export function installDownloads() {
-  document.addEventListener(
-    "click",
-    (event) => {
-      const target = event.target as Element | null;
-      const anchor = target?.closest?.("a[download]") as HTMLAnchorElement | null;
-      if (!anchor || !anchor.href.startsWith("blob:")) return;
-      event.preventDefault();
-      // A cancelled panel, a read-only folder: say so rather than leave the
-      // page carrying an unhandled rejection and the file silently unsaved.
-      saveBlob(anchor.href, anchor.getAttribute("download") || "part").catch((e) =>
-        void message(String(e), { title: "nurb", kind: "error" }),
-      );
-    },
-    true,
-  );
+/** The name Finder gives the nth copy: `bracket 2.3mf`. */
+export function numbered(name: string, n: number): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? `${name.slice(0, dot)} ${n}${name.slice(dot)}` : `${name} ${n}`;
 }
 
-async function saveBlob(href: string, name: string) {
-  const ext = name.includes(".") ? name.split(".").pop()! : "bin";
-  const blob = await fetch(href).then((r) => r.blob());
-  const path = await save({
-    defaultPath: name,
-    filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
-  });
-  if (!path) return;
+// A download lands where every other Mac download does, never over an earlier one,
+// and Finder shows it, so the next step (into the slicer) starts from the file itself.
+export async function saveToDownloads(name: string, blob: Blob): Promise<string> {
+  const dir = await downloadDir();
+  let path = await join(dir, name);
+  for (let n = 2; await exists(path); n++) path = await join(dir, numbered(name, n));
   await writeFile(path, new Uint8Array(await blob.arrayBuffer()));
+  await revealItemInDir(path).catch(() => {});
+  return "Downloads";
 }

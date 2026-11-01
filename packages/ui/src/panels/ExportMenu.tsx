@@ -6,12 +6,6 @@ import { rev } from "../format"
 
 export type ExportFormat = "3mf" | "stl" | "step"
 
-export interface ExportResult {
-  /** Where the finished file lives. The menu hands it to the user as a link. */
-  url: string
-  filename?: string
-}
-
 /** What the slicer said about the last export, once it has answered. */
 export interface ExportStatus {
   state: "queued" | "succeeded" | "failed"
@@ -23,8 +17,8 @@ export interface ExportStatus {
 export interface ExportMenuProps {
   /** Stable identity of the part being exported. */
   partId: string
-  /** Builds the file. The menu shows a pending state until this settles. */
-  export: (format: ExportFormat) => Promise<ExportResult>
+  /** Builds the file and hands it over. The menu shows a pending state until this settles. */
+  export: (format: ExportFormat) => Promise<void>
   /** The slicer estimate for the export just handed out. */
   status?: ExportStatus | null
   revision?: number
@@ -48,13 +42,25 @@ function estimateLine(status: ExportStatus): string {
   return `Estimate · ${parts.length ? parts.join(" · ") : "unavailable"}`
 }
 
-// The DOWNLOAD button opens a popover above it: one row per format, the file
-// built on demand. The finished file arrives as a link rather than an automatic
-// save, because the file belongs to the user's click, not to the menu's.
+const FORMAT_KEY = "nurb.exportFormat"
+
+// Nearly every download is the same type, so the type is remembered rather than asked.
+function rememberedFormat(): ExportFormat {
+  try {
+    const saved = localStorage.getItem(FORMAT_KEY)
+    if (ROWS.some((row) => row.format === saved)) return saved as ExportFormat
+  } catch {
+    // Storage can be off; the default is the right answer then.
+  }
+  return "3mf"
+}
+
+// One click downloads the remembered type. The chevron beside it is the only way to
+// another type, and picking one there downloads it and makes it the new default.
 export default function ExportMenu({ partId, export: runExport, status, revision, runId }: ExportMenuProps) {
+  const [format, setFormat] = useState<ExportFormat>(rememberedFormat)
   const [open, setOpen] = useState(false)
   const [preparing, setPreparing] = useState<ExportFormat | null>(null)
-  const [ready, setReady] = useState<{ format: ExportFormat; result: ExportResult } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -63,8 +69,7 @@ export default function ExportMenu({ partId, export: runExport, status, revision
   const requestIdRef = useRef(0)
   const previousGeometryRef = useRef({ partId, revision, runId })
 
-  // A prepared file describes one build. The menu stays open through a rebuild,
-  // because the user opened it; only the file it is offering goes.
+  // A download in flight describes one build; a rebuild makes its answer moot.
   useEffect(() => {
     const previous = previousGeometryRef.current
     if (
@@ -76,7 +81,6 @@ export default function ExportMenu({ partId, export: runExport, status, revision
     previousGeometryRef.current = { partId, revision, runId }
     requestIdRef.current += 1
     setPreparing(null)
-    setReady(null)
     setError(null)
   }, [partId, revision, runId])
 
@@ -115,37 +119,58 @@ export default function ExportMenu({ partId, export: runExport, status, revision
     }
   }, [open])
 
-  const download = async (format: ExportFormat) => {
+  const download = async (chosen: ExportFormat) => {
     const requestId = ++requestIdRef.current
-    setPreparing(format)
+    setPreparing(chosen)
     setError(null)
-    setReady(null)
     try {
-      const result = await runExport(format)
-      if (requestId !== requestIdRef.current) return
-      setReady({ format, result })
+      await runExport(chosen)
+      if (requestId === requestIdRef.current) setOpen(false)
     } catch (failure) {
       if (requestId !== requestIdRef.current) return
+      // The menu is where the failure can be read in full, so it opens to say it.
       setError(failure instanceof Error ? failure.message : "The export did not finish.")
+      setOpen(true)
     } finally {
       if (requestId === requestIdRef.current) setPreparing(null)
     }
   }
 
+  const choose = (chosen: ExportFormat) => {
+    setFormat(chosen)
+    try {
+      localStorage.setItem(FORMAT_KEY, chosen)
+    } catch {
+      // Remembered for this session only.
+    }
+    void download(chosen)
+  }
+
   return (
     <div ref={rootRef} className="relative flex-1">
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        className="chrome btn-label inline-flex h-9 w-full items-center justify-center gap-2 rounded-control bg-accent px-3 text-white transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-      >
-        <Icon name="download" />
-        {preparing ? "Preparing…" : "Download"}
-        <Icon name="chevron-down" />
-      </button>
+      <div className="flex h-9 w-full overflow-hidden rounded-control bg-accent text-white">
+        <button
+          type="button"
+          disabled={preparing !== null}
+          onClick={() => void download(format)}
+          className="chrome btn-label inline-flex flex-1 items-center justify-center gap-2 px-3 transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white disabled:hover:bg-transparent"
+        >
+          <Icon name="download" />
+          {preparing ? "Preparing…" : `Download ${format.toUpperCase()}`}
+        </button>
+        <button
+          ref={triggerRef}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label="Choose file type"
+          title="Choose file type"
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex w-9 shrink-0 items-center justify-center border-l border-white/25 transition-colors hover:bg-accent-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+        >
+          <Icon name="chevron-down" />
+        </button>
+      </div>
 
       {/* Portalled: the rail's footer scroller clips, and the first row was cut at its edge. */}
       {open ? (
@@ -158,13 +183,13 @@ export default function ExportMenu({ partId, export: runExport, status, revision
           className="z-30 overflow-hidden rounded-content border border-panel-edge bg-ground shadow-[var(--shadow-panel)]"
         >
           <div className="chrome flex h-[30px] items-center justify-between border-b border-line-soft px-3">
-            <span className="mono-label text-muted">Download</span>
+            <span className="mono-label text-muted">File type</span>
             {revision != null ? <span className="mono-caption text-muted">{rev(revision)}</span> : null}
           </div>
 
           {error ? (
             <div className="border-b border-line-soft bg-fail-wash px-3 py-2 text-[11px] leading-4 text-ink-soft">
-              <p className="mono-label text-fail">Export failed</p>
+              <p className="mono-label text-fail">Download failed</p>
               <p className="mt-0.5">{error}</p>
             </div>
           ) : null}
@@ -177,20 +202,23 @@ export default function ExportMenu({ partId, export: runExport, status, revision
           >
             {ROWS.map((row) => {
               const busy = preparing === row.format
+              const current = format === row.format
               return (
                 <button
                   key={row.format}
                   type="button"
                   role="menuitem"
                   disabled={preparing !== null}
-                  onClick={() => void download(row.format)}
+                  aria-current={current || undefined}
+                  onClick={() => choose(row.format)}
                   className={clsx(
                     "flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors hover:bg-raised focus-visible:bg-raised focus-visible:outline-none disabled:opacity-60 disabled:hover:bg-transparent",
-                    row.recommended && "bg-raised/60"
+                    current && "bg-raised/60"
                   )}
                 >
                   <span className="flex w-full items-center">
                     <span className="mono-value uppercase text-ink">{row.format}</span>
+                    {current ? <Icon name="check" className="ml-1.5 text-accent-ink" /> : null}
                     {busy ? (
                       <span className="mono-caption ml-auto flex items-center gap-1.5 text-muted">
                         <span className="size-1.5 rounded-full bg-accent" />
@@ -206,17 +234,6 @@ export default function ExportMenu({ partId, export: runExport, status, revision
             })}
           </div>
 
-          {ready ? (
-            <a
-              href={ready.result.url}
-              download={ready.result.filename}
-              onClick={() => setOpen(false)}
-              className="chrome btn-label flex items-center gap-2 border-t border-line-soft bg-ink px-3 py-2 text-white transition-colors hover:bg-ink-soft"
-            >
-              <Icon name="download" />
-              Save {ready.result.filename ?? `the ${ready.format.toUpperCase()}`}
-            </a>
-          ) : null}
 
           {status ? (
             <div className="chrome border-t border-line-soft bg-raised px-3 py-2">

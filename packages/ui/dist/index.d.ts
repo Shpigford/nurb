@@ -18,7 +18,7 @@ export type { ViewerIslandProps, CameraState, Section, Vec3 } from './viewer/Vie
 export { default as ParamsPanel, NumberRow as ParamSlider } from './panels/ParamsPanel';
 export type { ParamsPanelProps } from './panels/ParamsPanel';
 export { default as ExportMenu } from './panels/ExportMenu';
-export type { ExportMenuProps, ExportFormat, ExportResult, ExportStatus } from './panels/ExportMenu';
+export type { ExportMenuProps, ExportFormat, ExportStatus } from './panels/ExportMenu';
 export { default as PrinterMenu } from './panels/PrinterMenu';
 export type { PrinterMenuProps, PrinterOption } from './panels/PrinterMenu';
 export { default as AddPrinterDialog, bedLine } from './AddPrinterDialog';

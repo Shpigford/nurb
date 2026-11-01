@@ -366,50 +366,38 @@ describe("print time", () => {
 })
 
 describe("download", () => {
-  it("hands the user a link to the file it just built", async () => {
+  it("downloads the remembered type in one click", async () => {
     install({ "POST /api/parts/part-lid/export": () => new Response("3mf bytes") })
+    const clicked: HTMLAnchorElement[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this)
+    })
     render(<App />)
 
-    await userEvent.click(await screen.findByRole("button", { name: /Download/ }))
-    await userEvent.click(screen.getByRole("menuitem", { name: /3mf/i }))
+    await userEvent.click(await screen.findByRole("button", { name: "Download 3MF" }))
 
-    const link = await screen.findByRole("link", { name: /lid.3mf/ })
-    expect(link).toHaveAttribute("href", "blob:lid")
+    await waitFor(() => expect(clicked).toHaveLength(1))
+    expect(clicked[0].download).toBe("lid.3mf")
     expect(sent("/export")[0].body).toEqual({ format: "3mf", values: {} })
+    click.mockRestore()
   })
 
   it("tells the shell the export started and landed, under one id", async () => {
     install({ "POST /api/parts/part-lid/export": () => new Response("3mf bytes") })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
     const said: { id: string; title: string; detail?: string; tone: string }[] = []
     const listen = (event: Event) => said.push((event as CustomEvent<(typeof said)[number]>).detail)
     window.addEventListener("nurb:activity", listen)
     render(<App />)
 
-    await userEvent.click(await screen.findByRole("button", { name: /Download/ }))
-    await userEvent.click(screen.getByRole("menuitem", { name: /3mf/i }))
-    await screen.findByRole("link", { name: /lid.3mf/ })
+    await userEvent.click(await screen.findByRole("button", { name: "Download 3MF" }))
+    await waitFor(() => expect(said).toHaveLength(2))
     window.removeEventListener("nurb:activity", listen)
+    click.mockRestore()
 
     expect(said.map((a) => a.tone)).toEqual(["working", "done"])
     expect(said[0].title).toBe("Exporting lid.3mf")
     expect(said[1]).toMatchObject({ id: said[0].id, detail: "Saved" })
-  })
-
-  it("keeps the menu open when a rebuild lands under it, and drops the stale file", async () => {
-    install({ "POST /api/parts/part-lid/export": () => new Response("3mf bytes") })
-    render(<App />)
-
-    await userEvent.click(await screen.findByRole("button", { name: /Download/ }))
-    await userEvent.click(screen.getByRole("menuitem", { name: /3mf/i }))
-    await screen.findByRole("link", { name: /lid.3mf/ })
-
-    state = withPart({ build: { ...base.build!, id: "b2", glb_url: "/glb/p2/lid.glb?run=b2" } })
-    FakeSocket.instances[0].emit({ kind: "build", id: "b2", project_id: "p2" })
-
-    // The file described the old shape, so it goes; the menu was the user's, so it stays.
-    await waitFor(() => expect(screen.queryByRole("link", { name: /lid.3mf/ })).toBeNull())
-    expect(screen.getByRole("menuitem", { name: /3mf/i })).toBeInTheDocument()
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:lid")
   })
 })
 

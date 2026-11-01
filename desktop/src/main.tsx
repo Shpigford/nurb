@@ -2,10 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { readSoundPrefs } from "@nurb/ui";
 import App from "./App";
-import { installDownloads } from "./downloads";
 import "./tailwind.css";
 
-installDownloads();
 // Reading the prefs is what pushes them into the sound layer, and Settings may
 // never open, so the first cue of the session has to find the saved volume here.
 readSoundPrefs();

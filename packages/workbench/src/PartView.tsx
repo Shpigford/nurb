@@ -120,6 +120,15 @@ function applyNote(result: ApplyResult, params: Param[], diff: Params): string {
   return note
 }
 
+
+function browserDownload(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob)
+  const link = Object.assign(document.createElement("a"), { href: url, download: filename })
+  link.click()
+  // The click has handed the bytes over by the next task; the URL is not needed after.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 export default function PartView({
   project,
   partName,
@@ -131,6 +140,7 @@ export default function PartView({
   topInset,
   dragRegion,
   onManagePrinters,
+  onSaveFile,
 }: {
   project: Project | null
   partName: string | null
@@ -158,6 +168,9 @@ export default function PartView({
   dragRegion?: boolean
   /** Opens the app's Settings screen, where the bench is managed. The served page has none. */
   onManagePrinters?: () => void
+  /** Puts a downloaded file somewhere and says where. The desktop writes it to
+   * Downloads and shows it in Finder; without one the browser downloads it. */
+  onSaveFile?: (filename: string, blob: Blob) => Promise<string | void>
 }) {
   const projectId = project?.id ?? null
   const [highlight, setHighlight] = useState<number | null>(null)
@@ -188,7 +201,6 @@ export default function PartView({
   const paramsSeq = useRef(0)
   const paramsTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const paramsAbort = useRef<AbortController | null>(null)
-  const objectUrl = useRef<string | null>(null)
 
   const parts = project?.parts ?? []
   const part = parts.find((p) => p.name === partName) ?? parts[0] ?? null
@@ -266,17 +278,6 @@ export default function PartView({
     }
   }, [])
 
-  // A prepared download is about the geometry it came from, so it goes when that
-  // does, and when the page does.
-  useEffect(() => {
-    return () => {
-      if (objectUrl.current) {
-        URL.revokeObjectURL(objectUrl.current)
-        objectUrl.current = null
-      }
-    }
-  }, [part?.id, runId])
-
   const sendParams = useCallback(async (partId: string, next: Params) => {
     const seq = ++paramsSeq.current
     paramsAbort.current?.abort()
@@ -335,10 +336,8 @@ export default function PartView({
       activity({ id, title: `Exporting ${filename}`, tone: "working" })
       try {
         const blob = await exportPart(part.id, format, values)
-        if (objectUrl.current) URL.revokeObjectURL(objectUrl.current)
-        objectUrl.current = URL.createObjectURL(blob)
-        activity({ id, title: `Exporting ${filename}`, detail: "Saved", tone: "done" })
-        return { url: objectUrl.current, filename }
+        const where = onSaveFile ? await onSaveFile(filename, blob) : browserDownload(filename, blob)
+        activity({ id, title: `Exporting ${filename}`, detail: where ? `Saved to ${where}` : "Saved", tone: "done" })
       } catch (failure) {
         activity({
           id,
@@ -349,7 +348,7 @@ export default function PartView({
         throw failure
       }
     },
-    [part?.id, part?.name, values]
+    [part?.id, part?.name, values, onSaveFile]
   )
 
   const onCamera = useCallback(

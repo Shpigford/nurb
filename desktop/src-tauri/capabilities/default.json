@@ -31,6 +31,8 @@
     "updater:default",
     "process:allow-restart",
     "clipboard-manager:allow-write-text",
-    "fs:allow-write-file"
+    "fs:allow-write-file",
+    "fs:allow-exists",
+    "fs:scope-download-recursive"
   ]
 }
