@@ -61,7 +61,6 @@ test("a nurb step leaves the overlay once its own transcript row lands", () => {
   const items = fold([
     [call, START],
     [done, START + 2500],
-    [{ type: "prose", text: "Making the clip." }, START + 2600],
   ]);
   assert.equal(items.length, 1, "the step waits for its row");
 
@@ -116,6 +115,19 @@ test("an ACP step stays put and records how long it took", () => {
 
 test("a nurb tool with no named part reads as its own words", () => {
   assert.deepEqual(toolWords("list_project_parts", "nurb", undefined), ["list", "project parts"]);
+});
+
+test("the words landing clear the finished steps before them, not the failures", () => {
+  const items = fold([
+    [{ type: "tool_call", id: "t1", title: "Read", kind: "read", status: "in_progress" }, START],
+    [{ type: "tool_call_update", id: "t1", status: "completed" }, START + 10],
+    [{ type: "tool_call", id: "t2", title: "run_build", kind: "nurb", status: "in_progress" }, START + 20],
+    [{ type: "tool_call_update", id: "t2", status: "failed", output: "MCP server nurb failed" }, START + 30],
+    [{ type: "agent_text", text: "That did not build." }, START + 40],
+    [{ type: "prose", text: "That did not build." }, START + 50],
+  ]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind === "step" && items[0].step.id, "t2");
 });
 
 test("prose only drops the block it replaces", () => {

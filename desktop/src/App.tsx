@@ -830,6 +830,7 @@ function App() {
                           )
                         : []
                     }
+                    landed={col.path === activeDir ? project?.messages ?? [] : []}
                     agent={agent}
                     agents={chatAgents}
                     resume={col.resume}

@@ -244,7 +244,9 @@ def _record(conn, project_id, tool, note, summary, extra=None):
     """One line in the transcript. `extra` is what the page needs to draw the card and
     the model never sees, so it stays out of the tool result."""
     payload = {"tool": tool, "summary": summary, **(extra or {})}
-    db.add_message(conn, project_id, "assistant", note, payload)
+    # Tagged with the part it acted on, so that part's conversation shows the step in
+    # the order it happened rather than never.
+    db.add_message(conn, project_id, "assistant", note, payload, part=payload.get("part_name"))
 
 
 RENDER_URI = re.compile(r"^nurb://render/([0-9a-f]{32})/([a-z][a-z0-9_]*)/(iso|back|top|under)$")

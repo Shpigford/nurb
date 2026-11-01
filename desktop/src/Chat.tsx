@@ -30,9 +30,11 @@ import {
   NewItemsPill,
   SpecCard,
   ToolStepCard,
+  ToolStepGroup,
   cue,
   type MenuItem,
   type Message,
+  type ToolStep,
 } from "@nurb/ui";
 import { absolute, addMessage } from "@nurb/workbench/api";
 import {
@@ -146,6 +148,26 @@ function Turn({ who, n, children }: { who: string; n?: string; children: ReactNo
 }
 
 /** One row of the project's own transcript. */
+// A stored row that is a step of the work rather than something said: a tool call, or
+// the build a save ran. A build that would not build stays a failure in the group.
+function workStep(message: Message): ToolStep | null {
+  const payload = message.payload;
+  if (payload?.type === "step") return payload.step;
+  if (payload?.type === "build") {
+    const build = payload.build;
+    return {
+      id: message.id,
+      verb: "build",
+      object: build.part_name ?? "",
+      status: build.status === "error" ? "failed" : build.status === "running" ? "running" : "done",
+      started_at: build.started_at,
+      elapsed_s: build.elapsed_s ?? undefined,
+      output: build.error ?? undefined,
+    };
+  }
+  return null;
+}
+
 function Stored({ message, who, n }: { message: Message; who: string; n?: string }) {
   const payload = message.payload;
   return (
@@ -190,6 +212,7 @@ function Chat({
   subject,
   wholeProject,
   messages,
+  landed,
   agent,
   agents,
   resume,
@@ -220,6 +243,9 @@ function Chat({
   agent: string;
   // Everything the app can host, for the header's switcher.
   agents: { id: string; label: string; loggedIn: boolean | null }[];
+  // Every row the project has stored, this part's or not, so a live step can find its
+  // row even when it was a project-wide call that this part's transcript leaves out.
+  landed?: Message[];
   resume: string | null;
   hidden: boolean;
   // Text waiting for the composer, from a viewer nudge. Prefilled when the column
@@ -284,8 +310,8 @@ function Chat({
   const seqRef = useRef(0);
   seqRef.current = messages.reduce((top, m) => Math.max(top, m.sequence_number ?? 0), 0);
   useEffect(() => {
-    setItems((list) => pruneLanded(list, messages));
-  }, [messages]);
+    setItems((list) => pruneLanded(list, landed ?? messages));
+  }, [landed, messages]);
   // The model and effort this conversation runs on. Empty before the agent has
   // ever reported its lists, which is only ever the first chat on this Mac.
   const [config, setConfig] = useState<ConfigRow[]>([]);
@@ -978,6 +1004,25 @@ function Chat({
   let counted = 0;
   const nextTurn = () => String(++counted).padStart(2, "0");
 
+  // The conversation in order, with each run of tool calls between the words folded
+  // into one group: the words are the conversation, the steps are how it got there.
+  const flow: (
+    | { kind: "stored"; message: Message }
+    | { kind: "live"; item: Item; index: number }
+    | { kind: "work"; key: string; steps: ToolStep[] }
+  )[] = [];
+  const work = (step: ToolStep) => {
+    const last = flow[flow.length - 1];
+    if (last?.kind === "work") last.steps.push(step);
+    else flow.push({ kind: "work", key: step.id, steps: [step] });
+  };
+  for (const message of ordered) {
+    const step = message.content ? null : workStep(message);
+    if (step) work(step);
+    else flow.push({ kind: "stored", message });
+  }
+  items.forEach((item, index) => (item.kind === "step" ? work(item.step) : flow.push({ kind: "live", item, index })));
+
   return (
     <ChatPanel
       hidden={hidden}
@@ -1109,15 +1154,19 @@ function Chat({
             )}
           </div>
         )}
-        {ordered.map((message) => (
-          <Stored
-            key={message.id}
-            message={message}
-            who={label}
-            n={message.content ? nextTurn() : undefined}
-          />
-        ))}
-        {items.map((item, index) => {
+        {flow.map((entry) => {
+          if (entry.kind === "work") return <ToolStepGroup key={entry.key} steps={entry.steps} />;
+          if (entry.kind === "stored") {
+            return (
+              <Stored
+                key={entry.message.id}
+                message={entry.message}
+                who={label}
+                n={entry.message.content ? nextTurn() : undefined}
+              />
+            );
+          }
+          const { item, index } = entry;
           switch (item.kind) {
             case "user":
               return (
@@ -1153,13 +1202,6 @@ function Chat({
                   </summary>
                   <div className="mt-1.5 text-[12.5px] leading-[18px] text-faint">{item.text}</div>
                 </details>
-              );
-            case "step":
-              return (
-                <div key={item.step.id} className="flex flex-col gap-1.5">
-                  <ToolStepCard step={item.step} />
-                  <EditChips input={item.step.input} className="pl-7" />
-                </div>
               );
             case "plan":
               return (

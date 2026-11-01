@@ -189,8 +189,11 @@ export function applyChatEvent(items: Item[], event: ChatEvent, at: number, seq 
     }
     case "prose":
       // The block is on its way to the project's transcript, so the streaming
-      // copy has done its job.
-      return last && last.kind === "agent" ? items.slice(0, -1) : items;
+      // copy has done its job. So have the finished steps before it: the
+      // transcript keeps the ones that matter, in order, and left here they
+      // would pile up after the words they came before. A failure stays.
+      if (!last || last.kind !== "agent") return items;
+      return items.slice(0, -1).filter((item) => item.kind !== "step" || item.step.status !== "done");
     case "tool_call":
       return [
         ...items,
