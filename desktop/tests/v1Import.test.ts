@@ -17,11 +17,11 @@ test("a folder that refuses does not stop the others", async () => {
   assert.equal(count, 2);
   assert.deepEqual(tried, ["/a", "/bad", "/c"]);
   assert.equal(reported.length, 1);
-  assert.match(reported[0], /\/bad: Bracket\.py/);
+  assert.equal(reported[0], "bad (Bracket.py: a part name is lowercase snake_case)");
 });
 
 test("the notice counts projects in plain words", () => {
   assert.equal(broughtOver(1), "Brought over 1 project from nurb 0.x");
   assert.equal(broughtOver(3), "Brought over 3 projects from nurb 0.x");
-  assert.equal(notBroughtOver(1), "1 project from nurb 0.x didn't come over. Use Import folder to try again.");
+  assert.equal(notBroughtOver(["bad (why)"]), "1 project from nurb 0.x didn't come over: bad (why). Use Import folder to try again.");
 });

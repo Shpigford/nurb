@@ -232,7 +232,7 @@ function App() {
       // so on screen, or the person never learns to bring it over by hand.
       const refused: string[] = [];
       const count = await importV1Folders(folders, importFolder, (text) => refused.push(text));
-      if (refused.length) setError(`${notBroughtOver(refused.length)} ${refused.join("; ")}`);
+      if (refused.length) setError(notBroughtOver(refused));
       if (!count) return;
       await loadProjects();
       activityId.current = "v1-import";

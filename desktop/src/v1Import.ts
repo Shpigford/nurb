@@ -10,7 +10,7 @@ export async function importV1Folders(
       await importOne(path);
       imported += 1;
     } catch (e) {
-      report(`could not bring over ${path}: ${e instanceof Error ? e.message : String(e)}`);
+      report(`${path.split("/").filter(Boolean).pop() ?? path} (${e instanceof Error ? e.message : String(e)})`);
     }
   }
   return imported;
@@ -20,6 +20,7 @@ export function broughtOver(count: number): string {
   return `Brought over ${count} ${count === 1 ? "project" : "projects"} from nurb 0.x`;
 }
 
-export function notBroughtOver(count: number): string {
-  return `${count} ${count === 1 ? "project" : "projects"} from nurb 0.x didn't come over. Use Import folder to try again.`;
+export function notBroughtOver(refused: string[]): string {
+  const count = refused.length;
+  return `${count} ${count === 1 ? "project" : "projects"} from nurb 0.x didn't come over: ${refused.join("; ")}. Use Import folder to try again.`;
 }
