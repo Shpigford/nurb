@@ -40,14 +40,6 @@ The chat inside the app runs the agent you already have: Claude Code, Codex, Gem
 
 **Real CAD underneath.** Parts are true B-rep solids on the OCCT kernel, the same math as commercial CAD, not meshes. Chamfers and fillets are real operations, and STEP export means the part opens in Fusion or FreeCAD.
 
-## Which model should you use?
-
-nurb works with whatever AI subscription you already pay for, and they are not equally good at designing parts. We run the popular models through the same real part-design jobs and grade the actual geometry by machine, so you can pick based on what you subscribe to and what you are willing to spend: [nurb.app/benchmarks](https://nurb.app/benchmarks.html). The raw rows, transcripts, and grading code live in [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks), and adding a row for your model is one line on your own subscription, single runs welcome:
-
-```bash
-curl -fsSL https://nurb.app/bench.sh | sh
-```
-
 ## The checks
 
 The AI cannot see, so the checks are its eyes. Rules run against the exact solid and findings come back with coordinates:
