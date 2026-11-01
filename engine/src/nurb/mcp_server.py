@@ -1120,6 +1120,12 @@ def _photo_jpeg(data, edge):
         return None
 
 
+NO_PHOTOS = (
+    "there are no photos of the real thing yet. Carry on from what the person said; if a photo "
+    "would settle a shape you cannot work out, ask them to attach one in the chat"
+)
+
+
 def _photo_rank(rows, query):
     """Name matches first, database order within each group."""
     tokens = [token for token in str(query).lower().split() if token]
@@ -1133,10 +1139,10 @@ def _photo_rank(rows, query):
 def find_photos(conn, args, base_url):
     project = _project(conn, args["project_id"])
     rows = list(db.attachments_of(conn, project["id"]))
+    # Having no photos is the ordinary case, not a failure: the person describes the
+    # thing in words, and a photo is something to ask for in the chat when it would help.
     if not rows:
-        return _error(
-            "no reference photos in this project; add images to references/ in the folder or attach them in the app"
-        )
+        return _ok({"photos": [], "note": NO_PHOTOS})
 
     chosen = []
     for row in _photo_rank(rows, args["query"]):
@@ -1145,9 +1151,7 @@ def find_photos(conn, args, base_url):
         if _photo_jpeg(row["bytes"], PHOTO_EDGE) is not None:
             chosen.append(row)
     if not chosen:
-        return _error(
-            "reference photos are attached, but none could be read; replace them with valid PNG or JPEG images"
-        )
+        return _ok({"photos": [], "note": "the attached photos could not be opened. " + NO_PHOTOS})
 
     edge = PHOTO_EDGE
     while True:

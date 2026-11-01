@@ -106,23 +106,21 @@ def test_two_photos_come_back_downscaled(conn, tmp_path):
     assert len(result.model_dump_json(by_alias=True, exclude_none=True)) < 150000
 
 
-def test_no_attachments_says_where_to_put_them(conn, tmp_path):
+def test_no_photos_is_an_ordinary_answer(conn, tmp_path):
     project_id = project_with(conn, tmp_path, {})
     result = call(conn, project_id, "front")
-    assert result.is_error is True
-    assert result.content[0].text == (
-        "no reference photos in this project; add images to references/ in the folder"
-        " or attach them in the app"
-    )
+    assert result.is_error is False
+    payload = json.loads(result.content[0].text)
+    assert payload["photos"] == []
+    assert "ask them to attach one in the chat" in payload["note"]
+    assert "references/" not in payload["note"]
 
 
-def test_unreadable_attachments_return_an_actionable_error(conn, tmp_path):
+def test_unreadable_photos_are_not_a_failure_either(conn, tmp_path):
     project_id = project_with(conn, tmp_path, {"broken.png": b"not an image"})
     result = call(conn, project_id, "broken")
-    assert result.is_error is True
-    assert result.content[0].text == (
-        "reference photos are attached, but none could be read; replace them with valid PNG or JPEG images"
-    )
+    assert result.is_error is False
+    assert json.loads(result.content[0].text)["note"].startswith("the attached photos could not be opened")
 
 
 def test_the_query_ranks_matching_names_first(conn, tmp_path):

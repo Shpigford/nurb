@@ -792,7 +792,7 @@
  {
   "name": "find_photos",
   "title": "Find reference photos",
-  "description": "Look at the project's reference photos: up to three, downscaled. They come from the project's reference images, either references/ in the imported folder or ones added in the app. Use them to see an outline, where buttons, ports and cables sit, and which way is up. A photo is a shape, never a dimension.",
+  "description": "Look at the project's reference photos: up to three, downscaled. They are the photos the person attached in the chat. None is the ordinary case, not a problem: ask for one in the chat only when a photo would settle a shape. Use them to see an outline, where buttons, ports and cables sit, and which way is up. A photo is a shape, never a dimension.",
   "inputSchema": {
    "type": "object",
    "additionalProperties": false,
