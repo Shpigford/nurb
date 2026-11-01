@@ -33,7 +33,6 @@ import {
   ViewerIsland,
   type BuildEvent,
   type ExportFormat,
-  type ExportResult,
   type Param,
   type Params,
   UpdateCard,
@@ -121,8 +120,7 @@ function useOpenOnce() {
   return ref
 }
 
-const fakeExport = (format: ExportFormat): Promise<ExportResult> =>
-  new Promise((resolve) => setTimeout(() => resolve({ url: "#", filename: `rail_bracket.${format}` }), 1500))
+const fakeExport = (_format: ExportFormat): Promise<void> => new Promise((resolve) => setTimeout(resolve, 1500))
 
 /* 05 · Library ------------------------------------------------------------- */
 
