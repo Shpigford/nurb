@@ -89,13 +89,16 @@ function ResetDot({ param, onReset }: { param: Param; onReset: () => void }) {
 
 // Label and value on one baseline, the slider beneath. The value is still a
 // field: click it to type an exact number, or drag it sideways to scrub.
-function NumberRow({
+// Exported as ParamSlider: the project panel tunes a shared file's numbers with the
+// same control a part's rail uses.
+export function NumberRow({
   id,
   param,
   value,
   dirty,
   measurements,
   nozzle,
+  restLabel,
   onValue,
 }: {
   id: string
@@ -104,6 +107,8 @@ function NumberRow({
   dirty: boolean
   measurements?: Measurement[]
   nozzle?: number
+  /** What the stop at the starting value is called: a part's default, a project's saved number. */
+  restLabel?: string
   onValue: (value: number) => void
 }) {
   const int = param.kind === "int"
@@ -120,7 +125,10 @@ function NumberRow({
   }
 
   const reduced = useReducedMotion()
-  const detents = useMemo(() => detentsFor(param, measurements, nozzle), [param, measurements, nozzle])
+  const detents = useMemo(
+    () => detentsFor(param, measurements, nozzle, restLabel),
+    [param, measurements, nozzle, restLabel],
+  )
   const slider = useSliderDetents({
     value,
     onValueChange: onValue,

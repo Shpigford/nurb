@@ -89,13 +89,18 @@ const WALLISH = /wall|thickness|lip|rim|shell/
 // The stops a float slider hands the pointer: the declared default, anything the
 // project measured, and, on a wall, every whole number of extrusion lines.
 // An int slider gets none. Its every stop is already a detent.
-export function detentsFor(param: Param, measurements: Measurement[] | undefined, nozzle = 0.4): Detent[] {
+export function detentsFor(
+  param: Param,
+  measurements: Measurement[] | undefined,
+  nozzle = 0.4,
+  restLabel = "default",
+): Detent[] {
   if (param.kind !== "float" || typeof param.default !== "number") return []
   const { lo, hi, step } = rangeFor(param, false)
   const inside = (value: number) => Number.isFinite(value) && value >= lo && value <= hi
 
   // Pushed in priority order, so the first label on a value is the one that wins.
-  const found: Detent[] = [{ value: param.default, label: "default" }]
+  const found: Detent[] = [{ value: param.default, label: restLabel }]
   for (const m of measurements ?? []) {
     if (inside(m.value_mm)) found.push({ value: m.value_mm, label: "measured" })
   }

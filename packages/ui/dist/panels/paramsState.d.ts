@@ -17,4 +17,4 @@ export declare function dirtyValues(params: Param[], values: Params): Params;
 export interface Measurement {
     value_mm: number;
 }
-export declare function detentsFor(param: Param, measurements: Measurement[] | undefined, nozzle?: number): Detent[];
+export declare function detentsFor(param: Param, measurements: Measurement[] | undefined, nozzle?: number, restLabel?: string): Detent[];

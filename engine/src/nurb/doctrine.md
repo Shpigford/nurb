@@ -298,6 +298,8 @@ Specific to OCCT, and measured on real parts rather than reasoned about.
 
 When parts are meant to match, the geometry they must agree on lives in one shared file, imported by every part that uses it: a wall, a chamfer size, a mounting profile, the label recess. `write_shared_source` with the name `system` makes `system.py`, and a part reads it with `from system import WALL`. Changing it moves the whole family: the first part that imports it builds at once and the rest rebuild in the background, so one edit is how a set of bins gets thicker walls together.
 
+The person tunes a shared file from the project panel, so write it for them. Every UPPER_CASE name bound once at the top of the file to a plain number (`CLEARANCE = 0.2  # slide fit, depth`) shows there as a slider, captioned by its comment; give each one a comment in plain words. A number that is the file's own business, a boolean overshoot or a tolerance, starts with an underscore (`_EPS = 1e-4`) and stays out of the panel. A name derived from others (`CHANNEL_WIDTH = POCKET_WIDTH + 2 * SIDE_CLEARANCE`) is not a slider either, because moving it would only fight the numbers it comes from.
+
 A system is extracted, never scaffolded. Build the first two or three parts plainly, then lift what they genuinely say twice. Two parts that happen to share a number are not yet a system; two parts that would both have to change when the number changes are. The test of a real extraction is what does not use it: a part that genuinely differs keeps its own geometry, and a helper with a flag for each exception is the wrong abstraction wearing the right name.
 
 ## Cards

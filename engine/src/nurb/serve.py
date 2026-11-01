@@ -15,6 +15,7 @@ import pathlib
 import secrets
 import signal
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -754,6 +755,45 @@ def _project(conn, project_id, part=None):
     }
 
 
+def _system(conn, project_id):
+    """The project as a system: its shared files with their settings and pieces, and
+    its measurements, each with the parts that would rebuild if it changed."""
+    from . import shared
+
+    rows = list(db.parts_of(conn, project_id))
+    parts = [row for row in rows if row["kind"] == "part"]
+    files = []
+    for row in rows:
+        if row["kind"] != "module":
+            continue
+        files.append(
+            {
+                "name": row["name"],
+                "used_by": [user["name"] for user in mcp_server.importers(conn, project_id, row["id"])],
+                "settings": shared.settings(row["source"]),
+                "pieces": [
+                    {"name": piece, "used_by": [p["name"] for p in parts if shared.uses(p["source"], row["name"], piece)]}
+                    for piece in shared.pieces(row["source"])
+                ],
+            }
+        )
+    reads = mcp_server._measurement_uses(rows, db.project_files_of(conn, project_id))
+    names = {row["id"]: row["name"] for row in parts}
+    return {
+        "files": files,
+        "measurements": [
+            {
+                "name": m["name"],
+                "value_mm": float(m["value"]),
+                "how": m["how"],
+                "provisional": bool(m["provisional"]),
+                "used_by": [names[part_id] for part_id, used in reads.items() if part_id in names and m["name"] in used],
+            }
+            for m in db.measurements_of(conn, project_id)
+        ],
+    }
+
+
 def _composite(conn, project_id, name):
     """The part's newest picture, rendered now if the run predates renders."""
     row = conn.execute(
@@ -916,6 +956,91 @@ def _routes(conn, lock, server, token, pid):
                 raise _Refused(404, "no project")
             db.rename_project(conn, project_id, name)
             return next(row for row in _projects(conn) if row["id"] == project_id)
+
+        return await acted(work)
+
+    async def project_system(request):
+        """The project's shared files, settings, pieces and measurements."""
+        project_id = request.path_params["project_id"]
+
+        def work(conn):
+            if db.get_project(conn, project_id) is None:
+                raise _Refused(404, "no project")
+            return _system(conn, project_id)
+
+        return await acted(work)
+
+    async def project_setting(request):
+        """Set one number in a shared file and rebuild every part that imports it."""
+        sent = await body_of(request)
+        project_id = request.path_params["project_id"]
+
+        def work(conn):
+            from . import shared
+
+            file = word(sent, "file", "file must name the shared file")
+            name = word(sent, "name", "name must name the setting")
+            row = next(
+                (r for r in db.parts_of(conn, project_id) if r["kind"] == "module" and r["name"] == file), None
+            )
+            if row is None:
+                raise _Refused(404, f"no shared file called {file}")
+            try:
+                source = shared.set_setting(row["source"], name, sent.get("value"))
+            except ValueError as exc:
+                raise _Refused(400, str(exc)) from None
+            if source != row["source"]:
+                db.add_revision(conn, row["id"], source, note=f"Set {name} to {sent['value']} from the project panel")
+                users = mcp_server.importers(conn, project_id, row["id"])
+                engine_run.want_rebuild([user["id"] for user in users], project_id)
+                db.add_message(
+                    conn,
+                    project_id,
+                    "assistant",
+                    f"Set {name} to {sent['value']} in {file}; {len(users)} parts rebuilding.",
+                    {"tool": "apply_setting", "summary": f"{name} = {sent['value']} in {file}"},
+                )
+            return _system(conn, project_id)
+
+        return await acted(work)
+
+    async def project_measurement(request):
+        """Correct a measurement's value from the app and rebuild the parts that read it."""
+        sent = await body_of(request)
+        project_id = request.path_params["project_id"]
+        name = request.path_params["name"]
+
+        def work(conn):
+            row = conn.execute(
+                "SELECT * FROM measurements WHERE project_id = ? AND name = ?", (project_id, name)
+            ).fetchone()
+            if row is None:
+                raise _Refused(404, f"no measurement called {name}")
+            value = sent.get("value_mm")
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise _Refused(400, "value_mm must be a number of millimetres")
+            result = mcp_server.record_measurement(
+                conn,
+                {
+                    "project_id": project_id,
+                    "name": name,
+                    "value_mm": value,
+                    "how": row["how"],
+                    "provisional": bool(row["provisional"]),
+                    "note": "Corrected from the project panel",
+                },
+                "",
+            )
+            if result.is_error:
+                raise _Refused(400, result.content[0].text)
+            if float(row["value"]) != float(value):
+                # Every part that reads it, built or not: the panel promised them all.
+                rows = list(db.parts_of(conn, project_id))
+                reads = mcp_server._measurement_uses(rows, db.project_files_of(conn, project_id))
+                engine_run.want_rebuild(
+                    [r["id"] for r in rows if r["kind"] == "part" and name in reads.get(r["id"], [])], project_id
+                )
+            return _system(conn, project_id)
 
         return await acted(work)
 
@@ -1128,11 +1253,14 @@ def _routes(conn, lock, server, token, pid):
                     "error": "no slicer found. print time comes out of "
                     f"{' or '.join(slicing.SLICERS)}, both free.",
                 }
-            root = materialize.materialize(conn, part["project_id"])
-            try:
-                wanted, profile = checks.slicer_name(root)
-            except ValueError as exc:
-                return {"kind": "printer", "error": str(exc), "profiles": _printers()}
+            # Its own folder: the shared scratch copy is the build worker's, and the
+            # background builder can be writing it at this moment.
+            with tempfile.TemporaryDirectory() as own:
+                root = materialize.materialize(conn, part["project_id"], into=own)
+                try:
+                    wanted, profile = checks.slicer_name(root)
+                except ValueError as exc:
+                    return {"kind": "printer", "error": str(exc), "profiles": _printers()}
             if not wanted:
                 return {"kind": "choose", "profiles": _printers()}
             bundle = slicing.vendors(exe)
@@ -1475,6 +1603,9 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
         Route("/api/projects/{project_id}/printer", endpoint=answering(project_printer), methods=["POST"]),
+        Route("/api/projects/{project_id}/system", endpoint=answering(project_system)),
+        Route("/api/projects/{project_id}/settings", endpoint=answering(project_setting), methods=["POST"]),
+        Route("/api/projects/{project_id}/measurements/{name}", endpoint=answering(project_measurement), methods=["PATCH"]),
         Route("/api/printers", endpoint=answering(printers_read)),
         Route("/api/printers", endpoint=answering(printers_add), methods=["POST"]),
         Route("/api/printers/default", endpoint=answering(printers_default), methods=["POST"]),

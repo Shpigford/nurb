@@ -22,4 +22,15 @@ export interface ParamsPanelProps {
     /** What Apply said, once it landed. */
     note?: string | null;
 }
+export declare function NumberRow({ id, param, value, dirty, measurements, nozzle, restLabel, onValue, }: {
+    id: string;
+    param: Param;
+    value: number;
+    dirty: boolean;
+    measurements?: Measurement[];
+    nozzle?: number;
+    /** What the stop at the starting value is called: a part's default, a project's saved number. */
+    restLabel?: string;
+    onValue: (value: number) => void;
+}): import("react").JSX.Element;
 export default function ParamsPanel({ params, measurements, nozzle, values, onChange, onApply, building, applying, stats, error, note, }: ParamsPanelProps): import("react").JSX.Element | null;

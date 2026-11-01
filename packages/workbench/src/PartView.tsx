@@ -125,6 +125,7 @@ export default function PartView({
   partName,
   onSelectPart,
   onPartRenamed,
+  onOpenProject,
   header,
   chat,
   topInset,
@@ -137,6 +138,8 @@ export default function PartView({
   onSelectPart?: (name: string) => void
   /** A rename from the header. The host moves its selection (and any conversation) along. */
   onPartRenamed?: (was: string, name: string) => void
+  /** Opens the project panel; the switcher offers it when the host can show one. */
+  onOpenProject?: () => void
   /** What the host adds to the floating header: the project picker, its own icons.
    * `before` sits ahead of the lockup (the desktop's traffic lights), `nav` between
    * the lockup and the part name (the way back), `start` after it (the served page's
@@ -475,11 +478,14 @@ export default function PartView({
                   <Icon name="chevron-down" />
                 </span>
               )}
-              items={parts.map((p) => ({
-                label: p.name,
-                checked: p.name === part?.name,
-                onSelect: () => onSelectPart?.(p.name),
-              }))}
+              items={[
+                ...parts.map((p) => ({
+                  label: p.name,
+                  checked: p.name === part?.name,
+                  onSelect: () => onSelectPart?.(p.name),
+                })),
+                ...(onOpenProject ? [{ label: "Project settings", separated: true, onSelect: onOpenProject }] : []),
+              ]}
               footer={sharedLine(project.shared ?? [])}
             />
           ) : null}

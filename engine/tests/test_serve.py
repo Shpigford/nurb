@@ -1462,3 +1462,55 @@ def test_library_thumbnail_is_one_view_on_a_transparent_ground(tmp_path, monkeyp
     assert run_id in serve.THUMBNAILS
     assert client.get(f"/thumbnail/{project_id}/{part['name']}.png?run=nope").status_code == 404
     conn.close()
+
+
+def test_the_project_panel_reads_and_tunes_the_system(tmp_path, monkeypatch):
+    """Settings are the plain numbers in a shared file, pieces are its functions, and
+    changing either a setting or a measurement queues the parts that use it."""
+    import threading
+
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from nurb import db, engine_run, serve
+
+    monkeypatch.setenv("NURB_HOME", str(tmp_path))
+    conn = db.connect(check_same_thread=False)
+    project_id = db.create_project(conn, "shelf", folder=True)
+    db.create_part(
+        conn, project_id, "system",
+        'from nurb import *\nWALL = 2.0  # every wall\nCOUNT = 3\n_EPS = 1e-4\nDERIVED = WALL * 2\n\n'
+        'def slab(w):\n    return Box(w, w, WALL)\n',
+        kind="module",
+    )
+    db.set_measurement(conn, project_id, "rail_width", 20.0, "calipers")
+    db.create_part(conn, project_id, "bin_a", 'from nurb import *\nfrom system import slab\n\n@part\ndef bin_a(w=20.0):\n    return slab(w)\n')
+    db.create_part(conn, project_id, "lid", 'from nurb import *\nimport system\n\n@part\ndef lid(w=measured("rail_width")):\n    return Box(w, w, 1)\n')
+    while engine_run.take_rebuild():
+        pass
+    _, routes, _ = serve._routes(conn, threading.Lock(), None, "t", 0)
+    client = TestClient(Starlette(routes=[r for r in routes if "/api/projects" in getattr(r, "path", "")]))
+
+    system = client.get(f"/api/projects/{project_id}/system").json()
+    [file] = system["files"]
+    assert file["used_by"] == ["bin_a", "lid"]
+    assert [(s["name"], s["value"], s["kind"], s["note"]) for s in file["settings"]] == [
+        ("WALL", 2.0, "float", "every wall"),
+        ("COUNT", 3, "int", ""),
+    ]
+    assert file["pieces"] == [{"name": "slab", "used_by": ["bin_a"]}]
+    assert system["measurements"][0]["used_by"] == ["lid"]
+
+    assert "whole number" in client.post(
+        f"/api/projects/{project_id}/settings", json={"file": "system", "name": "COUNT", "value": 2.5}
+    ).json()["error"]
+    after = client.post(f"/api/projects/{project_id}/settings", json={"file": "system", "name": "WALL", "value": 3.0}).json()
+    assert after["files"][0]["settings"][0]["value"] == 3.0
+    queued = {engine_run.take_rebuild(), engine_run.take_rebuild()}
+    assert len(queued - {None}) == 2 and engine_run.take_rebuild() is None
+
+    fixed = client.patch(f"/api/projects/{project_id}/measurements/rail_width", json={"value_mm": 21.5}).json()
+    assert fixed["measurements"][0]["value_mm"] == 21.5
+    names = {r["id"]: r["name"] for r in db.parts_of(conn, project_id)}
+    assert names[engine_run.take_rebuild()] == "lid" and engine_run.take_rebuild() is None
+    conn.close()

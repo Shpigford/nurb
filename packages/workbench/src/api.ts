@@ -304,6 +304,50 @@ export function importFolder(path: string): Promise<{ id: string; name: string; 
 }
 
 /** Call a project something else. The name is a label, so nothing on disk moves. */
+/** A project read as a system: its shared files with their settings (the plain
+ * numbers at the top of each) and pieces (the functions parts call), and its
+ * measurements, each with the parts that rebuild when it changes. */
+export interface ProjectSystem {
+  files: {
+    name: string
+    used_by: string[]
+    settings: { name: string; value: number; kind: "int" | "float"; note: string }[]
+    pieces: { name: string; used_by: string[] }[]
+  }[]
+  measurements: { name: string; value_mm: number; how: string; provisional: boolean; used_by: string[] }[]
+}
+
+export async function getSystem(id: string): Promise<ProjectSystem> {
+  const url = `/api/projects/${encodeURIComponent(id)}/system`
+  const res = await fetch(base + url)
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+  return (await res.json()) as ProjectSystem
+}
+
+/** Set one number in a shared file; every part that imports it rebuilds. */
+export async function setSetting(id: string, file: string, name: string, value: number): Promise<ProjectSystem> {
+  const url = `/api/projects/${encodeURIComponent(id)}/settings`
+  const res = await fetch(base + url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ file, name, value }),
+  })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+  return (await res.json()) as ProjectSystem
+}
+
+/** Correct a measurement's value; every part that reads it rebuilds. */
+export async function setMeasurement(id: string, name: string, valueMm: number): Promise<ProjectSystem> {
+  const url = `/api/projects/${encodeURIComponent(id)}/measurements/${encodeURIComponent(name)}`
+  const res = await fetch(base + url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value_mm: valueMm }),
+  })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+  return (await res.json()) as ProjectSystem
+}
+
 /** Write a project out as a folder of part files (the 0.x layout) at `directory`,
  * which must be empty or not exist yet. */
 export async function exportProject(id: string, directory: string): Promise<{ directory: string; parts: string[] }> {

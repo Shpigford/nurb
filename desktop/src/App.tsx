@@ -32,6 +32,7 @@ import {
 import EngineStarting from "./EngineStarting";
 import { createLatestRequestGate } from "./latestRequest";
 import Library from "./Library";
+import ProjectPanel from "./ProjectPanel";
 import { messagesForPart, moveTargets, titleCase } from "./parts";
 import ProjectPicker from "./ProjectPicker";
 import Setup from "./Setup";
@@ -140,6 +141,8 @@ function App() {
 
   const [about, setAbout] = useState<AboutInfo | null>(null);
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+  // The project panel (sheet 31), opened over whatever screen asked for it.
+  const [projectPanel, setProjectPanel] = useState<{ id: string; name: string } | null>(null);
   const [showAddAgent, setShowAddAgent] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const geminiKeyResolver = useRef<((key: string | null) => void) | null>(null);
@@ -767,6 +770,7 @@ function App() {
           project={project}
           partName={partName}
           onSelectPart={setPartName}
+          onOpenProject={project && projectId ? () => setProjectPanel({ id: projectId, name: project.name }) : undefined}
           onPartRenamed={(was, name) => projectId && partRenamed(projectId, was, name)}
           onManagePrinters={() => setSettingsSection("printers")}
           dragRegion
@@ -871,8 +875,15 @@ function App() {
             void loadProjects();
           }}
           onSettings={() => setSettingsSection("agents")}
+          onOpenProject={(id, name) => setProjectPanel({ id, name })}
         />
       </div>
+
+      {projectPanel ? (
+        <div data-screen="project" className="fixed inset-0 z-30">
+          <ProjectPanel projectId={projectPanel.id} name={projectPanel.name} onClose={() => setProjectPanel(null)} />
+        </div>
+      ) : null}
 
       {settingsSection ? (
         <div data-screen="settings" className="fixed inset-0 z-30">

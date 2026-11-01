@@ -74,6 +74,8 @@ type Props = {
   onRemoved: (id: string | null) => void;
   /** The shell moves the part's conversation and its selection to the new name. */
   onPartRenamed: (projectId: string, was: string, name: string) => void;
+  /** The project panel: its shared settings, measurements and pieces. */
+  onOpenProject: (id: string, name: string) => void;
   onSettings: () => void;
 };
 
@@ -125,6 +127,7 @@ export default function Library({
   onImportFolder,
   onRemoved,
   onPartRenamed,
+  onOpenProject,
   onSettings,
 }: Props) {
   const [query, setQuery] = useState("");
@@ -235,6 +238,7 @@ export default function Library({
   };
 
   const projectMenu = (summary: ProjectSummary): MenuItem[] => [
+    { label: "Project settings", onSelect: () => onOpenProject(summary.id, summary.name) },
     { label: "Rename", onSelect: () => startRename(summary) },
     { label: "Export as folder…", onSelect: () => void exportFolder(summary) },
     { label: "Remove from library", tone: "danger", separated: true, onSelect: () => setConfirm({ project: summary }) },

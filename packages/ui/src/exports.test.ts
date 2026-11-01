@@ -6,6 +6,7 @@ it.each([
   "Icon",
   "ViewerIsland",
   "ParamsPanel",
+  "ParamSlider",
   "ExportMenu",
   "BuildCard",
   "SpecCard",
