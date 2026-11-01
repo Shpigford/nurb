@@ -778,6 +778,7 @@ function App() {
           partName={partName}
           onSelectPart={setPartName}
           onOpenProject={project && projectId ? () => setProjectPanel({ id: projectId, name: project.name }) : undefined}
+          onPointAt={(text) => projectId && setComposerSeed({ projectId, part: chatPart, text })}
           onPartRenamed={(was, name) => projectId && partRenamed(projectId, was, name)}
           onManagePrinters={() => setSettingsSection("printers")}
           onSaveFile={saveToDownloads}
