@@ -29,6 +29,13 @@ function SectionHead({ title, note }: { title: string; note: string }) {
   );
 }
 
+// What the button puts in the chat: plain words for the person, enough for the agent.
+function askText(repeat: { parts: string[]; statements: number; source: string }) {
+  const [first, ...rest] = repeat.parts;
+  const others = rest.length === 1 ? rest[0] : `${rest.slice(0, -1).join(", ")} and ${rest[rest.length - 1]}`;
+  return `${first} and ${others} build the same ${repeat.statements} lines. If they should change together, lift that into a shared file, make its numbers settings with plain-word comments, and have every one of these parts import it. Rebuild them and tell me what moved.`;
+}
+
 function partsLabel(count: number) {
   return count === 1 ? "1 part" : `${count} parts`;
 }
@@ -37,10 +44,13 @@ export default function ProjectPanel({
   projectId,
   name,
   onClose,
+  onAsk,
 }: {
   projectId: string;
   name: string;
   onClose: () => void;
+  /** Opens `part` with `text` waiting in its chat's composer, never sent for the person. */
+  onAsk: (part: string, text: string) => void;
 }) {
   const [system, setSystem] = useState<ProjectSystem | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -84,6 +94,7 @@ export default function ProjectPanel({
   };
 
   const files = system?.files ?? [];
+  const repeats = system?.repeats ?? [];
   // What the most parts lean on comes first; a file no part imports moves nothing.
   const tunable = files
     .filter((file) => file.settings.length > 0 && file.used_by.length > 0)
@@ -144,6 +155,31 @@ export default function ProjectPanel({
               <p className="mono-caption border-b border-line-soft bg-fail-wash px-7 py-2.5 text-fail" role="alert">
                 {failure}
               </p>
+            ) : null}
+
+            {repeats.length > 0 ? (
+              <section className="flex flex-col gap-3.5 bg-accent-wash px-7 py-5.5">
+                <SectionHead
+                  title="Repeated in your parts"
+                  note="These parts build the same thing twice. If they should change together, the agent can lift it into one shared piece."
+                />
+                <div className="flex flex-col">
+                  {repeats.map((repeat, index) => (
+                    <div
+                      key={repeat.parts.join(",") + repeat.statements}
+                      className={`flex h-11 items-center gap-3.5 ${index < repeats.length - 1 ? "border-b border-line-soft" : ""}`}
+                    >
+                      <span className="mono-id min-w-0 flex-1 truncate text-ink">{repeat.parts.join(" · ")}</span>
+                      <span className="mono-caption w-[72px] shrink-0 text-right uppercase text-muted">
+                        {repeat.statements} lines
+                      </span>
+                      <Button size="md" className="px-3" onClick={() => onAsk(repeat.parts[0], askText(repeat))}>
+                        Ask the agent
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </section>
             ) : null}
 
             <section className="flex flex-col gap-3.5 px-7 py-5.5">

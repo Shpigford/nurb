@@ -109,3 +109,36 @@ def uses(source, module, piece):
             if isinstance(node.value, ast.Name) and node.value.id == module:
                 return True
     return False
+
+
+def repeats(part_sources, limit=5):
+    """What sibling parts say twice, from their sources: [{parts, statements, sites}],
+    longest first, where sites are (part, first line, last line) and `source` is the
+    first site's text. Mechanical noticing only; naming and lifting stay a judgement."""
+    import pathlib
+    import tempfile
+
+    from . import extract
+
+    with tempfile.TemporaryDirectory() as folder:
+        paths = {}
+        for name, source in part_sources.items():
+            path = pathlib.Path(folder) / f"{name}.py"
+            path.write_text(source or "", encoding="utf-8")
+            paths[path] = name
+        try:
+            runs = extract.duplication(list(paths))
+        except SyntaxError:
+            return []
+        out = []
+        for run in runs[:limit]:
+            path, start, end, _ = run["sites"][0]
+            out.append(
+                {
+                    "parts": sorted({paths[site[0]] for site in run["sites"]}),
+                    "statements": run["statements"],
+                    "sites": [(paths[site[0]], site[1], site[2]) for site in run["sites"]],
+                    "source": extract.source(path, start, end),
+                }
+            )
+        return out

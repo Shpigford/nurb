@@ -312,11 +312,43 @@ def _build_result(conn, project_id, part_row, base_url, tool, note, deadline, ex
     )
     if timed_out:
         return _error(payload["error"])
+    repeats = part_repeats(conn, project_id, part_row["name"])
+    if repeats:
+        payload["repeats"] = repeats
+        payload["repeats_note"] = (
+            "This part says the same thing as a sibling. If they would both have to change "
+            "together, lift it into a shared file with write_shared_source, give its numbers "
+            "plain-word comments so they become settings, and import it from both parts. "
+            "If they only happen to match, leave them."
+        )
     body = _bound_error(
         {**(extra or {}), **payload},
         "use read_findings for the stored build error",
     )
     return _ok(body, links, "use read_findings for the full result", image=image)
+
+
+def part_repeats(conn, project_id, name):
+    """What this part repeats from its siblings, in the words a build result uses."""
+    from . import shared
+
+    sources = {row["name"]: row["source"] for row in db.parts_of(conn, project_id) if row["kind"] == "part"}
+    if len(sources) < 2 or name not in sources:
+        return []
+    found = []
+    for run in shared.repeats(sources, limit=50):
+        if name not in run["parts"]:
+            continue
+        lines = [f"{start}-{end}" for part, start, end in run["sites"] if part == name]
+        found.append(
+            {
+                "with": [other for other in run["parts"] if other != name],
+                "statements": run["statements"],
+                "lines_here": lines,
+                "source": run["source"],
+            }
+        )
+    return found[:3]
 
 
 def list_projects(conn, args, base_url):
@@ -356,6 +388,30 @@ def _last_build(conn, part_row):
     }
 
 
+def _system_summary(conn, project_id, rows):
+    """The project's shared files as a model should meet them: what each offers, who
+    uses it, and the instruction to build on it. None when the project shares nothing."""
+    from . import shared
+
+    files = [row for row in rows if row["kind"] == "module"]
+    if not files:
+        return None
+    return {
+        "note": "This project is a system. Build new parts on its shared files: import their "
+        "pieces and settings instead of re-deriving the geometry, and change a shared file "
+        "with edit_shared_source when the whole family should move.",
+        "shared_files": [
+            {
+                "name": row["name"],
+                "settings": [setting["name"] for setting in shared.settings(row["source"])],
+                "pieces": shared.pieces(row["source"]),
+                "used_by": len(importers(conn, project_id, row["id"])),
+            }
+            for row in files
+        ],
+    }
+
+
 def get_project(conn, args, base_url):
     project = _project(conn, args["project_id"])
     if ("source_offset" in args or "source_limit" in args) and "part_name" not in args:
@@ -380,6 +436,8 @@ def get_project(conn, args, base_url):
     payload = {
         "id": project["id"],
         "name": project["name"],
+        # First, so a new part starts from the family's system instead of rediscovering it.
+        "system": _system_summary(conn, project["id"], rows),
         "printer": _printer_profile(project["printer_toml"]),
         "spec": pinned,
         "measurements": [_measurement(row) for row in db.measurements_of(conn, project["id"])],

@@ -143,6 +143,8 @@ function App() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
   // The project panel (sheet 31), opened over whatever screen asked for it.
   const [projectPanel, setProjectPanel] = useState<{ id: string; name: string } | null>(null);
+  // A request waiting in a part's composer, put there by the project panel and never sent for the person.
+  const [composerSeed, setComposerSeed] = useState<{ projectId: string; part: string; text: string } | null>(null);
   const [showAddAgent, setShowAddAgent] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const geminiKeyResolver = useRef<((key: string | null) => void) | null>(null);
@@ -832,6 +834,14 @@ function App() {
                     agents={chatAgents}
                     resume={col.resume}
                     hidden={!visible}
+                    // Addressed to the part's own column: the project's column can be the visible one
+                    // for a render while the switch to the part lands.
+                    seed={
+                      visible && composerSeed?.projectId === projectId && composerSeed.part === col.part
+                        ? composerSeed.text
+                        : null
+                    }
+                    onSeed={() => setComposerSeed(null)}
                     onSession={(id) => chatStarted(col.path, col.part, id, agent)}
                     onFresh={() => startFresh(col.path, col.part)}
                     onAgent={(id, unstarted) => {
@@ -881,7 +891,16 @@ function App() {
 
       {projectPanel ? (
         <div data-screen="project" className="fixed inset-0 z-30">
-          <ProjectPanel projectId={projectPanel.id} name={projectPanel.name} onClose={() => setProjectPanel(null)} />
+          <ProjectPanel
+            projectId={projectPanel.id}
+            name={projectPanel.name}
+            onClose={() => setProjectPanel(null)}
+            onAsk={(part, text) => {
+              setComposerSeed({ projectId: projectPanel.id, part, text });
+              setProjectPanel(null);
+              openPart(projectPanel.id, part);
+            }}
+          />
         </div>
       ) : null}
 

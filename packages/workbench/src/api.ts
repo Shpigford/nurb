@@ -314,6 +314,8 @@ export interface ProjectSystem {
     settings: { name: string; value: number; kind: "int" | "float"; note: string }[]
     pieces: { name: string; used_by: string[] }[]
   }[]
+  /** What sibling parts build twice: a system waiting to be lifted. */
+  repeats: { parts: string[]; statements: number; source: string }[]
   measurements: { name: string; value_mm: number; how: string; provisional: boolean; used_by: string[] }[]
 }
 

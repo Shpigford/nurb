@@ -755,6 +755,20 @@ def _project(conn, project_id, part=None):
     }
 
 
+def _grouped_repeats(runs, limit=5):
+    """One row per set of parts: two parts that repeat three stretches are one thing to
+    lift, not three, so the stretches add up and their sources are kept together."""
+    groups = {}
+    for run in runs:
+        group = groups.setdefault(tuple(run["parts"]), {"parts": run["parts"], "statements": 0, "source": []})
+        group["statements"] += run["statements"]
+        group["source"].append(run["source"])
+    out = sorted(groups.values(), key=lambda g: -g["statements"])[:limit]
+    for group in out:
+        group["source"] = "\n\n".join(group["source"])
+    return out
+
+
 def _system(conn, project_id):
     """The project as a system: its shared files with their settings and pieces, and
     its measurements, each with the parts that would rebuild if it changed."""
@@ -781,6 +795,8 @@ def _system(conn, project_id):
     names = {row["id"]: row["name"] for row in parts}
     return {
         "files": files,
+        # What sibling parts say twice: the moment a system is waiting to be lifted.
+        "repeats": _grouped_repeats(shared.repeats({row["name"]: row["source"] for row in parts}, limit=20)),
         "measurements": [
             {
                 "name": m["name"],

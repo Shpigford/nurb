@@ -866,3 +866,38 @@ def test_a_shared_file_refuses_bad_source_and_a_parts_name(conn):
     assert "is a part in this project" in message(
         call(conn, "write_shared_source", {"project_id": project_id, "name": "cube", "source": "WALL = 2.0\n"})
     )
+
+
+TWIN = """from nurb import *
+
+
+@part
+def {name}(width=20.0, height=8.0):
+    plate = Box(width, width, 2.0)
+    rib = Pos(0, 0, height / 2) * Box(width, 2.0, height)
+    body = plate + rib
+    return body
+"""
+
+
+def test_a_build_names_what_it_repeats_from_a_sibling(conn):
+    """The moment a system is waiting to be lifted, the build that creates it says so."""
+    project_id = new_project(conn)
+    first = payload(call(conn, "write_part_source", {"project_id": project_id, "part_name": "bin_a", "source": TWIN.format(name="bin_a")}))
+    assert "repeats" not in first
+    second = payload(call(conn, "write_part_source", {"project_id": project_id, "part_name": "bin_b", "source": TWIN.format(name="bin_b")}))
+    [repeat] = second["repeats"]
+    assert repeat["with"] == ["bin_a"] and repeat["statements"] >= 3
+    assert "Box(width, 2.0, height)" in repeat["source"]
+    assert "write_shared_source" in second["repeats_note"]
+
+
+def test_get_project_leads_with_the_system_it_should_build_on(conn):
+    project_id = new_project(conn)
+    assert payload(call(conn, "get_project", {"project_id": project_id}))["system"] is None
+    payload(call(conn, "write_shared_source", {"project_id": project_id, "name": "system", "source": "WALL = 2.0  # every wall\n\ndef slab(w):\n    return w\n"}))
+    project = payload(call(conn, "get_project", {"project_id": project_id}))
+    assert list(project)[2] == "system"
+    [file] = project["system"]["shared_files"]
+    assert file == {"name": "system", "settings": ["WALL"], "pieces": ["slab"], "used_by": 0}
+    assert "Build new parts on its shared files" in project["system"]["note"]
