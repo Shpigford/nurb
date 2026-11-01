@@ -33,7 +33,7 @@ import EngineStarting from "./EngineStarting";
 import { createLatestRequestGate } from "./latestRequest";
 import Library from "./Library";
 import ProjectPanel from "./ProjectPanel";
-import { saveToDownloads } from "./downloads";
+import { openInSlicer, saveToDownloads } from "./downloads";
 import { messagesForPart, moveTargets, titleCase } from "./parts";
 import ProjectPicker from "./ProjectPicker";
 import Setup from "./Setup";
@@ -781,6 +781,7 @@ function App() {
           onPartRenamed={(was, name) => projectId && partRenamed(projectId, was, name)}
           onManagePrinters={() => setSettingsSection("printers")}
           onSaveFile={saveToDownloads}
+          onOpenInSlicer={openInSlicer}
           dragRegion
           header={{
             before: (

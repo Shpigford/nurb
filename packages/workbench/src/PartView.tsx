@@ -38,6 +38,7 @@ import {
   applyParams,
   buildWithParams,
   exportPart,
+  fetchPrinters,
   renamePart,
   type ApplyResult,
   type PartBuild,
@@ -142,6 +143,7 @@ export default function PartView({
   dragRegion,
   onManagePrinters,
   onSaveFile,
+  onOpenInSlicer,
 }: {
   project: Project | null
   partName: string | null
@@ -172,6 +174,8 @@ export default function PartView({
   /** Puts a downloaded file somewhere and says where. The desktop writes it to
    * Downloads and shows it in Finder; without one the browser downloads it. */
   onSaveFile?: (filename: string, blob: Blob) => Promise<string | void>
+  /** Saves a file and opens it in the named slicer app. Only the desktop can. */
+  onOpenInSlicer?: (filename: string, blob: Blob, app: string) => Promise<void>
 }) {
   const projectId = project?.id ?? null
   const [highlight, setHighlight] = useState<number | null>(null)
@@ -354,6 +358,40 @@ export default function PartView({
     },
     [part?.id, part?.name, values, onSaveFile]
   )
+
+  // The slicer the engine found, as the app name macOS opens files with. One that
+  // came off PATH rather than out of an .app has nothing to open, so no row.
+  const [slicer, setSlicer] = useState<{ name: string; app: string } | null>(null)
+  useEffect(() => {
+    if (!onOpenInSlicer) return
+    let live = true
+    fetchPrinters()
+      .then((workshop) => {
+        const app = workshop.slicer?.path.match(/([^/]+)\.app\//)?.[1]
+        if (live && workshop.slicer && app) {
+          setSlicer({ name: workshop.slicer.name === "BambuStudio" ? "Bambu Studio" : workshop.slicer.name, app })
+        }
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [onOpenInSlicer])
+
+  const openInSlicer = useCallback(async () => {
+    if (!part || !slicer || !onOpenInSlicer) return
+    const filename = `${part.name}.3mf`
+    const id = `slicer-${part.id}-${Date.now()}`
+    activity({ id, title: `Opening ${filename} in ${slicer.name}`, tone: "working" })
+    try {
+      await onOpenInSlicer(filename, await exportPart(part.id, "3mf", values), slicer.app)
+      activity({ id, title: `Opening ${filename} in ${slicer.name}`, detail: "Saved to Downloads", tone: "done" })
+    } catch (failure) {
+      const detail = failure instanceof Error ? failure.message : `${slicer.name} did not open it.`
+      activity({ id, title: `Opening ${filename} in ${slicer.name}`, detail, tone: "fail" })
+      throw failure
+    }
+  }, [part?.id, part?.name, values, slicer, onOpenInSlicer])
 
   const onCamera = useCallback(
     (state: CameraState) => {
@@ -652,6 +690,7 @@ export default function PartView({
                   status={sliceStatus}
                   revision={part.revision}
                   runId={runId}
+                  openIn={slicer ? { name: slicer.name, open: openInSlicer } : null}
                 />
               ) : null}
             </div>

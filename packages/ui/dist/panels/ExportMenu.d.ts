@@ -16,5 +16,10 @@ export interface ExportMenuProps {
     revision?: number;
     /** The build the prepared file came from; a newer one makes that file stale. */
     runId?: string | null;
+    /** The slicer on this computer, when the host can hand it a file. */
+    openIn?: {
+        name: string;
+        open: () => Promise<void>;
+    } | null;
 }
-export default function ExportMenu({ partId, export: runExport, status, revision, runId }: ExportMenuProps): import("react").JSX.Element;
+export default function ExportMenu({ partId, export: runExport, status, revision, runId, openIn }: ExportMenuProps): import("react").JSX.Element;
