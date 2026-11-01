@@ -1,14 +1,12 @@
 # @nurb/ui
 
-The React components the nurb workbench is made of: the three.js viewer, the cards a build, a spec and a measurement render as, the icon set, the assistant's markdown renderer, and the formatters that write every figure. One copy, shared by the desktop app and the web app, so a card never drifts between them.
+The React components the nurb workbench is made of: the three.js viewer, the cards a build, a spec and a measurement render as, the icons, the assistant's markdown renderer, and the formatters that write every figure. One copy, shared by the desktop app (`desktop/`) and the workbench page the engine serves (`packages/workbench/`), so a card never drifts between them.
 
-Components carry Tailwind 4 utility classes as literal strings and never import CSS. That keeps the port diffable against the app it came from, and it means the consuming app owns the build.
+Components carry Tailwind 4 utility classes as literal strings and never import CSS, so the consuming app owns the build.
 
-## Install
+## Using it
 
-```
-npm install @nurb/ui
-```
+The package is private to this repository and is not published to npm. The two apps depend on it through the npm workspace at the repository root.
 
 React 19, React DOM 19 and `three` 0.185 are peer dependencies. The viewer imports `three/addons/controls/OrbitControls.js` and `three/addons/loaders/GLTFLoader.js`, so the consumer's bundler has to resolve `three/addons/*` (any bundler reading the package's export map does).
 
@@ -29,7 +27,7 @@ Adjust that `@source` path to reach `node_modules` from your CSS file.
 
 Instrument Sans and JetBrains Mono ship inside the package under the SIL Open Font License (see `fonts/OFL.txt`), and `tokens.css` declares them.
 
-Satoshi is named in `--font-display` but no Satoshi file is in this package: its Fontshare license forbids redistribution. Supply it yourself with your own `@font-face` for the family `"Satoshi"`. Without it the display face falls back to Instrument Sans, which looks fine and is the intended fallback.
+Satoshi is the display face, but its Fontshare license keeps it out of a public repository (see `fonts/SATOSHI-LICENSE.md`). `npm run fonts:fetch` downloads your own copy into `fonts/`, and the workbench and desktop builds and the gallery screenshots run it first. Without it the display face falls back to Instrument Sans.
 
 ## Gallery
 

@@ -38,6 +38,8 @@ APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH/#\~/$HOME}"
 TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:?Set TAURI_SIGNING_PRIVATE_KEY (path to the updater key) in desktop/.env}"
 TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY/#\~/$HOME}"
 export APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH TAURI_SIGNING_PRIVATE_KEY
+# A shipped app must carry Satoshi, so the build fails rather than falling back.
+export NURB_REQUIRE_FONTS=1
 
 REPO="Shpigford/nurb"
 command -v gh >/dev/null || { echo "❌ The gh CLI uploads to GitHub Releases. brew install gh"; exit 1; }

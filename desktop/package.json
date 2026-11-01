@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "sh ../packages/ui/scripts/fetch-satoshi.sh",
     "build": "tsc && vite build",
     "test": "node --test tests/*.test.ts",
     "stage": "sh scripts/stage.sh",

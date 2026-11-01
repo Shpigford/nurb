@@ -1,7 +1,7 @@
 import { brand } from "./brand"
 
-// The horizontal lockup, shipped as outlines so it never depends on the font
-// (DESIGN.md §9). 65×18 in app headers, 87×24 on auth panels.
+// The horizontal lockup, shipped as outlines so it never depends on the font.
+// 65×18 in app headers, 87×24 where it stands on its own.
 export default function Lockup({
   size = "header",
   onNavigate,

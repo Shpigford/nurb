@@ -3,8 +3,8 @@ import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from "react"
 import Icon, { type IconName } from "./Icon"
 
 // Two heights only: 28 (chrome, inline actions) and 36/40 (the page's one
-// primary). Labels are mono caps. Filled accent carries white (DESIGN.md §2
-// "open debt"); secondary is a hairline outline on white; ghost is text.
+// primary). Labels are mono caps. Filled accent carries white; secondary is a
+// hairline outline on white; ghost is text.
 
 type Variant = "accent" | "ink" | "outline" | "ghost" | "danger"
 type Size = "sm" | "md" | "lg"

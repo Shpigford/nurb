@@ -1,5 +1,5 @@
 // A flat-shaded isometric box in the part palette, sized from a build's
-// bounding box (DESIGN.md §7). The library has no thumbnail renderer yet; a
+// bounding box. The library has no thumbnail renderer yet; a
 // box drawn from the real dimensions is honest, and reads as a part at a glance.
 // Projection: sx = (x − y) · 0.866, sy = (x + y) · 0.5 − z.
 

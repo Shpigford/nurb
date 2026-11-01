@@ -4,7 +4,7 @@ Tell your AI what you need printed. Watch the part take shape live. Print it.
 
 nurb turns the AI you already pay for into a CAD partner for 3D printing. You describe the part in plain words, the AI models it, and every version is measured against print physics and shown to you in a live viewer. You judge, drag sliders, click `3mf`, print.
 
-<img width="1609" height="950" alt="The nurb app: project rail, agent chat, and the live viewer" src="https://raw.githubusercontent.com/Shpigford/nurb/main/.github/app.png" />
+<img width="1600" height="1000" alt="The nurb app: the conversation, a shelf built on the stage, and its parameters as sliders" src="https://raw.githubusercontent.com/Shpigford/nurb/main/.github/app.png" />
 
 ## Get it
 
@@ -22,7 +22,7 @@ The chat inside the app runs the agent you already have: Claude Code, Codex, Gem
 
 **Already have a nurb project folder from 0.x?** Use **Import folder** in the app once and it comes across, parts, notes, measurements and all.
 
-**It works offline.** Modelling, checking, the viewer, and export all run on your computer, with no account and no cloud, so it works on a plane or in a workshop with bad wifi.
+**Your parts stay on your computer.** Modelling, checking, the viewer, and export all run locally, with no nurb account. The AI you talk to runs in the cloud, so designing a part needs an internet connection.
 
 ## What you get
 

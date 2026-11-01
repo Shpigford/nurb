@@ -1,8 +1,12 @@
 // Screenshots every design sheet the gallery serves, at 1440x900, into
-// docs/core/screenshots/phase-32/. The design skill runs this and reads the PNGs.
+// .design/gallery/ (gitignored). The design skill runs this and reads the PNGs.
 //
 //   npm run gallery:shots --workspace packages/ui            every sheet
 //   npm run gallery:shots --workspace packages/ui -- 10 13   just those
+//   npm run site:hero --workspace packages/ui                the nurb.dev hero, into site/
+//
+// The hero is drawn from the same components the app ships, so re-running this after
+// a UI change is how the site keeps showing the app as it is. /release runs it.
 //
 // It starts its own dev server on a free port and stops it on the way out.
 import { spawn, spawnSync } from "node:child_process"
@@ -14,7 +18,7 @@ import { fileURLToPath } from "node:url"
 const here = dirname(fileURLToPath(import.meta.url))
 const uiRoot = resolve(here, "..")
 const repoRoot = resolve(uiRoot, "../..")
-const outDir = resolve(repoRoot, "docs/core/screenshots/phase-32")
+const outDir = resolve(repoRoot, ".design/gallery")
 const SESSION = "nurb-ui-gallery"
 
 // Read out of sheets.tsx rather than kept in step by hand, so adding a sheet is
@@ -63,8 +67,13 @@ async function waitForServer(url, timeoutMs = 30000) {
   throw new Error(`The gallery never came up at ${url}`)
 }
 
+const site = process.argv.includes("--site")
 const wanted = process.argv.slice(2).filter((a) => !a.startsWith("-"))
-const sheets = wanted.length ? SHEETS.filter((id) => wanted.includes(id)) : SHEETS
+// The hero is a site asset, not a design sheet, so a plain run leaves it out.
+const sheets = site ? ["hero"] : wanted.length ? SHEETS.filter((id) => wanted.includes(id)) : SHEETS.filter((id) => id !== "hero")
+
+// The sheets set headlines in Satoshi, which is fetched rather than committed.
+spawnSync("sh", [resolve(uiRoot, "scripts/fetch-satoshi.sh")], { stdio: "inherit" })
 
 const port = await freePort()
 mkdirSync(outDir, { recursive: true })
@@ -80,8 +89,17 @@ let failed = null
 try {
   const base = `http://localhost:${port}/`
   await waitForServer(base)
-  browser(["set", "viewport", "1440", "900"])
-  for (const id of sheets) {
+  if (site) {
+    // One 2x JPEG: sharp on retina, and the phone layout crops into it.
+    browser(["set", "viewport", "1440", "900", "2"])
+    browser(["open", `${base}#/sheet/hero`])
+    browser(["wait", "2500"])
+    const path = resolve(repoRoot, "site/app.jpg")
+    browser(["screenshot", path, "--screenshot-format", "jpeg", "--screenshot-quality", "88"])
+    console.log(path)
+  }
+  if (!site) browser(["set", "viewport", "1440", "900"])
+  for (const id of site ? [] : sheets) {
     browser(["open", `${base}#/sheet/${id}`])
     // The viewer builds its scene from a GLB, so give three.js a frame or two.
     browser(["wait", "1500"])

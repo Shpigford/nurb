@@ -1,6 +1,6 @@
 import type { ReactNode, SVGProps } from "react"
 
-// Nucleo 12px outline grid, rendered 1:1 (DESIGN.md §6). Every glyph ships a
+// Nucleo 12px outline grid, rendered 1:1. Every glyph ships a
 // 1.5 stroke with round caps and joins; drawing them at 12px keeps the
 // effective stroke identical everywhere. Never hand-draw one, never scale one.
 //

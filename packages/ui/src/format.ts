@@ -1,4 +1,4 @@
-// Mono-label formatters. Every figure carries a unit (DESIGN.md §8).
+// Mono-label formatters. Every figure carries a unit.
 
 export function rev(n: number | null | undefined): string {
   return `REV ${String(Math.max(0, n ?? 0)).padStart(2, "0")}`

@@ -15,3 +15,6 @@ engine/*.egg-info
 engine/src/nurb/workbench/
 .DS_Store
 .context/
+.design/
+# Satoshi's license bars it from a public repository; packages/ui/scripts/fetch-satoshi.sh fetches it.
+packages/ui/fonts/Satoshi-Variable.ttf
