@@ -427,6 +427,8 @@ def get_project(conn, args, base_url):
     parts = [
         {
             "name": row["name"],
+            # What the person calls it, when they named it; say this one to them.
+            "title": row["title"],
             "kind": row["kind"],
             "source": row["source"],
             "last_build": _last_build(conn, row),

@@ -190,6 +190,11 @@ MIGRATIONS = [
     ALTER TABLE parts DROP COLUMN synced_revision_id;
     ALTER TABLE parts DROP COLUMN public_url;
     """,
+    """
+    -- What a person calls the part, exactly as typed ("Drill Bits"). The name stays the
+    -- part's file name, lowercase with underscores, which a title cannot be.
+    ALTER TABLE parts ADD COLUMN title TEXT;
+    """,
 ]
 
 # What a run can carry besides its geometry: it is measured from one build, so it
@@ -540,10 +545,11 @@ def part_name_from(text):
     return re.sub(r"[^a-z0-9]+", "_", (text or "").strip().lower()).strip("_")
 
 
-def rename_part(conn, part_id, name):
-    """Call a part something else. The name is its file's name, so the transcript's
-    turns follow it, and the function that carries @part takes the name in a new
-    revision, so the source an agent reads agrees with the part it opened."""
+def rename_part(conn, part_id, name, title=None):
+    """Call a part something else. The title is what a person typed and is saved as is;
+    the name is its file's name, so when it changes the transcript's turns follow it, and
+    the function that carries @part takes the name in a new revision, so the source an
+    agent reads agrees with the part it opened."""
     if not PART_NAME.match(name or ""):
         raise ValueError(f"{name or 'that'} can't be a part name: start with a letter, then use letters, numbers and underscores")
     with transaction(conn):
@@ -551,7 +557,10 @@ def rename_part(conn, part_id, name):
         if part is None:
             raise ValueError(f"no part {part_id!r}")
         old = part["name"]
+        if title is not None:
+            conn.execute("UPDATE parts SET title = ? WHERE id = ?", (title.strip() or None, part_id))
         if old == name:
+            changed("part", part_id, part["project_id"])
             return name
         if conn.execute(
             "SELECT 1 FROM parts WHERE project_id = ? AND name = ? AND kind = ?",

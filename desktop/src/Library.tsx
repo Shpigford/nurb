@@ -94,7 +94,7 @@ function toCard(part: Part, folder?: string | null): PartCardPart {
   const bbox = build?.stats?.bbox ?? null;
   return {
     id: part.id,
-    name: titleCase(part.name),
+    name: part.title ?? titleCase(part.name),
     identifier: part.name,
     bbox: Array.isArray(bbox) ? bbox : null,
     status,
@@ -530,7 +530,7 @@ export default function Library({
       ) : null}
       {confirm && "part" in confirm ? (
         <ConfirmDialog
-          title={`Delete ${titleCase(confirm.part.name)}?`}
+          title={`Delete ${confirm.part.title ?? titleCase(confirm.part.name)}?`}
           confirmLabel="Delete"
           hold
           onConfirm={() => void remove(confirm)}

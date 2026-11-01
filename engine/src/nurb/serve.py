@@ -666,6 +666,7 @@ def _part_entry(conn, project_id, part):
     return {
         "id": part["id"],
         "name": part["name"],
+        "title": part["title"],
         "kind": part["kind"],
         "revision_id": part["current_revision_id"],
         "revision": _revision_ordinal(conn, part["current_revision_id"]),
@@ -1066,12 +1067,13 @@ def _routes(conn, lock, server, token, pid):
 
         def work(conn):
             part = _part_row(conn, request.path_params["part_id"])
-            name = db.part_name_from(word(sent, "name", "name must be what to call the part"))
+            typed = word(sent, "name", "name must be what to call the part") or ""
+            name = db.part_name_from(typed)
             try:
-                db.rename_part(conn, part["id"], name)
+                db.rename_part(conn, part["id"], name, title=typed)
             except ValueError as exc:
                 raise _Refused(400, str(exc)) from None
-            return {"id": part["id"], "name": name, "was": part["name"]}
+            return {"id": part["id"], "name": name, "title": typed.strip() or None, "was": part["name"]}
 
         return await acted(work)
 

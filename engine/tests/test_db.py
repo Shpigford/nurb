@@ -464,3 +464,18 @@ def test_renaming_a_part_carries_its_transcript_and_its_function(tmp_path):
     with pytest.raises(ValueError, match="can't be a part name"):
         db.rename_part(conn, part["id"], "9lives")
     conn.close()
+
+
+def test_a_rename_keeps_the_title_exactly_as_typed(tmp_path):
+    """"Drill Bits" is the same part name as drill_bits, but it is still what the person
+    asked to see, so it saves even when the file's name does not move."""
+    conn = db.connect(tmp_path / "x.db")
+    project_id, _ = folder.import_folder(conn, pathlib.Path(__file__).parents[1] / "examples" / "demo")
+    part = conn.execute("SELECT id FROM parts WHERE name = 'bracket'").fetchone()
+    db.rename_part(conn, part["id"], db.part_name_from("Bracket"), title="Bracket")
+    row = conn.execute("SELECT name, title FROM parts WHERE id = ?", (part["id"],)).fetchone()
+    assert (row["name"], row["title"]) == ("bracket", "Bracket")
+    db.rename_part(conn, part["id"], db.part_name_from("Shelf Bracket"), title="Shelf Bracket")
+    row = conn.execute("SELECT name, title FROM parts WHERE id = ?", (part["id"],)).fetchone()
+    assert (row["name"], row["title"]) == ("shelf_bracket", "Shelf Bracket")
+    conn.close()

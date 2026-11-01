@@ -47,6 +47,8 @@ export interface PartBuild {
 export interface Part {
   id: string
   name: string
+  /** What the person calls it, exactly as typed; null until they rename it. */
+  title?: string | null
   kind: string
   revision_id: string
   revision: number
@@ -365,7 +367,10 @@ export async function exportProject(id: string, directory: string): Promise<{ di
 
 /** Call a part something else. The engine turns what was typed into a part name
  * ("Shelf Bracket" is shelf_bracket) and says what it was before. */
-export async function renamePart(id: string, name: string): Promise<{ id: string; name: string; was: string }> {
+export async function renamePart(
+  id: string,
+  name: string,
+): Promise<{ id: string; name: string; title: string | null; was: string }> {
   const url = `/api/parts/${encodeURIComponent(id)}`
   const res = await fetch(base + url, {
     method: "PATCH",
@@ -373,7 +378,7 @@ export async function renamePart(id: string, name: string): Promise<{ id: string
     body: JSON.stringify({ name }),
   })
   if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
-  return (await res.json()) as { id: string; name: string; was: string }
+  return (await res.json()) as { id: string; name: string; title: string | null; was: string }
 }
 
 export async function renameProject(id: string, name: string): Promise<ProjectSummary> {

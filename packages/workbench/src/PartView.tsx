@@ -430,7 +430,7 @@ export default function PartView({
             value={
               part ? (
                 <PartName
-                  name={part.name}
+                  name={part.title ?? part.name}
                   onRename={(name) =>
                     renamePart(part.id, name)
                       .then((renamed) => onPartRenamed?.(renamed.was, renamed.name))
@@ -480,7 +480,7 @@ export default function PartView({
               )}
               items={[
                 ...parts.map((p) => ({
-                  label: p.name,
+                  label: p.title ?? p.name,
                   checked: p.name === part?.name,
                   onSelect: () => onSelectPart?.(p.name),
                 })),

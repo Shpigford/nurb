@@ -258,7 +258,7 @@ function App() {
   useLive((event) => {
     // The library's part count and built time move on a build, not only on a
     // project event, so both refetch the list.
-    if (event.kind === "project" || event.kind === "build") void loadProjects();
+    if (event.kind === "project" || event.kind === "part" || event.kind === "build") void loadProjects();
   });
 
   useEffect(() => writeProject(projectId), [projectId]);
