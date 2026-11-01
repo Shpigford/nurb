@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 /// Wrap an adapter invocation in `sandbox-exec`. sandbox-exec applies the
 /// profile and execs the target in place, so the child pid, process group,
 /// and kill semantics the caller relies on are unchanged.
-pub(super) fn wrap(
+pub(crate) fn wrap(
     program: String,
     args: Vec<String>,
     project: &Path,

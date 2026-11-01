@@ -1,0 +1,7 @@
+{"type":"system","subtype":"session_state_changed","state":"starting"}
+{"type":"system","subtype":"init","session_id":"01998e7a-1111-2222-3333-444455556666","mcp_servers":[{"name":"nurb","status":"connected"}],"model":"claude-opus-5","claude_code_version":"2.1.272","tools":["mcp__nurb__write_part_source"]}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Making the shelf"}}}
+{"type":"assistant","message":{"id":"msg_01","role":"assistant","content":[{"type":"text","text":"Making the shelf taller."}]}}
+{"type":"assistant","message":{"id":"msg_02","role":"assistant","content":[{"type":"tool_use","id":"toolu_01","name":"mcp__nurb__write_part_source","input":{"part":"shelf","source":"from nurb import *"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01","content":[{"type":"text","text":"built shelf in 1.2s"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBOR"}}],"is_error":false}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"The shelf is 20mm taller.","session_id":"01998e7a-1111-2222-3333-444455556666","stop_reason":"end_turn","duration_ms":4210}

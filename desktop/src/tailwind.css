@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@import "@nurb/ui/tokens.css";
+
+/* The built and sibling-source classes live outside this app's tree, which
+   Tailwind does not scan on its own. */
+@source "../src";
+@source "../../packages/ui/dist";
+@source "../../packages/workbench/src";
+
+/* The stage is the window. WKWebView still rubber-bands the document on a
+   trackpad scroll that runs past the end of a panel, which slides the whole
+   app up and shows white beneath it. */
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--color-stage); }
+
+/* The indeterminate setup bar: a 96px accent segment crossing the 384px track
+   inside the 440px panel (sheet 23). */
+@theme {
+  --animate-slide: slide 1.4s ease-in-out infinite;
+
+  @keyframes slide {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(400%);
+    }
+  }
+}

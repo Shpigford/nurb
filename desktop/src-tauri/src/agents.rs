@@ -2,11 +2,10 @@
 //! how their ACP process starts, display name, sign-in state, and the login
 //! flow.
 //!
-//! Claude and Codex run through npm adapters the app provisions; each bundles
-//! its agent's real CLI (claude-agent-acp carries the native Claude Code
-//! binary, codex-acp carries @openai/codex). Gemini's official CLI speaks ACP
-//! itself and is provisioned beside them, so nothing has to be on the user's
-//! PATH except node/npx. Cursor and Grok ship CLIs that speak ACP natively, so the app never installs those: it finds the binary the
+//! Codex runs through an npm adapter the app provisions, and that adapter
+//! bundles its agent's real CLI (codex-acp carries @openai/codex). Gemini's
+//! official CLI speaks ACP itself and is provisioned beside it, so nothing has
+//! to be on the user's PATH except node/npx. Cursor and Grok ship CLIs that speak ACP natively, and Claude's CLI is driven directly in stream-json (see claude.rs), so the app never installs those three: it finds the binary the
 //! vendor's own installer put on the machine. Signing in through the app
 //! shares credentials with any terminal install either way, because every
 //! agent reads its own store (~/.claude, ~/.codex, Cursor's, ~/.grok).
@@ -19,6 +18,7 @@ use std::time::Duration;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AgentKind {
+    /// The user's own Claude Code CLI, driven directly (see claude.rs).
     Claude,
     Codex,
     Gemini,
@@ -72,10 +72,9 @@ impl AgentKind {
     /// release weekly, so no ranges. None for the ACP-native CLIs.
     pub fn adapter(self) -> Option<&'static str> {
         match self {
-            Self::Claude => Some("@agentclientprotocol/claude-agent-acp@0.74.0"),
-            Self::Codex => Some("@agentclientprotocol/codex-acp@1.10.0"),
-            Self::Gemini => Some("@google/gemini-cli@0.55.1"),
-            Self::Cursor | Self::Grok => None,
+            Self::Codex => Some("@agentclientprotocol/codex-acp@2.5.0"),
+            Self::Gemini => Some("@google/gemini-cli@0.66.0"),
+            Self::Claude | Self::Cursor | Self::Grok => None,
         }
     }
 
@@ -83,10 +82,9 @@ impl AgentKind {
     /// of the provisioned runtime without npx.
     pub fn adapter_bin(self) -> Option<&'static str> {
         match self {
-            Self::Claude => Some("claude-agent-acp"),
             Self::Codex => Some("codex-acp"),
             Self::Gemini => Some("gemini"),
-            Self::Cursor | Self::Grok => None,
+            Self::Claude | Self::Cursor | Self::Grok => None,
         }
     }
 
@@ -94,9 +92,15 @@ impl AgentKind {
     /// speak it natively. None for the adapter-hosted agents.
     pub fn native_command(self) -> Option<(&'static str, &'static [&'static str])> {
         match self {
-            Self::Cursor => Some(("agent", &["acp"])),
+            // The driver builds its own argv, so the pair carries the binary
+            // name and nothing else.
+            Self::Claude => Some(("claude", &[] as &[&str])),
+            // `cursor-agent`, not `agent`: Cursor's installer links both, but
+            // Grok's installer also claims `agent`, so only the long name is
+            // sure to be Cursor's.
+            Self::Cursor => Some(("cursor-agent", &["acp"])),
             Self::Grok => Some(("grok", &["agent", "stdio"])),
-            Self::Claude | Self::Codex | Self::Gemini => None,
+            Self::Codex | Self::Gemini => None,
         }
     }
 
@@ -105,19 +109,15 @@ impl AgentKind {
     /// machine, which is what "installed: false" means for these agents.
     pub fn native_bin(self) -> Option<PathBuf> {
         let (name, _) = self.native_command()?;
-        let install_dir = match self {
-            Self::Cursor => ".local/bin",
-            Self::Grok => ".grok/bin",
-            Self::Claude | Self::Codex | Self::Gemini => return None,
+        // Claude's own installer writes one of two spots depending on its age.
+        let install_dirs: &[&str] = match self {
+            Self::Claude => &[".local/bin", ".claude/local"],
+            Self::Cursor => &[".local/bin"],
+            Self::Grok => &[".grok/bin"],
+            Self::Codex | Self::Gemini => return None,
         };
         let home = PathBuf::from(std::env::var("HOME").ok()?);
-        let default = home.join(install_dir).join(name);
-        if default.is_file() {
-            return Some(default);
-        }
-        std::env::split_paths(&std::env::var_os("PATH")?)
-            .map(|dir| dir.join(name))
-            .find(|candidate| candidate.is_file())
+        find_bin(name, &home, install_dirs, std::env::var_os("PATH"))
     }
 
     /// What a signed-out user needs, in the pane and the chat column.
@@ -136,11 +136,29 @@ impl AgentKind {
     /// app and are never absent outside a broken dev machine.
     pub fn install_command(self) -> Option<&'static str> {
         match self {
+            Self::Claude => Some("curl -fsSL https://claude.ai/install.sh | bash"),
             Self::Cursor => Some("curl https://cursor.com/install -fsSL | bash"),
             Self::Grok => Some("curl -fsSL https://x.ai/cli/install.sh | bash"),
-            Self::Claude | Self::Codex | Self::Gemini => None,
+            Self::Codex | Self::Gemini => None,
         }
     }
+}
+
+fn find_bin(
+    name: &str,
+    home: &std::path::Path,
+    install_dirs: &[&str],
+    path: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    for dir in install_dirs {
+        let default = home.join(dir).join(name);
+        if default.is_file() {
+            return Some(default);
+        }
+    }
+    std::env::split_paths(&path?)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 #[derive(serde::Serialize)]
@@ -171,7 +189,7 @@ pub async fn agent_statuses(app: tauri::AppHandle) -> Vec<AgentStatus> {
             let installed = launcher.adapter_available(agent);
             let (logged_in, detail) = if installed {
                 match agent {
-                    AgentKind::Claude => claude_auth_status(&launcher),
+                    AgentKind::Claude => driver_auth_status(),
                     AgentKind::Codex => (Some(auth_file(".codex").is_file()), None),
                     AgentKind::Gemini => (Some(gemini_api_key().is_ok()), None),
                     AgentKind::Cursor => cursor_auth_status(agent),
@@ -206,31 +224,28 @@ pub async fn agent_statuses(app: tauri::AppHandle) -> Vec<AgentStatus> {
     statuses
 }
 
-/// The authoritative check, through the adapter's bundled Claude Code:
-/// `auth status --json` prints `{"loggedIn": bool, ...}` and exits 0 in both
-/// states, so only the JSON is trusted. Cheaper file checks lie: macOS
-/// installs may hold credentials in the keychain, the file, or both.
-fn claude_auth_status(launcher: &crate::env::Launcher) -> (Option<bool>, Option<String>) {
-    let (program, mut args) = launcher.adapter(AgentKind::Claude);
-    args.extend(["--cli", "auth", "status", "--json"].map(String::from));
-    let mut command = Command::new(program);
-    command.args(args);
-    if let Some(path) = launcher.adapter_path() {
-        command.env("PATH", path);
-    }
-    let output = command.output();
-    let Ok(output) = output else {
+/// The driver's own check: `claude auth status` exits 0 signed in and
+/// non-zero signed out, and prints JSON with `--json` on the versions that
+/// have it, which also carries the plan.
+fn driver_auth_status() -> (Option<bool>, Option<String>) {
+    let Some(bin) = AgentKind::Claude.native_bin() else {
         return (None, None);
     };
-    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
+    let Ok(output) = Command::new(bin).args(["auth", "status", "--json"]).output() else {
         return (None, None);
     };
-    let logged_in = parsed.get("loggedIn").and_then(|v| v.as_bool());
+    let parsed = serde_json::from_slice::<serde_json::Value>(&output.stdout).ok();
+    let logged_in = parsed
+        .as_ref()
+        .and_then(|json| json.get("loggedIn"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(output.status.success());
     let detail = parsed
-        .get("subscriptionType")
+        .as_ref()
+        .and_then(|json| json.get("subscriptionType"))
         .and_then(|v| v.as_str())
         .map(|plan| format!("{plan} plan"));
-    (logged_in, detail.filter(|_| logged_in == Some(true)))
+    (Some(logged_in), detail.filter(|_| logged_in))
 }
 
 /// Codex and Grok keep no status subcommand worth trusting, but both write
@@ -312,7 +327,7 @@ fn security_interactive_argument(value: &str) -> Result<String, String> {
     ))
 }
 
-/// `agent status` prints "Not logged in" signed out and account details
+/// `cursor-agent status` prints "Not logged in" signed out and account details
 /// signed in, with no JSON form, so the text is the signal and anything
 /// unrecognizable is honestly unknown rather than guessed.
 fn cursor_auth_status(kind: AgentKind) -> (Option<bool>, Option<String>) {
@@ -362,6 +377,11 @@ pub async fn agent_login(
 ) -> Result<(), String> {
     use tauri::Manager;
     let kind = AgentKind::parse(&agent)?;
+    // The driver never touches credentials: the CLI owns its own sign-in, and
+    // it is already installed on this Mac.
+    if kind == AgentKind::Claude {
+        return Err("Sign in from a terminal: run claude, then come back.".into());
+    }
     if kind == AgentKind::Gemini {
         let key = api_key
             .filter(|key| !key.trim().is_empty())
@@ -384,14 +404,11 @@ pub async fn agent_login(
         _ => None,
     };
     match kind {
-        AgentKind::Claude => {
-            args.extend(["--cli", "auth", "login", "--claudeai"].map(String::from))
-        }
         AgentKind::Codex => args.push("login".into()),
         // Native CLIs: drop the ACP args the launcher put on, login is its
         // own subcommand.
         AgentKind::Cursor | AgentKind::Grok => args = vec!["login".into()],
-        AgentKind::Gemini => unreachable!(),
+        AgentKind::Gemini | AgentKind::Claude => unreachable!(),
     }
     let (pgid_tx, pgid_rx) = std::sync::mpsc::channel::<i32>();
     let done = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
@@ -488,6 +505,26 @@ mod tests {
             assert_eq!(manifest["dependencies"][package], version);
             assert_eq!(locked[package], version);
         }
+    }
+
+    /// Grok's installer links `~/.local/bin/agent` to Grok, so a machine
+    /// with only that name has no Cursor; Cursor's installer always adds
+    /// `cursor-agent` beside it.
+    #[test]
+    fn cursor_is_found_by_its_own_name_not_groks_agent_alias() {
+        let home = std::env::temp_dir().join(format!("nurb-cursor-bin-{}", std::process::id()));
+        let bin = home.join(".local/bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("agent"), b"").unwrap();
+        let (name, _) = AgentKind::Cursor.native_command().unwrap();
+        assert_eq!(super::find_bin(name, &home, &[".local/bin"], None), None);
+
+        std::fs::write(bin.join("cursor-agent"), b"").unwrap();
+        assert_eq!(
+            super::find_bin(name, &home, &[".local/bin"], None),
+            Some(bin.join("cursor-agent"))
+        );
+        std::fs::remove_dir_all(home).unwrap();
     }
 
     /// `agent_login` hands Codex a CODEX_PATH pointing at `.bin/codex`, which

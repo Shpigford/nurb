@@ -1,0 +1,819 @@
+[
+ {
+  "name": "list_projects",
+  "title": "List projects",
+  "description": "List every project: id, name, part count, and when a part was last built. Call this first to find the project to work in.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [],
+   "properties": {}
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "get_project",
+  "title": "Read a project",
+  "description": "Read a project: its pinned spec, measurements with provenance, and parts with current source and last build summary. Large responses say what was omitted; pass part_name and source_offset/source_limit to recover one source in bounded chunks.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "minLength": 1,
+     "description": "Optional exact part or module name to return, including imported names such as _shared or Unicode identifiers. Used to recover source omitted from a full-project response."
+    },
+    "source_offset": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Character offset into the selected part's source; requires part_name and defaults to 0."
+    },
+    "source_limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 100000,
+     "description": "Maximum source characters to return from the selected part; requires part_name and defaults to the largest safe chunk."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 150000
+  }
+ },
+ {
+  "name": "create_project",
+  "title": "Create a project",
+  "description": "Create a project. Without a name it gets a placeholder name you can keep or change later. Returns the project id every other tool needs.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [],
+   "properties": {
+    "name": {
+     "type": "string",
+     "maxLength": 200,
+     "description": "What to call the project, in the user's words, up to 200 characters. Leave it out for a placeholder name."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "read_guide",
+  "title": "Read the guide",
+  "description": "Read nurb's design doctrine, the part-file vocabulary and a build123d sheet. Call this once before writing any part source.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [],
+   "properties": {}
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 120000
+  }
+ },
+ {
+  "name": "pin_spec",
+  "title": "Pin the build spec",
+  "description": "Pin the final build spec once every fit-critical dimension is settled. The spec is the record the part is built and rebuilt from. It must be complete: parameter signature, every dimension with provenance, acceptance criteria mapped to checks, and explicit conventions.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name",
+    "summary",
+    "params",
+    "dimensions",
+    "acceptance",
+    "conventions"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "Python identifier for the part function, lowercase snake_case, no leading underscore."
+    },
+    "summary": {
+     "type": "string",
+     "minLength": 1,
+     "description": "One or two sentences: what the part is and what it must fit."
+    },
+    "params": {
+     "type": "array",
+     "minItems": 1,
+     "description": "The exposed parameter signature: these become the user's sliders. Name them in the user's words.",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "name",
+       "kind",
+       "default",
+       "description"
+      ],
+      "properties": {
+       "name": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+       },
+       "kind": {
+        "type": "string",
+        "enum": [
+         "float",
+         "int",
+         "bool",
+         "str"
+        ]
+       },
+       "default": {
+        "type": [
+         "number",
+         "boolean",
+         "string"
+        ]
+       },
+       "min": {
+        "type": "number"
+       },
+       "max": {
+        "type": "number"
+       },
+       "description": {
+        "type": "string",
+        "description": "One line: what it moves. Shown on slider hover."
+       }
+      }
+     }
+    },
+    "dimensions": {
+     "type": "array",
+     "minItems": 1,
+     "description": "Every dimension the part depends on, in mm, each with provenance.",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "name",
+       "value_mm",
+       "how",
+       "source",
+       "provisional"
+      ],
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "value_mm": {
+        "type": "number"
+       },
+       "how": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Where the number came from: the standard's name, 'calipers', 'user stated', or the guess being made."
+       },
+       "source": {
+        "type": "string",
+        "enum": [
+         "standard",
+         "measured",
+         "asked",
+         "doctrine"
+        ],
+        "description": "The kind of provenance: standard (a published number), measured (the user measured it), asked (the user stated it), doctrine (a design rule, or a value derived from one)."
+       },
+       "provisional": {
+        "type": "boolean",
+        "description": "true when the value is a guess or scale estimate that a real measurement should replace."
+       }
+      }
+     }
+    },
+    "acceptance": {
+     "type": "array",
+     "minItems": 1,
+     "description": "Acceptance criteria, each mapped to a concrete check the build can run.",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "criterion",
+       "check"
+      ],
+      "properties": {
+       "criterion": {
+        "type": "string",
+        "description": "Plain-English pass condition."
+       },
+       "check": {
+        "type": "string",
+        "description": "The check rule the build reports (min_wall, overhang, floating, stability, ...) or a measurable assertion on the build's bbox or volume. Never a CLI command."
+       }
+      }
+     }
+    },
+    "conventions": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "expose_params",
+      "parameter_style"
+     ],
+     "description": "Explicit build conventions the build must follow, in the part's own coordinates: which face mates, which way the payload runs.",
+     "properties": {
+      "expose_params": {
+       "type": "boolean",
+       "const": true,
+       "description": "Every listed param must be a keyword argument with its default: floats stay floats (1.0 not 1) so sliders are continuous."
+      },
+      "parameter_style": {
+       "type": "string",
+       "minLength": 1,
+       "description": "Naming and docstring conventions, e.g. plain words in the user's vocabulary, one-line 'name: what it moves' docs."
+      },
+      "notes": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Any other binding conventions: orientation, chamfers, printability constraints, and the outline of the object the part pockets or cradles, as a photo showed it (an ellipse of width by depth for any continuous curve; straight sides only when seen)."
+      }
+     }
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "amend_spec",
+  "title": "Amend the build spec",
+  "description": "Change the pinned spec of an existing part. Send only what changed: params, dimensions, acceptance entries and notes are matched by name and replaced, new ones are added. The merged spec supersedes the old one. Never re-pin a part with pin_spec to change it.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part whose pinned spec changes."
+    },
+    "summary": {
+     "type": "string",
+     "minLength": 1,
+     "description": "Replacement summary, only if the part's description changed."
+    },
+    "params": {
+     "type": "array",
+     "description": "Parameters to add or replace, matched by name.",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "name",
+       "kind",
+       "default",
+       "description"
+      ],
+      "properties": {
+       "name": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$"
+       },
+       "kind": {
+        "type": "string",
+        "enum": [
+         "float",
+         "int",
+         "bool",
+         "str"
+        ]
+       },
+       "default": {
+        "type": [
+         "number",
+         "boolean",
+         "string"
+        ]
+       },
+       "min": {
+        "type": "number"
+       },
+       "max": {
+        "type": "number"
+       },
+       "description": {
+        "type": "string",
+        "description": "One line: what it moves. Shown on slider hover."
+       }
+      }
+     }
+    },
+    "remove_params": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Parameter names to drop."
+    },
+    "dimensions": {
+     "type": "array",
+     "description": "Dimensions to add or replace, matched by name.",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "name",
+       "value_mm",
+       "how",
+       "source",
+       "provisional"
+      ],
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "value_mm": {
+        "type": "number"
+       },
+       "how": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Where the number came from: the standard's name, 'calipers', 'user stated', or the guess being made."
+       },
+       "source": {
+        "type": "string",
+        "enum": [
+         "standard",
+         "measured",
+         "asked",
+         "doctrine"
+        ],
+        "description": "The kind of provenance: standard (a published number), measured (the user measured it), asked (the user stated it), doctrine (a design rule, or a value derived from one)."
+       },
+       "provisional": {
+        "type": "boolean",
+        "description": "true when the value is a guess or scale estimate that a real measurement should replace."
+       }
+      }
+     }
+    },
+    "acceptance": {
+     "type": "array",
+     "description": "Acceptance criteria to add or replace, matched by check.",
+     "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "criterion",
+       "check"
+      ],
+      "properties": {
+       "criterion": {
+        "type": "string",
+        "description": "Plain-English pass condition."
+       },
+       "check": {
+        "type": "string",
+        "description": "The check rule the build reports (min_wall, overhang, floating, stability, ...) or a measurable assertion on the build's bbox or volume. Never a CLI command."
+       }
+      }
+     }
+    },
+    "notes": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "Binding conventions to append."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "read_measurements",
+  "title": "Read measurements",
+  "description": "Read the project's measurements with provenance and whether each value is provisional, plus the project's parts and which measurements each reads. Millimetre rows return value_mm. An imported row in another unit returns its honest value and unit plus conversion instructions. Use measured(\"<name>\") in the part source to reference one.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "record_measurement",
+  "title": "Record a measurement",
+  "description": "Record a project measurement: a real-world dimension in mm with its provenance, shared by every part in the project. Call it as soon as a fit-critical number is known, from a standard, calipers, or the user, and again with the corrected value when the user changes one. Reuse an imported name exactly, even when it is not snake_case; this also replaces an imported non-mm value after conversion while reporting its prior raw value and unit. Parts whose source reads the measurement become stale and can be rebuilt without a new spec.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "name",
+    "value_mm",
+    "how",
+    "provisional"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "name": {
+     "type": "string",
+     "description": "Exact existing measurement name, or a short name for a new measurement. New names normalize to a Python-safe form."
+    },
+    "value_mm": {
+     "type": "number",
+     "description": "The value in millimetres."
+    },
+    "how": {
+     "type": "string",
+     "minLength": 1,
+     "description": "Where the number came from: the standard's name, 'calipers', 'user stated', or the guess being made."
+    },
+    "provisional": {
+     "type": "boolean",
+     "description": "true when the value is a guess or scale estimate that a real measurement should replace."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "write_part_source",
+  "title": "Write the part source",
+  "description": "Save the complete Python source for the part and build it: the result carries the build's status, findings, stats and inspect. Replaces the previous revision entirely; send the whole file, never a diff. For a fix to an existing source, prefer edit_part_source. A passing build also returns one picture, the part from four angles (iso, back, top, under), and a link to the full-size iso render; the other views are MCP resources under nurb://render/.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name",
+    "source"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    },
+    "source": {
+     "type": "string",
+     "description": "The full part file: `from nurb import *`, one part function, keyword defaults as parameters."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "edit_part_source",
+  "title": "Edit the part source",
+  "description": "Replace one exact snippet of the current part source with new text, save the result as a new revision and build it: the result carries the build's status, findings, stats and inspect. old_string must appear exactly once; include enough surrounding lines to make it unique. Use this for fixes instead of resending the whole file. A passing build also returns one picture, the part from four angles (iso, back, top, under), and a link to the full-size iso render; the other views are MCP resources under nurb://render/.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name",
+    "old_string",
+    "new_string"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    },
+    "old_string": {
+     "type": "string",
+     "description": "The exact text to replace, matching the current source byte for byte (indentation included)."
+    },
+    "new_string": {
+     "type": "string",
+     "description": "The replacement text."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "write_shared_source",
+  "title": "Write a shared file",
+  "description": "Save the complete source of a project's shared file, the module its parts import (system.py is `from system import ...`). Use it for geometry a family of parts must agree on: a wall, a chamfer, a mounting profile. Build two or three parts plainly first and lift only what they genuinely repeat. Every part that imports the file, directly or through another shared file, is out of date once it changes: the first one builds now and its result comes back here (findings, stats, the picture); the rest rebuild in the background, and `importers` names them all. Send the whole file, never a diff; for a fix prefer edit_shared_source.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "name",
+    "source"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The shared file's name without .py, as parts import it: `system` is system.py, read with `from system import ...`."
+    },
+    "source": {
+     "type": "string",
+     "description": "The complete Python source of the shared file."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "edit_shared_source",
+  "title": "Edit a shared file",
+  "description": "Replace one exact snippet of a project's shared file and save it as a new revision. old_string must appear exactly once. As with write_shared_source, the first part that imports the file builds now and the rest rebuild in the background; `importers` names them all.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "name",
+    "old_string",
+    "new_string"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The shared file's name without .py, as parts import it: `system` is system.py, read with `from system import ...`."
+    },
+    "old_string": {
+     "type": "string",
+     "description": "The exact text to replace, matching the current source byte for byte (indentation included)."
+    },
+    "new_string": {
+     "type": "string",
+     "description": "The replacement text."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "run_build",
+  "title": "Build the part",
+  "description": "Build the current source again without changing it and run every check. Every write_part_source and edit_part_source already builds, so this is only for a rebuild of unchanged source. Returns status, findings, stats, and inspect (the inspect report: findings resolved to faces, the largest faces, the concave edges). The build passes when there is no error and no finding with severity \"fail\". A passing build also returns one picture, the part from four angles (iso, back, top, under), and a link to the full-size iso render; the other views are MCP resources under nurb://render/.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "read_findings",
+  "title": "Read findings",
+  "description": "Read a page of diagnostic findings from the most recent build. Use next_offset to read every page; face triangle meshes are omitted.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    },
+    "offset": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Finding index to start at; defaults to 0."
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 20,
+     "description": "Findings to return; defaults to 5, maximum 20."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "look",
+  "title": "Look at the part",
+  "description": "Look at the part's latest passing build from four angles: the iso, the opposed corner, straight down, and the underside. Call it after a build passes, before handing the part over, and compare what you see against how the part sits in use. What you see is a hypothesis: confirm a fault by coordinate with inspect before editing. Returns one picture with the four views and the link to the full-size iso render.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "find_photos",
+  "title": "Find reference photos",
+  "description": "Look at the project's reference photos: up to three, downscaled. They are the photos the person attached in the chat. None is the ordinary case, not a problem: ask for one in the chat only when a photo would settle a shape. Use them to see an outline, where buttons, ports and cables sit, and which way is up. A photo is a shape, never a dimension.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "query"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "query": {
+     "type": "string",
+     "description": "What to look for among the project's reference photos."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false
+  }
+ }
+]

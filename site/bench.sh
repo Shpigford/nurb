@@ -1,5 +1,5 @@
 #!/bin/sh
-# nurb benchmark contribution: curl -fsSL https://nurb.dev/bench.sh | sh
+# nurb benchmark contribution: curl -fsSL https://nurb.app/bench.sh | sh
 #
 # Runs the nurb model benchmark on the AI subscription you already have and stages
 # a leaderboard submission. A wizard asks which model to test from a menu, so you

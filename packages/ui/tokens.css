@@ -1,0 +1,259 @@
+/* nurb design tokens. Import this once in the consuming app's Tailwind 4 entry, after `@import "tailwindcss"`, and add `@source "../node_modules/@nurb/ui/dist"` so the classes the components name survive the production build. */
+
+/* ---------------------------------------------------------------------------
+   Fonts. Satoshi announces, Instrument Sans speaks, JetBrains Mono measures.
+   All three are local variable TTFs so nothing depends on a third-party CDN.
+   Instrument Sans and JetBrains Mono ship here under the OFL. Satoshi's license
+   keeps it out of a public repository, so scripts/fetch-satoshi.sh fetches it
+   before a build (fonts/SATOSHI-LICENSE.md). Never italic.
+   --------------------------------------------------------------------------- */
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("./fonts/Satoshi-Variable.ttf") format("truetype");
+  font-weight: 300 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Sans";
+  src: url("./fonts/InstrumentSans-Variable.ttf") format("truetype");
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("./fonts/JetBrainsMono-Variable.ttf") format("truetype");
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+/* ---------------------------------------------------------------------------
+   nurb design tokens, mirrored from the Paper file
+   "nurb — product design". One cool slate ramp, one accent, three semantics.
+   `static` so a consumer gets every variable even where its scanner never sees
+   the utility that would have pulled it in.
+   --------------------------------------------------------------------------- */
+
+@theme static {
+  --font-display: "Satoshi", "Instrument Sans", system-ui, sans-serif;
+  --font-sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Surfaces and lines */
+  --color-ground: #ffffff;
+  --color-raised: #eef2f8;
+  --color-stage: #e5f0fb;
+  --color-stage-line: #c9dcee;
+  --color-line-soft: #e8edf4;
+  --color-line: #dce3ed;
+  --color-panel-edge: #bdcee2;
+
+  /* Text */
+  --color-faint: #6f7c8d;
+  --color-muted: #64707f;
+  --color-on-stage-muted: #556174;
+  --color-ink-soft: #38424f;
+  --color-ink: #121821;
+
+  /* Accent and semantics */
+  --color-accent: #ff5230;
+  --color-accent-hover: #f0421f;
+  --color-accent-ink: #d6380e;
+  --color-accent-wash: #ffede8;
+  --color-pass: #00a45a;
+  --color-pass-wash: #e2f7ed;
+  --color-warn: #e08700;
+  --color-warn-wash: #fdf1dc;
+  --color-fail: #b3001b;
+  --color-fail-wash: #fce8ea;
+
+  /* Part illustration */
+  --color-part-top: #ff7050;
+  --color-part-front: #f0421f;
+  --color-part-side: #c42d12;
+  --color-part-edge: #a32409;
+
+  /* Radius tiers: 12 panels, 6 content, 3 controls */
+  --radius-panel: 12px;
+  --radius-content: 6px;
+  --radius-control: 3px;
+
+  /* The one shadow, blue-tinted. Only floating panels cast it. */
+  --shadow-panel: 0 1px 2px rgb(24 42 74 / 0.08), 0 3px 8px rgb(24 42 74 / 0.06);
+  --shadow-control: 0 1px 2px rgb(24 42 74 / 0.08);
+
+  /* Motion. Tailwind 4 turns --ease-* into ease-* utilities; the durations are
+     named, not numbered, because one 150ms everywhere is what makes an interface
+     feel like a spreadsheet. A press answers (tick), a panel settles, a result
+     arrives, a build pulse coasts. Pick by what the motion means. */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.65, 0, 0.35, 1);
+  --duration-tick: 90ms;
+  --duration-settle: 240ms;
+  --duration-arrive: 420ms;
+  --duration-coast: 1400ms;
+
+  --breakpoint-md: 768px;
+  --breakpoint-lg: 1024px;
+}
+
+/* ---------------------------------------------------------------------------
+   Utilities that recur on every screen.
+   --------------------------------------------------------------------------- */
+
+/* A floating panel: pure white, hairline panel-edge, the shadow. */
+@utility panel {
+  background-color: var(--color-ground);
+  border: 1px solid var(--color-panel-edge);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
+}
+
+/* Mono ALL-CAPS label: 10px / 500 / 0.14em. The default voice of every strip. */
+@utility mono-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* Mono caption: 10px / 400 / 0.09em. Secondary lines, timestamps, dims.
+   Tabular figures because the elapsed counters live here and must not jitter. */
+@utility mono-caption {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 12px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mono value: 11px / 500 readouts. */
+@utility mono-value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mono identifier: 10.5px part names, file names, tab labels. */
+@utility mono-id {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+}
+
+/* Filled button label. The design's buttons are mono caps at 10.5 / 0.13em. */
+@utility btn-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 14px;
+  font-weight: 500;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+/* Chat prose: 12.5 / 18. Transcripts run long, so this sits under the 13.5 body size. */
+@utility text-chat {
+  font-size: 12.5px;
+  line-height: 18px;
+}
+
+/* Headline: Satoshi, never italic. */
+@utility font-display {
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+
+/* Every label, tab and button is chrome: a drag that starts on it must not select it. */
+@utility chrome {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Parameter sliders. Native input[type=range] keeps the platform keyboard map
+   and assistive-tech behaviour; only the paint is ours. The filled portion has
+   no cross-browser pseudo-element, so the track is a gradient stopped under
+   the thumb's centre: --pct (0–1, set by the component on every value change)
+   of the thumb's travel, which is the track less one thumb width. */
+.param-slider {
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+}
+.param-slider:focus {
+  outline: none;
+}
+.param-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-accent) calc(6px + (100% - 12px) * var(--pct, 0)),
+    var(--color-line) calc(6px + (100% - 12px) * var(--pct, 0))
+  );
+}
+.param-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -4px;
+  height: 12px;
+  width: 12px;
+  border-radius: 9999px;
+  background: var(--color-ground);
+  border: 1.5px solid var(--color-accent);
+}
+.param-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--color-accent-wash);
+}
+.param-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-line);
+}
+.param-slider::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+.param-slider::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border-radius: 9999px;
+  background: var(--color-ground);
+  border: 1.5px solid var(--color-accent);
+}
+.param-slider:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--color-accent-wash);
+}
+
+/* Streaming caret for markdown replies: rides on the last rendered node so it
+   follows the text instead of dropping below the closed paragraph or list. */
+.md-streaming > :last-child::after,
+.md-streaming > :is(ol, ul):last-child > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background-color: var(--color-accent);
+  animation: var(--animate-pulse);
+}
+.md-streaming > :is(ol, ul):last-child::after {
+  content: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

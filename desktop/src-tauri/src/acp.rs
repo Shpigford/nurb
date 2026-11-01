@@ -2,13 +2,14 @@
 //! (Claude Code or Codex, see agents.rs), spoken to over stdio JSON-RPC,
 //! streaming updates to the webview through a Tauri ipc channel.
 
-mod events;
+pub(crate) mod events;
+pub(crate) mod mcp;
 mod policy;
-mod sandbox;
+pub(crate) mod sandbox;
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -19,7 +20,8 @@ use agent_client_protocol::schema::v1::{
     ListSessionsRequest, LoadSessionRequest, Meta, NewSessionRequest, PromptRequest,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse, ResourceLink,
     SelectedPermissionOutcome, SessionConfigKind, SessionConfigOption, SessionConfigSelectOptions,
-    SessionId, SessionNotification, SetSessionConfigOptionRequest, TextContent,
+    SessionId, SessionModeId, SessionModeState, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, TextContent,
 };
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::{
@@ -88,7 +90,246 @@ use events::{forward, permission_choice, permission_title, wire_string};
 
 /// The whole-project conversation rides the per-part session plumbing under a
 /// name no part file can have. The twin constant lives in desktop/src/Chat.tsx.
-const PROJECT_CHAT: &str = "//project";
+pub(crate) const PROJECT_CHAT: &str = "//project";
+
+/// The project id an agent working directory belongs to; the app hands agents
+/// <appdata>/projects/<id> as their cwd, so the last segment is the id.
+pub(crate) fn project_key(project: &Path) -> String {
+    project
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| project.display().to_string())
+}
+
+/// The serve every session's tools point at. `start` waits for a cold serve;
+/// the rail's listing does not.
+async fn serve_entry(
+    app: &tauri::AppHandle,
+    start: bool,
+) -> Option<crate::supervisor::ServeInfo> {
+    use tauri::Manager;
+    if !start {
+        return app.state::<crate::supervisor::Supervisor>().published_live();
+    }
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        handle.state::<crate::supervisor::Supervisor>().ensure()
+    })
+    .await
+    .ok()
+    .and_then(Result::ok)
+}
+
+/// The nurb MCP server for one session, or nothing when the serve is not up
+/// or the agent cannot reach it.
+fn mcp_entry(
+    caps: &agent_client_protocol::schema::v1::McpCapabilities,
+    serve: Option<&crate::supervisor::ServeInfo>,
+) -> Option<agent_client_protocol::schema::v1::McpServer> {
+    mcp::nurb_mcp_server(caps, serve?)
+}
+
+/// The folder fallback's bookkeeping: where the agent is working, where the
+/// parts go back to, and what they looked like when it started.
+#[derive(Clone)]
+struct Capture {
+    root: PathBuf,
+    serve: crate::supervisor::ServeInfo,
+    project_id: String,
+    label: &'static str,
+    parts: Arc<Mutex<HashMap<String, String>>>,
+}
+
+/// Hand back every named part whose source has moved since the snapshot.
+async fn capture_parts(capture: Capture, names: Vec<String>, channel: Channel<ChatEvent>) {
+    for name in names {
+        let path = capture.root.join("parts").join(format!("{name}.py"));
+        let Ok(source) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if capture.parts.lock().unwrap().get(&name) == Some(&source) {
+            continue;
+        }
+        match mcp::capture(
+            &capture.serve,
+            &capture.project_id,
+            &name,
+            &source,
+            capture.label,
+        )
+        .await
+        {
+            Ok(_) => {
+                capture.parts.lock().unwrap().insert(name, source);
+            }
+            Err(sentence) => {
+                let note = ChatEvent::Note { text: sentence };
+                events::mirror(&note);
+                let _ = channel.send(note);
+            }
+        }
+    }
+}
+
+/// Where this chat's agent works: the project itself when the tools reach it,
+/// a checked-out copy when they do not. The copy is the only way an agent
+/// that cannot call the tools can still change a part.
+async fn working_folder(
+    launcher: &crate::env::Launcher,
+    kind: AgentKind,
+    project: &Path,
+    data: &Path,
+    serve: Option<&crate::supervisor::ServeInfo>,
+    channel: &Channel<ChatEvent>,
+) -> Result<Option<Capture>, String> {
+    // The native driver passes the tools on its own command line, and without
+    // a serve there is nothing to check or to hand parts back to.
+    let (Some(serve), false) = (serve, kind == AgentKind::Claude) else {
+        return Ok(None);
+    };
+    let key = mcp::verdict_key(kind.id(), kind.adapter());
+    let verdict = match mcp::read_verdict(data, &key) {
+        Some(verdict) => Some(verdict),
+        None => {
+            note(channel, format!("Checking that {} can reach the nurb tools…", kind.label()));
+            let asked = probe_tools(launcher, kind, data, serve).await;
+            if let Some(verdict) = &asked {
+                mcp::write_verdict(data, &key, verdict);
+            }
+            asked
+        }
+    };
+    if verdict.map(|verdict| verdict.tools).unwrap_or(false) {
+        return Ok(None);
+    }
+    let project_id = project_key(project);
+    let root = project.join("checkout");
+    let _ = std::fs::remove_dir_all(&root);
+    mcp::checkout(serve, &project_id, &root).await?;
+    note(
+        channel,
+        format!(
+            "The nurb tools did not reach {}, so this chat works in a copy of the project folder and every part it writes is captured back.",
+            kind.label()
+        ),
+    );
+    Ok(Some(Capture {
+        parts: Arc::new(Mutex::new(mcp::snapshot_parts(&root))),
+        root,
+        serve: serve.clone(),
+        project_id,
+        label: kind.label(),
+    }))
+}
+
+fn note(channel: &Channel<ChatEvent>, text: String) {
+    let note = ChatEvent::Note { text };
+    events::mirror(&note);
+    let _ = channel.send(note);
+}
+
+/// One throwaway session whose only question is whether the MCP entry landed.
+/// ACP cannot list a model's tools, so the model is asked.
+async fn probe_tools(
+    launcher: &crate::env::Launcher,
+    kind: AgentKind,
+    data: &Path,
+    serve: &crate::supervisor::ServeInfo,
+) -> Option<mcp::Verdict> {
+    // Its own cwd, so this session never lands in the project's history:
+    // codex's session list is filtered by working directory.
+    let cwd = data.join("probe").join(kind.id());
+    std::fs::create_dir_all(&cwd).ok()?;
+    let (program, args) = launcher.adapter(kind);
+    let (program, args) = sandbox::wrap(program, args, &cwd, &launcher.engine_root());
+    let mut config = AcpAgentConfig::new(program).args(args);
+    if let Some(path) = launcher.adapter_path() {
+        config = config.env("PATH", path);
+    }
+    if kind == AgentKind::Gemini {
+        if let Ok(key) = crate::agents::gemini_api_key() {
+            config = config.env("GEMINI_API_KEY", key);
+        }
+    }
+    let (stdin, stdout, stderr, child) = AcpAgent::new(config).spawn_process().ok()?;
+    let pgid = child.id() as i32;
+    drain_stderr(kind, stderr);
+    let said = Arc::new(Mutex::new(String::new()));
+    let heard = Arc::clone(&said);
+    // A model that calls the tool and narrates nothing has still proved the
+    // server connected, so the call itself counts.
+    let called = Arc::new(AtomicBool::new(false));
+    let saw_call = Arc::clone(&called);
+    let transport = Arc::new(Mutex::new(String::new()));
+    let chosen = Arc::clone(&transport);
+    let serve = serve.clone();
+    let asked = tokio::time::timeout(
+        Duration::from_secs(60),
+        Client
+            .builder()
+            .on_receive_notification(
+                async move |notification: SessionNotification, _cx| {
+                    match notification.update {
+                        SessionUpdate::AgentMessageChunk(chunk) => {
+                            if let ContentBlock::Text(text) = chunk.content {
+                                heard.lock().unwrap().push_str(&text.text);
+                            }
+                        }
+                        SessionUpdate::ToolCall(call) => {
+                            if mcp::nurb_tool(&call.title).is_some() {
+                                saw_call.store(true, Ordering::Relaxed);
+                            }
+                        }
+                        _ => {}
+                    }
+                    Ok(())
+                },
+                agent_client_protocol::on_receive_notification!(),
+            )
+            .connect_with(
+                ByteStreams::new(stdin, stdout),
+                move |cx: ConnectionTo<Agent>| async move {
+                    let init = cx
+                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
+                        .block_task()
+                        .await?;
+                    let caps = &init.agent_capabilities.mcp_capabilities;
+                    *chosen.lock().unwrap() = if caps.http { "http" } else { "none" }.to_string();
+                    let entry = mcp::nurb_mcp_server(caps, &serve);
+                    let mut opening = NewSessionRequest::new(cwd);
+                    if let Some(entry) = entry {
+                        opening = opening.mcp_servers(vec![entry]);
+                    }
+                    let session = cx.send_request(opening).block_task().await?;
+                    cx.send_request(PromptRequest::new(
+                        session.session_id,
+                        vec![ContentBlock::Text(TextContent::new(mcp::PROBE_PROMPT))],
+                    ))
+                    .block_task()
+                    .await?;
+                    Ok(())
+                },
+            ),
+    )
+    .await;
+    reap(pgid, child).await;
+    // A probe that timed out or errored answers for nothing, so it is not
+    // remembered; the next chat asks again.
+    asked.ok()?.ok()?;
+    let reply = said.lock().unwrap().clone();
+    let transport = transport.lock().unwrap().clone();
+    let tools = mcp::tools_reached(&reply, called.load(Ordering::Relaxed));
+    eprintln!(
+        "[probe] {} over {transport}: tools={tools} called={} reply={reply:?}",
+        kind.id(),
+        called.load(Ordering::Relaxed)
+    );
+    Some(mcp::Verdict {
+        tools,
+        transport,
+        checked_at: mcp::now(),
+    })
+}
 
 type Pending = Arc<Mutex<HashMap<u32, oneshot::Sender<RequestPermissionOutcome>>>>;
 
@@ -111,6 +352,9 @@ struct ChatSession {
     /// model rebuilds the effort list, and `session/set_model` does not return
     /// the new menus.
     grok_models: Vec<GrokModelMenu>,
+    /// Set only when the tools never reached this agent: the copy of the
+    /// project it works in, and what it takes to hand parts back.
+    checkout: Option<Capture>,
     pgid: i32,
     /// Dropped (with the whole entry) to end the connection task, which kills
     /// the adapter's process group.
@@ -141,6 +385,7 @@ pub async fn start_chat(
     app: tauri::AppHandle,
     path: String,
     agent: String,
+    part: Option<String>,
     on_event: Channel<ChatEvent>,
     resume: Option<String>,
 ) -> Result<String, String> {
@@ -148,6 +393,11 @@ pub async fn start_chat(
     let project = PathBuf::from(&path);
     if !project.is_dir() {
         return Err(format!("project folder missing: {}", project.display()));
+    }
+    // Claude runs as a driver, not an adapter: its own CLI, spoken to in
+    // stream-json (see claude.rs).
+    if kind == AgentKind::Claude {
+        return crate::claude::start(app, project, part, on_event, resume).await;
     }
     let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
     let (ready_tx, ready_rx) = oneshot::channel();
@@ -192,19 +442,26 @@ pub async fn list_sessions(
     use tauri::Manager;
     let project = PathBuf::from(&path);
     let launcher = app.state::<crate::env::Launcher>().inner().clone();
+    // The tools every session gets. A rail refresh must never be what starts
+    // the serve, so a serve that is not up yet just means no entry here.
+    let serve = serve_entry(&app, false).await;
     // Every agent in parallel, skipping the native CLIs that are not on this
     // machine: spawning those just to watch them fail is noise, where the
     // adapters (always present once provisioned) fail informatively.
     let checks: Vec<_> = crate::agents::ALL
         .into_iter()
+        // The driver answers no session/list, so its history rides the
+        // adapter's entry until it speaks for itself.
+        .filter(|kind| *kind != AgentKind::Claude)
         .filter(|kind| kind.native_command().is_none() || launcher.adapter_available(*kind))
         .map(|kind| {
             let launcher = launcher.clone();
             let project = project.clone();
+            let serve = serve.clone();
             (
                 kind,
                 tauri::async_runtime::spawn(async move {
-                    agent_sessions(&launcher, kind, project).await
+                    agent_sessions(&launcher, kind, project, serve).await
                 }),
             )
         })
@@ -247,7 +504,7 @@ pub async fn list_sessions(
         .into_iter()
         .map(|(kind, session)| {
             let id = wire_string(&session.session_id);
-            let part = store.part_of(&id, &project);
+            let part = store.part_of(&id, &project_key(&project));
             SessionEntry {
                 id,
                 title: session.title,
@@ -267,6 +524,7 @@ async fn agent_sessions(
     launcher: &crate::env::Launcher,
     kind: AgentKind,
     project: PathBuf,
+    serve: Option<crate::supervisor::ServeInfo>,
 ) -> Result<
     (
         Vec<agent_client_protocol::schema::v1::SessionInfo>,
@@ -307,6 +565,8 @@ async fn agent_sessions(
                         .send_request(InitializeRequest::new(ProtocolVersion::V1))
                         .block_task()
                         .await?;
+                    let entry =
+                        mcp_entry(&init.agent_capabilities.mcp_capabilities, serve.as_ref());
                     let menus = grok_model_menus(init.meta.as_ref()).unwrap_or_default();
                     let model_rows = grok_rows_by_model(&menus);
                     // Only a session knows what models the agent offers, and a
@@ -316,8 +576,16 @@ async fn agent_sessions(
                     // asking here is what lets the very first chat of a fresh
                     // install open with a working picker. Failure (a signed-out
                     // Codex answers -32000) just means no picker.
+                    // This throwaway session is only asked what models the
+                    // agent offers, but it is a real session, and a session
+                    // without the tools would answer for a configuration the
+                    // user never runs in.
+                    let mut opening = NewSessionRequest::new(project.clone());
+                    if let Some(entry) = entry.clone() {
+                        opening = opening.mcp_servers(vec![entry]);
+                    }
                     let config = cx
-                        .send_request(NewSessionRequest::new(project.clone()))
+                        .send_request(opening)
                         .block_task()
                         .await
                         .map(|session| {
@@ -363,7 +631,18 @@ pub async fn send_prompt(
     attachments: Vec<String>,
 ) -> Result<String, String> {
     use tauri::Manager;
-    let (conn, session, project, kind) = {
+    if let Some(driver) = app.state::<crate::claude::Drivers>().get(&session_id) {
+        app.state::<crate::sessions::SessionStore>().record(
+            &session_id,
+            AgentKind::Claude.id(),
+            &project_key(&driver.project),
+            part,
+        );
+        // The part and the audience live in the CLI's system prompt, set when
+        // the session started, so the turn carries the user's words alone.
+        return driver.prompt(text).await;
+    }
+    let (conn, session, project, kind, capture, capture_channel) = {
         let sessions = app.state::<Chats>();
         let sessions = sessions.sessions.lock().unwrap();
         let chat = sessions.get(&session_id).ok_or("chat is not running")?;
@@ -372,6 +651,8 @@ pub async fn send_prompt(
             chat.session.clone(),
             chat.project.clone(),
             chat.agent,
+            chat.checkout.clone(),
+            chat.channel.clone(),
         )
     };
     // Remember which part was on screen for this session, so reopening it
@@ -379,38 +660,23 @@ pub async fn send_prompt(
     app.state::<crate::sessions::SessionStore>().record(
         &session_id,
         kind.id(),
-        &project,
+        &project_key(&project),
         part.clone(),
     );
     // Each chat column belongs to one part, and that identity travels with
     // every turn, so "make the lip taller" lands on the right part. The
-    // server's real address matters too: without it the agent probes with
-    // lsof and can find another project's server (seen live: it told the
-    // user the wrong port). The audience line shapes the replies: the app's
-    // users are hobbyists, and phrasing like "parts/lid.py:5" in an answer
-    // is the file system leaking into a product that promises not to have
-    // one.
-    let project_name = project
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| project.display().to_string());
-    let server = app
-        .state::<crate::supervisor::Supervisor>()
-        .port(&project)
-        .map(|port| {
-            format!(
-                " This project's nurb dev server is already running at http://127.0.0.1:{port} and its viewer is on screen beside this chat; never start another one."
-            )
-        })
-        .unwrap_or_default();
+    // audience line shapes the replies: the app's users are hobbyists, and an
+    // answer that names a source file is the file system leaking into a
+    // product that promises not to have one.
+    let project_name = project_key(&project);
     let selected = match part.as_deref() {
-        // The rail's project row; the twin constant lives in Chat.tsx.
-        Some(PROJECT_CHAT) => " This conversation is about the whole project rather than one part. You can create parts with `nurb new`, edit any part, and lift design the parts share into system.py at the project root; the app notices new and rebuilt parts on its own.".to_string(),
+        // A folder's own conversation; the twin constant lives in Chat.tsx.
+        Some(PROJECT_CHAT) => " This conversation is about the project as a whole rather than one part.".to_string(),
         Some(part) => format!(" This conversation is about the part \"{part}\", which is on screen beside the chat."),
         None => String::new(),
     };
     let context = format!(
-        "Context: nurb project \"{project_name}\".{selected}{server} \
+        "Context: nurb project \"{project_name}\".{selected} \
         The user is a 3D-printing hobbyist, not a programmer, and the app hides all files and code: \
         in your replies, talk about the part, its features, and its dimensions in plain language, and \
         never mention file names, paths, line numbers, code, or Python. The viewer is built into this \
@@ -432,6 +698,17 @@ pub async fn send_prompt(
         .send_request(PromptRequest::new(session, blocks))
         .block_task()
         .await;
+    // Whatever the agent wrote and the tool calls did not name: a turn is
+    // over, so nothing is half-written, and a part left behind in the copy
+    // would be work the user never gets back.
+    if let Some(capture) = capture {
+        let snapshot = capture.parts.lock().unwrap().clone();
+        let names = mcp::changed_parts(&snapshot, &capture.root)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        capture_parts(capture, names, capture_channel).await;
+    }
     // A dialog still open when its turn resolves belongs to no turn now: the
     // UI clears it on its side, so answer it cancelled here too rather than
     // leaving the oneshot pending for the life of the session.
@@ -491,6 +768,10 @@ fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
 #[tauri::command]
 pub fn cancel_turn(app: tauri::AppHandle, session_id: String) -> Result<(), String> {
     use tauri::Manager;
+    if let Some(driver) = app.state::<crate::claude::Drivers>().get(&session_id) {
+        driver.cancel();
+        return Ok(());
+    }
     let sessions = app.state::<Chats>();
     let sessions = sessions.sessions.lock().unwrap();
     let chat = sessions.get(&session_id).ok_or("chat is not running")?;
@@ -993,6 +1274,62 @@ fn rows(options: &[SessionConfigOption]) -> Vec<ConfigRow> {
         .collect()
 }
 
+/// Codex's full-access mode id, which maps to `danger-full-access` with
+/// approvals `never`.
+const FULL_ACCESS: &str = "agent-full-access";
+
+/// The mode to put a fresh session in, if the agent offers it. Only Codex:
+/// macOS refuses a nested sandbox-exec, so Codex's own sandbox cannot start
+/// inside the app's Seatbelt profile. Every command it wraps dies with exit 71,
+/// and apply_patch has no escalation path, so Codex can never edit a file.
+/// Full access here is still only as wide as the profile the app already
+/// spawned the adapter under.
+fn full_access_mode(kind: AgentKind, modes: Option<&SessionModeState>) -> Option<SessionModeId> {
+    if kind != AgentKind::Codex {
+        return None;
+    }
+    modes?
+        .available_modes
+        .iter()
+        .find(|mode| wire_string(&mode.id) == FULL_ACCESS)
+        .map(|mode| mode.id.clone())
+}
+
+/// Sends session/set_mode when the session offers full access. The app's
+/// Seatbelt profile is the guard, so this is "write only where the app says",
+/// not "write anywhere".
+async fn set_full_access(
+    cx: &ConnectionTo<Agent>,
+    session: &SessionId,
+    kind: AgentKind,
+    modes: Option<&SessionModeState>,
+) {
+    let Some(mode_id) = full_access_mode(kind, modes) else {
+        if kind == AgentKind::Codex {
+            let _ = writeln!(
+                std::io::stderr(),
+                "[chat-session] session mode: {FULL_ACCESS} not offered"
+            );
+        }
+        return;
+    };
+    let sent = cx
+        .send_request(SetSessionModeRequest::new(session.clone(), mode_id))
+        .block_task()
+        .await;
+    let _ = match sent {
+        Ok(_) => writeln!(
+            std::io::stderr(),
+            "[chat-session] session mode: {FULL_ACCESS} set"
+        ),
+        Err(error) => writeln!(
+            std::io::stderr(),
+            "[chat-session] session mode: {FULL_ACCESS} refused ({})",
+            error.message
+        ),
+    };
+}
+
 /// Put the user's remembered picks onto a session the moment it exists, before
 /// the first prompt can go out on the wrong model. A pick the agent no longer
 /// offers (a model dropped from an account's allowlist) is skipped, leaving the
@@ -1066,6 +1403,9 @@ pub fn chat_config(
 ) -> Result<Vec<ConfigRow>, String> {
     use tauri::Manager;
     let kind = AgentKind::parse(&agent)?;
+    if kind == AgentKind::Claude {
+        return Ok(crate::claude::config_rows(&app.state::<PrefStore>()));
+    }
     if let Some(id) = session_id {
         let sessions = app.state::<Chats>();
         let sessions = sessions.sessions.lock().unwrap();
@@ -1074,6 +1414,37 @@ pub fn chat_config(
         }
     }
     Ok(app.state::<PrefStore>().rows(kind.id()))
+}
+
+/// The picker looking at an agent this project has never run: rows from the
+/// cache when it has them, else one throwaway session asks the agent what it
+/// offers, exactly as `list_sessions` does for every agent at once. The error
+/// is the user's answer (a signed-out Codex says so), not a silent empty list.
+#[tauri::command]
+pub async fn probe_chat_config(
+    app: tauri::AppHandle,
+    agent: String,
+    path: String,
+) -> Result<Vec<ConfigRow>, String> {
+    use tauri::Manager;
+    let kind = AgentKind::parse(&agent)?;
+    if kind == AgentKind::Claude {
+        return Ok(crate::claude::config_rows(&app.state::<PrefStore>()));
+    }
+    let cached = app.state::<PrefStore>().rows(kind.id());
+    if !cached.is_empty() {
+        return Ok(cached);
+    }
+    let launcher = app.state::<crate::env::Launcher>().inner().clone();
+    let serve = serve_entry(&app, false).await;
+    let (_, config, model_rows) =
+        agent_sessions(&launcher, kind, PathBuf::from(path), serve).await?;
+    let prefs = app.state::<PrefStore>();
+    prefs.cache(kind.id(), config);
+    if kind == AgentKind::Grok {
+        prefs.cache_model_rows(kind.id(), model_rows);
+    }
+    Ok(prefs.rows(kind.id()))
 }
 
 /// Remember a pick and, when a session is running, move it there now. The
@@ -1093,6 +1464,11 @@ pub async fn set_chat_config(
     let kind = AgentKind::parse(&agent)?;
     app.state::<PrefStore>()
         .remember(kind.id(), &category, &value);
+    // The driver passes the model at spawn, so a pick lands on the next
+    // session rather than the running one.
+    if kind == AgentKind::Claude {
+        return Ok(crate::claude::config_rows(&app.state::<PrefStore>()));
+    }
     let live = session_id.and_then(|id| {
         let sessions = app.state::<Chats>();
         let sessions = sessions.sessions.lock().unwrap();
@@ -1144,6 +1520,7 @@ pub async fn set_chat_config(
 #[tauri::command]
 pub fn close_chat(app: tauri::AppHandle, session_id: String) {
     use tauri::Manager;
+    app.state::<crate::claude::Drivers>().remove(&session_id);
     // Dropping the entry drops the close sender; the connection task sees it,
     // returns, and kills the adapter's process group.
     app.state::<Chats>()
@@ -1169,9 +1546,39 @@ async fn run_chat(
     close_rx: oneshot::Receiver<()>,
 ) {
     use tauri::Manager;
-    let launcher = app.state::<crate::env::Launcher>();
+    // The tools have to be on the session request, so the serve is started
+    // before the adapter rather than alongside it.
+    let serve = serve_entry(&app, true).await;
+    let launcher = app.state::<crate::env::Launcher>().inner().clone();
+    let data = app.state::<crate::AppData>().0.clone();
+    // Whether this agent can reach the tools decides where it works, so it is
+    // settled before the adapter that will do the work is even spawned.
+    let capture = match working_folder(&launcher, kind, &project, &data, serve.as_ref(), &channel)
+        .await
+    {
+        Ok(capture) => capture,
+        Err(message) => {
+            let failed = ChatEvent::SessionError {
+                message: message.clone(),
+            };
+            events::mirror(&failed);
+            let _ = channel.send(failed);
+            let mut error = agent_client_protocol::Error::internal_error();
+            error.message = message;
+            let _ = ready_tx.send(Err(error));
+            return;
+        }
+    };
+    // A saved session was created in the project folder; loading it with the
+    // checkout as cwd leaves the agent's own sandbox on the old workspace and
+    // every file write is refused, so the folder path always starts fresh.
+    let resume = if capture.is_some() { None } else { resume };
+    let cwd = match &capture {
+        Some(capture) => mcp::session_cwd(false, &project, &capture.root),
+        None => project.clone(),
+    };
     let (program, args) = launcher.adapter(kind);
-    let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
+    let (program, args) = sandbox::wrap(program, args, &cwd, &launcher.engine_root());
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -1199,6 +1606,8 @@ async fn run_chat(
     let replaying = Arc::new(AtomicBool::new(false));
     let notify_replaying = Arc::clone(&replaying);
     let notify_channel = channel.clone();
+    let notify_capture = capture.clone();
+    let chat_capture = capture.clone();
     let ask_channel = channel.clone();
     let ask_pending = pending.clone();
     let live_session = Arc::new(Mutex::new(None));
@@ -1214,6 +1623,16 @@ async fn run_chat(
         .builder()
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
+                // A part the agent just finished writing goes back to the
+                // project now, not only at the end of the turn: the viewer
+                // should move while the user is watching.
+                if let Some(capture) = notify_capture.clone() {
+                    let names = mcp::completed_parts(&notification.update, &capture.root);
+                    if !names.is_empty() {
+                        let channel = notify_channel.clone();
+                        tokio::spawn(capture_parts(capture, names, channel));
+                    }
+                }
                 forward(
                     &notify_channel,
                     notification.update,
@@ -1285,6 +1704,7 @@ async fn run_chat(
                 let ready_tx = ready_tx.take().expect("main_fn runs once");
                 let close_tx = close_tx.take().expect("main_fn runs once");
                 let connected_session = Arc::clone(&connected_session);
+                let chat_capture = chat_capture.clone();
                 let load_replaying = Arc::clone(&replaying);
                 let resume = resume.clone();
                 let chat_app = chat_app.clone();
@@ -1297,6 +1717,10 @@ async fn run_chat(
                             .send_request(InitializeRequest::new(ProtocolVersion::V1))
                             .block_task()
                             .await?;
+                        // codex-acp forgets a loaded session's MCP servers
+                        // unless they are sent again, so both paths carry it.
+                        let entry =
+                            mcp_entry(&init.agent_capabilities.mcp_capabilities, serve.as_ref());
                         let menus = grok_model_menus(init.meta.as_ref()).unwrap_or_default();
                         let chosen = chat_app.state::<PrefStore>().chosen(kind.id());
                         let open_meta = grok_open_meta(kind, &chosen);
@@ -1313,7 +1737,10 @@ async fn run_chat(
                                 let requested = SessionId::new(id.clone());
                                 load_replaying.store(true, Ordering::Relaxed);
                                 let mut request =
-                                    LoadSessionRequest::new(requested.clone(), project.clone());
+                                    LoadSessionRequest::new(requested.clone(), cwd.clone());
+                                if let Some(entry) = entry.clone() {
+                                    request = request.mcp_servers(vec![entry]);
+                                }
                                 if let Some(meta) = open_meta.clone() {
                                     request = request.meta(meta);
                                 }
@@ -1327,6 +1754,7 @@ async fn run_chat(
                                             loaded.meta.as_ref(),
                                             init.meta.as_ref(),
                                         ),
+                                        loaded.modes,
                                     )
                                 })
                             } else {
@@ -1338,6 +1766,8 @@ async fn run_chat(
                                         std::io::stderr(),
                                         "[chat-session] restore path: session/load ok ({id})"
                                     );
+                                    set_full_access(&cx, &session.0, kind, session.2.as_ref())
+                                        .await;
                                     return Ok((session.0, session.1, menus, chosen));
                                 }
                                 Err(error) => {
@@ -1355,25 +1785,31 @@ async fn run_chat(
                                 }
                             }
                         }
-                        let mut request = NewSessionRequest::new(project);
+                        let mut request = NewSessionRequest::new(cwd);
+                        if let Some(entry) = entry {
+                            request = request.mcp_servers(vec![entry]);
+                        }
                         if let Some(meta) = open_meta {
                             request = request.meta(meta);
                         }
-                        cx.send_request(request)
-                            .block_task()
-                            .await
-                            .map(|new_session| {
-                                (
-                                    new_session.session_id,
-                                    picker_rows(
-                                        &new_session.config_options.unwrap_or_default(),
-                                        new_session.meta.as_ref(),
-                                        init.meta.as_ref(),
-                                    ),
-                                    menus,
-                                    chosen,
-                                )
-                            })
+                        let new_session = cx.send_request(request).block_task().await?;
+                        set_full_access(
+                            &cx,
+                            &new_session.session_id,
+                            kind,
+                            new_session.modes.as_ref(),
+                        )
+                        .await;
+                        Ok((
+                            new_session.session_id,
+                            picker_rows(
+                                &new_session.config_options.unwrap_or_default(),
+                                new_session.meta.as_ref(),
+                                init.meta.as_ref(),
+                            ),
+                            menus,
+                            chosen,
+                        ))
                     }
                     .await;
                     let session_id = match session {
@@ -1408,6 +1844,7 @@ async fn run_chat(
                                     channel: chat_channel,
                                     config: Mutex::new(config),
                                     grok_models: menus,
+                                    checkout: chat_capture,
                                     pgid,
                                     _close: close_tx,
                                 },
@@ -1533,10 +1970,12 @@ fn friendly(kind: AgentKind, error: agent_client_protocol::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        attachment_block, friendly, grok_open_meta, grok_rows, picker_rows, rows, with_grok_choice,
-        AgentKind,
+        attachment_block, friendly, full_access_mode, grok_open_meta, grok_rows, picker_rows, rows,
+        with_grok_choice, AgentKind,
     };
-    use agent_client_protocol::schema::v1::{ContentBlock, Meta, SessionConfigOption};
+    use agent_client_protocol::schema::v1::{
+        ContentBlock, Meta, SessionConfigOption, SessionMode, SessionModeState,
+    };
 
     /// The exact message a revoked token produces (#115): an internal error,
     /// not -32000, so only the message can route it to the sign-in button.
@@ -1549,9 +1988,8 @@ mod tests {
         assert!(friendly(AgentKind::Claude, error).starts_with("auth_required:"));
     }
 
-    /// What claude-agent-acp 0.64.2 actually answers session/new with, captured
-    /// off the wire. Mode, fast, and agent ride along and must not reach the
-    /// picker.
+    /// What Claude actually answers session/new with, captured off the wire.
+    /// Mode, fast, and agent ride along and must not reach the picker.
     const CLAUDE: &str = r#"[
       {"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"default",
        "options":[{"value":"default","name":"Default"},{"value":"plan","name":"Plan"}]},
@@ -1791,5 +2229,29 @@ mod tests {
 
         let huge = scratch("huge.png", &vec![0u8; 10 * 1024 * 1024 + 1]);
         assert!(attachment_block(&huge).unwrap_err().contains("too large"));
+    }
+
+    /// Only Codex gets full access, and only when the adapter offers it: the
+    /// app's Seatbelt profile is the guard, and Codex's own sandbox cannot nest
+    /// inside it.
+    #[test]
+    fn full_access_is_codex_only() {
+        let offered = SessionModeState::new(
+            "agent",
+            vec![
+                SessionMode::new("read-only", "Read only"),
+                SessionMode::new("agent", "Agent"),
+                SessionMode::new("agent-full-access", "Full access"),
+            ],
+        );
+        let plain = SessionModeState::new("agent", vec![SessionMode::new("agent", "Agent")]);
+
+        assert_eq!(
+            full_access_mode(AgentKind::Codex, Some(&offered)).map(|id| id.to_string()),
+            Some("agent-full-access".to_string())
+        );
+        assert!(full_access_mode(AgentKind::Codex, Some(&plain)).is_none());
+        assert!(full_access_mode(AgentKind::Codex, None).is_none());
+        assert!(full_access_mode(AgentKind::Claude, Some(&offered)).is_none());
     }
 }

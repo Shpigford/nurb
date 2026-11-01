@@ -1,0 +1,12 @@
+@import "tailwindcss";
+@import "@nurb/ui/tokens.css";
+
+/* The built components' classes live here, through the workspace rather than
+   node_modules, which Tailwind does not scan. */
+@source "../src";
+@source "../../ui/dist";
+
+/* The stage is the window. WKWebView still rubber-bands the document on a
+   trackpad scroll that runs past the end of a panel, which slides the whole
+   app up and shows white beneath it. */
+html, body { height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--color-stage); }

@@ -1,0 +1,8 @@
+{
+  "name": "nurb-workspace",
+  "private": true,
+  "workspaces": [
+    "desktop",
+    "packages/*"
+  ]
+}

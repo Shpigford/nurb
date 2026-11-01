@@ -13,6 +13,9 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
+    "paths": {
+      "@nurb/workbench/*": ["../packages/workbench/src/*"]
+    },
 
     /* Linting */
     "strict": true,
@@ -20,6 +23,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": ["src", "../packages/workbench/src"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

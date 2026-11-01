@@ -1,0 +1,158 @@
+/* nurb.app: the parts every page shares. Tokens mirror packages/ui/tokens.css,
+   so the site and the app are one world: white, ink, orange, and the stage. */
+
+/* Satoshi comes from Fontshare's own servers: its license keeps the file out of
+   this public repository. The other two faces are OFL and live in vendor/. */
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@700&display=swap");
+
+@font-face {
+  font-family: "Instrument Sans";
+  src: url(vendor/fonts/InstrumentSans-Variable.ttf) format("truetype");
+  font-weight: 400 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url(vendor/fonts/JetBrainsMono-Variable.ttf) format("truetype");
+  font-weight: 100 800;
+  font-display: swap;
+}
+
+:root {
+  --display: "Satoshi", "Instrument Sans", system-ui, sans-serif;
+  --sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --ground: #ffffff;
+  --raised: #eef2f8;
+  --stage: #e5f0fb;
+  --stage-grid: #d8e7f6;
+  --line-soft: #e8edf4;
+  --line: #dce3ed;
+  --panel-edge: #bdcee2;
+
+  --faint: #6f7c8d;
+  --muted: #64707f;
+  --on-stage-muted: #556174;
+  --ink-soft: #38424f;
+  --ink: #121821;
+
+  --accent: #ff5230;
+  --accent-hover: #f0421f;
+  --accent-ink: #d6380e;
+  --accent-wash: #ffede8;
+  --pass: #00a45a;
+  --pass-ink: #007a43;
+  --pass-wash: #e2f7ed;
+  --warn: #e08700;
+  --warn-ink: #b86e00;
+  --fail: #b3001b;
+
+  /* The dark band is ink; its text and rules are lifted from the same ramp. */
+  --ink-text: #b8c2cf;
+  --ink-line: #2a3340;
+
+  --gutter: 64px;
+  --page: 1440px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font: 16px/1.6 var(--sans);
+  background: var(--ground); color: var(--ink);
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+}
+::selection { background: var(--accent-wash); }
+a { color: inherit; text-decoration: none; }
+img { display: block; max-width: 100%; }
+
+.wrap { max-width: var(--page); margin: 0 auto; padding: 0 var(--gutter); }
+
+/* The drafting-paper ground the app's stage sits on. */
+.stage {
+  background-color: var(--stage);
+  background-image:
+    linear-gradient(var(--stage-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--stage-grid) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-position: -1px -1px;
+}
+
+/* ---- type ---- */
+.label {
+  font: 500 11px/14px var(--mono); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--accent-ink);
+}
+.mono-cap {
+  font: 500 11px/14px var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted);
+}
+h1, h2, h3 { font-family: var(--display); font-weight: 700; color: var(--ink); text-wrap: balance; }
+h1 { font-size: 80px; line-height: 1; letter-spacing: -.035em; }
+h2 { font-size: 48px; line-height: 52px; letter-spacing: -.03em; }
+h3 { font-size: 36px; line-height: 40px; letter-spacing: -.028em; }
+.lede { font-size: 18px; line-height: 28px; color: var(--ink-soft); text-wrap: pretty; }
+
+/* ---- buttons ---- */
+.btn {
+  display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 20px;
+  border-radius: 4px; font: 600 16px/20px var(--sans); color: #fff; white-space: nowrap;
+  background: var(--accent); transition: background-color .15s;
+}
+.btn:hover { background: var(--accent-hover); }
+.btn svg { width: 15px; height: 18px; flex: none; fill: currentColor; }
+.btn.ink { background: var(--ink); }
+.btn.ink:hover { background: #26303d; }
+.btn.sm { height: 36px; padding: 0 14px; gap: 8px; font-size: 14px; font-weight: 500; }
+.btn.sm svg { width: 13px; height: 15px; }
+.link { text-decoration: underline; text-decoration-color: var(--panel-edge); text-underline-offset: 3px; }
+.link:hover { text-decoration-color: currentColor; }
+
+/* ---- header ---- */
+.site-head { position: relative; z-index: 10; }
+.site-head .masthead { display: flex; align-items: center; gap: 32px; height: 72px; }
+.site-head .logo { display: block; width: 87px; height: 24px; flex: none; }
+.site-head .logo img { width: 100%; height: 100%; }
+.site-head nav { display: flex; align-items: center; gap: 28px; margin-left: auto; }
+.site-head nav a { font-size: 15px; line-height: 20px; color: var(--ink-soft); }
+.site-head nav a:hover { color: var(--ink); }
+.site-head nav a[aria-current] { color: var(--ink); font-weight: 600; }
+.site-head nav a.btn { color: #fff; }
+.site-head .menu-btn { display: none; margin-left: auto; padding: 8px; margin-right: -8px; background: none; border: 0; color: var(--ink); cursor: pointer; }
+.site-head .menu-btn svg { display: block; width: 22px; height: 22px; }
+.site-head .menu-btn .x, .site-head.open .menu-btn .bars { display: none; }
+.site-head.open .menu-btn .x { display: block; }
+
+/* ---- footer ---- */
+.site-foot { border-top: 1px solid var(--line); }
+.site-foot .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px 32px; padding-top: 32px; padding-bottom: 32px; }
+.site-foot .left { display: flex; align-items: center; gap: 20px; font-size: 14px; color: var(--muted); }
+.site-foot .left img { width: 65px; height: 18px; }
+.site-foot nav { display: flex; flex-wrap: wrap; gap: 12px 28px; font-size: 14px; }
+.site-foot nav a { color: var(--ink-soft); }
+.site-foot nav a:hover { color: var(--ink); }
+
+@media (max-width: 900px) {
+  :root { --gutter: 20px; }
+  h1 { font-size: 46px; }
+  h2 { font-size: 34px; line-height: 38px; }
+  h3 { font-size: 28px; line-height: 32px; }
+  .lede { font-size: 17px; line-height: 26px; }
+  .site-head .masthead { height: 64px; }
+  .site-head .logo { width: 76px; height: 21px; }
+  .site-head .menu-btn { display: block; }
+  .site-head nav {
+    display: none; position: absolute; top: 64px; left: 0; right: 0;
+    flex-direction: column; align-items: stretch; gap: 0; padding: 8px var(--gutter) 20px;
+    background: var(--ground); border-bottom: 1px solid var(--line);
+    box-shadow: 0 24px 48px rgba(24, 42, 74, .12);
+  }
+  .site-head.open nav { display: flex; }
+  .site-head nav a { padding: 12px 0; font-size: 17px; }
+  .site-head nav .btn { margin-top: 8px; justify-content: center; height: 48px; font-size: 16px; }
+  .site-foot .wrap { flex-direction: column; align-items: flex-start; }
+  .site-foot nav { order: -1; }
+  br.wide { display: none; }
+}

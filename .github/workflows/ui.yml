@@ -1,0 +1,41 @@
+name: ui
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "packages/**"
+      - "desktop/**"
+      - ".github/workflows/ui.yml"
+
+# The npm workspace: the React package and the desktop shell's TypeScript. The
+# Tauri build itself is the release script's job, not CI's.
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck --workspace packages/ui
+      - run: npm test --workspace packages/ui
+      - run: npm run build --workspace packages/ui
+      - run: npm run gallery:build --workspace packages/ui
+
+      - run: npm run typecheck --workspace packages/workbench
+      - run: npm test --workspace packages/workbench
+      - run: npm run build --workspace packages/workbench
+
+      - run: ../node_modules/.bin/tsc --noEmit
+        working-directory: desktop
+      - run: node --test tests/*.test.ts
+        working-directory: desktop

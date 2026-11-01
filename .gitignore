@@ -1,21 +1,20 @@
-# Python-generated files
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+*.pyc
+.env
+.design-audit/
 
-# three.js ships its own build/ directory and the pattern above swallows it. Without
-# this the viewer's importmap points at a file that is not in the repo, which fails as
-# a blank canvas rather than as an error.
-!src/nurb/vendor/**/build/
+# npm workspace root; desktop/ and packages/* hoist here
+node_modules/
+gallery-dist/
 
-# Virtual environments
-.venv
-
-# Per-worktree dev server state written by the SessionStart hook
+# engine: venv, wheel builds, and the workbench page Vite writes from packages/workbench
+engine/.venv/
+engine/dist/
+engine/build/
+engine/*.egg-info
+engine/src/nurb/workbench/
 .DS_Store
-
-# Conductor's local, per-checkout settings (not meant to be shared/committed)
-.conductor/
+.context/
+.design/
+# Satoshi's license bars it from a public repository; packages/ui/scripts/fetch-satoshi.sh fetches it.
+packages/ui/fonts/Satoshi-Variable.ttf

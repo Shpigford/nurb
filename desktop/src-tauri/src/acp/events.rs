@@ -21,6 +21,12 @@ pub(crate) enum ChatEvent {
     AgentText {
         text: String,
     },
+    /// A finished assistant message. The Claude driver streams deltas and then
+    /// repeats the whole block, so the webview swaps its streamed copy for
+    /// this one rather than appending it twice.
+    Prose {
+        text: String,
+    },
     AgentThought {
         text: String,
     },
@@ -35,6 +41,9 @@ pub(crate) enum ChatEvent {
         input: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<String>,
+        /// The files the call touched, for the folder fallback's capture.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<String>,
     },
     ToolCallUpdate {
         id: String,
@@ -45,6 +54,8 @@ pub(crate) enum ChatEvent {
         /// Replaces earlier output (ACP update fields replace, not append).
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<String>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<String>,
     },
     Plan {
         entries: Vec<PlanItem>,
@@ -103,23 +114,38 @@ pub(super) fn forward(channel: &Channel<ChatEvent>, update: SessionUpdate, repla
         SessionUpdate::AgentThoughtChunk(chunk) => {
             text_of(chunk.content).map(|text| ChatEvent::AgentThought { text })
         }
-        SessionUpdate::ToolCall(call) => Some(ChatEvent::ToolCall {
-            id: wire_string(&call.tool_call_id),
-            title: call.title,
-            kind: wire_string(&call.kind),
-            status: wire_string(&call.status),
-            input: input_of(call.raw_input.as_ref()),
-            output: output_of(&call.content, call.raw_output.as_ref()),
-        }),
+        SessionUpdate::ToolCall(call) => {
+            // An MCP tool arrives under whatever spelling the adapter gives
+            // it; the card only renders a nurb verb once it is named as one.
+            let (title, kind) = super::mcp::named(call.title, wire_string(&call.kind));
+            // A replayed nurb call already has its row in the transcript, so
+            // forwarding it would show the step twice.
+            if replaying && kind == super::mcp::SERVER {
+                return;
+            }
+            Some(ChatEvent::ToolCall {
+                id: wire_string(&call.tool_call_id),
+                title,
+                kind,
+                status: wire_string(&call.status),
+                input: input_of(call.raw_input.as_ref()),
+                output: output_of(&call.content, call.raw_output.as_ref()),
+                locations: paths_of(Some(&call.locations)),
+            })
+        }
         SessionUpdate::ToolCallUpdate(update) => Some(ChatEvent::ToolCallUpdate {
             id: wire_string(&update.tool_call_id),
-            title: update.fields.title,
+            title: update
+                .fields
+                .title
+                .map(|title| super::mcp::named(title, String::new()).0),
             status: update.fields.status.as_ref().map(wire_string),
             input: input_of(update.fields.raw_input.as_ref()),
             output: output_of(
                 update.fields.content.as_deref().unwrap_or(&[]),
                 update.fields.raw_output.as_ref(),
             ),
+            locations: paths_of(update.fields.locations.as_deref()),
         }),
         SessionUpdate::Plan(plan) => Some(ChatEvent::Plan {
             entries: plan
@@ -159,6 +185,17 @@ pub(crate) fn mirror(event: &ChatEvent) {
     let _ = event;
 }
 
+/// The files a tool call named, which the folder fallback captures back.
+fn paths_of(
+    locations: Option<&[agent_client_protocol::schema::v1::ToolCallLocation]>,
+) -> Vec<String> {
+    locations
+        .unwrap_or_default()
+        .iter()
+        .map(|location| location.path.display().to_string())
+        .collect()
+}
+
 fn text_of(content: ContentBlock) -> Option<String> {
     match content {
         ContentBlock::Text(text) => Some(text.text),
@@ -170,7 +207,7 @@ fn text_of(content: ContentBlock) -> Option<String> {
 /// build output to make the point.
 const DETAIL_CAP: usize = 20_000;
 
-fn capped(mut text: String) -> Option<String> {
+pub(crate) fn capped(mut text: String) -> Option<String> {
     if text.trim().is_empty() {
         return None;
     }
