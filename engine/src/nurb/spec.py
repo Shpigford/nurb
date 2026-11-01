@@ -39,6 +39,19 @@ KIND_CHECK = {
 }
 
 
+def settle_numbers(spec):
+    """A float parameter's whole numbers written as floats. JSON says 14 where a model
+    means 14.0, and refusing that only bought a retry; the float is what the slider reads."""
+    for param in spec.get("params") or []:
+        if param.get("kind") != "float":
+            continue
+        for field in ("default", "min", "max"):
+            value = param.get(field)
+            if isinstance(value, int) and not isinstance(value, bool):
+                param[field] = float(value)
+    return spec
+
+
 def _where(error):
     return "".join(
         f"[{step}]" if isinstance(step, int) else f".{step}" for step in error.absolute_path

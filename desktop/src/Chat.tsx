@@ -17,27 +17,23 @@ import clsx from "clsx";
 import {
   ApprovalCard,
   AssistantMarkdown,
-  BuildCard,
   Button,
   ChatPanel,
   CyclingPlaceholder,
   DropHint,
-  EditChips,
   Icon,
   IconButton,
   MeasurementCard,
   Menu,
   NewItemsPill,
   SpecCard,
-  ToolStepCard,
-  ToolStepGroup,
   cue,
   type MenuItem,
   type Message,
-  type ToolStep,
 } from "@nurb/ui";
-import { absolute, addMessage } from "@nurb/workbench/api";
+import { addMessage } from "@nurb/workbench/api";
 import {
+  activity,
   applyChatEvent,
   claudeNote,
   describe,
@@ -149,23 +145,10 @@ function Turn({ who, n, children }: { who: string; n?: string; children: ReactNo
 
 /** One row of the project's own transcript. */
 // A stored row that is a step of the work rather than something said: a tool call, or
-// the build a save ran. A build that would not build stays a failure in the group.
-function workStep(message: Message): ToolStep | null {
-  const payload = message.payload;
-  if (payload?.type === "step") return payload.step;
-  if (payload?.type === "build") {
-    const build = payload.build;
-    return {
-      id: message.id,
-      verb: "build",
-      object: build.part_name ?? "",
-      status: build.status === "error" ? "failed" : build.status === "running" ? "running" : "done",
-      started_at: build.started_at,
-      elapsed_s: build.elapsed_s ?? undefined,
-      output: build.error ?? undefined,
-    };
-  }
-  return null;
+// the build a save ran. The person is not a developer; the part on the stage is the
+// result, and the working line says what is happening while it happens.
+function isWork(message: Message): boolean {
+  return message.payload?.type === "step" || message.payload?.type === "build";
 }
 
 function Stored({ message, who, n }: { message: Message; who: string; n?: string }) {
@@ -183,25 +166,10 @@ function Stored({ message, who, n }: { message: Message; who: string; n?: string
           )}
         </Turn>
       ) : null}
-      {payload?.type === "build" && (
-        // The serve's render path is relative to the serve, not to this page.
-        <BuildCard
-          build={{
-            ...payload.build,
-            render_url: payload.build.render_url ? absolute(payload.build.render_url) : undefined,
-          }}
-        />
-      )}
       {payload?.type === "spec" && (
         <SpecCard spec={payload.spec} model={payload.model} effort={payload.effort} />
       )}
       {payload?.type === "measurement" && <MeasurementCard measurement={payload.measurement} />}
-      {payload?.type === "step" && (
-        <div className="flex flex-col gap-1.5">
-          <ToolStepCard step={payload.step} />
-          <EditChips input={payload.step.input} className="pl-7" />
-        </div>
-      )}
     </div>
   );
 }
@@ -1004,24 +972,11 @@ function Chat({
   let counted = 0;
   const nextTurn = () => String(++counted).padStart(2, "0");
 
-  // The conversation in order, with each run of tool calls between the words folded
-  // into one group: the words are the conversation, the steps are how it got there.
-  const flow: (
-    | { kind: "stored"; message: Message }
-    | { kind: "live"; item: Item; index: number }
-    | { kind: "work"; key: string; steps: ToolStep[] }
-  )[] = [];
-  const work = (step: ToolStep) => {
-    const last = flow[flow.length - 1];
-    if (last?.kind === "work") last.steps.push(step);
-    else flow.push({ kind: "work", key: step.id, steps: [step] });
-  };
-  for (const message of ordered) {
-    const step = message.content ? null : workStep(message);
-    if (step) work(step);
-    else flow.push({ kind: "stored", message });
-  }
-  items.forEach((item, index) => (item.kind === "step" ? work(item.step) : flow.push({ kind: "live", item, index })));
+  // The conversation in order: what was said, and the cards that carry meaning. The
+  // tool calls in between are how it got there, and stay off the page.
+  const flow: ({ kind: "stored"; message: Message } | { kind: "live"; item: Item; index: number })[] = [];
+  for (const message of ordered) if (message.content || !isWork(message)) flow.push({ kind: "stored", message });
+  items.forEach((item, index) => item.kind !== "step" && flow.push({ kind: "live", item, index }));
 
   return (
     <ChatPanel
@@ -1155,7 +1110,6 @@ function Chat({
           </div>
         )}
         {flow.map((entry) => {
-          if (entry.kind === "work") return <ToolStepGroup key={entry.key} steps={entry.steps} />;
           if (entry.kind === "stored") {
             return (
               <Stored
@@ -1241,7 +1195,7 @@ function Chat({
               className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
               aria-hidden="true"
             />
-            {label} is working…
+            {label} is {activity(items)}…
           </p>
         )}
         {authNeeded !== "none" && (

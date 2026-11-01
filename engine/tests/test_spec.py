@@ -89,7 +89,7 @@ def test_a_duplicated_parameter_name_is_refused():
 
 @pytest.mark.parametrize(
     "kind,default",
-    [("float", True), ("float", 1), ("int", 1.5), ("bool", "yes"), ("str", 3)],
+    [("float", True), ("float", "1"), ("int", 1.5), ("bool", "yes"), ("str", 3)],
 )
 def test_a_default_that_does_not_match_its_kind_is_refused(kind, default):
     broken = copy.deepcopy(SPEC)
@@ -239,3 +239,11 @@ SOURCE = """from nurb import *
 def bracket(width=80.0):
     return Box(width, width, width)
 """
+
+
+def test_a_whole_number_for_a_float_parameter_is_read_as_a_float():
+    sent = copy.deepcopy(SPEC)
+    sent["params"][0].update(kind="float", default=14, min=8, max=25)
+    settled = spec.settle_numbers(sent)
+    assert spec.errors(settled) == []
+    assert [type(settled["params"][0][f]) for f in ("default", "min", "max")] == [float, float, float]

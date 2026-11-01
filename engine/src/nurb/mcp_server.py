@@ -1024,7 +1024,8 @@ def read_guide(conn, args, base_url):
 
 def _spec_input(args):
     """The spec fields of a call: everything that is not the call's own addressing."""
-    return {key: value for key, value in args.items() if key not in ("project_id", "note")}
+    spec = {key: value for key, value in args.items() if key not in ("project_id", "note")}
+    return spec_module.settle_numbers(spec)
 
 
 def _reject(problems):

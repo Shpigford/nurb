@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  activity,
   applyChatEvent,
   claudeNote,
   pruneLanded,
@@ -152,4 +153,14 @@ test("the same trouble reported twice in a turn leaves one note", () => {
   assert.equal(twice.length, 1);
   const other = withNote(twice, "Update Claude Code.");
   assert.equal(other.length, 2);
+});
+
+test("the working line names the running call in plain words", () => {
+  const running = fold([
+    [{ type: "tool_call", id: "t1", title: "get_project", kind: "nurb", status: "in_progress" }, START],
+    [{ type: "tool_call_update", id: "t1", status: "completed" }, START + 10],
+    [{ type: "tool_call", id: "t2", title: "edit_part_source", kind: "nurb", status: "in_progress" }, START + 20],
+  ]);
+  assert.equal(activity(running), "building the part");
+  assert.equal(activity([]), "working");
 });

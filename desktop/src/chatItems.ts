@@ -79,6 +79,28 @@ export function describe(title: string, kind: string | undefined, mode: 0 | 1): 
   return title;
 }
 
+// What the working line says while a tool runs, in the person's words. The chat no
+// longer lists the calls, so this is the one place the work shows.
+const ACTIVITY: [RegExp, string][] = [
+  [/^(pin|amend)_spec$/, "planning the part"],
+  [/^record_measurement$/, "noting the sizes"],
+  [/^find_photos$/, "looking at the photos"],
+  [/^(write|edit)_(part|shared)_source$|^run_build$/, "building the part"],
+  [/^(render|inspect|check|verify|compare)/, "checking the part"],
+  [/^(export|slice)/, "preparing the print"],
+];
+
+/** "building the part" while that is the newest running call, else "working". */
+export function activity(items: Item[]): string {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.kind !== "step" || item.step.status !== "running") continue;
+    const tool = (item.tool ?? "").replace(/^mcp__nurb__/, "");
+    return ACTIVITY.find(([pattern]) => pattern.test(tool))?.[1] ?? "working";
+  }
+  return "working";
+}
+
 const STEP_STATUS: Record<string, StepStatus> = {
   pending: "running",
   in_progress: "running",
