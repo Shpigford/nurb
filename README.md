@@ -100,7 +100,7 @@ def hose_adapter(vac_end=57.6, tool_end=35.0, wall=2.4):
 
 ## Coming from 0.x
 
-1.0 is the app. The `nurb` command line, the skill file and the PyPI package are gone: a project now lives in a database on your computer instead of a folder of files, which is what gives every part its revision history and keeps the app and the agent from overwriting each other. Your old folders come across with **Import folder**, and an agent in your terminal reaches the same parts through **Settings > Connect**.
+1.0 is the app. The `nurb` command line, the skill file and the PyPI package are gone: a project now lives in a database on your computer instead of a folder of files, which is what gives every part its revision history and keeps the app and the agent from overwriting each other. Your old projects come across on their own the first time 1.0 opens (**Import folder** brings over any that don't), and an agent in your terminal reaches the same parts through **Settings > Connect**.
 
 Two things don't carry over. Conversations from 0.x stay behind, so each part starts a fresh chat. And the app no longer brings its own copy of Claude Code: to chat with Claude, install Claude Code once (the app shows how) and sign in.
 
