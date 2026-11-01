@@ -38,6 +38,22 @@ describe("ExportMenu", () => {
     expect(screen.queryByRole("menu")).toBeNull()
   })
 
+  it("offers the slicer only when there is one, and hands it the file instead of downloading", async () => {
+    const run = vi.fn().mockResolvedValue(undefined)
+    const send = vi.fn().mockResolvedValue(undefined)
+    render(<ExportMenu partId="shelf" export={run} />)
+    await open()
+    expect(screen.queryByRole("menuitem", { name: /open in/i })).toBeNull()
+
+    cleanup()
+    render(<ExportMenu partId="shelf" export={run} openIn={{ name: "Bambu Studio", open: send }} />)
+    await open()
+    await userEvent.click(screen.getByRole("menuitem", { name: /open in bambu studio/i }))
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    expect(run).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull())
+  })
+
   it("offers every print format behind the chevron", async () => {
     render(<ExportMenu partId="shelf" export={vi.fn()} />)
     await open()

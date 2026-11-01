@@ -16,6 +16,14 @@
       "allow": [
         {
           "path": "$HOME/**"
+        },
+        {
+          "path": "$DOWNLOAD/**",
+          "app": "BambuStudio"
+        },
+        {
+          "path": "$DOWNLOAD/**",
+          "app": "OrcaSlicer"
         }
       ]
     },
