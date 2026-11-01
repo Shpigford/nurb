@@ -309,7 +309,7 @@ publish_tag
 
 if [ "$RELEASE_STATE" = missing ]; then
   gh release create "$TAG" --repo "$REPO" --verify-tag --draft \
-    --title "nurb $VERSION" --notes "What changed: https://nurb.app/changelog#v$VERSION"
+    --title "$TAG" --generate-notes --notes "What changed: https://nurb.app/changelog#v$VERSION"
 fi
 
 # Keep nurb.dmg as the established Apple silicon URL. Intel Macs use a named
