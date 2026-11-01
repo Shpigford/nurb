@@ -87,6 +87,11 @@ class _Named(float):
         self.param = param
         return self
 
+    # Geometry copies its arguments (`Box(width, ...)` deep-copies them), and a copy
+    # rebuilds the object from these, so both have to come back.
+    def __getnewargs__(self):
+        return float(self), self.param
+
 
 @dataclass
 class Scene:

@@ -242,3 +242,22 @@ def test_a_stop_that_turns_true_interrupts_the_sweep_between_poses(project):
         checks.run(shape, stop=lambda: True)
     # A stop that stays false changes nothing.
     assert [f.rule for f in checks.run(shape, stop=lambda: False)] == ["motion"] * 2
+
+
+def test_a_float_parameter_builds_geometry_inside_an_assembly(project):
+    """The runtime wraps float arguments so a hinge can name its slider, and the
+    wrapped value has to survive being copied into geometry. `Box(width, ...)` copies
+    it, and the bare constructor call that a copy makes used to crash the build."""
+    path = write(project, "tray", '''from nurb import *
+
+
+@assembly
+def tray(width=40.0, open_deg=0.0):
+    base = Box(width, 30, 2)
+    lid = hinge(Pos(0, 0, 3) * Box(width, 30, 2), Axis((0, -15, 2), (1, 0, 0)),
+                through=(0, 90), at=open_deg, name="lid")
+    return base, lid
+''')
+    shape, _, _ = builder.build(path)
+    assert round(shape.bounding_box().size.X, 3) == 40
+    assert shape._nurb_scene.hinges[0].param == "open_deg"
