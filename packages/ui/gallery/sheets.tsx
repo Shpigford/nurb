@@ -391,6 +391,7 @@ function AutoOpenExport() {
         export={fakeExport}
         status={{ state: "succeeded", grams: 42, seconds: 4320 }}
         revision={4}
+        openIn={{ name: "Bambu Studio", open: fakeExport.bind(null, "3mf") }}
       />
     </div>
   )

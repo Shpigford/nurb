@@ -3,7 +3,7 @@
 //! to auto-allow, and it lost by construction: bash's lexer is the spec, any
 //! approximation misses shapes, and every miss was a dialog. Now the adapter
 //! process (and so every command the agent runs) is spawned under a Seatbelt
-//! profile: read anything, network allowed, write only where the app says.
+//! profile: read almost anything, network allowed, write only where the app says.
 //! Dialogs are gone because the kernel is the guard; a forbidden write fails
 //! in the agent's own transcript instead of interrupting the user.
 //!
@@ -31,11 +31,21 @@ pub(crate) fn wrap(
 }
 
 /// The Seatbelt profile. Later rules win, so: allow everything, deny all
-/// writes, then re-allow the app-derived writable roots.
+/// writes, re-allow the app-derived writable roots, then shut the folders
+/// macOS guards with a permission prompt and re-open the roots the agent works in.
 fn profile(project: &Path, engine_root: &Path) -> String {
     let mut rules = String::new();
+    let mut readable = String::new();
     for root in writable_roots(project, engine_root) {
         rules.push_str(&format!("  (subpath {})\n", quoted(&root)));
+        readable.push_str(&format!("  (subpath {})\n", quoted(&root)));
+    }
+    if let Some(bundle) = app_bundle() {
+        readable.push_str(&format!("  (subpath {})\n", quoted(&bundle)));
+    }
+    let mut private = String::new();
+    for folder in private_folders() {
+        private.push_str(&format!("  (subpath {})\n", quoted(&folder)));
     }
     if let Some(home) = home() {
         // The agents' own state (`~/.claude` and the `~/.claude.json` family,
@@ -59,8 +69,36 @@ fn profile(project: &Path, engine_root: &Path) -> String {
          \x20 (literal \"/dev/dtracehelper\")\n\
          \x20 (regex #\"^/dev/ttys[0-9]\")\n\
          \x20 (subpath \"/private/tmp\")\n\
-         {rules})\n"
+         {rules})\n\
+         (deny file-read*\n\
+         {private})\n\
+         (allow file-read*\n\
+         {readable})\n"
     )
+}
+
+/// The folders macOS asks the user about before any app reads them. An agent
+/// left to look around (`ls ~/Documents`, a search across the home folder) set
+/// off one prompt per folder in nurb's name. Its project and attachments come
+/// from the app, so it never needs these, and a refused read lands in its own
+/// transcript instead of a dialog.
+fn private_folders() -> Vec<PathBuf> {
+    let mut folders = vec![PathBuf::from("/Volumes")];
+    if let Some(home) = home() {
+        for name in ["Desktop", "Documents", "Downloads", "Library/CloudStorage", "Library/Mobile Documents"] {
+            folders.push(home.join(name));
+        }
+    }
+    folders
+}
+
+/// The .app the running binary lives in. Opened straight from the mounted DMG it
+/// sits under /Volumes, and the adapters it bundles still have to be readable.
+fn app_bundle() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    exe.ancestors()
+        .find(|dir| dir.extension().is_some_and(|ext| ext == "app"))
+        .map(Path::to_path_buf)
 }
 
 /// Directory roots the adapter may write, symlink-resolved because Seatbelt
@@ -184,6 +222,22 @@ mod tests {
                 if let Some(h) = home() {
                     std::fs::remove_dir(h.join(dot)).ok();
                 }
+            }
+        }
+        std::fs::remove_dir_all(&project).ok();
+    }
+
+    #[test]
+    fn the_folders_macos_guards_are_shut_and_the_project_stays_open() {
+        let project = std::env::temp_dir().join(format!("nurb-sbx-read-{}", std::process::id()));
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join("part.py"), "x = 1\n").unwrap();
+        let profile = profile(&project, &project);
+        assert!(sh(&profile, &format!("cat '{}/part.py' > /dev/null", project.display())));
+        assert!(sh(&profile, "cat /etc/hosts > /dev/null && ls \"$HOME\" > /dev/null"));
+        for folder in ["Documents", "Desktop", "Downloads"] {
+            if home().is_some_and(|h| h.join(folder).is_dir()) {
+                assert!(!sh(&profile, &format!("ls \"$HOME/{folder}\" > /dev/null")), "{folder} is readable");
             }
         }
         std::fs::remove_dir_all(&project).ok();

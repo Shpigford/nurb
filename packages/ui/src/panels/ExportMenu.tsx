@@ -24,6 +24,8 @@ export interface ExportMenuProps {
   revision?: number
   /** The build the prepared file came from; a newer one makes that file stale. */
   runId?: string | null
+  /** The slicer on this computer, when the host can hand it a file. */
+  openIn?: { name: string; open: () => Promise<void> } | null
 }
 
 const ROWS: { format: ExportFormat; caption: string; recommended?: boolean }[] = [
@@ -57,10 +59,10 @@ function rememberedFormat(): ExportFormat {
 
 // One click downloads the remembered type. The chevron beside it is the only way to
 // another type, and picking one there downloads it and makes it the new default.
-export default function ExportMenu({ partId, export: runExport, status, revision, runId }: ExportMenuProps) {
+export default function ExportMenu({ partId, export: runExport, status, revision, runId, openIn }: ExportMenuProps) {
   const [format, setFormat] = useState<ExportFormat>(rememberedFormat)
   const [open, setOpen] = useState(false)
-  const [preparing, setPreparing] = useState<ExportFormat | null>(null)
+  const [preparing, setPreparing] = useState<ExportFormat | "slicer" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -119,12 +121,12 @@ export default function ExportMenu({ partId, export: runExport, status, revision
     }
   }, [open])
 
-  const download = async (chosen: ExportFormat) => {
+  const run = async (key: ExportFormat | "slicer", task: () => Promise<void>) => {
     const requestId = ++requestIdRef.current
-    setPreparing(chosen)
+    setPreparing(key)
     setError(null)
     try {
-      await runExport(chosen)
+      await task()
       if (requestId === requestIdRef.current) setOpen(false)
     } catch (failure) {
       if (requestId !== requestIdRef.current) return
@@ -135,6 +137,8 @@ export default function ExportMenu({ partId, export: runExport, status, revision
       if (requestId === requestIdRef.current) setPreparing(null)
     }
   }
+
+  const download = (chosen: ExportFormat) => run(chosen, () => runExport(chosen))
 
   const choose = (chosen: ExportFormat) => {
     setFormat(chosen)
@@ -232,6 +236,26 @@ export default function ExportMenu({ partId, export: runExport, status, revision
                 </button>
               )
             })}
+            {openIn ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={preparing !== null}
+                onClick={() => void run("slicer", openIn.open)}
+                className="mt-1 flex w-full flex-col gap-0.5 border-t border-line-soft px-3 pt-2.5 pb-2 text-left transition-colors hover:bg-raised focus-visible:bg-raised focus-visible:outline-none disabled:opacity-60 disabled:hover:bg-transparent"
+              >
+                <span className="flex w-full items-center">
+                  <span className="mono-value uppercase text-ink">Open in {openIn.name}</span>
+                  {preparing === "slicer" ? (
+                    <span className="mono-caption ml-auto flex items-center gap-1.5 text-muted">
+                      <span className="size-1.5 rounded-full bg-accent" />
+                      preparing
+                    </span>
+                  ) : null}
+                </span>
+                <span className="text-xs leading-4 text-ink-soft">Saves a 3MF and opens it there.</span>
+              </button>
+            ) : null}
           </div>
 
 
