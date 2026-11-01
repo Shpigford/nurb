@@ -454,7 +454,7 @@ export default function ParamsPanel({
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-3">
         {pinned.length > 0 ? (
           <>
-            <SectionRule>Pinned by spec</SectionRule>
+            <SectionRule>Set by the plan</SectionRule>
             <dl className="flex flex-col">
               {pinned.map((param) => (
                 <div key={param.name} className="flex items-center gap-[9px] px-4 py-1.5" title={param.description}>

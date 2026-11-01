@@ -1,11 +1,18 @@
 import { useEffect, useRef } from "react"
-import { AssistantMarkdown, MeasurementCard, SpecCard, type Message } from "@nurb/ui"
+import { AssistantMarkdown, MeasurementCard, SpecCard, changedSize, type Message } from "@nurb/ui"
+
+// Tool calls, the builds they ran, and sizes first written down (the plan lists those)
+// are how the part got made; the page shows what was said and what changed.
+function shown(message: Message): boolean {
+  const payload = message.payload
+  if (message.content || !payload) return true
+  if (payload.type === "step" || payload.type === "build") return false
+  return payload.type !== "measurement" || changedSize(payload.measurement)
+}
 
 function Payload({ message }: { message: Message }) {
   const payload = message.payload
   if (!payload) return null
-  // Tool calls and the builds they ran are how the part got made; the part on the
-  // stage is the result, so they stay off the page.
   switch (payload.type) {
     case "spec":
       return <SpecCard spec={payload.spec} model={payload.model} effort={payload.effort} />
@@ -32,7 +39,7 @@ export default function Transcript({ messages }: { messages: Message[] }) {
       {messages.length === 0 ? (
         <p className="mono-caption text-muted">Nothing here yet. Ask your agent to build a part.</p>
       ) : null}
-      {messages.filter((m) => m.content || (m.payload?.type !== "step" && m.payload?.type !== "build")).map((message) => (
+      {messages.filter(shown).map((message) => (
         <div key={message.id} className="flex flex-col gap-3">
           {message.content ? (
             message.role === "user" ? (

@@ -5,3 +5,5 @@ export declare function elapsedLabel(seconds: number): string;
 export declare function relativeTime(iso: string | null | undefined, now?: number): string | null;
 export declare function formatBbox(bbox?: number[] | null): string | null;
 export declare function initials(nameOrEmail: string | null | undefined): string;
+/** A code name as a person reads it: `case_width` is "Case width". */
+export declare function words(name: string): string;

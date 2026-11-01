@@ -30,17 +30,17 @@ describe("SpecCard", () => {
 
   it("renders the part name and summary", () => {
     render(<SpecCard spec={spec} />)
-    expect(screen.getByText(/shelf_bracket/)).toBeInTheDocument()
+    expect(screen.getByText("The plan")).toBeInTheDocument()
     expect(screen.getByText(spec.summary)).toBeInTheDocument()
   })
 
   it("renders every dimension with its value in mm", () => {
     render(<SpecCard spec={spec} />)
-    expect(screen.getByText("rail_width")).toBeInTheDocument()
+    expect(screen.getByText("Rail width")).toBeInTheDocument()
     expect(screen.getByText("25.16 mm")).toBeInTheDocument()
-    expect(screen.getByText("shelf_depth")).toBeInTheDocument()
+    expect(screen.getByText("Shelf depth")).toBeInTheDocument()
     expect(screen.getByText("180 mm")).toBeInTheDocument()
-    expect(screen.getByText("screw_dia")).toBeInTheDocument()
+    expect(screen.getByText("Screw dia")).toBeInTheDocument()
     expect(screen.getByText("4 mm")).toBeInTheDocument()
     // Provisional dimensions carry the tilde.
     expect(screen.getByText("~2 mm")).toBeInTheDocument()
@@ -48,27 +48,21 @@ describe("SpecCard", () => {
 
   it("labels one dimension per source", () => {
     render(<SpecCard spec={spec} />)
-    for (const label of ["Measured", "Asked", "Standard", "Doctrine"]) {
+    for (const label of ["You measured", "You told us", "Published", "Rule of thumb"]) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
   })
 
-  it("renders the acceptance rows, tagging prose checks as assert", () => {
+  it("lists what done means in plain sentences, without the check names", () => {
     render(<SpecCard spec={spec} />)
     expect(screen.getByText("No wall under 1.2 mm")).toBeInTheDocument()
-    expect(screen.getByText("min_wall")).toBeInTheDocument()
     expect(screen.getByText("The bounding box stays under 200 mm")).toBeInTheDocument()
-    expect(screen.getByText("assert")).toBeInTheDocument()
+    expect(screen.queryByText("min_wall")).toBeNull()
   })
 
   it("counts the sliders and names each param", () => {
     render(<SpecCard spec={spec} />)
-    expect(screen.getByText("3 sliders")).toBeInTheDocument()
-    expect(screen.getByText("hook_depth")).toBeInTheDocument()
-  })
-
-  it("shows the stack label with the part name", () => {
-    render(<SpecCard spec={spec} model="claude-fable-5" effort="low" />)
-    expect(screen.getByText("fable-5 low · shelf_bracket")).toBeInTheDocument()
+    expect(screen.getByText("3 sliders to adjust")).toBeInTheDocument()
+    expect(screen.getByText("Hook depth")).toBeInTheDocument()
   })
 })

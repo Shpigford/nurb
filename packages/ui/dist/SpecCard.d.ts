@@ -1,5 +1,5 @@
 import { Spec } from './types';
-export default function SpecCard({ spec, model, effort }: {
+export default function SpecCard({ spec }: {
     spec: Spec;
     model?: string;
     effort?: string;

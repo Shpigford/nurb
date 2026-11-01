@@ -34,7 +34,7 @@ describe("ParamRail", () => {
     expect(container.querySelector("aside")?.className).toContain("overflow-hidden")
   })
 
-  it("puts what the spec pinned above what the user may drag", () => {
+  it("puts what the plan set above what the user may drag", () => {
     render(
       <ParamRail
         count={2}
@@ -43,8 +43,8 @@ describe("ParamRail", () => {
         actions={null}
       />
     )
-    expect(screen.getByText("Pinned by spec")).toBeTruthy()
-    expect(screen.getByText("block_width")).toBeTruthy()
+    expect(screen.getByText("Set by the plan")).toBeTruthy()
+    expect(screen.getByText("Block width")).toBeTruthy()
     expect(screen.getByText("25.16 mm")).toBeTruthy()
     // The "Yours to drag" rule belongs to ParamsPanel, so the rail never draws it twice.
     expect(screen.queryByText("Yours to drag")).toBeNull()

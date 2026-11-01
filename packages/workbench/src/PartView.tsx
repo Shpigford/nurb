@@ -529,7 +529,7 @@ export default function PartView({
               title={part ? (failedBuild ? `${part.name} did not build` : `${part.name} is not built yet`) : "No part yet"}
               caption={
                 !part
-                  ? "It builds here, live, the moment the spec is pinned."
+                  ? "It appears here, live, as soon as the plan is set."
                   : failedBuild
                     ? "The rail says what went wrong. Change a value or ask for a fix, and it rebuilds."
                     : "Build it once and it appears here. Dragging a parameter rebuilds it from then on."

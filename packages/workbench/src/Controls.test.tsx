@@ -130,7 +130,7 @@ describe("sliders", () => {
     render(<App />)
 
     await screen.findByLabelText("wall")
-    expect(screen.getByText("Pinned by spec")).toBeInTheDocument()
+    expect(screen.getByText("Set by the plan")).toBeInTheDocument()
     expect(screen.getByText("25.16 mm")).toBeInTheDocument()
     expect(screen.queryByLabelText("rail_width")).toBeNull()
   })

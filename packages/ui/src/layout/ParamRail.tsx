@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import Icon from "../Icon"
+import { words } from "../format"
 import PanelStrip from "../PanelStrip"
 
 export interface PinnedParam {
@@ -71,14 +72,14 @@ export default function ParamRail({
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {pinned && pinned.length > 0 ? (
           <>
-            <Rule>Pinned by spec</Rule>
+            <Rule>Set by the plan</Rule>
             <ul className="flex flex-col gap-1.5 px-4 pb-1">
               {pinned.map((row) => (
                 <li key={row.name} className="flex items-center gap-2">
                   <span className="shrink-0 text-faint">
                     <Icon name="lock" />
                   </span>
-                  <span className="mono-label truncate text-muted">{row.name}</span>
+                  <span className="mono-label truncate text-muted">{words(row.name)}</span>
                   <span className="flex-1" />
                   <span className="mono-value text-right text-ink">{row.value}</span>
                 </li>

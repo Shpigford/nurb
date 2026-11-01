@@ -4,7 +4,7 @@ import { brand } from "./brand"
 // the part will.
 export default function EmptyProject({
   title = "No part yet",
-  caption = "It builds here, live, the moment the spec is pinned.",
+  caption = "It appears here, live, as soon as the plan is set.",
 }: {
   title?: string
   caption?: string

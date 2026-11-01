@@ -58,3 +58,9 @@ export function initials(nameOrEmail: string | null | undefined): string {
   const letters = words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)
   return letters.toUpperCase()
 }
+
+/** A code name as a person reads it: `case_width` is "Case width". */
+export function words(name: string): string {
+  const spaced = name.replace(/_+/g, " ").trim()
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}

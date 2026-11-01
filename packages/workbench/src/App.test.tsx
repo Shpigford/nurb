@@ -55,13 +55,12 @@ describe("workbench", () => {
     await waitFor(() => expect(screen.getByTestId("stage")).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=2"))
   })
 
-  it("renders every payload kind in the transcript", async () => {
+  it("shows what was said and the plan, not the tool calls or a first measurement", async () => {
     render(<App />)
     expect(await screen.findByText("Built the bracket.")).toBeInTheDocument()
-    // build, spec, measurement, step: one recognizable line each.
-    expect(screen.getAllByText(/bracket/i).length).toBeGreaterThan(1)
     expect(screen.getByText("A bracket")).toBeInTheDocument()
-    expect(screen.getAllByText(/rail_width/).length).toBeGreaterThan(0)
+    // The plan lists sizes; a size first written down is not news in the transcript.
+    expect(screen.queryByText("Measurement recorded")).toBeNull()
   })
 
   // A delete names a project the list already holds, which is the whole point of it.

@@ -19,6 +19,7 @@ import {
   AssistantMarkdown,
   Button,
   ChatPanel,
+  changedSize,
   CyclingPlaceholder,
   DropHint,
   Icon,
@@ -148,7 +149,10 @@ function Turn({ who, n, children }: { who: string; n?: string; children: ReactNo
 // the build a save ran. The person is not a developer; the part on the stage is the
 // result, and the working line says what is happening while it happens.
 function isWork(message: Message): boolean {
-  return message.payload?.type === "step" || message.payload?.type === "build";
+  const payload = message.payload;
+  if (payload?.type === "step" || payload?.type === "build") return true;
+  // A size first written down is already in the plan's table; only a change is news.
+  return payload?.type === "measurement" && !changedSize(payload.measurement);
 }
 
 function Stored({ message, who, n }: { message: Message; who: string; n?: string }) {

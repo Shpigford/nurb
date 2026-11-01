@@ -1,5 +1,11 @@
 import Icon from "./Icon"
+import { words } from "./format"
 import type { Measurement } from "./types"
+
+/** Whether a recorded measurement moved an earlier value, rather than writing a first one. */
+export function changedSize(measurement: Measurement): boolean {
+  return measurement.previous_value_mm != null && measurement.previous_value_mm !== measurement.value_mm
+}
 
 // A measurement the intake recorded mid-conversation. When the value moved
 // and parts read it, the card carries the rebuild: no new part, no new spec.
@@ -23,7 +29,7 @@ export default function MeasurementCard({
 }) {
   const recorded = measurement.stale_parts ?? []
   const stale = staleParts ? recorded.filter((name) => staleParts.includes(name)) : recorded
-  const changed = measurement.previous_value_mm != null && measurement.previous_value_mm !== measurement.value_mm
+  const changed = changedSize(measurement)
   const showAccept = measurement.provisional && onAccept
 
   return (
@@ -39,7 +45,7 @@ export default function MeasurementCard({
       </div>
       <div className="flex flex-col gap-1.5 px-3 pt-[9px] pb-2.5">
         <div className="flex items-baseline gap-2">
-          <span className="mono-id min-w-0 flex-1 truncate text-ink-soft">{measurement.name}</span>
+          <span className="min-w-0 flex-1 truncate text-xs leading-4 text-ink-soft">{words(measurement.name)}</span>
           {changed ? (
             <span className="mono-value text-muted line-through">{measurement.previous_value_mm} mm</span>
           ) : null}

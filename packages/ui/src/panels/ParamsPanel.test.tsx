@@ -58,7 +58,7 @@ describe("ParamsPanel", () => {
     expect(screen.getByLabelText("width value")).toHaveValue("40")
     expect(screen.getByLabelText("bracket_count value")).toHaveValue("4")
     expect(screen.getByRole("switch", { name: "draft" })).toHaveAttribute("aria-checked", "false")
-    expect(screen.getByText("Pinned by spec")).toBeInTheDocument()
+    expect(screen.getByText("Set by the plan")).toBeInTheDocument()
     expect(screen.queryByLabelText("finish value")).toBeNull()
   })
 

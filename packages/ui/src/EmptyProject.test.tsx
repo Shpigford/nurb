@@ -8,7 +8,7 @@ describe("EmptyProject", () => {
   it("stands the outline mark on the plate", () => {
     render(<EmptyProject />)
     expect(screen.getByText("No part yet")).toBeTruthy()
-    expect(screen.getByText(/It builds here, live/)).toBeTruthy()
+    expect(screen.getByText(/It appears here, live/)).toBeTruthy()
   })
 
   it("takes overrides", () => {
