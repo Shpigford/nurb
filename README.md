@@ -20,7 +20,7 @@ The part appears while you read the reply. When it looks right: drag the sliders
 
 The chat inside the app runs the agent you already have: Claude Code, Codex, Gemini, Cursor or Grok, on your own subscription. Prefer your own terminal? **Settings > Connect** has one copyable command each for Claude Code, the Codex CLI, and Cursor. Paste it once and that tool designs parts in your projects through the same tools the app uses, with the same live viewer showing you what it does.
 
-**Already have a nurb project folder from 0.x?** Use **Import folder** in the app once and it comes across, parts, notes, measurements and all.
+**Coming from nurb 0.x?** The update brings your projects across on its own the first time 1.0 opens, parts, notes, measurements and all. A folder that doesn't make it says so, and **Import folder** brings it over by hand.
 
 **Your parts stay on your computer.** Modelling, checking, the viewer, and export all run locally, with no nurb account. The AI you talk to runs in the cloud, so designing a part needs an internet connection.
 
@@ -42,10 +42,10 @@ The chat inside the app runs the agent you already have: Claude Code, Codex, Gem
 
 ## Which model should you use?
 
-nurb works with whatever AI subscription you already pay for, and they are not equally good at designing parts. We run the popular models through the same real part-design jobs and grade the actual geometry by machine, so you can pick based on what you subscribe to and what you are willing to spend: [nurb.dev/benchmarks](https://nurb.dev/benchmarks.html). The raw rows, transcripts, and grading code live in [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks), and adding a row for your model is one line on your own subscription, single runs welcome:
+nurb works with whatever AI subscription you already pay for, and they are not equally good at designing parts. We run the popular models through the same real part-design jobs and grade the actual geometry by machine, so you can pick based on what you subscribe to and what you are willing to spend: [nurb.app/benchmarks](https://nurb.app/benchmarks.html). The raw rows, transcripts, and grading code live in [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks), and adding a row for your model is one line on your own subscription, single runs welcome:
 
 ```bash
-curl -fsSL https://nurb.dev/bench.sh | sh
+curl -fsSL https://nurb.app/bench.sh | sh
 ```
 
 ## The checks
@@ -101,6 +101,8 @@ def hose_adapter(vac_end=57.6, tool_end=35.0, wall=2.4):
 ## Coming from 0.x
 
 1.0 is the app. The `nurb` command line, the skill file and the PyPI package are gone: a project now lives in a database on your computer instead of a folder of files, which is what gives every part its revision history and keeps the app and the agent from overwriting each other. Your old folders come across with **Import folder**, and an agent in your terminal reaches the same parts through **Settings > Connect**.
+
+Two things don't carry over. Conversations from 0.x stay behind, so each part starts a fresh chat. And the app no longer brings its own copy of Claude Code: to chat with Claude, install Claude Code once (the app shows how) and sign in.
 
 Some 0.x tools are not in 1.0 yet: the stress button, reading phone scans and target meshes, the section plane, card variants and the hinge slider for assemblies.
 

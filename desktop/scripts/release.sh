@@ -149,7 +149,7 @@ write_feed() {
 cat > "$1/latest.json" << JSON
 {
   "version": "$VERSION",
-  "notes": "nurb $VERSION. What changed: https://nurb.dev/changelog",
+  "notes": "nurb $VERSION. What changed: https://nurb.app/changelog",
   "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "platforms": {
     "darwin-aarch64": {
@@ -309,7 +309,7 @@ publish_tag
 
 if [ "$RELEASE_STATE" = missing ]; then
   gh release create "$TAG" --repo "$REPO" --verify-tag --draft \
-    --title "nurb $VERSION" --notes "What changed: https://nurb.dev/changelog#v$VERSION"
+    --title "nurb $VERSION" --notes "What changed: https://nurb.app/changelog#v$VERSION"
 fi
 
 # Keep nurb.dmg as the established Apple silicon URL. Intel Macs use a named

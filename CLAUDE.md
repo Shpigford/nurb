@@ -43,7 +43,7 @@ One repo, one engine, one UI, one route for building: the agent drives the local
 engine/     the Python engine and the local serve process (uv project; run everything here with `cd engine`)
 packages/   @nurb/ui (tokens, viewer, panels, cards) and @nurb/workbench (the part page the engine serves and the app embeds)
 desktop/    the Tauri app: Rust core, React shell, bundles the engine wheel
-site/       nurb.dev marketing pages
+site/       nurb.app marketing pages
 ```
 
 ## Running it
@@ -169,7 +169,7 @@ This is source-available under FSL-1.1-MIT, which converts each release to MIT t
 - **Public API is `engine/src/nurb/__init__.py`.** Anything exported there is a promise. Everything else is internal and free to change. Keep the surface small.
 - **Dependencies are a cost.** Five right now: build123d, mcp, pillow, trimesh, websockets. Adding a sixth needs a reason that survives being asked out loud.
 - **Watch the transitive license surface.** build123d is Apache-2.0, but it pulls OCP, whose wheel bundles OCCT native libraries under LGPL-2.1-with-exception. That is fine while we dynamically link and do not redistribute them. It stops being automatic if nurb is ever bundled into a single-file binary, which would require shipping the OCCT license and keeping the library replaceable. Attribution lives in the README's third-party notices.
-- **Never commit Satoshi.** Its Fontshare license allows embedding it in the app and serving it on nurb.dev, and forbids a public repository. `packages/ui/scripts/fetch-satoshi.sh` downloads it before the workbench and desktop builds (strict under `NURB_REQUIRE_FONTS=1`, which the release sets), and the site loads it from Fontshare's servers. The Nucleo icons in `Icon.tsx` are capped at 100 in public source by their license, and `@nurb/ui` stays private, because publishing it would make it an icon library.
+- **Never commit Satoshi.** Its Fontshare license allows embedding it in the app and serving it on nurb.app, and forbids a public repository. `packages/ui/scripts/fetch-satoshi.sh` downloads it before the workbench and desktop builds (strict under `NURB_REQUIRE_FONTS=1`, which the release sets), and the site loads it from Fontshare's servers. The Nucleo icons in `Icon.tsx` are capped at 100 in public source by their license, and `@nurb/ui` stays private, because publishing it would make it an icon library.
 - **Errors are the interface.** Most users will meet this tool through a failure. Tracebacks get trimmed to the user's own file; messages say what went wrong and what to do, never just "invalid input".
 - **The doctrine ships in the package**, reached by an agent through the `read_guide` tool. One source of truth, assembled at call time so an upgrade cannot leave a stale copy teaching the wrong rules.
 - **The workbench works offline.** Everything it *needs* is local: three.js and the fonts are bundled into `engine/src/nurb/workbench/` by the workbench build, because a CAD tool that needs a CDN is broken on a plane. Anything new the workbench imports is bundled too, and `pyproject.toml`'s `source-include` has to carry the output. Network is allowed for nudges that degrade silently, like the daily update check, which also stays out of headless renders.

@@ -5,7 +5,7 @@ description: Publish the nurb model leaderboard from merged benchmark submission
 
 # nurb leaderboard
 
-Two generated surfaces, one editorial layer, two repos. The benchmark (tasks, scorer, submissions, `REPORT.md`) lives in [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks); the public page (`site/benchmarks.html`, behind nurb.dev/benchmarks) lives here. Both surfaces regenerate mechanically from that repo's `submissions/`; the verdict sentences and subscription labels live in its `src/nurb_evals/site.py` and are written by a person. Submission PRs are pure additions and merge freely; nothing reaches the public page until this skill runs. That gap is deliberate: it is where the sanity check and the verdicts happen, so publishing is an editorial act, not a side effect of merging.
+Two generated surfaces, one editorial layer, two repos. The benchmark (tasks, scorer, submissions, `REPORT.md`) lives in [Shpigford/nurb-benchmarks](https://github.com/Shpigford/nurb-benchmarks); the public page (`site/benchmarks.html`, behind nurb.app/benchmarks) lives here. Both surfaces regenerate mechanically from that repo's `submissions/`; the verdict sentences and subscription labels live in its `src/nurb_evals/site.py` and are written by a person. Submission PRs are pure additions and merge freely; nothing reaches the public page until this skill runs. That gap is deliberate: it is where the sanity check and the verdicts happen, so publishing is an editorial act, not a side effect of merging.
 
 ## Step 0: Get the benchmarks checkout
 

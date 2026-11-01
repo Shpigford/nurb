@@ -38,7 +38,7 @@ import { messagesForPart, moveTargets, titleCase } from "./parts";
 import ProjectPicker from "./ProjectPicker";
 import Setup from "./Setup";
 import Settings, { type AboutInfo, type SettingsSection } from "./Settings";
-import { broughtOver, importV1Folders } from "./v1Import";
+import { broughtOver, importV1Folders, notBroughtOver } from "./v1Import";
 
 /** What the picker needs to know about the part it is placing. */
 type PickTarget = { id: string | null; name: string; project_id: string; folder: boolean };
@@ -228,7 +228,11 @@ function App() {
     void (async () => {
       const folders = await invoke<string[]>("take_v1_folders").catch(() => []);
       if (!folders.length) return;
-      const count = await importV1Folders(folders, importFolder, (text) => console.warn(text));
+      // The list is gone after this launch, so a folder that refused has to say
+      // so on screen, or the person never learns to bring it over by hand.
+      const refused: string[] = [];
+      const count = await importV1Folders(folders, importFolder, (text) => refused.push(text));
+      if (refused.length) setError(`${notBroughtOver(refused.length)} ${refused.join("; ")}`);
       if (!count) return;
       await loadProjects();
       activityId.current = "v1-import";

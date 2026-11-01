@@ -19,3 +19,7 @@ export async function importV1Folders(
 export function broughtOver(count: number): string {
   return `Brought over ${count} ${count === 1 ? "project" : "projects"} from nurb 0.x`;
 }
+
+export function notBroughtOver(count: number): string {
+  return `${count} ${count === 1 ? "project" : "projects"} from nurb 0.x didn't come over. Use Import folder to try again.`;
+}
