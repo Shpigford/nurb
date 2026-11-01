@@ -1500,8 +1500,6 @@ def test_the_project_panel_reads_and_tunes_the_system(tmp_path, monkeypatch):
     ]
     assert file["pieces"] == [{"name": "slab", "used_by": ["bin_a"]}]
     assert system["measurements"][0]["used_by"] == ["lid"]
-    # The part page gets the same answer, so a part lists only what it reads.
-    assert serve._project(conn, project_id)["measurements"][0]["used_by"] == ["lid"]
 
     assert "whole number" in client.post(
         f"/api/projects/{project_id}/settings", json={"file": "system", "name": "COUNT", "value": 2.5}

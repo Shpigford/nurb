@@ -103,7 +103,7 @@ export function project(id: string, name: string, parts: Part[], msgs: Message[]
     printer: { name: "bambu_x1c", bed: [256, 256, 256] },
     printers: ["bambu_x1c", "prusa_mk4"],
     spec: null,
-    measurements: [{ name: "rail_width", value_mm: 25.16, unit: "mm", how: "calipers", provisional: true, value_changed_at: null, used_by: ["bracket"] }],
+    measurements: [{ name: "rail_width", value_mm: 25.16, unit: "mm", how: "calipers", provisional: true, value_changed_at: null }],
     parts,
     messages: msgs,
   }
