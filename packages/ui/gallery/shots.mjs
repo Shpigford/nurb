@@ -3,7 +3,7 @@
 //
 //   npm run gallery:shots --workspace packages/ui            every sheet
 //   npm run gallery:shots --workspace packages/ui -- 10 13   just those
-//   npm run site:hero --workspace packages/ui                the nurb.dev hero, into site/
+//   npm run site:hero --workspace packages/ui                the nurb.app hero, into site/
 //
 // The hero is drawn from the same components the app ships, so re-running this after
 // a UI change is how the site keeps showing the app as it is. /release runs it.

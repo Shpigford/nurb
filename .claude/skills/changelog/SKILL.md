@@ -1,11 +1,11 @@
 ---
 name: changelog
-description: Write nurb.dev changelog entries from the releases since the last published one. Filters the release's merged PRs to what a user would actually notice, drafts each in the site's voice, and inserts the release into site/changelog.html. Use when the user says "changelog", "update the changelog", "announce this", or after cutting a release.
+description: Write nurb.app changelog entries from the releases since the last published one. Filters the release's merged PRs to what a user would actually notice, drafts each in the site's voice, and inserts the release into site/changelog.html. Use when the user says "changelog", "update the changelog", "announce this", or after cutting a release.
 ---
 
 # nurb changelog
 
-One surface: `site/changelog.html`, the static page behind nurb.dev/changelog. One `<article class="release">` per released version, newest first. There is no build step and no data file; the HTML is the data.
+One surface: `site/changelog.html`, the static page behind nurb.app/changelog. One `<article class="release">` per released version, newest first. There is no build step and no data file; the HTML is the data.
 
 Releases are the unit. A nurb release is a version bump merged to main; `desktop/scripts/release.sh` tags it and publishes it as a GitHub release. Final releases use the same spelling everywhere (`v1.0.0`); prerelease git tags use PEP 440 (`v1.0.0a1`) while the app and changelog use SemVer (`v1.0.0-alpha.1`). The changelog entry for a version is written from the commits merged between one git tag and the next, filtered hard.
 

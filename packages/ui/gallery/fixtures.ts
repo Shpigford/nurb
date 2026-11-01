@@ -12,7 +12,7 @@ Two things I still need:
 - the wall thickness you want at the hook, default \`wall = 2.0\`
 - whether the bracket carries more than 2 kg
 
-The doctrine on this is in [the print rules](https://nurb.dev/rules).
+The doctrine on this is in [the print rules](https://nurb.app/rules).
 
 \`\`\`python
 @part

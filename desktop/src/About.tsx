@@ -116,7 +116,7 @@ export default function About({
       <section className="flex flex-col gap-3 px-7 py-5.5">
         <h2 className="font-display text-[17px] leading-[22px] tracking-tight text-ink">Links</h2>
         <div className="flex flex-col">
-          <LinkRow label="nurb.dev" hint="Guides and changelog" href="https://nurb.dev" />
+          <LinkRow label="nurb.app" hint="Guides and changelog" href="https://nurb.app" />
           <LinkRow label="GitHub issues" hint="Tell us what broke" href="https://github.com/Shpigford/nurb/issues" />
           <LinkRow label="Kernel sources" hint="OCCT source archive" href={occtSources} last />
         </div>
