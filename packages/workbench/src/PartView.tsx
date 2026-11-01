@@ -17,6 +17,7 @@ import {
   ParamsPanel,
   RailDisclosure,
   Stage,
+  StageBuilding,
   StageColumn,
   StageNotice,
   ViewerIsland,
@@ -519,7 +520,8 @@ export default function PartView({
             settleKey={settleKey}
             purge={purge}
             onCamera={onCamera}
-            className="min-h-0 flex-1"
+            // The model on screen is the one before the change until the new one lands.
+            className={`min-h-0 flex-1 transition-opacity duration-300 ${building ? "opacity-45" : ""}`}
           />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
@@ -548,6 +550,7 @@ export default function PartView({
             ) : null}
           </div>
         )}
+        <StageBuilding open={building && !!glbUrl} expected={seconds} />
         {renameError ? <StageNotice>{renameError}</StageNotice> : null}
         {failedBuild ? (
           <StageNotice>

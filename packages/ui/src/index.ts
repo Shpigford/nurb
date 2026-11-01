@@ -54,6 +54,7 @@ export type { RailDisclosureProps, DisclosureTone } from "./layout/RailDisclosur
 export { default as FindingsList } from "./layout/FindingsList"
 export type { FindingsListProps, Verdict } from "./layout/FindingsList"
 export { BuildFailedBanner, StageNotice } from "./layout/BuildFailed"
+export { StageBuilding } from "./layout/StageBuilding"
 export { default as UpdateCard } from "./UpdateCard"
 
 // motion
