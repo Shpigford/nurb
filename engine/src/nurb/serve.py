@@ -484,20 +484,22 @@ def _catalogue_entry(name, block):
     }
 
 
-def _slicer_found():
-    """The installed slicer, for the page that would otherwise offer a dead button."""
-    from . import slicing
+def _opener(printer):
+    """The slicer app a part for this nurb printer opens in, or None."""
+    from . import checks, slicing
 
-    exe = slicing.app()
-    if exe is None:
-        return None
-    path = " ".join(str(v) for v in exe) if isinstance(exe, tuple) else str(exe)
-    return {"name": slicing.label(exe), "path": path}
+    block = checks.profiles().get(printer or "", {})
+    found = slicing.opener(block.get("slicer"), block.get("brand"))
+    return {"name": found[0], "path": str(found[1])} if found else None
 
 
-def _workshop():
-    """Everything the printer panel draws: what is here, what could be, what slices."""
-    from . import checks, workshop
+def _workshop(printer=None):
+    """Everything the printer panel draws: what is here, what could be, what slices.
+
+    `opener` answers for `printer`, the machine the part on screen prints on, or the
+    default when the page names none, because which slicer a file opens in follows it.
+    """
+    from . import checks, slicing, workshop
 
     have = checks.profiles()
     default = workshop.default_printer()
@@ -513,7 +515,8 @@ def _workshop():
         "printers": mine,
         # File order, which is grouped by brand, because the picker reads that way.
         "catalogue": [_catalogue_entry(name, block) for name, block in have.items()],
-        "slicer": _slicer_found(),
+        "slicers": [{"name": name, "path": str(path)} for name, path in slicing.installed()],
+        "opener": _opener(printer or default),
     }
 
 
@@ -1393,15 +1396,14 @@ def _routes(conn, lock, server, token, pid):
             from . import checks, slicing
 
             part = _part_row(conn, request.path_params["part_id"])
-            exe = slicing.app()
-            if exe is None:
+            if slicing.app() is None and slicing.prusaslicer() is None:
                 # Not a fault and not the user's mistake: nurb reads these numbers out
                 # of a slicer rather than re-deriving them, so without one there is no
                 # answer to give. No retry fixes this and the page installs nothing.
                 return {
                     "kind": "slicer",
                     "error": "no slicer found. print time comes out of "
-                    f"{' or '.join(slicing.SLICERS)}, both free.",
+                    f"{' or '.join(slicing.SLICERS)}, both free, or PrusaSlicer for a Prusa.",
                 }
             # Its own folder: the shared scratch copy is the build worker's, and the
             # background builder can be writing it at this moment.
@@ -1413,16 +1415,39 @@ def _routes(conn, lock, server, token, pid):
                     return {"kind": "printer", "error": str(exc), "profiles": _printers()}
             if not wanted:
                 return {"kind": "choose", "profiles": _printers()}
-            bundle = slicing.vendors(exe)
-            if bundle is None:
-                # The app is here and its own profiles are not: a broken install.
-                return {
-                    "kind": "profile",
-                    "error": f"found {slicing.label(exe)} but not its profile bundle",
-                }
+            # A Prusa slices in PrusaSlicer when it is here, the same slicer it opens in,
+            # because Prusa's own profiles are the ones its owner prints with.
+            preset = checks.profiles().get(profile, {}).get("prusaslicer")
+            prusa = slicing.prusaslicer() if preset else None
             try:
-                machine = slicing.machine(bundle, wanted)
-                process, filament = slicing.profiles_for(machine, LAYER, MATERIAL)
+                if prusa:
+                    presets = slicing.prusa_presets(prusa, preset, LAYER, MATERIAL)
+
+                    def job(stl, gcode):
+                        return slicing.prusa_run(stl, gcode, prusa, presets)
+
+                    settings = f"{profile} / {presets[1][0]} / {presets[2][0]}"
+                else:
+                    exe = slicing.app(printer=wanted)
+                    if exe is None:
+                        raise slicing.Unavailable(
+                            f"PrusaSlicer only slices Prusa printers here. Print time for {wanted} "
+                            f"comes out of {' or '.join(slicing.SLICERS)}, both free."
+                        )
+                    bundle = slicing.vendors(exe)
+                    if bundle is None:
+                        # The app is here and its own profiles are not: a broken install.
+                        return {
+                            "kind": "profile",
+                            "error": f"found {slicing.label(exe)} but not its profile bundle",
+                        }
+                    machine = slicing.machine(bundle, wanted)
+                    process, filament = slicing.profiles_for(machine, LAYER, MATERIAL)
+
+                    def job(stl, gcode):
+                        return slicing.run(stl, gcode, machine, process, filament, exe)
+
+                    settings = f"{profile} / {process.stem} / {filament.stem} / {slicing.PLATE}"
             except slicing.Unavailable as exc:
                 # The machines ride along: what fixes this is choosing a different one,
                 # not pressing the same button again.
@@ -1436,12 +1461,12 @@ def _routes(conn, lock, server, token, pid):
                 model, _, _ = engine_run.export_part(conn, part["id"], "stl", overrides=overrides)
             except ValueError as exc:
                 return {"kind": "build", "error": str(exc)}
-            return part["name"], run["id"], model, exe, machine, process, filament, profile
+            return part["name"], run["id"], model, job, settings, profile
 
         prepared = await query(work)
         if isinstance(prepared, dict):
             return JSONResponse(prepared)
-        name, run_id, model, exe, machine, process, filament, profile = prepared
+        name, run_id, model, job, settings, profile = prepared
 
         def sliced():
             from . import slicing
@@ -1452,9 +1477,7 @@ def _routes(conn, lock, server, token, pid):
                 stl = pathlib.Path(scratch) / f"{name}.stl"
                 stl.write_bytes(model)
                 try:
-                    (seconds, grams), _ = slicing.run(
-                        stl, pathlib.Path(scratch) / f"{name}.gcode", machine, process, filament, exe
-                    )
+                    (seconds, grams), _ = job(stl, pathlib.Path(scratch) / f"{name}.gcode")
                 except slicing.Unavailable as exc:
                     return {"kind": "build", "error": str(exc)}
                 except Exception as exc:
@@ -1468,7 +1491,7 @@ def _routes(conn, lock, server, token, pid):
                 # The machine alone on the row, because with two printers in the
                 # workshop that is the one word that changes how the number reads.
                 "profile": profile,
-                "settings": f"{profile} / {process.stem} / {filament.stem} / {slicing.PLATE}",
+                "settings": settings,
             }
 
         payload = await anyio.to_thread.run_sync(sliced)
@@ -1485,8 +1508,8 @@ def _routes(conn, lock, server, token, pid):
         return await acted(save)
 
     async def printers_read(request):
-        """The workshop: the machines here, everything that could be, and the slicer."""
-        return JSONResponse(_workshop())
+        """The workshop: the machines here, everything that could be, and the slicers."""
+        return JSONResponse(_workshop(request.query_params.get("printer")))
 
     async def printers_add(request):
         """Put a machine in the workshop. The first one becomes the default."""

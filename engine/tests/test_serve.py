@@ -884,7 +884,7 @@ from nurb import slicing
 def run(model, target, *args, **kwargs):
     time.sleep(5)
     return (3600, 12.0), pathlib.Path(target)
-slicing.app = lambda search=None: pathlib.Path("/slow/OrcaSlicer")
+slicing.app = lambda search=None, printer=None: pathlib.Path("/slow/OrcaSlicer")
 slicing.vendors = lambda exe: pathlib.Path("/slow")
 slicing.machine = lambda bundle, name: pathlib.Path("/slow/machine.json")
 slicing.profiles_for = lambda *a: (pathlib.Path("/slow/process.json"), pathlib.Path("/slow/pla.json"))
@@ -914,6 +914,41 @@ def test_a_slice_in_flight_leaves_the_server_free(home):
         assert time.monotonic() - started < 2
         slicing.join()
         assert sliced["kind"] == "slice" and sliced["seconds"] == 3600
+
+
+# A serve with PrusaSlicer and nothing else, so a Prusa takes Prusa's route.
+PRUSA_ONLY = [
+    sys.executable,
+    "-c",
+    """
+import pathlib, runpy, sys
+from nurb import slicing
+def run(model, target, exe, presets, settings=None, timeout=None):
+    assert presets[0][0] == "Original Prusa MK4S 0.4 nozzle"
+    return (1800, 9.0), pathlib.Path(target)
+slicing.app = lambda search=None, printer=None: None
+slicing.prusaslicer = lambda: pathlib.Path("/prusa/PrusaSlicer")
+slicing.prusa_presets = lambda exe, preset, *a: ((preset, {}), ("0.20mm SPEED @MK4S 0.4", {}), ("Generic PLA @MK4S", {}))
+slicing.prusa_run = run
+sys.argv = ["nurb.serve", *sys.argv[1:]]
+runpy.run_module("nurb.serve", run_name="__main__")
+""",
+]
+
+
+def test_a_prusa_slices_in_prusaslicer_and_anything_else_says_what_it_needs(home):
+    """With PrusaSlicer alone, a Prusa gets its numbers and a Bambu gets a sentence
+    naming the slicer that would give them, not a crash (#263)."""
+    project_id, part_id = a_slab()
+    with serving(home, free_port(), command=PRUSA_ONLY) as url:
+        post(f"{url}/api/projects/{project_id}/printer", {"profile": "prusa_mk4s"})
+        sliced = json.loads(post(f"{url}/api/parts/{part_id}/slice", {})[2])
+        assert sliced["kind"] == "slice" and sliced["seconds"] == 1800
+        assert sliced["settings"] == "prusa_mk4s / 0.20mm SPEED @MK4S 0.4 / Generic PLA @MK4S"
+
+        post(f"{url}/api/projects/{project_id}/printer", {"profile": "bambu_x1c"})
+        other = json.loads(post(f"{url}/api/parts/{part_id}/slice", {})[2])
+        assert other["kind"] == "profile" and "OrcaSlicer" in other["error"]
 
 
 def test_a_refusal_about_a_broken_part_is_one_sentence(home):
@@ -1525,6 +1560,10 @@ def test_the_workshop_holds_the_printers_and_names_the_default(home):
         detail = json.loads(get(f"{url}/api/projects/{project_id}")[2])
         assert detail["printer"]["name"] == "bambu_p1s"
         assert detail["printers"] == ["bambu_p1s", "prusa_mk4s"]
+
+        # Which slicer a file opens in follows the printer the page asks about.
+        asked = json.loads(get(f"{url}/api/printers?printer=prusa_mk4s")[2])
+        assert "opener" in asked and isinstance(asked["slicers"], list)
 
         moved = json.loads(post(f"{url}/api/printers/default", {"profile": "prusa_mk4s"})[2])
         assert [p["name"] for p in moved["printers"]] == ["prusa_mk4s", "bambu_p1s"]

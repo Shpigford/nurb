@@ -110,11 +110,19 @@ export interface Slicer {
   path: string
 }
 
-/** Everything the printer surfaces read: the bench, the catalogue, the slicer. */
+/** Everything the printer surfaces read: the bench, the catalogue, the slicers. */
 export interface Workshop {
   printers: PrinterProfile[]
   catalogue: PrinterCatalogueEntry[]
-  slicer: Slicer | null
+  /** Every slicer app found, including ones that only open files. */
+  slicers: Slicer[]
+  /** The slicer app a part for the asked-about printer opens in. */
+  opener: Slicer | null
+}
+
+/** A slicer's name as people write it. */
+export function slicerName(name: string): string {
+  return name === "BambuStudio" ? "Bambu Studio" : name
 }
 
 export interface Project {
@@ -263,8 +271,8 @@ export function slicePart(partId: string): Promise<SliceResult> {
   return post(partUrl(partId, "slice"), {})
 }
 
-export function fetchPrinters(): Promise<Workshop> {
-  return get("/api/printers")
+export function fetchPrinters(printer?: string | null): Promise<Workshop> {
+  return get(printer ? `/api/printers?printer=${encodeURIComponent(printer)}` : "/api/printers")
 }
 
 export function addPrinter(profile: string): Promise<Workshop> {

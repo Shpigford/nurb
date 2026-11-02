@@ -7,6 +7,7 @@ two numbers from the files a slicer leaves behind.
 """
 
 import json
+import os
 import pathlib
 from types import SimpleNamespace
 
@@ -398,6 +399,47 @@ def test_a_hyphenated_linux_command_and_share_tree_are_found(tmp_path, monkeypat
     assert slicing.vendors(found) == profiles
 
 
+def _fake_slicer(root, name, machines):
+    """An unpacked-AppImage layout: the executable beside resources/profiles."""
+    exe = root / name / name
+    exe.parent.mkdir(parents=True)
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    folder = root / name / "resources" / "profiles" / "Vendor" / "machine"
+    folder.mkdir(parents=True)
+    for machine in machines:
+        (folder / f"{machine} 0.4 nozzle.json").write_text("{}")
+    return exe
+
+
+def test_the_slicer_that_carries_the_printer_wins(tmp_path, monkeypatch):
+    """Bambu Studio ships two Prusas, so finding it first must not fail an MK4S that
+    the other installed slicer can slice (#263)."""
+    first = _fake_slicer(tmp_path, "SlicerA", ["Prusa MINI"])
+    second = _fake_slicer(tmp_path, "SlicerB", ["Prusa MINI", "Prusa MK4S"])
+    monkeypatch.setenv("PATH", f"{first.parent}{os.pathsep}{second.parent}")
+    search = ("SlicerA", "SlicerB")
+    assert slicing.app(search=search, printer="Prusa MK4S") == second
+    assert slicing.app(search=search, printer="Prusa MINI") == first
+    # Nobody carries it: the first one, so its error names the missing machine.
+    assert slicing.app(search=search, printer="Voron 2.4") == first
+
+
+def test_a_prusa_opens_in_prusaslicer_and_everything_else_in_the_slicer_that_has_it(monkeypatch):
+    bambu = pathlib.Path("/Applications/BambuStudio.app/Contents/MacOS/BambuStudio")
+    prusa = pathlib.Path("/Applications/PrusaSlicer.app")
+    monkeypatch.setattr(slicing, "installed", lambda: [("BambuStudio", bambu), ("PrusaSlicer", prusa)])
+    monkeypatch.setattr(slicing, "app", lambda search=None, printer=None: bambu)
+    assert slicing.opener("Prusa MK4S", "Prusa") == ("PrusaSlicer", prusa)
+    assert slicing.opener("Bambu Lab X1 Carbon", "Bambu Lab") == ("BambuStudio", bambu)
+    # PrusaSlicer alone still opens a Bambu part: it is the slicer that is here.
+    monkeypatch.setattr(slicing, "installed", lambda: [("PrusaSlicer", prusa)])
+    monkeypatch.setattr(slicing, "app", lambda search=None, printer=None: None)
+    assert slicing.opener("Bambu Lab X1 Carbon", "Bambu Lab") == ("PrusaSlicer", prusa)
+    monkeypatch.setattr(slicing, "installed", lambda: [])
+    assert slicing.opener("Prusa MK4S", "Prusa") is None
+
+
 def test_a_print_over_a_day_keeps_its_days():
     """Dropping the unit would not fail, it would report 28 hours as four."""
     assert slicing._clock("1d 4h 20m 12s") == 102_012
@@ -499,11 +541,11 @@ def test_the_overrides_land_in_the_process_profile_alone(tmp_path):
 
 
 def test_the_kit_says_what_a_bare_3mf_is_missing(tmp_path, monkeypatch):
-    monkeypatch.setattr(slicing, "app", lambda search=None: None)
+    monkeypatch.setattr(slicing, "app", lambda search=None, printer=None: None)
     kit, why = slicing.kit(tmp_path)
     assert kit is None and "no slicer" in why
 
-    monkeypatch.setattr(slicing, "app", lambda search=None: tmp_path / "slicer")
+    monkeypatch.setattr(slicing, "app", lambda search=None, printer=None: tmp_path / "slicer")
     kit, why = slicing.kit(tmp_path)  # a slicer but no printer named anywhere
     assert kit is None and "no printer" in why
 
@@ -511,7 +553,7 @@ def test_the_kit_says_what_a_bare_3mf_is_missing(tmp_path, monkeypatch):
 def test_the_kit_reason_is_one_line(tmp_path, monkeypatch):
     """A missing machine explains itself over several lines; the kit keeps the first (#301)."""
     (tmp_path / "printer.toml").write_text('profile = "prusa_mk4s"\n')
-    monkeypatch.setattr(slicing, "app", lambda search=None: tmp_path / "slicer")
+    monkeypatch.setattr(slicing, "app", lambda search=None, printer=None: tmp_path / "slicer")
     monkeypatch.setattr(slicing, "vendors", lambda exe: tmp_path)
 
     def missing(bundle, name):
@@ -521,3 +563,81 @@ def test_the_kit_reason_is_one_line(tmp_path, monkeypatch):
     kit, why = slicing.kit(tmp_path)
     assert kit is None
     assert why == "this slicer has no profile for 'Prusa MK4S'."
+
+
+# --- PrusaSlicer ---------------------------------------------------------------
+# One INI holds Prusa's whole bundle, and a preset inherits from a list of parents.
+
+PRUSA_INI = """
+[printer_model:MK4S]
+default_materials = Prusament PLA @MK4S HF0.4; Generic PLA @MK4S HF0.4; Generic PETG @MK4S HF0.4
+
+[printer:*common*]
+binary_gcode = 1
+nozzle_diameter = 0.6
+default_print_profile = 0.15mm QUALITY @MK4S 0.4
+
+[printer:*mk4s*]
+printer_model = MK4S
+nozzle_diameter = 0.5
+
+[printer:Original Prusa MK4S 0.4 nozzle]
+inherits = *common*; *mk4s*
+nozzle_diameter = 0.4
+default_filament_profile = "Prusament PLA @MK4S"
+
+[print:0.15mm QUALITY @MK4S 0.4]
+layer_height = 0.15
+
+[print:0.20mm QUALITY @MK4S 0.4]
+layer_height = 0.2
+
+[filament:Generic PLA @MK4S]
+filament_type = PLA
+
+[filament:Generic PETG @MK4S HF0.4]
+filament_type = PETG
+"""
+
+
+def _fake_prusa(tmp_path, footer):
+    """A PrusaSlicer bundle whose executable writes a G-code ending in `footer`."""
+    exe = tmp_path / "PrusaSlicer.app" / "Contents" / "MacOS" / "PrusaSlicer"
+    exe.parent.mkdir(parents=True)
+    exe.write_text(
+        "#!/bin/sh\n"
+        'while [ "$1" != "--output" ]; do shift; done\n'
+        f"printf '; estimated printing time (normal mode) = 1h 2m 3s\\n; filament used [g] = 8.92\\n%s' > \"$2\"\n"
+        % footer
+    )
+    exe.chmod(0o755)
+    profiles = tmp_path / "PrusaSlicer.app" / "Contents" / "Resources" / "profiles"
+    profiles.mkdir(parents=True)
+    (profiles / "PrusaResearch.ini").write_text(PRUSA_INI)
+    return exe
+
+
+def test_prusa_parents_apply_left_to_right_and_the_preset_wins(tmp_path):
+    exe = _fake_prusa(tmp_path, "")
+    (_, printer), (process, _), (material, _) = slicing.prusa_presets(exe, "Original Prusa MK4S 0.4 nozzle")
+    assert printer["nozzle_diameter"] == "0.4" and printer["printer_model"] == "MK4S"
+    # The default print at the asked layer, and the generic filament for this nozzle,
+    # not the HF one the model's material list happens to name first.
+    assert process == "0.20mm QUALITY @MK4S 0.4"
+    assert material == "Generic PLA @MK4S"
+    # PETG has no generic for this nozzle, so the model's own list answers.
+    *_, (petg, _) = slicing.prusa_presets(exe, "Original Prusa MK4S 0.4 nozzle", filament="PETG")
+    assert petg == "Generic PETG @MK4S HF0.4"
+    with pytest.raises(slicing.Unavailable, match="no printer profile 'Original Prusa XL'"):
+        slicing.prusa_presets(exe, "Original Prusa XL")
+
+
+def test_prusa_totals_are_read_past_the_config_dump(tmp_path):
+    """PrusaSlicer prints its totals and then several thousand config lines."""
+    exe = _fake_prusa(tmp_path, "; some_setting = 1\\n" * 3000)
+    presets = slicing.prusa_presets(exe, "Original Prusa MK4S 0.4 nozzle")
+    model = tmp_path / "part.stl"
+    model.write_text("solid part\nendsolid part\n")
+    (seconds, grams), out = slicing.prusa_run(model, tmp_path / "part.gcode", exe, presets)
+    assert (seconds, grams) == (3723, 8.92)
+    assert out.is_file() and not (tmp_path / ".part.slicing").exists()

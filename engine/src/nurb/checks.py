@@ -1295,7 +1295,7 @@ def printer_line(root, name=None):
 # a rule reads. Named once because `_apply` deliberately refuses a key the Context does
 # not have, which is what catches a typo, and an exclusion spelled in two places is how
 # that protection quietly stops covering one of them.
-NOT_SETTINGS = ("slicer", "label", "brand")
+NOT_SETTINGS = ("slicer", "prusaslicer", "label", "brand")
 
 
 def machine_only(block):
