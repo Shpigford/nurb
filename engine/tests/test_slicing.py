@@ -506,3 +506,18 @@ def test_the_kit_says_what_a_bare_3mf_is_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(slicing, "app", lambda search=None: tmp_path / "slicer")
     kit, why = slicing.kit(tmp_path)  # a slicer but no printer named anywhere
     assert kit is None and "no printer" in why
+
+
+def test_the_kit_reason_is_one_line(tmp_path, monkeypatch):
+    """A missing machine explains itself over several lines; the kit keeps the first (#301)."""
+    (tmp_path / "printer.toml").write_text('profile = "prusa_mk4s"\n')
+    monkeypatch.setattr(slicing, "app", lambda search=None: tmp_path / "slicer")
+    monkeypatch.setattr(slicing, "vendors", lambda exe: tmp_path)
+
+    def missing(bundle, name):
+        raise slicing.Unavailable(f"this slicer has no profile for {name!r}.\n  It has: others.")
+
+    monkeypatch.setattr(slicing, "machine", missing)
+    kit, why = slicing.kit(tmp_path)
+    assert kit is None
+    assert why == "this slicer has no profile for 'Prusa MK4S'."

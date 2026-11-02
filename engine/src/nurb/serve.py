@@ -1274,7 +1274,8 @@ def _routes(conn, lock, server, token, pid):
             }
             if note:
                 # What the 3MF carries besides geometry, for the note under the button.
-                headers["X-Nurb-Print-Settings"] = note
+                # A header is one line, and a slicer's reason can run to several.
+                headers["X-Nurb-Print-Settings"] = " ".join(note.split())
             return Response(body, media_type=EXPORTS[fmt], headers=headers)
 
         return await acted(work)

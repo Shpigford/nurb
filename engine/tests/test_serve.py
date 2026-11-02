@@ -1672,3 +1672,14 @@ def test_a_build_that_hits_a_locked_database_is_tried_again(tmp_path, monkeypatc
 
     assert len(calls) == 2
     assert serve.next_unbuilt(conn) is None
+
+
+def test_a_3mf_downloads_when_the_slicer_lacks_the_printer(home):
+    """The slicer's reason runs to several lines, and a header holds only one (#301)."""
+    project_id, part_id = a_slab()
+    with serving(home, free_port()) as url:
+        post(f"{url}/api/projects/{project_id}/printer", {"profile": "prusa_mk4s"})
+        status, headers, body = post(f"{url}/api/parts/{part_id}/export", {"format": "3mf"})
+        assert status == 200
+        assert body[:2] == b"PK"
+        assert headers["X-Nurb-Print-Settings"]
