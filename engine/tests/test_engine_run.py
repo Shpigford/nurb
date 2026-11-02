@@ -106,6 +106,16 @@ def test_a_raising_part_reports_the_users_own_frame(conn, monkeypatch, tmp_path)
     assert 'parts/broken.py"' in first[1]
 
 
+def test_a_raising_part_still_offers_its_sliders(conn, monkeypatch, tmp_path):
+    monkeypatch.setenv("NURB_HOME", str(tmp_path / "home"))
+    project_id = db.create_project(conn, "scratchpad")
+    part = db.create_part(conn, project_id, "broken", BROKEN)
+    run_id, result = engine_run.run_build(conn, part)
+
+    assert [p["name"] for p in result["params"]] == ["width"]
+    assert json.loads(run_row(conn, run_id)["params"]) == result["params"]
+
+
 def test_a_refused_part_has_no_traceback(conn, monkeypatch, tmp_path):
     monkeypatch.setenv("NURB_HOME", str(tmp_path / "home"))
     project_id = db.create_project(conn, "scratchpad")

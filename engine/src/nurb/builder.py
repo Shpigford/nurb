@@ -8,8 +8,6 @@ import time
 import numpy as np
 import trimesh
 
-from .registry import Rejected
-
 
 class BuildError(Exception):
     pass
@@ -148,10 +146,10 @@ def build(path, overrides=None, draft=False):
     started = time.perf_counter()
     try:
         shape = fn(**call)
-    except Rejected as exc:
-        # A refused build still needs to describe the attempted values: they are the
-        # controls the parameter panel offers to get back into the part's valid range.
-        exc.params = params
+    except Exception as exc:
+        # A refused or broken build still needs to describe the attempted values: they
+        # are the controls the parameter panel offers to get back to a part that builds.
+        exc._nurb_params = params
         raise
     elapsed = (time.perf_counter() - started) * 1000
     if shape is None:

@@ -64,9 +64,6 @@ class Rejected(Exception):
     def __init__(self, message, param=None):
         super().__init__(message)
         self.param = param
-        # Filled by the builder before this crosses the server boundary. Keeping the
-        # attempted values lets a fresh viewer render the controls needed to recover.
-        self.params = None
 
 
 def reject(message, param=None):

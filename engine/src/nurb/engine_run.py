@@ -81,11 +81,12 @@ def _build_in_process(
         result["params"] = params
     except registry.Rejected as exc:
         result["error"] = str(exc)
-        result["params"] = exc.params or []
+        result["params"] = getattr(exc, "_nurb_params", [])
         return result
     except BaseException as exc:
         result["error"] = f"{type(exc).__name__}: {exc}"
         result["traceback"] = _user_traceback(exc, path)
+        result["params"] = getattr(exc, "_nurb_params", [])
         return result
 
     ctx, card_error = _context(root, path, profile, params)
