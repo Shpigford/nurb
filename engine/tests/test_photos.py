@@ -30,14 +30,7 @@ def conn(tmp_path, monkeypatch):
 
 def noise(width, height, mode="RGB"):
     rng = random.Random(width * height)
-    image = Image.new(mode, (width, height))
-    image.putdata(
-        [
-            tuple(rng.randrange(256) for _ in range(len(mode)))
-            for _ in range(width * height)
-        ]
-    )
-    return image
+    return Image.frombytes(mode, (width, height), rng.randbytes(width * height * len(mode)))
 
 
 def encoded(width, height, fmt):
