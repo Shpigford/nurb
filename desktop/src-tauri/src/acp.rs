@@ -1617,9 +1617,13 @@ pub async fn set_chat_config(
     let kind = AgentKind::parse(&agent)?;
     app.state::<PrefStore>()
         .remember(kind.id(), &category, &value);
-    // The driver passes the model at spawn, so a pick lands on the next
-    // session rather than the running one.
+    // The driver passes both picks at spawn. The model also switches the
+    // running child, so the menu never names a model this chat is not on.
     if kind == AgentKind::Claude {
+        let driver = session_id.and_then(|id| app.state::<crate::claude::Drivers>().get(&id));
+        if let (Some(driver), "model") = (driver, category.as_str()) {
+            driver.set_model(&value).await?;
+        }
         return Ok(crate::claude::config_rows(&app.state::<PrefStore>()));
     }
     let live = session_id.and_then(|id| {
