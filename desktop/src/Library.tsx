@@ -37,7 +37,7 @@ import {
   type Project,
   type ProjectSummary,
 } from "@nurb/workbench/api";
-import { folders, sortParts, titleCase, type LibrarySort } from "./parts";
+import { folders, matchesSearch, sortParts, titleCase, type LibrarySort } from "./parts";
 
 const SORTS: Record<LibrarySort, string> = { built: "Last built", name: "Name" };
 const SORT_KEY = "nurb.librarySort";
@@ -207,8 +207,7 @@ export default function Library({
   };
 
   const shown = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const found = needle ? parts.filter((p) => p.name.toLowerCase().includes(needle)) : parts;
+    const found = query.trim() ? parts.filter((p) => matchesSearch(p, query)) : parts;
     return sortParts(found, sort);
   }, [parts, query, sort]);
 

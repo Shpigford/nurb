@@ -47,6 +47,12 @@ type Sortable = { name: string; title?: string | null; build?: { finished_at: st
 const cardName = (part: Sortable) => part.title ?? titleCase(part.name);
 const builtAt = (part: Sortable) => part.build?.finished_at ?? "";
 
+/** Search reads the name on the card as well as the slug, so "reward chart" finds reward_chart. */
+export function matchesSearch(part: Sortable, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  return [part.name, cardName(part)].some((name) => name.toLowerCase().includes(needle));
+}
+
 /** Newest build first, never-built last; or by the name on the card. */
 export function sortParts<T extends Sortable>(parts: T[], sort: LibrarySort): T[] {
   return [...parts].sort((a, b) =>

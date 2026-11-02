@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { folders, messagesForPart, moveTargets, sortParts } from "../src/parts.ts";
+import { folders, matchesSearch, messagesForPart, moveTargets, sortParts } from "../src/parts.ts";
 import type { Message } from "@nurb/ui";
 import type { LibraryPart, ProjectSummary } from "@nurb/workbench/api";
 
@@ -70,4 +70,15 @@ test("the library sorts by newest build, or by the name on the card", () => {
   ];
   assert.deepEqual(sortParts(parts, "built").map((p) => p.name), ["mid", "zeta", "alpha"]);
   assert.deepEqual(sortParts(parts, "name").map((p) => p.name), ["alpha", "mid", "zeta"]);
+});
+
+test("search matches the name on the card as well as the slug", () => {
+  const chart = { name: "reward_chart", title: null };
+  assert.ok(matchesSearch(chart, "reward chart"));
+  assert.ok(matchesSearch(chart, "Reward Chart"));
+  assert.ok(matchesSearch(chart, "reward_chart"));
+  assert.ok(!matchesSearch(chart, "bracket"));
+  const named = { name: "part_3", title: "Sticker sheet" };
+  assert.ok(matchesSearch(named, "sticker"));
+  assert.ok(matchesSearch(named, "part_3"));
 });
