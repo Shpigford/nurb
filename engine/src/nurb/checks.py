@@ -1736,9 +1736,13 @@ def min_wall(shape, ctx):
             if near * 0.3 < ctx.min_wall:
                 # The sphere starts from the first boundary crossing rather than from
                 # the accepted chord, because half of that is guaranteed to sit inside
-                # the material, and the shrink only ever moves down from there.
+                # the material, and the shrink only ever moves down from there. Signed,
+                # because the axis is a whole line: across a gap, the gap's far side
+                # comes back as a hit behind the probe.
                 first = min(
-                    (hit - point).length for hit, _ in hits if (hit - point).length > floor
+                    ahead
+                    for hit, _ in hits
+                    if (ahead := (hit - point).dot(inward)) > floor
                 )
                 section = _sphere_at(shape, point, normal, first)
                 if section is not None and floor < section < near:
