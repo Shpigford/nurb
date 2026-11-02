@@ -112,6 +112,18 @@ impl Session {
             "type": "user",
             "message": { "role": "user", "content": content },
         });
+        self.write_line(line).await?;
+        wait.await
+            .map_err(|_| "Claude stopped unexpectedly".to_string())?
+    }
+
+    /// Switches the running child, so the picker never names a model this
+    /// chat is not on. The CLI takes it between turns or mid-turn alike.
+    pub(crate) async fn set_model(&self, model: &str) -> Result<(), String> {
+        self.write_line(set_model_line(model)).await
+    }
+
+    async fn write_line(&self, line: Value) -> Result<(), String> {
         let mut stdin = self.stdin.lock().await;
         stdin
             .write_all(format!("{line}\n").as_bytes())
@@ -120,10 +132,7 @@ impl Session {
         stdin
             .flush()
             .await
-            .map_err(|e| format!("Claude stopped listening: {e}"))?;
-        drop(stdin);
-        wait.await
-            .map_err(|_| "Claude stopped unexpectedly".to_string())?
+            .map_err(|e| format!("Claude stopped listening: {e}"))
     }
 
     /// SIGINT: measured on 2.1.272, the CLI answers with an
@@ -133,6 +142,16 @@ impl Session {
         self.stopped.store(true, Ordering::SeqCst);
         self.signal(libc::SIGINT);
     }
+}
+
+/// The CLI's own control request. "default" is an alias it understands, and
+/// resets the child to the plan's default model.
+pub(crate) fn set_model_line(model: &str) -> Value {
+    serde_json::json!({
+        "type": "control_request",
+        "request_id": uuid::Uuid::new_v4().to_string(),
+        "request": { "subtype": "set_model", "model": model },
+    })
 }
 
 /// More text than this would crowd out the conversation it was attached to.
@@ -661,7 +680,8 @@ fn drain_stderr(stderr: Option<tokio::process::ChildStderr>) {
 }
 
 /// The driver's picker: the model and how hard it thinks, both passed at
-/// spawn, so a pick lands on the next session.
+/// spawn. A model pick also switches the running child; thinking waits for
+/// the next session.
 pub(crate) fn config_rows(prefs: &PrefStore) -> Vec<ConfigRow> {
     let chosen = prefs.chosen(AgentKind::Claude.id());
     let pick = |category: &str| {
@@ -693,7 +713,7 @@ pub(crate) fn config_rows(prefs: &PrefStore) -> Vec<ConfigRow> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_current, map_line, spawn, spawn_args, user_content, Signal};
+    use super::{is_current, map_line, set_model_line, spawn, spawn_args, user_content, Signal};
     use serde_json::Value;
 
     const STREAM: &str = include_str!("../tests/fixtures/claude-stream.jsonl");
@@ -792,6 +812,18 @@ mod tests {
         assert!(is_current("2.2.0"));
         assert!(is_current("2.1.272"));
         assert!(!is_current("2.0.9"));
+    }
+
+    /// The shape 2.1.316 answers with a success and the new model on the
+    /// next turn: issue #303, where the menu moved and the chat did not.
+    #[test]
+    fn a_model_pick_is_a_control_request_to_the_running_child() {
+        let line = set_model_line("haiku");
+        assert_eq!(line["type"], "control_request");
+        assert_eq!(line["request"]["subtype"], "set_model");
+        assert_eq!(line["request"]["model"], "haiku");
+        assert!(line["request_id"].as_str().is_some_and(|id| !id.is_empty()));
+        assert_ne!(line["request_id"], set_model_line("haiku")["request_id"]);
     }
 
     #[test]
