@@ -182,8 +182,8 @@ describe("sliders", () => {
     vi.useRealTimers()
 
     // The refusal renders after the response body is read; a loaded CI runner has
-    // missed the default one-second window, so wait for the request first.
-    await waitFor(() => expect(sent("/params")).toHaveLength(1))
+    // missed the default one-second window for both the request and the sentence.
+    await waitFor(() => expect(sent("/params")).toHaveLength(1), { timeout: 5000 })
     expect(
       await screen.findByText("build lid once before changing its parameters", {}, { timeout: 5000 })
     ).toBeInTheDocument()
