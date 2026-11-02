@@ -4,11 +4,12 @@
 # in printer.toml, never per card. What a part has justified (its min_wall, its
 # accepted slivers) stays on its card next to the sentence explaining why.
 #
-# Every key must be a field of checks.Context, with three exceptions. `slicer` is what
+# Every key must be a field of checks.Context, with four exceptions. `slicer` is what
 # this machine is called in a slicer's own vendor bundle, which slicing needs and no
-# rule does. `label` is what a person calls it, and `brand` groups the picker. They
-# live here so a machine is described in one place. Sizes are manufacturer-published
-# build volumes in mm, X x Y x Z.
+# rule does, and `prusaslicer` is its printer preset in PrusaSlicer's, whose names
+# follow no pattern code could derive. `label` is what a person calls it, and `brand`
+# groups the picker. They live here so a machine is described in one place. Sizes are
+# manufacturer-published build volumes in mm, X x Y x Z.
 
 [bambu_x1c]
 bed = [256.0, 256.0, 256.0]
@@ -81,18 +82,21 @@ brand = "Bambu Lab"
 [prusa_mk4s]
 bed = [250.0, 210.0, 220.0]
 slicer = "Prusa MK4S"
+prusaslicer = "Original Prusa MK4S 0.4 nozzle"
 label = "Prusa MK4S"
 brand = "Prusa"
 
 [prusa_mini]
 bed = [180.0, 180.0, 180.0]
 slicer = "Prusa MINI"
+prusaslicer = "Original Prusa MINI & MINI+ Input Shaper"
 label = "Prusa MINI"
 brand = "Prusa"
 
 [prusa_xl]
 bed = [360.0, 360.0, 360.0]
 slicer = "Prusa XL"
+prusaslicer = "Original Prusa XL Input Shaper 0.4 nozzle"
 label = "Prusa XL"
 brand = "Prusa"
 

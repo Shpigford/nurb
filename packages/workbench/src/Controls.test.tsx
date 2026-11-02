@@ -248,7 +248,8 @@ const BENCH = {
     { name: "prusa_mk4", label: "Prusa MK4", brand: "Prusa", bed: [250, 210, 220] },
     { name: "ender_3", label: "Creality Ender 3", brand: "Creality", bed: [220, 220, 250] },
   ],
-  slicer: { name: "OrcaSlicer", path: "/Applications/OrcaSlicer.app" },
+  slicers: [{ name: "OrcaSlicer", path: "/Applications/OrcaSlicer.app" }],
+  opener: { name: "OrcaSlicer", path: "/Applications/OrcaSlicer.app" },
 }
 
 describe("print time", () => {

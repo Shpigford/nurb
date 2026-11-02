@@ -24,6 +24,7 @@ import {
   fetchPrinters,
   removePrinter,
   setDefaultPrinter,
+  slicerName,
   type Workshop,
 } from "@nurb/workbench/api";
 import { connectCommands, maskToken } from "./connect";
@@ -75,10 +76,13 @@ type Props = {
   onClose: () => void;
 };
 
-// The slicer's path is a path; the person recognises the folder it sits in.
+// The slicer's path is a path; the person recognises the folder it sits in. For a Mac
+// app that is the folder holding the .app, not the bundle's own MacOS folder.
 function folderOf(path: string): string {
   const parts = path.split("/").filter(Boolean);
-  return parts.length > 1 ? parts[parts.length - 2] : path;
+  const app = parts.findIndex((part) => part.endsWith(".app"));
+  const at = app > 0 ? app - 1 : parts.length - 2;
+  return at >= 0 ? parts[at] : path;
 }
 
 // A section title and the line under it, the pair every block on this screen opens with.
@@ -400,15 +404,20 @@ export default function Settings({
                   <div className="flex items-start justify-between gap-6">
                     <div className="flex min-w-0 flex-col gap-1">
                       <span className="font-mono text-[10px] leading-4 tracking-[0.08em] text-muted uppercase">
-                        Slicer
+                        Slicers
                       </span>
-                      {workshop?.slicer ? (
-                        <span className="flex items-center gap-1.5 font-mono text-[11px] leading-4 text-ink">
-                          <span className="text-pass">
-                            <Icon name="check" />
+                      {workshop?.slicers.length ? (
+                        workshop.slicers.map((found) => (
+                          <span
+                            key={found.path}
+                            className="flex items-center gap-1.5 font-mono text-[11px] leading-4 text-ink"
+                          >
+                            <span className="text-pass">
+                              <Icon name="check" />
+                            </span>
+                            {slicerName(found.name)} · in {folderOf(found.path)}
                           </span>
-                          {workshop.slicer.name} · in {folderOf(workshop.slicer.path)}
-                        </span>
+                        ))
                       ) : (
                         <span className="flex items-center gap-1.5 font-mono text-[11px] leading-4 text-ink">
                           <span className="text-warn">
@@ -418,9 +427,10 @@ export default function Settings({
                         </span>
                       )}
                     </div>
-                    {workshop?.slicer ? (
+                    {workshop?.slicers.length ? (
                       <p className="w-[240px] shrink-0 text-right text-[12px] leading-4 text-muted">
-                        Weight and print time come from here. Without it, downloads still work.
+                        Each printer uses the slicer that has its profile, for weight, print time and Open in
+                        slicer. Prusa printers use PrusaSlicer.
                       </p>
                     ) : (
                       <button
@@ -430,7 +440,7 @@ export default function Settings({
                         }
                         className="chrome w-[240px] shrink-0 text-right text-[12px] leading-4 text-muted underline underline-offset-2 transition-colors hover:text-ink"
                       >
-                        Install OrcaSlicer and weight and print time appear. Downloads work either way.
+                        Install OrcaSlicer, or PrusaSlicer for a Prusa, and weight and print time appear. Downloads work either way.
                       </button>
                     )}
                   </div>

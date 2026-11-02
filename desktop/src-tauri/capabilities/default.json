@@ -24,6 +24,10 @@
         {
           "path": "$DOWNLOAD/**",
           "app": "OrcaSlicer"
+        },
+        {
+          "path": "$DOWNLOAD/**",
+          "app": "PrusaSlicer"
         }
       ]
     },

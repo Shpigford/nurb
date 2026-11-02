@@ -44,6 +44,7 @@ import {
   renameLabel,
   renamePart,
   setLabel,
+  slicerName,
   type ApplyResult,
   type PartBuild,
   type Project,
@@ -475,24 +476,25 @@ export default function PartView({
     return [...shown, { key: "label-draft", point: draft.point, node: editor }]
   }, [partId, part?.labels, draft])
 
-  // The slicer the engine found, as the app name macOS opens files with. One that
+  // The slicer this part's printer opens in, as the app name macOS opens files with.
+  // It follows the printer, so a Prusa opens in PrusaSlicer when it is here. One that
   // came off PATH rather than out of an .app has nothing to open, so no row.
+  const printerName = project?.printer?.name ?? null
   const [slicer, setSlicer] = useState<{ name: string; app: string } | null>(null)
   useEffect(() => {
     if (!onOpenInSlicer) return
     let live = true
-    fetchPrinters()
+    fetchPrinters(printerName)
       .then((workshop) => {
-        const app = workshop.slicer?.path.match(/([^/]+)\.app\//)?.[1]
-        if (live && workshop.slicer && app) {
-          setSlicer({ name: workshop.slicer.name === "BambuStudio" ? "Bambu Studio" : workshop.slicer.name, app })
-        }
+        if (!live) return
+        const app = workshop.opener?.path.match(/([^/]+)\.app(\/|$)/)?.[1]
+        setSlicer(workshop.opener && app ? { name: slicerName(workshop.opener.name), app } : null)
       })
       .catch(() => {})
     return () => {
       live = false
     }
-  }, [onOpenInSlicer])
+  }, [onOpenInSlicer, printerName])
 
   const openInSlicer = useCallback(async () => {
     if (!part || !slicer || !onOpenInSlicer) return

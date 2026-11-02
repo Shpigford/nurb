@@ -90,34 +90,211 @@ def tuned(shape, ctx=None):
     return settings, notes
 
 
-def app(search=None):
+def app(search=None, printer=None):
     """The installed slicer's executable, or None.
 
-    macOS keeps it in a bundle. Linux uses a command, an AppImage on PATH, or one of
-    the two official Flatpaks. A Flatpak is returned as its command prefix; `run`
-    appends the slicing arguments in exactly the same way it does for an executable.
+    With `printer`, the first installed slicer whose bundle carries that machine,
+    because Bambu Studio ships two Prusas and OrcaSlicer ships them all: picking by
+    install order alone would fail a print that the other slicer on the same Mac could
+    have sliced. When none carries it, the first one found, so the error it raises
+    names the machine rather than claiming no slicer exists.
     """
-    for name in search or SLICERS:
-        bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
-        if bundle.is_file():
-            return bundle
-        for command in COMMANDS.get(name, (name, name.lower())):
-            found = shutil.which(command)
-            if found:
-                return pathlib.Path(found)
-        # AppImage filenames carry a version, so `which` cannot name one exactly.
-        # Looking only on PATH keeps discovery explicit and bounded.
-        patterns = (f"{name}*.AppImage", f"{name.replace('Studio', '_Studio')}*.AppImage")
-        for folder in os.get_exec_path():
-            for pattern in patterns:
-                for found in sorted(pathlib.Path(folder).glob(pattern)):
-                    if found.is_file() and os.access(found, os.X_OK):
-                        return found
-        app_id = FLATPAKS.get(name)
-        flatpak = shutil.which("flatpak")
-        if app_id and flatpak and any(root.is_dir() for root in _flatpak_roots(app_id)):
-            return (flatpak, "run", app_id)
+    found = [exe for name in search or SLICERS if (exe := _installed(name))]
+    if printer:
+        for exe in found:
+            bundle = vendors(exe)
+            if bundle and any(bundle.glob(f"*/machine/{printer} {NOZZLE} nozzle.json")):
+                return exe
+    return found[0] if found else None
+
+
+def _installed(name):
+    """One slicer's executable: macOS keeps it in a bundle. Linux uses a command, an
+    AppImage on PATH, or one of the two official Flatpaks. A Flatpak is returned as its
+    command prefix; `run` appends the slicing arguments in exactly the same way it does
+    for an executable.
+    """
+    bundle = pathlib.Path(f"/Applications/{name}.app/Contents/MacOS/{name}")
+    if bundle.is_file():
+        return bundle
+    for command in COMMANDS.get(name, (name, name.lower())):
+        found = shutil.which(command)
+        if found:
+            return pathlib.Path(found)
+    # AppImage filenames carry a version, so `which` cannot name one exactly.
+    # Looking only on PATH keeps discovery explicit and bounded.
+    patterns = (f"{name}*.AppImage", f"{name.replace('Studio', '_Studio')}*.AppImage")
+    for folder in os.get_exec_path():
+        for pattern in patterns:
+            for found in sorted(pathlib.Path(folder).glob(pattern)):
+                if found.is_file() and os.access(found, os.X_OK):
+                    return found
+    app_id = FLATPAKS.get(name)
+    flatpak = shutil.which("flatpak")
+    if app_id and flatpak and any(root.is_dir() for root in _flatpak_roots(app_id)):
+        return (flatpak, "run", app_id)
     return None
+
+
+# PrusaSlicer speaks a different CLI and keeps its profiles as INI bundles, so it never
+# slices here. It is still the slicer a Prusa owner has tuned, so a part for a Prusa
+# opens in it. Prusa's own installer puts it inside a folder of its drivers.
+PRUSA = (
+    pathlib.Path("/Applications/PrusaSlicer.app"),
+    pathlib.Path("/Applications/Original Prusa Drivers/PrusaSlicer.app"),
+)
+
+
+def installed():
+    """Every slicer app on this Mac, as (name, bundle path), for the settings list."""
+    found = []
+    for name in SLICERS:
+        exe = _installed(name)
+        if exe is not None:
+            found.append((name, exe))
+    prusa = next((b for b in PRUSA if (b / "Contents" / "MacOS" / "PrusaSlicer").is_file()), None)
+    if prusa:
+        found.append(("PrusaSlicer", prusa))
+    return found
+
+
+def opener(printer=None, brand=None):
+    """The slicer app a part for this machine should open in, as (name, path), or None.
+
+    A Prusa opens in PrusaSlicer when it is here, which is the brand's own slicer and
+    the one its owner has tuned. Anything else opens in the slicer that carries the
+    machine, so the settings the 3MF embeds came from the same slicer reading it.
+    """
+    have = installed()
+    prusa = next((entry for entry in have if entry[0] == "PrusaSlicer"), None)
+    if brand == "Prusa" and prusa:
+        return prusa
+    engine = app(printer=printer)
+    return next((entry for entry in have if entry[1] == engine), None) or prusa
+
+
+def prusaslicer():
+    """PrusaSlicer's executable, or None."""
+    for name, path in installed():
+        if name == "PrusaSlicer":
+            return path / "Contents" / "MacOS" / "PrusaSlicer"
+    return None
+
+
+# What `tuned` decides, in PrusaSlicer's own key names. The values already agree.
+PRUSA_KEYS = {
+    "sparse_infill_pattern": "fill_pattern",
+    "sparse_infill_density": "fill_density",
+    "wall_loops": "perimeters",
+    "brim_type": "brim_type",
+    "brim_width": "brim_width",
+}
+
+
+def _prusa_bundle(exe):
+    """Prusa's own vendor bundle: one INI holding every printer, print and filament."""
+    bundle = pathlib.Path(exe).parent.parent / "Resources" / "profiles" / "PrusaResearch.ini"
+    return bundle if bundle.is_file() else None
+
+
+def _ini(path):
+    """`[kind:name]` sections as {(kind, name): {key: value}}."""
+    sections, current = {}, None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        head = re.match(r"^\[(\w+):(.+)\]\s*$", line)
+        if head:
+            current = sections.setdefault((head[1], head[2]), {})
+        elif current is not None and "=" in line and not line.lstrip().startswith("#"):
+            key, value = line.split("=", 1)
+            current[key.strip()] = value.strip()
+    return sections
+
+
+def _prusa_flat(sections, kind, name, seen=()):
+    """One complete preset. `inherits` lists parents left to right, later ones winning,
+    and the preset's own keys win over all of them, which is PrusaSlicer's own order."""
+    if name in seen:
+        raise Unavailable(f"PrusaSlicer profile inheritance loops at {name!r}")
+    if (kind, name) not in sections:
+        raise Unavailable(f"PrusaSlicer has no {kind} profile {name!r}")
+    own = dict(sections[(kind, name)])
+    full = {}
+    for parent in filter(None, (p.strip() for p in own.pop("inherits", "").split(";"))):
+        full.update(_prusa_flat(sections, kind, parent, (*seen, name)))
+    full.update(own)
+    return full
+
+
+def prusa_presets(exe, preset, layer="0.20", filament="PLA"):
+    """The printer, print and filament PrusaSlicer slices this machine with.
+
+    Returns three (name, settings) pairs. The print is the printer's own default at
+    `layer`, and the filament is the generic one Prusa tunes for this printer's nozzle,
+    found through the suffix its default filament carries (`@MK4S`), because a
+    generic profile is what a spool from any shop prints with.
+    """
+    bundle = _prusa_bundle(exe)
+    if bundle is None:
+        raise Unavailable("found PrusaSlicer but not its Prusa profiles")
+    sections = _ini(bundle)
+    printer = _prusa_flat(sections, "printer", preset)
+    default = printer.get("default_print_profile", "")
+    at_layer = re.sub(r"^\d\.\d+mm", f"{layer}mm", default)
+    process = at_layer if ("print", at_layer) in sections else default
+    stock = printer.get("default_filament_profile", "").strip('"')
+    suffix = stock.split("@", 1)[1] if "@" in stock else None
+    model = sections.get(("printer_model", printer.get("printer_model", "")), {})
+    offered = [m.strip().strip('"') for m in model.get("default_materials", "").split(";")]
+    wanted = [f"Generic {filament} @{suffix}", f"Prusament {filament} @{suffix}"] if suffix else []
+    wanted += [m for m in offered if re.search(rf"(?<![\w-]){re.escape(filament)}(?![\w-])", m)]
+    material = next((m for m in wanted if ("filament", m) in sections), None)
+    if material is None:
+        raise Unavailable(f"PrusaSlicer ships no {filament} profile for {preset!r}")
+    return (
+        (preset, printer),
+        (process, _prusa_flat(sections, "print", process)),
+        (material, _prusa_flat(sections, "filament", material)),
+    )
+
+
+def prusa_run(model, target, exe, presets, settings=None, timeout=None):
+    """Slice one model with PrusaSlicer, and return ((seconds, grams), path) like `run`.
+
+    Each preset is flattened into its own file and loaded in order, so nothing in the
+    person's own PrusaSlicer setup is read or changed; the scratch `--datadir` is what
+    keeps it that way. Binary G-code is off because the totals are read as text.
+    """
+    target = pathlib.Path(target)
+    out_dir = target.parent / f".{target.stem}.slicing"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    shutil.rmtree(out_dir, ignore_errors=True)
+    out_dir.mkdir(parents=True)
+    try:
+        loads = []
+        for kind, (_, data) in zip(("printer", "print", "filament"), presets):
+            data = {k: v for k, v in data.items() if not k.startswith("compatible_")}
+            if kind == "printer":
+                data["binary_gcode"] = "0"
+            if kind == "print" and settings:
+                data.update({PRUSA_KEYS[k]: v for k, v in settings.items() if k in PRUSA_KEYS})
+            full = out_dir / f"{kind}.ini"
+            full.write_text("".join(f"{k} = {v}\n" for k, v in data.items()), encoding="utf-8")
+            loads += ["--load", str(full)]
+        done = subprocess.run(
+            [str(exe), "--datadir", str(out_dir / "data"), *loads, "--export-gcode", "--output", str(target), str(model)],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        if done.returncode != 0 or not target.is_file():
+            raise Unavailable(f"PrusaSlicer refused this model: {_why(done, out_dir)}")
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
+    # PrusaSlicer writes its totals ahead of a long config dump, past where `_tail` reads.
+    tail = _tail(target, 65536)
+    said = PRUSA_TIME.search(tail)
+    return ((_clock(said[1]) if said else None), _grams(tail)), target
 
 
 def vendors(exe):
@@ -361,13 +538,13 @@ def kit(root):
     """
     from . import checks
 
-    exe = app()
-    if exe is None:
+    if app() is None:
         return None, "no slicer installed to write print settings"
     try:
         wanted, _ = checks.slicer_name(root)
         if not wanted:
             return None, "no printer named in printer.toml to tune settings for"
+        exe = app(printer=wanted)
         bundle = vendors(exe)
         if bundle is None:
             return None, f"found {label(exe)} but not its profile bundle"
@@ -484,6 +661,7 @@ def _why(done, out_dir):
 
 
 TIME = re.compile(r"total estimated time: ([^;\n]+)")
+PRUSA_TIME = re.compile(r"estimated printing time \(normal mode\) = ([^\n]+)")
 LENGTH = re.compile(r"total filament length \[mm\] ?: ?([\d.]+)")
 WEIGHT = re.compile(r"total filament weight \[g\] ?: ?([\d.]+)")
 # Orca on a Bambu machine writes no total weight line, only the per-extruder block:
