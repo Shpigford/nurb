@@ -210,6 +210,9 @@ export default function PartView({
   const paramsSeq = useRef(0)
   const paramsTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const paramsAbort = useRef<AbortController | null>(null)
+  // A drag the server has not answered yet. While it is out, a run landing is the
+  // drag's own, or older, and must not pull the thumb back under the pointer.
+  const paramsPending = useRef(false)
 
   const parts = project?.parts ?? []
   const part = parts.find((p) => p.name === partName) ?? parts[0] ?? null
@@ -269,6 +272,7 @@ export default function PartView({
     paramsSeq.current += 1
     paramsAbort.current?.abort()
     if (paramsTimer.current) clearTimeout(paramsTimer.current)
+    paramsPending.current = false
     setValues(part?.overrides ?? {})
     setNote(null)
     setBuildError(null)
@@ -277,6 +281,13 @@ export default function PartView({
     // price it just reported and leave the readouts disagreeing with the row.
     setSliceStatus(seedStatus(part?.build?.slice))
   }, [projectId, part?.name])
+
+  // A chat edit, a shared setting or a measurement rebuilds the part at its own
+  // values, so the sliders follow the run on screen. Otherwise a download would
+  // send the old numbers onto the new shape, or a parameter that no longer exists.
+  useEffect(() => {
+    if (!paramsPending.current) setValues(part?.overrides ?? {})
+  }, [runId])
 
   // A rebuild queued by the last drag is about a part nobody is looking at any more,
   // so the timer and the request leave with the view.
@@ -302,7 +313,10 @@ export default function PartView({
       if ((failure as Error | null)?.name === "AbortError" || seq !== paramsSeq.current) return
       setBuildError(failure instanceof Error ? failure.message : "The rebuild did not finish.")
     } finally {
-      if (seq === paramsSeq.current) setBuilding(false)
+      if (seq === paramsSeq.current) {
+        paramsPending.current = false
+        setBuilding(false)
+      }
     }
   }, [])
 
@@ -311,10 +325,12 @@ export default function PartView({
       setValues(next)
       setNote(null)
       const partId = part?.id
-      if (!partId) return
+      const changed = Object.keys({ ...values, ...next }).filter((key) => values[key] !== next[key])
+      // Nothing moved, so there is nothing to build or slice.
+      if (!partId || changed.length === 0) return
+      paramsPending.current = true
       if (paramsTimer.current) clearTimeout(paramsTimer.current)
       // The wait is for a drag settling; a switch is one click, so it builds at once.
-      const changed = Object.keys({ ...values, ...next }).filter((key) => values[key] !== next[key])
       const flipped = changed.length > 0 && changed.every((key) => typeof (next[key] ?? values[key]) === "boolean")
       paramsTimer.current = setTimeout(() => void sendParams(partId, next), flipped ? 0 : DEBOUNCE_MS)
     },

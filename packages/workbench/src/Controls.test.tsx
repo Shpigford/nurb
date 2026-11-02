@@ -92,6 +92,22 @@ describe("sliders", () => {
     expect(sent("/params")[0].body).toEqual({ values: { ribs: 6, wall: 3 } })
   })
 
+  it("builds nothing when a number field is clicked and left unchanged", async () => {
+    // Issue #304: the rebuild also started a slice and turned the view.
+    state = withPart({ params: [{ name: "wall", kind: "float", default: 2 }], overrides: { wall: 3 } })
+    install({ "POST /api/parts/part-lid/params": () => ({ build: base.build }) })
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByLabelText("wall value")).toHaveValue("3"))
+    const field = screen.getByLabelText("wall value")
+    vi.useFakeTimers()
+    fireEvent.focus(field)
+    fireEvent.blur(field)
+    act(() => void vi.advanceTimersByTime(1000))
+    vi.useRealTimers()
+    expect(sent("/params")).toHaveLength(0)
+  })
+
   it("cues once when a rebuild the user watched comes back passing", async () => {
     state = withPart({ params: [{ name: "wall", kind: "float", default: 2 }] })
     install({ "POST /api/parts/part-lid/params": () => ({ build: base.build }) })
@@ -378,6 +394,24 @@ describe("download", () => {
 
     await waitFor(() => expect(clicked).toHaveLength(1))
     expect(clicked[0].download).toBe("lid.3mf")
+    expect(sent("/export")[0].body).toEqual({ format: "3mf", values: {} })
+    click.mockRestore()
+  })
+
+  it("downloads the values the newest build used, after someone else rebuilt the part", async () => {
+    state = withPart({ params: [{ name: "wall", kind: "float", default: 2 }], overrides: { wall: 3 } })
+    install({ "POST /api/parts/part-lid/export": () => new Response("3mf bytes") })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    render(<App />)
+    await waitFor(() => expect(screen.getByLabelText("wall value")).toHaveValue("3"))
+
+    // The chat edit removed the parameter and rebuilt at the source defaults.
+    state = withPart({ params: [], overrides: {}, build: { ...base.build!, id: "b2" } })
+    FakeSocket.instances[0].emit({ kind: "build", id: "b2", project_id: "p2" })
+    await waitFor(() => expect(screen.queryByLabelText("wall value")).not.toBeInTheDocument())
+
+    await userEvent.click(await screen.findByRole("button", { name: "Download 3MF" }))
+    await waitFor(() => expect(sent("/export")).toHaveLength(1))
     expect(sent("/export")[0].body).toEqual({ format: "3mf", values: {} })
     click.mockRestore()
   })

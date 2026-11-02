@@ -234,6 +234,20 @@ describe("ParamsPanel", () => {
     fireEvent(field, pointer("pointerup", 128))
   })
 
+  it("commits nothing when the field leaves with the number it already had", () => {
+    // Issue #304: a click in and out rebuilt the part, and with a printer set, sliced it.
+    const onChange = vi.fn()
+    render(<ParamsPanel params={params} values={{}} onChange={onChange} onApply={vi.fn()} />)
+    const field = screen.getByLabelText("width value")
+
+    fireEvent.focus(field)
+    fireEvent.blur(field)
+    fireEvent.change(field, { target: { value: "40.0" } })
+    fireEvent.keyDown(field, { key: "Enter" })
+    expect(onChange).not.toHaveBeenCalled()
+    expect(field).toHaveValue("40")
+  })
+
   it("does not scrub on a plain click or a caret nudge", () => {
     render(<Host onApply={vi.fn()} />)
     const field = screen.getByLabelText("width value")
