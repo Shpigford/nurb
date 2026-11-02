@@ -411,6 +411,7 @@ export default function Library({
                     <input
                       autoFocus
                       aria-label={`Rename ${summary.name}`}
+                      maxLength={100}
                       value={draft}
                       onChange={(e) => setDraft(e.target.value)}
                       onClick={(e) => e.stopPropagation()}

@@ -102,7 +102,7 @@ The model leaderboard (tasks, scorer, runner, and every submitted run) lives in 
 
 ### This file is for developing nurb, not for using it
 
-The part-design workflow (open the workbench first thing, end every reply with its URL, model while the user watches) is the agent-facing guidance the MCP server ships: its `instructions` and the `read_guide` tool. It applies in a user's parts project, never in this repo. Here you are building the tool. When verifying workbench or serve changes, run `uv run python -m nurb.serve` in the background, import `examples/notch`, and share the URL for that; `?part=<name>&variant=<name>` deep-links to the exact configuration you want looked at.
+The part-design workflow (open the workbench first thing, end every reply with its URL, model while the user watches) is the agent-facing guidance the MCP server ships: its `instructions` and the `read_guide` tool. It applies in a user's parts project, never in this repo. Here you are building the tool. When verifying workbench or serve changes, run `NURB_HOME=<scratch dir> uv run python -m nurb.serve` in the background, import `examples/notch`, and share the URL for that; `?part=<name>&variant=<name>` deep-links to the exact configuration you want looked at. Never run a serve, a test probe or a review against the default home: that is the user's real library, and a dev import or a junk project left there shows up in their sidebar.
 
 ### Every feature gets a surface in the app
 

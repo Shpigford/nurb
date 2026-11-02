@@ -1123,6 +1123,17 @@ def test_renaming_a_project_keeps_its_parts_where_they_are(home):
         assert blank.value.code == 400
         assert json.loads(blank.value.read())["error"] == "name must be what to call the project"
 
+        # A runaway name once filled a sidebar row with nothing but an ellipsis.
+        for send in (
+            lambda: patch(f"{url}/api/projects/{imported['id']}", {"name": "x" * 101}),
+            lambda: post(f"{url}/api/projects", {"name": "x" * 101}),
+        ):
+            with pytest.raises(urllib.error.HTTPError) as long:
+                send()
+            assert long.value.code == 400
+            assert json.loads(long.value.read())["error"] == "name can be at most 100 characters"
+        assert len(json.loads(get(f"{url}/api/projects")[2])["projects"]) == 1
+
         with pytest.raises(urllib.error.HTTPError) as gone:
             patch(f"{url}/api/projects/nosuchproject", {"name": "Shelf"})
         assert gone.value.code == 404

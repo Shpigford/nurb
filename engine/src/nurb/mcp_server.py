@@ -501,6 +501,8 @@ def _placeholder_name(conn):
 
 def create_project(conn, args, base_url):
     name = (args.get("name") or "").strip() or _placeholder_name(conn)
+    if len(name) > db.NAME_LIMIT:
+        raise Refused(f"name can be at most {db.NAME_LIMIT} characters")
     project_id = db.create_project(conn, name)
     _record(conn, project_id, "create_project", args.get("note"), f"created project {name}")
     return _ok({"id": project_id, "name": name})

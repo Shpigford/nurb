@@ -89,6 +89,7 @@ export default function ProjectPicker({
             autoFocus
             value={name}
             placeholder="Project name"
+            maxLength={100}
             onChange={(e) => setName(e.target.value)}
             className="mono-value h-8 min-w-0 flex-1 rounded-[3px] border border-line bg-ground px-2 uppercase text-ink focus:border-panel-edge focus:outline-none"
           />

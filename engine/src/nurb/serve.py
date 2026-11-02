@@ -885,12 +885,15 @@ def _routes(conn, lock, server, token, pid):
         payload = await query(work)
         return payload if isinstance(payload, Response) else JSONResponse(payload)
 
-    def word(sent, key, said):
+    def word(sent, key, said, most=None):
         """One string a route was sent. Anything else is the sentence it names."""
         value = sent.get(key)
         if value is not None and not isinstance(value, str):
             raise _Refused(400, said)
-        return (value or "").strip()
+        value = (value or "").strip()
+        if most is not None and len(value) > most:
+            raise _Refused(400, f"{key} can be at most {most} characters")
+        return value
 
     async def body_of(request):
         try:
@@ -906,7 +909,7 @@ def _routes(conn, lock, server, token, pid):
         sent = await body_of(request)
 
         def work(conn):
-            name = word(sent, "name", "name must be what to call the project") or mcp_server._placeholder_name(conn)
+            name = word(sent, "name", "name must be what to call the project", db.NAME_LIMIT) or mcp_server._placeholder_name(conn)
             folder = sent.get("folder", False)
             if not isinstance(folder, bool):
                 raise _Refused(400, "folder must be true for a folder of parts, false for one part")
@@ -1038,7 +1041,7 @@ def _routes(conn, lock, server, token, pid):
 
         def work(conn):
             project_id = request.path_params["project_id"]
-            name = word(sent, "name", "name must be what to call the project")
+            name = word(sent, "name", "name must be what to call the project", db.NAME_LIMIT)
             if not name:
                 raise _Refused(400, "name must be what to call the project")
             if db.get_project(conn, project_id) is None:
@@ -1155,7 +1158,7 @@ def _routes(conn, lock, server, token, pid):
 
         def work(conn):
             project_id = request.path_params["project_id"]
-            name = word(sent, "name", "name must be what to call the folder")
+            name = word(sent, "name", "name must be what to call the folder", db.NAME_LIMIT)
             if not name:
                 raise _Refused(400, "name must be what to call the folder")
             if db.get_project(conn, project_id) is None:
