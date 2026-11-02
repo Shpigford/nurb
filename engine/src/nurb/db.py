@@ -356,6 +356,10 @@ def measurement_names(source):
     return found
 
 
+# A name is a label in a sidebar row, never a paragraph.
+NAME_LIMIT = 100
+
+
 def create_project(conn, name, printer_toml=None, folder=False):
     project_id = new_id()
     with transaction(conn):
