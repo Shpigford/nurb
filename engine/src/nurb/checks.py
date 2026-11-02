@@ -9,7 +9,7 @@ see each other, and `run` gathers them.
 
 import pathlib
 from dataclasses import dataclass, field, replace
-from math import asin, atan2, cos, degrees, pi, sin
+from math import asin, atan2, cos, degrees, pi, sin, sqrt
 
 from build123d import Axis, CenterOf, GeomType, Plane, Vector
 
@@ -494,18 +494,24 @@ def _fits_rotated(shape, bed, up=None):
 
 
 def _reach(face, up):
-    """How far a face protrudes, which is the smallest of its horizontal extents.
+    """How far a face protrudes: the smallest of its horizontal extents, or its width
+    as a strip if that is smaller.
 
     What makes an unsupported ledge droop is how far out it goes, not how much of it
     there is. A 0.5mm ledge prints cleanly at any length, which is why raised lettering
-    is not a hundred overhang failures.
+    is not a hundred overhang failures. The extents alone miss a ledge that turns a
+    corner: a lip wrapped round a block is 20mm across both ways and 0.5mm wide (issue
+    #295). A strip of width w and length L has area wL and perimeter 2(L + w), which
+    solves for w, exactly for a rectangle and for a strip bent any way.
     """
     across = [
         _span(face, axis)[1] - _span(face, axis)[0]
         for axis in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1))
         if abs(axis.dot(up)) < 0.9
     ]
-    return min(across) if across else 0.0
+    half = sum(e.length for e in face.edges()) / 2
+    strip = (half - sqrt(max(0.0, half * half - 4 * face.area))) / 2
+    return min(across + [strip]) if across else 0.0
 
 
 # Height over stance width past which first-layer adhesion is holding a lever and a
@@ -609,9 +615,12 @@ def _bridged(solid, face, up, ctx):
     reports a channel roof and a shelf underside as the same problem.
 
     Both sides get probed just outside the face and just below it, which is the same
-    containment test the convexity work was checked against.
+    containment test the convexity work was checked against. A side also holds when
+    material sits just above the face's top there: a rounded slot's roof runs on into
+    its arches, so past the roof's end is air below and the arch above (issue #295).
     """
     below = face.center() - up * PROBE
+    over = up * (_span(face, up)[1] + PROBE - below.dot(up))
     best = None
     for axis in (Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1)):
         if abs(axis.dot(up)) > 0.9:
@@ -622,7 +631,12 @@ def _bridged(solid, face, up, ctx):
             below + axis * (low - here - PROBE),
             below + axis * (high - here + PROBE),
         ]
-        if all(solid.is_inside((p.X, p.Y, p.Z)) for p in ends):
+        held = [
+            solid.is_inside((p.X, p.Y, p.Z)) or solid.is_inside((q.X, q.Y, q.Z))
+            for p in ends
+            for q in [p + over]
+        ]
+        if all(held):
             reach = high - low
             best = reach if best is None else min(best, reach)
     return best
