@@ -90,12 +90,12 @@ def post_mcp(url, body, token=None):
 
 
 @contextlib.contextmanager
-def serving(home, port=None):
+def serving(home, port=None, command=SERVE):
     """A serve on `port`, or on whatever it picks for itself when none is asked for."""
     log = home / "test-serve.log"
     with open(log, "w", encoding="utf-8") as sink:
         proc = subprocess.Popen(
-            [*SERVE, *(["--port", str(port)] if port else [])],
+            [*command, *(["--port", str(port)] if port else [])],
             env={**os.environ, "NURB_HOME": str(home)},
             stdout=sink,
             stderr=sink,
@@ -872,6 +872,48 @@ def test_a_slice_of_a_part_that_is_not_there_is_a_sentence(home):
             post(f"{url}/api/parts/nosuchpart/slice", {})
         assert missing.value.code == 404
         assert json.loads(missing.value.read())["error"] == "no such part"
+
+
+# A serve whose slicer takes five seconds and is found without one being installed.
+SLOW_SLICER = [
+    sys.executable,
+    "-c",
+    """
+import pathlib, runpy, sys, time
+from nurb import slicing
+def run(model, target, *args, **kwargs):
+    time.sleep(5)
+    return (3600, 12.0), pathlib.Path(target)
+slicing.app = lambda search=None: pathlib.Path("/slow/OrcaSlicer")
+slicing.vendors = lambda exe: pathlib.Path("/slow")
+slicing.machine = lambda bundle, name: pathlib.Path("/slow/machine.json")
+slicing.profiles_for = lambda *a: (pathlib.Path("/slow/process.json"), pathlib.Path("/slow/pla.json"))
+slicing.run = run
+sys.argv = ["nurb.serve", *sys.argv[1:]]
+runpy.run_module("nurb.serve", run_name="__main__")
+""",
+]
+
+
+def test_a_slice_in_flight_leaves_the_server_free(home):
+    """Every build starts a slice, and a slicer can take minutes. A slider drag or a
+    chat write that waits behind it looks like a frozen app (issue #296)."""
+    import threading
+
+    project_id, part_id = a_slab()
+    with serving(home, free_port(), command=SLOW_SLICER) as url:
+        post(f"{url}/api/projects/{project_id}/printer", {"profile": "bambu_x1c"})
+        sliced = {}
+        slicing = threading.Thread(
+            target=lambda: sliced.update(json.loads(post(f"{url}/api/parts/{part_id}/slice", {})[2]))
+        )
+        slicing.start()
+        time.sleep(1.5)  # the slice is under way
+        started = time.monotonic()
+        get(f"{url}/api/projects/{project_id}")
+        assert time.monotonic() - started < 2
+        slicing.join()
+        assert sliced["kind"] == "slice" and sliced["seconds"] == 3600
 
 
 def test_a_refusal_about_a_broken_part_is_one_sentence(home):

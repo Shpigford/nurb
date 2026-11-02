@@ -862,6 +862,8 @@ def _routes(conn, lock, server, token, pid):
 
         return await anyio.to_thread.run_sync(go)
 
+    one_slicer = threading.Lock()
+
     async def read(sql, args):
         return await query(lambda conn: conn.execute(sql, args).fetchall())
 
@@ -1334,23 +1336,30 @@ def _routes(conn, lock, server, token, pid):
                 model, _, _ = engine_run.export_part(conn, part["id"], "stl", overrides=overrides)
             except ValueError as exc:
                 return {"kind": "build", "error": str(exc)}
-            with tempfile.TemporaryDirectory() as scratch:
-                stl = pathlib.Path(scratch) / f"{part['name']}.stl"
+            return part["name"], run["id"], model, exe, machine, process, filament, profile
+
+        prepared = await query(work)
+        if isinstance(prepared, dict):
+            return JSONResponse(prepared)
+        name, run_id, model, exe, machine, process, filament, profile = prepared
+
+        def sliced():
+            from . import slicing
+
+            # Outside the server lock, because a slicer can take minutes and every build
+            # starts one; one at a time, because two would fight over the same cores.
+            with one_slicer, tempfile.TemporaryDirectory() as scratch:
+                stl = pathlib.Path(scratch) / f"{name}.stl"
                 stl.write_bytes(model)
                 try:
                     (seconds, grams), _ = slicing.run(
-                        stl,
-                        pathlib.Path(scratch) / f"{part['name']}.gcode",
-                        machine,
-                        process,
-                        filament,
-                        exe,
+                        stl, pathlib.Path(scratch) / f"{name}.gcode", machine, process, filament, exe
                     )
                 except slicing.Unavailable as exc:
                     return {"kind": "build", "error": str(exc)}
                 except Exception as exc:
                     return {"kind": "build", "error": f"{type(exc).__name__}: {exc}"}
-            payload = {
+            return {
                 "kind": "slice",
                 "seconds": seconds,
                 "spoken": slicing.spoken(seconds),
@@ -1361,10 +1370,19 @@ def _routes(conn, lock, server, token, pid):
                 "profile": profile,
                 "settings": f"{profile} / {process.stem} / {filament.stem} / {slicing.PLATE}",
             }
-            db.set_run_result(conn, run["id"], "slice", payload)
-            return {**payload, "run_id": run["id"]}
 
-        return await acted(work)
+        payload = await anyio.to_thread.run_sync(sliced)
+        if payload["kind"] != "slice":
+            return JSONResponse(payload)
+
+        def save(conn):
+            try:
+                db.set_run_result(conn, run_id, "slice", payload)
+            except ValueError as exc:  # the part went away while its slicer ran
+                return {"kind": "build", "error": str(exc)}
+            return {**payload, "run_id": run_id}
+
+        return await acted(save)
 
     async def printers_read(request):
         """The workshop: the machines here, everything that could be, and the slicer."""
