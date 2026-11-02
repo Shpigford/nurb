@@ -9558,16 +9558,17 @@ const L0 = X.out;
 function Qy({
   open: e = !0,
   revision: t,
-  shownRevision: n
+  shownRevision: n,
+  error: i
 }) {
-  const i = J();
+  const s = J();
   return /* @__PURE__ */ c(pe, { children: e ? /* @__PURE__ */ x(
     B.div,
     {
       initial: { opacity: 0, y: -8 },
       animate: { opacity: 1, y: 0 },
       exit: { opacity: 0, y: -8 },
-      transition: { duration: i ? 0 : z.settle, ease: L0 },
+      transition: { duration: s ? 0 : z.settle, ease: L0 },
       className: "flex items-start gap-2 bg-fail-wash px-4 py-2.5",
       children: [
         /* @__PURE__ */ c("span", { className: "mt-0.5 shrink-0 text-fail", children: /* @__PURE__ */ c(j, { name: "warning" }) }),
@@ -9576,12 +9577,12 @@ function Qy({
             Bt(t),
             " failed at these values"
           ] }),
+          i ? /* @__PURE__ */ c("span", { className: "text-chat text-ink", children: i }) : null,
           n != null ? /* @__PURE__ */ x("span", { className: "text-chat text-ink-soft", children: [
             "Showing ",
             Bt(n).toLowerCase(),
             ", the last one that built."
-          ] }) : null,
-          /* @__PURE__ */ c("span", { className: "text-chat text-muted", children: "That one didn't survive the checks. It didn't cost you a part either." })
+          ] }) : null
         ] })
       ]
     }

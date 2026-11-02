@@ -10,8 +10,11 @@ describe("BuildFailed", () => {
     expect(screen.getByText("REV 05 failed at these values")).toBeTruthy()
     expect(screen.getByText("Showing rev 04, the last one that built.")).toBeTruthy()
     expect((container.firstElementChild as HTMLElement).className).toContain("bg-fail-wash")
-    // A failed build is the one place the tone has to carry, so the banner says what it cost.
-    expect(screen.getByText("That one didn't survive the checks. It didn't cost you a part either.")).toBeTruthy()
+  })
+
+  it("says what went wrong, whatever kind of failure it was", () => {
+    render(<BuildFailedBanner revision={1} error="RuntimeError: the sketch is missing a line" />)
+    expect(screen.getByText("RuntimeError: the sketch is missing a line")).toBeTruthy()
   })
 
   it("goes back up on its own when the error clears", async () => {

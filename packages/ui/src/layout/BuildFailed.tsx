@@ -16,11 +16,14 @@ export function BuildFailedBanner({
   open = true,
   revision,
   shownRevision,
+  error,
 }: {
   /** False sends the banner back up the way it came. */
   open?: boolean
   revision: number
   shownRevision?: number | null
+  /** The failure's own last line, so the reason sits under the headline whatever raised it. */
+  error?: string | null
 }) {
   const reduced = useReducedMotion()
   return (
@@ -38,14 +41,12 @@ export function BuildFailedBanner({
           </span>
           <span className="flex flex-col gap-1">
             <span className="mono-label text-fail">{rev(revision)} failed at these values</span>
+            {error ? <span className="text-chat text-ink">{error}</span> : null}
             {shownRevision != null ? (
               <span className="text-chat text-ink-soft">
                 Showing {rev(shownRevision).toLowerCase()}, the last one that built.
               </span>
             ) : null}
-            <span className="text-chat text-muted">
-              That one didn't survive the checks. It didn't cost you a part either.
-            </span>
           </span>
         </motion.div>
       ) : null}

@@ -649,6 +649,7 @@ export default function PartView({
                 open={failedBuild}
                 revision={part?.revision ?? 0}
                 shownRevision={build?.shown_revision ?? null}
+                error={failedBuild && build?.error ? lastLine(build.error) : null}
               />
               <ParamsPanel
                 params={draggable}
@@ -659,7 +660,8 @@ export default function PartView({
                 applying={applying}
                 stats={stats}
                 measurements={project?.measurements}
-                error={buildError ?? (failedBuild && build?.error ? lastLine(build.error) : null)}
+                // While the banner is open it carries the reason; this is for a rebuild that never answered.
+                error={failedBuild ? null : buildError}
                 note={note}
               />
             </>
