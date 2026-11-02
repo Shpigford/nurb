@@ -119,8 +119,19 @@ def test_non_ascii_earlier_on_the_line_does_not_shift_the_offsets():
     assert out == source.replace("count=4", "count=6")
 
 
+def test_a_switch_is_written_as_true_or_false():
+    """Issue #299: Save as default skipped a switch, so the source kept the old value."""
+    source = "from nurb import *\n\n\n@part\ndef lid(closed=False, wall=2.0):\n    return wall\n"
+    out, written, skipped = edit.apply_to_source(source, {"closed": True, "wall": 3})
+    assert written == ["closed", "wall"] and skipped == []
+    assert out == source.replace("closed=False", "closed=True").replace("wall=2.0", "wall=3.0")
+    back, written, _ = edit.apply_to_source(out, {"closed": False})
+    assert written == ["closed"] and back == source.replace("wall=2.0", "wall=3.0")
+
+
 def test_a_default_that_is_a_literal_but_not_a_number_says_what_it_is():
-    """"Change False itself" is advice about nothing: a literal has no source to edit."""
-    out, written, skipped = edit.apply_to_source(SOURCE, {"draft": True})
-    assert out == SOURCE and written == []
-    assert skipped == [("draft", "defaults to False, which is not a number.")]
+    """"Change 'flat' itself" is advice about nothing: a literal has no source to edit."""
+    source = "from nurb import *\n\n\n@part\ndef thing(style='flat'):\n    return 1\n"
+    out, written, skipped = edit.apply_to_source(source, {"style": "round"})
+    assert out == source and written == []
+    assert skipped == [("style", "defaults to 'flat', which is not a number or a switch.")]

@@ -54,8 +54,17 @@ def _number(node):
     return None
 
 
+def _literal(node):
+    """A default the sliders can write: a number, or a switch written as True or False."""
+    if isinstance(node, ast.Constant) and type(node.value) is bool:
+        return node.value
+    return _number(node)
+
+
 def _format(old, new):
     """Written the way it was written: an int stays an int, a float stays a float."""
+    if isinstance(old, bool):
+        return str(bool(new))
     if isinstance(old, int) and float(new).is_integer():
         return str(int(new))
     # A slider lands on 0.30000000000000004, which is not a dimension anyone chose.
@@ -87,7 +96,7 @@ def apply_to_source(source, values):
         node = defaults.get(name)
         if node is None:
             raise EditError(f"this part has no parameter named {name}")
-        old = _number(node)
+        old = _literal(node)
         if old is None:
             # A default written as a name or a call is a value with a source. Replacing
             # it with a literal keeps the number and throws away the only record of
@@ -97,7 +106,7 @@ def apply_to_source(source, values):
             if isinstance(node, ast.Constant):
                 # A literal has no source to change, so "change it itself" would be
                 # advice about nothing. Say what it is instead.
-                skipped.append((name, f"defaults to {written}, which is not a number."))
+                skipped.append((name, f"defaults to {written}, which is not a number or a switch."))
             else:
                 skipped.append((name, f"defaults to {written}. Change {written} itself."))
             continue
@@ -112,9 +121,9 @@ def apply_to_source(source, values):
         out = _splice(out, node, text)
 
     # This rewrites someone's source, so it checks its own work before handing it back:
-    # it still parses, and every default it touched reads back as the number it wrote.
+    # it still parses, and every default it touched reads back as the value it wrote.
     check = _defaults(_part_function(ast.parse(out), "the part"))
     for name, _, text in edits:
-        if _number(check[name]) != float(text):
+        if ast.get_source_segment(out, check[name]) != text:
             raise EditError(f"rewriting {name} did not come out right")
     return out, sorted(name for name, _, _ in edits), skipped

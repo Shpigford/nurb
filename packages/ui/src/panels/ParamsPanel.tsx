@@ -211,11 +211,14 @@ export function NumberRow({
   const commitText = () => {
     editing.current = false
     const parsed = Number(text)
-    if (text.trim() === "" || !Number.isFinite(parsed)) {
+    const next = int ? Math.round(parsed) : parsed
+    // Blur is a commit, so clicking in and out would rebuild the part, and slice it,
+    // at the number it already had.
+    if (text.trim() === "" || !Number.isFinite(parsed) || next === value) {
       setText(formatValue(value, int, step))
       return
     }
-    onValue(int ? Math.round(parsed) : parsed)
+    onValue(next)
   }
 
   // The grid is passed in, never read at the time of the move: a gesture that
