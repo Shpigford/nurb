@@ -116,16 +116,23 @@ def _fins(seated, height):
     footing = sum(f.center().X * f.area for f in bed) / sum(f.area for f in bed)
     s = 1.0 if seated.center(CenterOf.MASS).X >= footing else -1.0
 
-    # The lean line u(z) = c + m*z, fitted mid-part where the silhouette is the lean
+    # The lean face tops out where the part reaches furthest out; above that the part
+    # turns back in. A long bar reaches out near its top, a cube at its outer corner,
+    # at or below mid-height, so the fin is fitted and sized to that, not the height.
+    far = bb.max.X if s > 0 else bb.min.X
+    rim = seated & Pos(far - s * 0.025, 0, 0) * Box(0.05, 10000, 10000)
+    reach = min(height, rim.bounding_box().min.Z)
+
+    # The lean line u(z) = c + m*z, fitted mid-face where the silhouette is the lean
     # face itself rather than whatever bulk sits near the bed.
-    z1, z2 = 0.45 * height, 0.65 * height
+    z1, z2 = 0.45 * reach, 0.65 * reach
     u1, u2 = _underside(seated, s, z1), _underside(seated, s, z2)
     m = max((u2 - u1) / (z2 - z1), 0.0)
     c = u1 - m * z1
     # The fin foot starts beyond whatever the part puts near the bed, grip lumps
     # included, so the blade breaks away instead of fusing into them.
     start = max(c + GAP, _underside(seated, s, PAD_THICK) + GAP)
-    rise = FIN_RISE * height
+    rise = FIN_RISE * reach
     lip = min((start - c - GAP) / m if m > 0 else 0.0, rise * 0.5)
 
     def at(u, z):

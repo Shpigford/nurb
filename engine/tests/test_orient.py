@@ -87,3 +87,13 @@ def test_degenerate_tilts_are_refused():
         stand(Box(10, 10, 10), facet=0)
     with pytest.raises(ValueError, match="horizontal rotation axis"):
         stand(Box(10, 10, 10), axis=Axis.Z)
+
+
+@pytest.mark.parametrize("tilt", [30, 45, 60])
+def test_fins_on_a_chunky_part_join_it(tilt):
+    """Issue #298: a cube's lean face ends at its outer corner, at or below mid-height,
+    so fins fitted to the middle of the part missed it and came back as loose pieces."""
+    stood = stand(Box(40, 40, 40), tilt=tilt)
+    assert stood.bounding_box().size.Z > 40
+    assert len(stood.solids()) == 1
+    assert stood.volume > stand(Box(40, 40, 40), tilt=tilt, fins=False).volume
