@@ -15,6 +15,7 @@ import os
 import pathlib
 import secrets
 import signal
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -1720,7 +1721,8 @@ def build_unbuilt(wake, stop):
     and the page's reads must not wait on it. The warm worker builds one part at a
     time anyway, so a build somebody asked for waits behind one of these at most. A
     failed build still leaves its run row, and `tried` covers a build that raised
-    before writing one, so no revision is attempted twice.
+    before writing one, so no revision is attempted twice, unless it raised because
+    another writer held the database.
     """
     conn = db.connect()
     tried = set()
@@ -1744,6 +1746,10 @@ def build_unbuilt(wake, stop):
                     engine_run.run_build(conn, part_id)
                 except Exception as exc:
                     print(f"  background build of {part_id} failed: {exc}", flush=True)
+                    # An import holding the write lock past the busy timeout is not
+                    # the part's fault, so it gets another turn once the lock lifts.
+                    if next_part and getattr(exc, "sqlite_errorcode", None) == sqlite3.SQLITE_BUSY:
+                        tried.discard(revision_id)
     finally:
         conn.close()
 
