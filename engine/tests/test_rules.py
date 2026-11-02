@@ -410,6 +410,26 @@ def test_bridge_limit_is_per_printer():
     assert only(shape, "overhang", Context(bridge_limit=30)) == []
 
 
+def test_rounded_slot_is_the_same_bridge_as_a_square_one():
+    """Issue #295: the slot's roof runs on into its arches, so just past the roof's end
+    there is air below and material above. The square slot, with a wall there, passed."""
+    from build123d import Rectangle, SlotOverall
+
+    for profile in (Rectangle(16, 6), SlotOverall(16, 6)):
+        shape = Box(40, 3, 30) - extrude(Plane.XZ * profile, 10, both=True)
+        assert only(shape, "overhang") == [], profile
+
+
+def test_ledge_wrapped_round_a_block_is_as_short_as_one_side_of_it():
+    """Issue #295: a 0.5mm lip all the way round is a 20mm-wide face, but it sticks out
+    0.5mm, the same as the lip on one side that already passed."""
+    ring = Box(19, 19, 5) + Pos(0, 0, 5) * Box(20, 20, 5)
+    strip = Pos(-0.25, 0, 0) * Box(19.5, 20, 5) + Pos(0, 0, 5) * Box(20, 20, 5)
+    for shape in (ring, strip):
+        assert only(shape, "overhang") == []
+        assert only(shape, "floating") == []
+
+
 def test_cantilever_still_fails_even_though_it_is_also_90_degrees():
     """The distinction the whole rule turns on: same angle, no support on one side."""
     shape = Box(6, 6, 20) + Pos(0, 0, 12) * Box(30, 30, 4)
