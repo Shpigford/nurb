@@ -375,7 +375,7 @@ def kit(root):
         material = (checks.printer(root).material or "PLA").upper()
         process, filament = profiles_for(machine_path, filament=material)
     except (ValueError, Unavailable) as exc:
-        return None, str(exc)
+        return None, str(exc).splitlines()[0]
     return (machine_path, process, filament, exe), None
 
 
