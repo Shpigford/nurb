@@ -50,6 +50,9 @@ import { chatKey } from "./chatColumns";
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
 export const PROJECT_CHAT = "//project";
+// A part being started inside a folder has no name yet. Its turns are stored
+// unnamed and handed to the part once the agent writes it. Twin in acp.rs.
+export const NEW_PART = "//new";
 
 type Permission = { id: number; title: string; options: PermissionOption[] };
 
@@ -257,6 +260,9 @@ function Chat({
   // The sentinel never reaches copy: everywhere the column says its name, it
   // says the name the owner gave it.
   const isProject = part === PROJECT_CHAT;
+  const isNew = part === NEW_PART;
+  // The transcript names a part only once it exists.
+  const stamp = isProject || isNew ? null : part;
   const aboutProject = wholeProject ?? isProject;
   const spoken = subject ?? (isProject ? "this project" : part);
   // Claude runs through the app's own driver, which stores the conversation in
@@ -501,7 +507,7 @@ function Chat({
           if (isClaude) {
             // Drop the streaming copy only once the row exists, or the text
             // blinks out for the refetch's round trip.
-            addMessage(projectId, "assistant", event.text, isProject ? null : part)
+            addMessage(projectId, "assistant", event.text, stamp)
               .then(() =>
                 setItems((list) => applyChatEvent(list, event, Date.now(), seqRef.current)),
               )
@@ -695,7 +701,7 @@ function Chat({
             projectId,
             "user",
             text,
-            isProject ? null : part,
+            stamp,
             files.length ? files.map(basename) : undefined,
           );
           stored = true;
@@ -1129,7 +1135,9 @@ function Chat({
                       ? restoringRef.current
                         ? "Restoring conversation…"
                         : `Starting ${label}…`
-                      : `Describe or change ${spoken}…`
+                      : isNew
+                        ? "Describe the new part…"
+                        : `Describe or change ${spoken}…`
               }
               rows={2}
               disabled={starting}
@@ -1169,7 +1177,9 @@ function Chat({
       <div ref={scrollRef} className="flex flex-col gap-4 px-4 pt-3.5 pb-3">
         {!said && !busy && (
           <p className="text-chat text-muted">
-            {aboutProject
+            {isNew
+              ? `Describe the new part for ${spoken}, and ${label} will model it here. It can use the sizes the other parts in ${spoken} share.`
+              : aboutProject
               ? `This conversation covers every part in ${spoken}. Ask ${label} for a new part, or for a change they should all share.`
               : `You're chatting with ${spoken}. Describe it or ask for changes, and ${label} will model it in the viewer.`}
           </p>

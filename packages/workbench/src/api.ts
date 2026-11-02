@@ -287,6 +287,11 @@ export function addMessage(
   return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, { role, content, part, files })
 }
 
+/** Hand a new part the folder's unnamed turns after `after`, the ones that described it. */
+export function claimMessages(projectId: string, part: string, after: number): Promise<{ claimed: number }> {
+  return post(`/api/projects/${encodeURIComponent(projectId)}/messages/claim`, { part, after })
+}
+
 /** A folder is a project the person named; without one the project holds a single part. */
 export function createProject(name?: string, folder = false): Promise<{ id: string; name: string }> {
   return post("/api/projects", name === undefined ? { folder } : { name, folder })

@@ -1194,6 +1194,39 @@ def test_the_chat_column_can_write_both_sides_of_a_turn(home):
         assert unknown.value.code == 404
 
 
+def test_a_new_part_claims_the_turns_that_described_it(home):
+    from nurb import db
+
+    conn = db.connect()
+    shelves = db.create_project(conn, "shelves", folder=True)
+    conn.close()
+    with serving(home, free_port()) as url:
+        route = f"{url}/api/projects/{shelves}/messages"
+        before = json.loads(post(route, {"role": "user", "content": "about the whole set"})[2])
+        post(route, {"role": "user", "content": "a bin, 40 wide"})
+        post(route, {"role": "assistant", "content": "made the bin"})
+        conn = db.connect()
+        db.create_part(conn, shelves, "bin", SLAB.replace("slab", "bin"))
+        conn.close()
+
+        claim = f"{route}/claim"
+        assert json.loads(post(claim, {"part": "bin", "after": before["sequence_number"]})[2]) == {"claimed": 2}
+        whole = json.loads(get(f"{url}/api/projects/{shelves}")[2])["messages"]
+        # The turn from before the new part was started stays the folder's.
+        assert [(m["content"], m["part"]) for m in whole] == [
+            ("about the whole set", None),
+            ("a bin, 40 wide", "bin"),
+            ("made the bin", "bin"),
+        ]
+
+        with pytest.raises(urllib.error.HTTPError) as unknown:
+            post(claim, {"part": "nope", "after": 0})
+        assert unknown.value.code == 400
+        with pytest.raises(urllib.error.HTTPError) as bad:
+            post(claim, {"part": "bin", "after": "x"})
+        assert bad.value.code == 400
+
+
 def test_a_photo_from_the_chat_is_what_find_photos_sees(home):
     import base64
     import io
