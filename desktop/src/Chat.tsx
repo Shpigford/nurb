@@ -44,7 +44,8 @@ import {
   pruneLanded,
   withNote,
 } from "./chatItems";
-import { AttachmentDraft, restoreDraftText } from "./chatDraft";
+import { AttachmentDraft, restoreDraftText, stashDraft, unstashDraft } from "./chatDraft";
+import { chatKey } from "./chatColumns";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
@@ -400,6 +401,23 @@ function Chat({
     // scroll event away from the end, which unpins and re-arms the pill mid-jump.
     if (pane) pane.scrollTop = pane.scrollHeight;
   };
+
+  // New conversation clears the composer; every other remount keeps it.
+  const discardRef = useRef(false);
+  useEffect(() => {
+    const box = inputRef.current;
+    const key = chatKey(path, part);
+    const draft = unstashDraft(key);
+    if (box && draft.text) {
+      box.value = restoreDraftText(draft.text, box.value);
+      grow();
+    }
+    attachmentDraft.restore(draft.files);
+    return () => {
+      if (discardRef.current) return;
+      stashDraft(key, { text: box?.value ?? "", files: attachmentDraft.current });
+    };
+  }, [path, part, attachmentDraft]);
 
   useEffect(() => {
     // Dev-only test hook: the Rust side forwards loopback-socket text here so
@@ -904,7 +922,10 @@ function Chat({
             section: "Conversation",
             label: "New conversation",
             disabled: busy || starting,
-            onSelect: onFresh,
+            onSelect: () => {
+              discardRef.current = true;
+              onFresh();
+            },
           },
         ]
       : []),
