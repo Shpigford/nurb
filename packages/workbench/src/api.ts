@@ -281,9 +281,10 @@ export function addMessage(
   projectId: string,
   role: "user" | "assistant",
   content: string,
-  part?: string | null
+  part?: string | null,
+  files?: string[]
 ): Promise<Message> {
-  return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, { role, content, part })
+  return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, { role, content, part, files })
 }
 
 /** A folder is a project the person named; without one the project holds a single part. */

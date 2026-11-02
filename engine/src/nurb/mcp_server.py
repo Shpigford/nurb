@@ -1128,10 +1128,10 @@ NO_PHOTOS = (
 
 
 def _photo_rank(rows, query):
-    """Name matches first, database order within each group."""
+    """Name matches first, newest first within each group: the photo just attached."""
     tokens = [token for token in str(query).lower().split() if token]
     hits, rest = [], []
-    for row in rows:
+    for row in reversed(rows):
         stem = pathlib.PurePosixPath(row["name"]).with_suffix("").as_posix().lower()
         (hits if any(token in stem for token in tokens) else rest).append(row)
     return hits + rest

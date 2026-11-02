@@ -622,6 +622,8 @@ async fn agent_sessions(
         .map_err(|error| friendly(kind, error))
 }
 
+const COPY_LIMIT: u64 = 500 * 1024 * 1024;
+
 #[tauri::command]
 pub async fn send_prompt(
     app: tauri::AppHandle,
@@ -639,8 +641,10 @@ pub async fn send_prompt(
             part,
         );
         // The part and the audience live in the CLI's system prompt, set when
-        // the session started, so the turn carries the user's words alone.
-        return driver.prompt(text).await;
+        // the session started, so the turn carries the user's words and files.
+        let content = crate::claude::user_content(text, &attachments)?;
+        remember_photos(&app, &project_key(&driver.project), &attachments).await;
+        return driver.prompt(content).await;
     }
     let (conn, session, project, kind, capture, capture_channel) = {
         let sessions = app.state::<Chats>();
@@ -694,6 +698,7 @@ pub async fn send_prompt(
         blocks.push(attachment_block(std::path::Path::new(path))?);
     }
     blocks.push(ContentBlock::Text(TextContent::new(context)));
+    remember_photos(&app, &project_name, &attachments).await;
     let response = conn
         .send_request(PromptRequest::new(session, blocks))
         .block_task()
@@ -732,37 +737,185 @@ pub async fn send_prompt(
 /// image capability carries; anything else (a mesh, a PDF) becomes a link the
 /// agent reads from disk itself.
 fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .ok_or_else(|| format!("not a file: {}", path.display()))?;
-    let mime = match path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => Some("image/png"),
-        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
-        Some("gif") => Some("image/gif"),
-        Some("webp") => Some("image/webp"),
-        _ => None,
-    };
-    let Some(mime) = mime else {
+    let name = attachment_name(path)?;
+    let Some((mime, data)) = attached_image(path, &name)? else {
+        // A folder is not copied whole; the agent reads it where it is, if it can.
+        let target = if path.is_dir() { path.to_path_buf() } else { readable_copy(path, &name)? };
         return Ok(ContentBlock::ResourceLink(ResourceLink::new(
             name,
-            format!("file://{}", path.display()),
+            format!("file://{}", target.display()),
         )));
     };
-    let data = std::fs::read(path).map_err(|e| format!("cannot read {name}: {e}"))?;
-    if data.len() > 10 * 1024 * 1024 {
-        return Err(format!("{name} is too large to attach (over 10MB)"));
-    }
     use base64::Engine;
     Ok(ContentBlock::Image(ImageContent::new(
         base64::engine::general_purpose::STANDARD.encode(data),
         mime,
     )))
+}
+
+/// A photo outlives the conversation it came in: picking another agent starts a
+/// new session, and find_photos is how that one sees it. The turn itself carries
+/// the photo either way, so a failure here is only worth a log line.
+async fn remember_photos(app: &tauri::AppHandle, project_id: &str, attachments: &[String]) {
+    use tauri::Manager;
+    let photos: Vec<_> = attachments
+        .iter()
+        .filter_map(|path| {
+            let path = std::path::Path::new(path);
+            let name = attachment_name(path).ok()?;
+            let (mime, data) = attached_image(path, &name).ok()??;
+            Some((photo_name(&name, mime), mime, data))
+        })
+        .collect();
+    if photos.is_empty() {
+        return;
+    }
+    let handle = app.clone();
+    let serve = tauri::async_runtime::spawn_blocking(move || {
+        handle.state::<crate::supervisor::Supervisor>().ensure()
+    })
+    .await;
+    let Ok(Ok(serve)) = serve else {
+        eprintln!("[photos] no serve to keep them with");
+        return;
+    };
+    for (name, mime, data) in photos {
+        if let Err(error) = mcp::save_photo(&serve, project_id, name, mime, data).await {
+            eprintln!("[photos] {error}");
+        }
+    }
+}
+
+/// What a photo is kept as. The extension follows the bytes, because a HEIC is
+/// stored as the JPEG it became, and every paste has the same friendly name, so
+/// each gets its own or the newest would replace the rest.
+fn photo_name(name: &str, mime: &str) -> String {
+    let stem = std::path::Path::new(name)
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "photo".into());
+    let extension = match mime {
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => "jpg",
+    };
+    if stem == crate::PASTED_IMAGE {
+        return format!("{stem}-{}.{extension}", uuid::Uuid::new_v4());
+    }
+    format!("{stem}.{extension}")
+}
+
+/// Run before a turn starts, so a file that cannot go leaves the message in the
+/// composer instead of in the transcript as if it had been sent.
+#[tauri::command]
+pub async fn check_attachments(attachments: Vec<String>, claude: bool) -> Result<(), String> {
+    if claude {
+        return crate::claude::user_content(String::new(), &attachments).map(|_| ());
+    }
+    for path in &attachments {
+        let path = std::path::Path::new(path);
+        let name = attachment_name(path)?;
+        if attached_image(path, &name)?.is_none() {
+            check_copy_size(path, &name)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn attachment_name(path: &std::path::Path) -> Result<String, String> {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("not a file: {}", path.display()))
+}
+
+pub(crate) fn attachment_extension(path: &std::path::Path) -> Option<String> {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+}
+
+pub(crate) fn read_attachment(path: &std::path::Path, name: &str) -> Result<Vec<u8>, String> {
+    let size = std::fs::metadata(path)
+        .map_err(|e| format!("cannot read {name}: {e}"))?
+        .len();
+    if size > 10 * 1024 * 1024 {
+        return Err(format!("{name} is too large to attach (over 10MB)"));
+    }
+    std::fs::read(path).map_err(|e| format!("cannot read {name}: {e}"))
+}
+
+/// A photo as a prompt carries it: its type and bytes, or None for any other
+/// file. An iPhone photo is usually HEIC, which no model takes, so the formats
+/// macOS can read but a prompt cannot are converted first.
+pub(crate) fn attached_image(
+    path: &std::path::Path,
+    name: &str,
+) -> Result<Option<(&'static str, Vec<u8>)>, String> {
+    let mime = match attachment_extension(path).as_deref() {
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("heic") | Some("heif") | Some("tif") | Some("tiff") | Some("bmp") | Some("avif") => {
+            return converted_to_jpeg(path, name).map(|data| Some(("image/jpeg", data)));
+        }
+        _ => return Ok(None),
+    };
+    read_attachment(path, name).map(|data| Some((mime, data)))
+}
+
+fn converted_to_jpeg(path: &std::path::Path, name: &str) -> Result<Vec<u8>, String> {
+    let dir = attachment_dir(name)?;
+    let out = dir.join("converted.jpg");
+    let converted = std::process::Command::new("/usr/bin/sips")
+        // A phone's HEIC can double as a JPEG at full size, and past this size a
+        // model only downsamples it anyway.
+        .args(["-s", "format", "jpeg", "-Z", "2576"])
+        .arg(path)
+        .arg("--out")
+        .arg(&out)
+        .output()
+        .map_err(|e| format!("cannot read {name}: {e}"))?;
+    let data = if converted.status.success() {
+        read_attachment(&out, name)
+    } else {
+        Err(format!("cannot read {name}: it does not open as an image"))
+    };
+    std::fs::remove_dir_all(&dir).ok();
+    data
+}
+
+/// The copy happens before the prompt goes out, where Stop cannot reach it, so a
+/// file too big to copy quickly is refused rather than left to look like a hang.
+fn check_copy_size(path: &std::path::Path, name: &str) -> Result<(), String> {
+    let size = std::fs::metadata(path)
+        .map_err(|e| format!("cannot read {name}: {e}"))?
+        .len();
+    if !path.is_dir() && size > COPY_LIMIT {
+        return Err(format!("{name} is too large to attach (over 500MB)"));
+    }
+    Ok(())
+}
+
+/// The agent's sandbox shuts the folders people keep files in, so it reads a
+/// copy from the temp tree instead. The copy goes in a URI as it stands, so its
+/// name stays plain; the link still shows the real one.
+fn readable_copy(path: &std::path::Path, name: &str) -> Result<PathBuf, String> {
+    check_copy_size(path, name)?;
+    let plain: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || ".-_".contains(c) { c } else { '-' })
+        .collect();
+    let copy = attachment_dir(name)?.join(plain);
+    std::fs::copy(path, &copy).map_err(|e| format!("cannot read {name}: {e}"))?;
+    Ok(copy)
+}
+
+fn attachment_dir(name: &str) -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join(format!("nurb-attach-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot read {name}: {e}"))?;
+    Ok(dir)
 }
 
 #[tauri::command]
@@ -2224,11 +2377,79 @@ mod tests {
             other => panic!("expected a resource link, got {other:?}"),
         }
 
+        // The agent's sandbox shuts Desktop, Documents and Downloads, so what it
+        // reads is a copy in the temp tree it is allowed to read.
+        let spaced = scratch("My Bracket (v2).3mf", b"zip bytes");
+        match attachment_block(&spaced).unwrap() {
+            ContentBlock::ResourceLink(link) => {
+                assert_eq!(link.name, "My Bracket (v2).3mf");
+                let copy = link.uri.strip_prefix("file://").unwrap();
+                assert_ne!(std::path::Path::new(copy), spaced);
+                assert!(copy.starts_with(&*std::env::temp_dir().to_string_lossy()));
+                assert!(!copy.contains(' '), "{copy}");
+                assert_eq!(std::fs::read(copy).unwrap(), b"zip bytes");
+            }
+            other => panic!("expected a resource link, got {other:?}"),
+        }
+
+        // A format no prompt takes arrives as a JPEG, not as a link to itself.
+        use base64::Engine;
+        let tiny = base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC")
+            .unwrap();
+        let png = scratch("tiny.png", &tiny);
+        let tiff = png.with_file_name("tiny.tiff");
+        assert!(std::process::Command::new("/usr/bin/sips")
+            .args(["-s", "format", "tiff"])
+            .arg(&png)
+            .arg("--out")
+            .arg(&tiff)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        match attachment_block(&tiff).unwrap() {
+            ContentBlock::Image(image) => assert_eq!(image.mime_type, "image/jpeg"),
+            other => panic!("expected an image block, got {other:?}"),
+        }
+        let broken = scratch("broken.heic", b"not a photo");
+        assert!(attachment_block(&broken).unwrap_err().contains("broken.heic"));
+
+        // Too big to copy is refused by name, before any bytes move.
+        let giant = scratch("giant.3mf", b"");
+        std::fs::File::options()
+            .write(true)
+            .open(&giant)
+            .unwrap()
+            .set_len(super::COPY_LIMIT + 1)
+            .unwrap();
+        assert!(attachment_block(&giant).unwrap_err().contains("too large"));
+        std::fs::remove_file(&giant).unwrap();
+
+        // A folder is linked where it is: it cannot be copied like a file.
+        let folder = spaced.parent().unwrap();
+        match attachment_block(folder).unwrap() {
+            ContentBlock::ResourceLink(link) => {
+                assert_eq!(link.uri, format!("file://{}", folder.display()));
+            }
+            other => panic!("expected a resource link, got {other:?}"),
+        }
+
         let missing = std::path::Path::new("/nowhere/gone.png");
         assert!(attachment_block(missing).unwrap_err().contains("gone.png"));
 
         let huge = scratch("huge.png", &vec![0u8; 10 * 1024 * 1024 + 1]);
         assert!(attachment_block(&huge).unwrap_err().contains("too large"));
+    }
+
+    #[test]
+    fn a_kept_photo_is_named_for_its_bytes_and_pastes_stay_apart() {
+        assert_eq!(super::photo_name("hook.PNG", "image/png"), "hook.png");
+        assert_eq!(super::photo_name("IMG_0001.HEIC", "image/jpeg"), "IMG_0001.jpg");
+        let paste = |_| super::photo_name("pasted-image.png", "image/png");
+        let (one, two) = (paste(1), paste(2));
+        assert_ne!(one, two);
+        assert!(one.starts_with("pasted-image-") && one.ends_with(".png"));
     }
 
     /// Only Codex gets full access, and only when the adapter offers it: the

@@ -128,6 +128,8 @@ export interface Message {
     content: string | null;
     payload?: MessagePayload;
     attachments?: MessageAttachment[];
+    /** The names of the files sent with this turn. */
+    files?: string[];
     sequence_number?: number;
     created_at: string;
     /** The part this line belongs to. Null is a folder's project-wide conversation. */

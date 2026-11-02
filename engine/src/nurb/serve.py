@@ -6,6 +6,7 @@ Every route rejects non-loopback Host headers so DNS rebinding cannot expose loc
 """
 
 import asyncio
+import base64
 import contextlib
 import datetime
 import json
@@ -426,6 +427,7 @@ def _message(conn, row):
         "sequence_number": row["sequence_number"],
         "created_at": row["created_at"],
         "part": row["part"],
+        "files": payload.get("files") or [],
         "payload": _shaped(conn, row, payload),
     }
 
@@ -944,7 +946,11 @@ def _routes(conn, lock, server, token, pid):
             content = word(sent, "content", "content must be what was said")
             if role not in ("user", "assistant"):
                 raise _Refused(400, "role must be user or assistant")
-            if not content:
+            files = sent.get("files") or []
+            if not isinstance(files, list) or not all(isinstance(name, str) for name in files):
+                raise _Refused(400, "files must be the names of what was attached")
+            # A photo alone is a legitimate message, so a file stands in for words.
+            if not content and not files:
                 raise _Refused(400, "content must be what was said")
             if db.get_project(conn, project_id) is None:
                 raise _Refused(404, "no project")
@@ -954,9 +960,33 @@ def _routes(conn, lock, server, token, pid):
                 (project_id, part),
             ).fetchone() is None:
                 raise _Refused(400, f"no part called {part} in this project")
-            message_id = db.add_message(conn, project_id, role, content, {}, part=part)
+            payload = {"files": files} if files else {}
+            message_id = db.add_message(conn, project_id, role, content, payload, part=part)
             row = conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
             return JSONResponse(_message(conn, row), status_code=201)
+
+        return await acted(work)
+
+    async def project_attachment(request):
+        """Keep a photo from the chat with the project, so the next conversation can see it."""
+        sent = await body_of(request)
+
+        def work(conn):
+            project_id = request.path_params["project_id"]
+            name = word(sent, "name", "name must be the photo's file name")
+            mime = word(sent, "mime", "mime must be the photo's type")
+            if not name or pathlib.PurePosixPath(name).name != name or name == "..":
+                raise _Refused(400, "name must be a file name, not a path")
+            if not mime.startswith("image/"):
+                raise _Refused(400, "only photos are kept with a project")
+            try:
+                data = base64.b64decode(word(sent, "data", "data must be base64"), validate=True)
+            except ValueError:
+                raise _Refused(400, "data must be base64") from None
+            if db.get_project(conn, project_id) is None:
+                raise _Refused(404, "no project")
+            db.add_attachment(conn, project_id, name, mime, data)
+            return JSONResponse({"name": name}, status_code=201)
 
         return await acted(work)
 
@@ -1620,6 +1650,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}", endpoint=answering(part_delete), methods=["DELETE"]),
         Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
+        Route("/api/projects/{project_id}/attachments", endpoint=answering(project_attachment), methods=["POST"]),
         Route("/api/projects/{project_id}/printer", endpoint=answering(project_printer), methods=["POST"]),
         Route("/api/projects/{project_id}/system", endpoint=answering(project_system)),
         Route("/api/projects/{project_id}/settings", endpoint=answering(project_setting), methods=["POST"]),

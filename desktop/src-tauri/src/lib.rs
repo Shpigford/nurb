@@ -132,10 +132,11 @@ fn save_pasted_image(request: tauri::ipc::Request) -> Result<String, String> {
         .into_owned())
 }
 
+pub(crate) const PASTED_IMAGE: &str = "pasted-image";
+
 fn write_pasted_image(mime: Option<&str>, bytes: &[u8]) -> Result<PathBuf, String> {
-    // Keep the real type: attachment_block embeds the formats agents support
-    // and links everything else. Renaming TIFF or HEIC bytes to PNG makes an
-    // invalid embedded image instead of a readable file attachment.
+    // Keep the real type: the attachment path converts or links by extension,
+    // and renaming TIFF or HEIC bytes to PNG makes an invalid embedded image.
     let extension = match mime {
         Some("image/png") => "png",
         Some("image/jpeg") => "jpg",
@@ -160,7 +161,7 @@ fn write_pasted_image(mime: Option<&str>, bytes: &[u8]) -> Result<PathBuf, Strin
             .as_nanos()
     ));
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not save pasted image: {e}"))?;
-    let path = dir.join(format!("pasted-image.{extension}"));
+    let path = dir.join(format!("{PASTED_IMAGE}.{extension}"));
     std::fs::write(&path, bytes).map_err(|e| format!("could not save pasted image: {e}"))?;
     Ok(path)
 }
@@ -313,6 +314,7 @@ pub fn run() {
             acp::start_chat,
             acp::list_sessions,
             acp::send_prompt,
+            acp::check_attachments,
             acp::cancel_turn,
             acp::respond_permission,
             acp::chat_config,

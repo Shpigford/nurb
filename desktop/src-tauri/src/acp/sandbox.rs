@@ -235,6 +235,11 @@ mod tests {
         let profile = profile(&project, &project);
         assert!(sh(&profile, &format!("cat '{}/part.py' > /dev/null", project.display())));
         assert!(sh(&profile, "cat /etc/hosts > /dev/null && ls \"$HOME\" > /dev/null"));
+        // Where an attachment's copy lands, which is not the project.
+        let copy = std::env::temp_dir().join(format!("nurb-sbx-copy-{}", std::process::id()));
+        std::fs::write(&copy, "x").unwrap();
+        assert!(sh(&profile, &format!("cat '{}' > /dev/null", copy.display())));
+        std::fs::remove_file(&copy).ok();
         for folder in ["Documents", "Desktop", "Downloads"] {
             if home().is_some_and(|h| h.join(folder).is_dir()) {
                 assert!(!sh(&profile, &format!("ls \"$HOME/{folder}\" > /dev/null")), "{folder} is readable");

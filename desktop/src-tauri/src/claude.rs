@@ -99,7 +99,7 @@ impl Session {
 
     /// One user turn: the prompt goes in as a single stream-json line, and the
     /// turn ends when the CLI's `result` line arrives.
-    pub(crate) async fn prompt(&self, text: String) -> Result<String, String> {
+    pub(crate) async fn prompt(&self, content: Value) -> Result<String, String> {
         let (done, wait) = oneshot::channel();
         {
             let mut turn = self.turn.lock().unwrap();
@@ -110,7 +110,7 @@ impl Session {
         }
         let line = serde_json::json!({
             "type": "user",
-            "message": { "role": "user", "content": text },
+            "message": { "role": "user", "content": content },
         });
         let mut stdin = self.stdin.lock().await;
         stdin
@@ -133,6 +133,57 @@ impl Session {
         self.stopped.store(true, Ordering::SeqCst);
         self.signal(libc::SIGINT);
     }
+}
+
+/// More text than this would crowd out the conversation it was attached to.
+const TEXT_LIMIT: usize = 100 * 1024;
+
+/// What one turn says: the user's words, then each file as a block the model
+/// reads itself. Every built-in tool is off, so a link to a path would be a
+/// file the CLI has no way to open.
+pub(crate) fn user_content(text: String, attachments: &[String]) -> Result<Value, String> {
+    if attachments.is_empty() {
+        return Ok(Value::String(text));
+    }
+    let mut blocks = Vec::new();
+    if !text.trim().is_empty() {
+        blocks.push(serde_json::json!({ "type": "text", "text": text }));
+    }
+    for path in attachments {
+        blocks.push(attachment_block(Path::new(path))?);
+    }
+    Ok(Value::Array(blocks))
+}
+
+fn attachment_block(path: &Path) -> Result<Value, String> {
+    use base64::Engine;
+    let encode = |data: Vec<u8>| base64::engine::general_purpose::STANDARD.encode(data);
+    let name = crate::acp::attachment_name(path)?;
+    if let Some((mime, data)) = crate::acp::attached_image(path, &name)? {
+        return Ok(serde_json::json!({
+            "type": "image",
+            "source": { "type": "base64", "media_type": mime, "data": encode(data) },
+        }));
+    }
+    let data = crate::acp::read_attachment(path, &name)?;
+    if crate::acp::attachment_extension(path).as_deref() == Some("pdf") {
+        return Ok(serde_json::json!({
+            "type": "document",
+            "title": name,
+            "source": { "type": "base64", "media_type": "application/pdf", "data": encode(data) },
+        }));
+    }
+    let text = String::from_utf8(data)
+        .ok()
+        .filter(|text| !text.contains('\0'))
+        .ok_or_else(|| format!("Claude can't open {name}. It reads photos, PDFs and text files, so attach a screenshot of it instead."))?;
+    if text.len() > TEXT_LIMIT {
+        return Err(format!("{name} is too long to attach (over 100KB of text)"));
+    }
+    Ok(serde_json::json!({
+        "type": "text",
+        "text": format!("Attached file \"{name}\":\n\n{text}"),
+    }))
 }
 
 /// What one stdout line means. Events go straight to the webview; the other
@@ -642,7 +693,7 @@ pub(crate) fn config_rows(prefs: &PrefStore) -> Vec<ConfigRow> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_current, map_line, spawn, spawn_args, Signal};
+    use super::{is_current, map_line, spawn, spawn_args, user_content, Signal};
     use serde_json::Value;
 
     const STREAM: &str = include_str!("../tests/fixtures/claude-stream.jsonl");
@@ -688,6 +739,50 @@ mod tests {
         assert_eq!(mapped[4]["output"], "built shelf in 1.2s\n[image]");
         assert_eq!(mapped[5]["type"], "result");
         assert_eq!(mapped[5]["stop"], "end_turn");
+    }
+
+    #[test]
+    fn a_turn_carries_its_files_as_blocks_the_model_reads() {
+        let dir = std::env::temp_dir().join(format!("nurb-claude-files-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = |name: &str, bytes: &[u8]| {
+            let path = dir.join(name);
+            std::fs::write(&path, bytes).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+
+        // No files is the plain turn it has always been.
+        assert_eq!(user_content("taller".into(), &[]).unwrap(), Value::String("taller".into()));
+
+        let sent = user_content(
+            "fit this".into(),
+            &[file("photo.PNG", b"pixels"), file("manual.pdf", b"%PDF-1.4"), file("notes.txt", b"lip is 3mm")],
+        )
+        .unwrap();
+        let blocks = sent.as_array().unwrap();
+        assert_eq!(blocks[0]["text"], "fit this");
+        assert_eq!(blocks[1]["type"], "image");
+        assert_eq!(blocks[1]["source"]["media_type"], "image/png");
+        assert_eq!(blocks[1]["source"]["data"], "cGl4ZWxz");
+        assert_eq!(blocks[2]["type"], "document");
+        assert_eq!(blocks[2]["title"], "manual.pdf");
+        assert_eq!(blocks[2]["source"]["media_type"], "application/pdf");
+        assert_eq!(blocks[3]["type"], "text");
+        assert!(blocks[3]["text"].as_str().unwrap().contains("notes.txt"));
+        assert!(blocks[3]["text"].as_str().unwrap().contains("lip is 3mm"));
+
+        // A photo alone is a message, and it stays a photo with no empty words.
+        let alone = user_content("  ".into(), &[file("hook.jpg", b"pixels")]).unwrap();
+        assert_eq!(alone.as_array().unwrap().len(), 1);
+        assert_eq!(alone[0]["type"], "image");
+
+        // What Claude has no way to read is refused by name, never dropped.
+        let mesh = file("bracket.3mf", b"PK\x03\x04\xff\xfe");
+        assert!(user_content("hi".into(), &[mesh]).unwrap_err().contains("bracket.3mf"));
+        let long = file("huge.txt", &vec![b'a'; super::TEXT_LIMIT + 1]);
+        assert!(user_content("hi".into(), &[long]).unwrap_err().contains("too long"));
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
