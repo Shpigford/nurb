@@ -50,6 +50,9 @@ export default function Transcript({ messages }: { messages: Message[] }) {
               </div>
             )
           ) : null}
+          {message.files?.length ? (
+            <p className="mono-id ml-8 text-muted">{message.files.join(", ")}</p>
+          ) : null}
           <Payload message={message} />
         </div>
       ))}

@@ -155,17 +155,34 @@ function isWork(message: Message): boolean {
   return payload?.type === "measurement" && !changedSize(payload.measurement);
 }
 
+function FileNames({ names }: { names: string[] }) {
+  return (
+    <span className="mt-1.5 flex flex-wrap gap-1">
+      {names.map((name, i) => (
+        <span key={i} className="mono-id rounded-[3px] bg-raised px-1.5 py-0.5 text-muted">
+          {name}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function Stored({ message, who, n }: { message: Message; who: string; n?: string }) {
   const payload = message.payload;
   return (
     <div className="flex flex-col gap-4">
-      {message.content ? (
+      {message.content || message.files?.length ? (
         <Turn who={message.role === "user" ? "You" : who} n={n}>
           {message.role === "user" ? (
-            <p className="text-chat whitespace-pre-wrap text-ink-soft">{message.content}</p>
+            <>
+              {message.content && (
+                <p className="text-chat whitespace-pre-wrap text-ink-soft">{message.content}</p>
+              )}
+              {message.files?.length ? <FileNames names={message.files} /> : null}
+            </>
           ) : (
             <div className="text-chat text-ink-soft">
-              <AssistantMarkdown content={message.content} />
+              <AssistantMarkdown content={message.content ?? ""} />
             </div>
           )}
         </Turn>
@@ -257,6 +274,11 @@ function Chat({
   const [permissions, setPermissions] = useState<Permission[]>([]);
   // Absolute paths; the Rust side reads them at send time.
   const [attachments, setAttachments] = useState<string[]>([]);
+  const refusalRef = useRef<string | null>(null);
+  // Stop can land before the prompt has gone out, while the files are checked or
+  // the session starts. There is nothing to interrupt yet, so the send stands down.
+  const stoppedRef = useRef(false);
+  const promptingRef = useRef(false);
   const attachmentDraftRef = useRef<AttachmentDraft | null>(null);
   if (!attachmentDraftRef.current) {
     attachmentDraftRef.current = new AttachmentDraft(setAttachments);
@@ -598,6 +620,12 @@ function Chat({
   const send = useCallback(
     async (text: string, files: string[]) => {
       sendingRef.current = true;
+      stoppedRef.current = false;
+      // A refused file was about the draft this send replaces. Live notes sit below
+      // Claude's stored turns, so left alone it would trail every later reply.
+      setItems((list) =>
+        list.filter((item) => item.kind !== "note" || item.text !== refusalRef.current),
+      );
       const localId = nextLocalIdRef.current++;
       // Claude's turn is stored, not replayed, so the line comes back from the
       // project instead of living here for the session.
@@ -620,12 +648,41 @@ function Chat({
       setAuthNeeded("none");
       let completed = false;
       let stored = false;
+      let refused = false;
+      // Nothing was sent. Restore it ahead of any next draft composed during
+      // the turn, and keep both turns' attachments.
+      const restoreDraft = () => {
+        setItems((list) =>
+          list.filter((item) => item.kind !== "user" || item.localId !== localId),
+        );
+        if (inputRef.current) {
+          inputRef.current.value = restoreDraftText(text, inputRef.current.value);
+          grow();
+        }
+        attachmentDraft.restore(files);
+      };
       try {
+        if (files.length > 0) {
+          refused = true;
+          await invoke("check_attachments", { attachments: files, claude: isClaude });
+          refused = false;
+        }
         const session = await ensureSession();
+        if (stoppedRef.current) {
+          restoreDraft();
+          return;
+        }
         if (isClaude) {
-          await addMessage(projectId, "user", text, isProject ? null : part);
+          await addMessage(
+            projectId,
+            "user",
+            text,
+            isProject ? null : part,
+            files.length ? files.map(basename) : undefined,
+          );
           stored = true;
         }
+        promptingRef.current = true;
         await invoke<string>("send_prompt", {
           sessionId: session,
           text,
@@ -636,25 +693,18 @@ function Chat({
       } catch (e) {
         const message = String(e);
         const trouble = isClaude ? claudeNote(message) : null;
-        if (trouble || message.includes("auth_required")) {
-          // Nothing was sent. Restore it ahead of any next draft composed
-          // during the turn, and keep both turns' attachments.
-          if (!stored) {
-            setItems((list) =>
-              list.filter((item) => item.kind !== "user" || item.localId !== localId),
-            );
-            if (inputRef.current) {
-              inputRef.current.value = restoreDraftText(text, inputRef.current.value);
-              grow();
-            }
-            attachmentDraft.restore(files);
-          }
+        if (trouble || refused || message.includes("auth_required")) {
+          if (!stored) restoreDraft();
           if (trouble) setItems((list) => withNote(list, trouble));
-          else setAuthNeeded("resend");
+          else if (refused) {
+            refusalRef.current = message;
+            setItems((list) => withNote(list, message));
+          } else setAuthNeeded("resend");
         } else {
           setItems((list) => withNote(list, message));
         }
       } finally {
+        promptingRef.current = false;
         sendingRef.current = false;
         setBusy(false);
         onBusyRef.current(false);
@@ -779,8 +829,11 @@ function Chat({
   };
 
   const cancel = () => {
+    stoppedRef.current = true;
     const session = sessionRef.current;
-    if (session) invoke("cancel_turn", { sessionId: session }).catch(() => {});
+    if (session && promptingRef.current) {
+      invoke("cancel_turn", { sessionId: session }).catch(() => {});
+    }
   };
 
   // One menu: which agent, then that agent's own settings (its model, and how
@@ -1120,7 +1173,7 @@ function Chat({
                 key={entry.message.id}
                 message={entry.message}
                 who={label}
-                n={entry.message.content ? nextTurn() : undefined}
+                n={entry.message.content || entry.message.files?.length ? nextTurn() : undefined}
               />
             );
           }
@@ -1130,25 +1183,17 @@ function Chat({
               return (
                 <Turn key={index} who="You" n={nextTurn()}>
                   <p className="text-chat whitespace-pre-wrap text-ink-soft">{item.text}</p>
-                  {item.files && (
-                    <span className="mt-1.5 flex flex-wrap gap-1">
-                      {item.files.map((name, i) => (
-                        <span
-                          key={i}
-                          className="mono-id rounded-[3px] bg-raised px-1.5 py-0.5 text-muted"
-                        >
-                          {name}
-                        </span>
-                      ))}
-                    </span>
-                  )}
+                  {item.files && <FileNames names={item.files} />}
                 </Turn>
               );
             case "agent":
               return (
                 <Turn key={index} who={label} n={nextTurn()}>
                   <div className="text-chat text-ink-soft">
-                    <AssistantMarkdown content={item.text} streaming />
+                    <AssistantMarkdown
+                      content={item.text}
+                      streaming={busy && index === items.length - 1}
+                    />
                   </div>
                 </Turn>
               );

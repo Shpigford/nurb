@@ -76,6 +76,35 @@ pub(crate) async fn checkout(
     .map_err(|error| format!("Could not copy the project out: {error}"))?
 }
 
+/// Keep one chat photo with the project, where find_photos reads it.
+pub(crate) async fn save_photo(
+    serve: &ServeInfo,
+    project_id: &str,
+    name: String,
+    mime: &str,
+    data: Vec<u8>,
+) -> Result<(), String> {
+    use base64::Engine;
+    let port = serve.port;
+    let path = format!("/api/projects/{project_id}/attachments");
+    let request = serde_json::json!({
+        "name": name,
+        "mime": mime,
+        "data": base64::engine::general_purpose::STANDARD.encode(data),
+    })
+    .to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (status, body) = loopback_post(port, &path, &request)?;
+        if (200..300).contains(&status) {
+            Ok(())
+        } else {
+            Err(format!("the serve answered {status}: {body}"))
+        }
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 /// The tool names the serve publishes, read at compile time so this list and
 /// the server's cannot drift.
 fn tool_names() -> &'static [String] {

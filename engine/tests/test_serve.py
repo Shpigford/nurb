@@ -1152,6 +1152,73 @@ def test_the_chat_column_can_write_both_sides_of_a_turn(home):
         assert unknown.value.code == 404
 
 
+def test_a_photo_from_the_chat_is_what_find_photos_sees(home):
+    import base64
+    import io
+
+    from PIL import Image
+
+    from nurb import db, mcp_server
+
+    conn = db.connect()
+    project_id = db.create_project(conn, "turns")
+    conn.close()
+
+    def jpeg(color):
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 64), color).save(buf, "JPEG")
+        return base64.b64encode(buf.getvalue()).decode()
+
+    with serving(home, free_port()) as url:
+        route = f"{url}/api/projects/{project_id}/attachments"
+        for name in ("first.jpg", "second.jpg", "third.jpg", "fourth.jpg"):
+            sent = {"name": name, "mime": "image/jpeg", "data": jpeg("red")}
+            assert post(route, sent)[0] == 201
+
+        for bad in (
+            {"name": "../escape.jpg", "mime": "image/jpeg", "data": jpeg("red")},
+            {"name": "notes.txt", "mime": "text/plain", "data": jpeg("red")},
+            {"name": "x.jpg", "mime": "image/jpeg", "data": "not base64!"},
+        ):
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                post(route, bad)
+            assert refused.value.code == 400
+
+    conn = db.connect()
+    result = mcp_server.dispatch(conn, "find_photos", {"project_id": project_id, "query": "bracket"}, "http://x")
+    conn.close()
+    # The newest come back when no name matches: that is what was just attached.
+    assert [photo["name"] for photo in json.loads(result.content[0].text)["photos"]] == [
+        "fourth.jpg",
+        "third.jpg",
+        "second.jpg",
+    ]
+
+
+def test_a_turn_remembers_the_files_sent_with_it(home):
+    from nurb import db
+
+    conn = db.connect()
+    project_id = db.create_project(conn, "turns")
+    conn.close()
+
+    with serving(home, free_port()) as url:
+        route = f"{url}/api/projects/{project_id}/messages"
+        # A photo alone is a legitimate message, so no words is fine with a file.
+        assert post(route, {"role": "user", "content": "", "files": ["hook.jpg"]})[0] == 201
+        assert post(route, {"role": "user", "content": "taller"})[0] == 201
+
+        detail = json.loads(get(f"{url}/api/projects/{project_id}")[2])
+        assert [(m["content"], m["files"]) for m in detail["messages"]] == [
+            ("", ["hook.jpg"]),
+            ("taller", []),
+        ]
+
+        with pytest.raises(urllib.error.HTTPError) as not_names:
+            post(route, {"role": "user", "content": "hi", "files": "hook.jpg"})
+        assert not_names.value.code == 400
+
+
 def test_a_part_file_from_a_folder_is_captured_as_a_revision(home):
     from nurb import db
 
