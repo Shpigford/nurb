@@ -135,9 +135,12 @@ function browserDownload(filename: string, blob: Blob) {
 export default function PartView({
   project,
   partName,
+  starting,
   onSelectPart,
   onPartRenamed,
   onOpenProject,
+  onNewPart,
+  onAddToProject,
   header,
   chat,
   topInset,
@@ -149,12 +152,18 @@ export default function PartView({
 }: {
   project: Project | null
   partName: string | null
+  /** A new part is being described, so no sibling stands in for it until it exists. */
+  starting?: boolean
   /** The header's part switcher changes parts, and whoever owns the selection is told. */
   onSelectPart?: (name: string) => void
   /** A rename from the header. The host moves its selection (and any conversation) along. */
   onPartRenamed?: (was: string, name: string) => void
   /** Opens the project panel; the switcher offers it when the host can show one. */
   onOpenProject?: () => void
+  /** Starts another part in this part's folder. The switcher offers it when the host can. */
+  onNewPart?: () => void
+  /** Puts a part that is in no folder into one. Shown where the folder cell would be. */
+  onAddToProject?: () => void
   /** What the host adds to the floating header: the project picker, its own icons.
    * `before` sits ahead of the lockup (the desktop's traffic lights), `nav` between
    * the lockup and the part name (the way back), `start` after it (the served page's
@@ -215,7 +224,7 @@ export default function PartView({
   const paramsPending = useRef(false)
 
   const parts = project?.parts ?? []
-  const part = parts.find((p) => p.name === partName) ?? parts[0] ?? null
+  const part = parts.find((p) => p.name === partName) ?? (starting ? null : parts[0] ?? null)
   const build = part?.build ?? null
   const verdict = verdictOf(build)
   const glbUrl = build?.glb_url ?? null
@@ -510,6 +519,8 @@ export default function PartView({
                 />
               ) : project && !project.folder ? (
                 project.name
+              ) : project ? (
+                "New part"
               ) : (
                 "No part yet"
               )
@@ -529,7 +540,7 @@ export default function PartView({
         <>
           {/* One cell names the project and opens its parts, because a row of tabs
            * runs off the header once a project holds a dozen. */}
-          {project && parts.length > 1 ? (
+          {project && (project.folder || parts.length > 1) ? (
             <Menu
               label={`Parts in ${project.name}`}
               portal
@@ -550,7 +561,9 @@ export default function PartView({
                 </span>
               )}
               items={[
-                ...parts.map((p) => ({
+                ...(onNewPart ? [{ label: `New part in ${project.name}`, onSelect: onNewPart }] : []),
+                ...parts.map((p, index) => ({
+                  separated: Boolean(onNewPart) && index === 0,
                   label: p.title ?? p.name,
                   checked: p.name === part?.name,
                   onSelect: () => onSelectPart?.(p.name),
@@ -559,6 +572,15 @@ export default function PartView({
               ]}
               footer={sharedLine(project.shared ?? [])}
             />
+          ) : part && onAddToProject ? (
+            <button
+              type="button"
+              onClick={onAddToProject}
+              className="chrome flex h-[50px] items-center gap-2 border-l border-line px-3.5 text-muted transition-colors hover:text-ink"
+            >
+              <Icon name="folder" />
+              <span className="mono-label">Add to project</span>
+            </button>
           ) : null}
           {header?.end ? <HeaderIcons>{header.end}</HeaderIcons> : null}
         </>

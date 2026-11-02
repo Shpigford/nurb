@@ -734,6 +734,22 @@ def add_message(conn, project_id, role, content, payload, part=None):
     return message_id
 
 
+def claim_messages(conn, project_id, part, after):
+    """Stamp a folder's unnamed turns after `after` with the part they made.
+
+    A new part in a folder is described before it has a name, so its first turns are
+    stored without one and handed to the part once the agent has written it.
+    """
+    with transaction(conn):
+        claimed = conn.execute(
+            "UPDATE messages SET part = ? WHERE project_id = ? AND part IS NULL AND sequence_number > ?",
+            (part, project_id, after),
+        ).rowcount
+    if claimed:
+        changed("message", None, project_id)
+    return claimed
+
+
 def latest_run(conn, part_id, revision_id=None):
     """The part's newest build attempt, whatever its status, across every revision.
 

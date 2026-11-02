@@ -436,6 +436,7 @@ pub(crate) fn spawn_args(
     // column, so the part it is about rides in the prompt the session is born
     // with. The project-wide conversation names no part.
     let selected = match part.filter(|name| *name != crate::acp::PROJECT_CHAT) {
+        Some(crate::acp::NEW_PART) => crate::acp::NEW_PART_CONTEXT.to_string(),
         Some(name) => format!(" This conversation is about the part \"{name}\", which is on screen beside the chat."),
         None => String::new(),
     };

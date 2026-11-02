@@ -79,7 +79,8 @@ type Props = {
   onSelectProject: (id: string) => void;
   onSelectAll: () => void;
   onOpenPart: (projectId: string, name: string) => void;
-  onNewPart: () => void;
+  /** Starts a part, inside the folder when one is named. */
+  onNewPart: (folderId?: string) => void;
   /** Opens the picker that puts this part in a folder. */
   onAddToProject: (part: LibraryPart) => void;
   onImportFolder: () => void;
@@ -260,6 +261,7 @@ export default function Library({
   };
 
   const projectMenu = (summary: ProjectSummary): MenuItem[] => [
+    { label: "New part in this project", onSelect: () => onNewPart(summary.id) },
     { label: "Project settings", onSelect: () => onOpenProject(summary.id, summary.name) },
     { label: "Rename", onSelect: () => startRename(summary) },
     { label: "Export as folder…", onSelect: () => void exportFolder(summary) },
@@ -292,6 +294,9 @@ export default function Library({
       setFailure(e instanceof Error ? e.message : String(e));
     }
   };
+
+  // The open folder is where a new part goes, so the button says so.
+  const folder = !showAll && project?.folder ? project : null;
 
   const header = (
     <FloatingHeader
@@ -327,8 +332,14 @@ export default function Library({
           <Button variant="outline" size="md" icon="folder" onClick={onImportFolder} disabled={importing}>
             {importing ? "Importing…" : "Import folder"}
           </Button>
-          <Button variant="accent" size="md" icon="plus" onClick={onNewPart}>
-            New part
+          <Button
+            variant="accent"
+            size="md"
+            icon="plus"
+            onClick={() => onNewPart(folder?.id)}
+            className="max-w-[260px]"
+          >
+            <span className="min-w-0 truncate">{folder ? `New part in ${folder.name}` : "New part"}</span>
           </Button>
         </div>
       }
@@ -416,7 +427,20 @@ export default function Library({
                       {summary.name}
                     </span>
                   )}
-                  <span className="mono-caption shrink-0 text-muted">{summary.parts}</span>
+                  <span className="mono-caption shrink-0 text-muted group-hover:hidden group-focus-within:hidden">
+                    {summary.parts}
+                  </span>
+                  <span className="hidden shrink-0 group-hover:block group-focus-within:block">
+                    <IconButton
+                      icon="plus"
+                      label={`New part in ${summary.name}`}
+                      className="size-6"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onNewPart(summary.id);
+                      }}
+                    />
+                  </span>
                   <Menu
                     portal
                     className="-mr-1 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100"
@@ -462,7 +486,7 @@ export default function Library({
             <EmptyShelf
               firstRun={firstRun}
               caption="Start a part and describe it, or import a folder of parts you already have."
-              primary={{ label: "New part", icon: "plus", onClick: onNewPart }}
+              primary={{ label: "New part", icon: "plus", onClick: () => onNewPart() }}
               secondary={{
                 label: importing ? "Importing…" : "Import folder",
                 icon: "folder",
@@ -474,14 +498,9 @@ export default function Library({
         ) : parts.length === 0 ? (
           <div className="flex min-h-0 flex-1 flex-col pr-4 pb-4">
             <EmptyShelf
-              caption="No parts in this project yet. Open a part and choose Add to project to put it here."
-              primary={{ label: "All parts", onClick: onSelectAll }}
-              secondary={{
-                label: importing ? "Importing…" : "Import folder",
-                icon: "folder",
-                onClick: onImportFolder,
-                disabled: importing,
-              }}
+              caption={`No parts in ${project?.name ?? "this project"} yet. Start one here.`}
+              primary={{ label: "New part", icon: "plus", onClick: () => onNewPart(projectId ?? undefined) }}
+              secondary={{ label: "All parts", onClick: onSelectAll }}
             />
           </div>
         ) : (

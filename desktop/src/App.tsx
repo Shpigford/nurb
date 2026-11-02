@@ -7,8 +7,10 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cue, duration, ease, Icon, IconButton, LiveActivity, UpdateCard, useLiveActivity } from "@nurb/ui";
 import {
+  claimMessages,
   configure,
   createProject,
+  fetchProject,
   fetchProjects,
   importFolder,
   listParts,
@@ -21,7 +23,7 @@ import { reconnect, useLive } from "@nurb/workbench/live";
 import { useProject } from "@nurb/workbench/useProject";
 import PartView from "@nurb/workbench/PartView";
 import AddAgent from "./AddAgent";
-import Chat, { AGENT_LABEL, PROJECT_CHAT } from "./Chat";
+import Chat, { AGENT_LABEL, NEW_PART, PROJECT_CHAT } from "./Chat";
 import {
   chatKey,
   markChatSeen,
@@ -42,6 +44,10 @@ import { broughtOver, importV1Folders, notBroughtOver } from "./v1Import";
 
 /** What the picker needs to know about the part it is placing. */
 type PickTarget = { id: string | null; name: string; project_id: string; folder: boolean };
+
+// A part being started inside a folder: the parts the folder already had, its
+// last turn before the draft, and the part once the agent has written it.
+type Draft = { projectId: string; had: string[]; after: number; landed: string | null };
 
 type ServeInfo = {
   url: string;
@@ -117,6 +123,7 @@ function App() {
   const [moveError, setMoveError] = useState<string | null>(null);
   const [projectId, setProjectId] = useState<string | null>(readProject);
   const [partName, setPartName] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [importing, setImporting] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const listSeq = useRef(0);
@@ -348,7 +355,10 @@ function App() {
   // A folder keeps a conversation for each part in it, plus one about the folder
   // itself. A project holding a single part has one conversation, and the part
   // and the project are the same thing, so it is the project's.
-  const chatPart = project?.folder ? partName ?? PROJECT_CHAT : PROJECT_CHAT;
+  // A new part's own turns stay on its draft until the turn that wrote it ends.
+  const drafting =
+    draft !== null && draft.projectId === projectId && (partName === null || partName === draft.landed);
+  const chatPart = drafting ? NEW_PART : project?.folder ? partName ?? PROJECT_CHAT : PROJECT_CHAT;
 
   // One chat per conversation, mounted for as long as its turn runs.
   useEffect(() => {
@@ -521,9 +531,32 @@ function App() {
 
   // A new part is its own container until the person puts it in a project, so
   // the library never shows an empty shelf waiting to be filled.
-  const newPart = useCallback(async () => {
+  // Inside a folder the part is started there, so the agent works beside its
+  // siblings and their shared sizes; the conversation becomes the part's once
+  // the agent has written it.
+  const newPart = useCallback(async (folderId?: string) => {
     setLibraryError(null);
     try {
+      if (folderId) {
+        const folder = await fetchProject(folderId);
+        const dir = dirs[folderId];
+        const running = dir ? busyRef.current[chatKey(dir, NEW_PART)] : false;
+        if (!running) {
+          await invoke("select_part_chat", { projectId: folderId, part: NEW_PART, sessionId: null });
+          setColumns((list) => list.filter((col) => !(col.path === dir && col.part === NEW_PART)));
+          setDraft({
+            projectId: folderId,
+            had: folder.parts.map((part) => part.name),
+            after: Math.max(0, ...folder.messages.map((message) => message.sequence_number ?? 0)),
+            landed: null,
+          });
+        }
+        setProjectId(folderId);
+        setPartName(null);
+        setShowAll(false);
+        setScreen("workspace");
+        return folderId;
+      }
       const created = await createProject(undefined, false);
       await loadProjects();
       setProjectId(created.id);
@@ -535,7 +568,33 @@ function App() {
       setLibraryError(e instanceof Error ? e.message : String(e));
       return null;
     }
-  }, [loadProjects]);
+  }, [loadProjects, dirs]);
+
+  // The first part the folder did not have when the draft began is the one it made.
+  useEffect(() => {
+    if (!draft || draft.landed) return;
+    const made = allParts.find((part) => part.project_id === draft.projectId && !draft.had.includes(part.name));
+    if (!made) return;
+    setDraft({ ...draft, landed: made.name });
+    if (projectId === draft.projectId) setPartName((open) => open ?? made.name);
+  }, [draft, allParts, projectId]);
+
+  // Handing the conversation over remounts its column, which would end a running
+  // turn, so it waits for the turn that wrote the part to finish.
+  useEffect(() => {
+    if (!draft?.landed) return;
+    const dir = dirs[draft.projectId];
+    if (!dir || busyChats[chatKey(dir, NEW_PART)]) return;
+    const { projectId: folderId, landed: name, after } = draft;
+    setDraft(null);
+    claimMessages(folderId, name, after).catch((e) => setError(String(e)));
+    invoke("rename_part_chat", { projectId: folderId, was: NEW_PART, name }).catch((e) => setError(String(e)));
+    setColumns((list) =>
+      list
+        .filter((col) => !(col.path === dir && col.part === name))
+        .map((col) => (col.path === dir && col.part === NEW_PART ? { ...col, part: name } : col)),
+    );
+  }, [draft, dirs, busyChats]);
 
   // The part's own container becomes the folder when it has no project yet;
   // otherwise the folder is made and the part moves into it.
@@ -776,8 +835,18 @@ function App() {
         <PartView
           project={project}
           partName={partName}
+          starting={drafting}
           onSelectPart={setPartName}
           onOpenProject={project && projectId ? () => setProjectPanel({ id: projectId, name: project.name }) : undefined}
+          onNewPart={project?.folder ? () => void newPart(project.id) : undefined}
+          onAddToProject={
+            project && !project.folder && project.parts[0]
+              ? () => {
+                  setMoveError(null);
+                  setPicking({ ...project.parts[0], project_id: project.id, folder: false });
+                }
+              : undefined
+          }
           onPointAt={(text) => projectId && setComposerSeed({ projectId, part: chatPart, text })}
           onPartRenamed={(was, name) => projectId && partRenamed(projectId, was, name)}
           onManagePrinters={() => setSettingsSection("printers")}
@@ -820,7 +889,9 @@ function App() {
                     // other column speaks of the part it belongs to.
                     wholeProject={Boolean(project?.folder) && col.part === PROJECT_CHAT}
                     subject={
-                      col.part === PROJECT_CHAT
+                      col.part === NEW_PART
+                        ? project?.name ?? "this project"
+                        : col.part === PROJECT_CHAT
                         ? project?.folder
                           ? project.name
                           : project?.parts[0]?.name ?? "this part"
@@ -830,7 +901,11 @@ function App() {
                     // an empty list resets the column's sequence floor, and a step
                     // recorded against zero is pruned the moment the list returns.
                     messages={
-                      col.path === activeDir
+                      col.path === activeDir && col.part === NEW_PART
+                        ? (project?.messages ?? []).filter(
+                            (m) => (m.part ?? null) === null && (m.sequence_number ?? 0) > (draft?.after ?? 0),
+                          )
+                        : col.path === activeDir
                         ? messagesForPart(
                             project?.messages ?? [],
                             col.part === PROJECT_CHAT ? null : col.part,
@@ -882,7 +957,7 @@ function App() {
           onSelectProject={selectProject}
           onSelectAll={() => setShowAll(true)}
           onOpenPart={openPart}
-          onNewPart={() => void newPart()}
+          onNewPart={(folderId) => void newPart(folderId)}
           onAddToProject={(part) => {
             setMoveError(null);
             setPicking(part);

@@ -970,6 +970,27 @@ def _routes(conn, lock, server, token, pid):
 
         return await acted(work)
 
+    async def project_message_claim(request):
+        """Give a new part the turns that described it before it had a name."""
+        sent = await body_of(request)
+
+        def work(conn):
+            project_id = request.path_params["project_id"]
+            part = word(sent, "part", "part must be the name of a part in this project")
+            after = sent.get("after")
+            if not isinstance(after, int) or isinstance(after, bool) or after < 0:
+                raise _Refused(400, "after must be the last turn before the new part was started")
+            if db.get_project(conn, project_id) is None:
+                raise _Refused(404, "no project")
+            if conn.execute(
+                "SELECT 1 FROM parts WHERE project_id = ? AND name = ? AND kind = 'part'",
+                (project_id, part),
+            ).fetchone() is None:
+                raise _Refused(400, f"no part called {part} in this project")
+            return {"claimed": db.claim_messages(conn, project_id, part, after)}
+
+        return await acted(work)
+
     async def project_attachment(request):
         """Keep a photo from the chat with the project, so the next conversation can see it."""
         sent = await body_of(request)
@@ -1688,6 +1709,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}", endpoint=answering(part_delete), methods=["DELETE"]),
         Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
+        Route("/api/projects/{project_id}/messages/claim", endpoint=answering(project_message_claim), methods=["POST"]),
         Route("/api/projects/{project_id}/attachments", endpoint=answering(project_attachment), methods=["POST"]),
         Route("/api/mesh", endpoint=answering(mesh_describe), methods=["POST"]),
         Route("/api/projects/{project_id}/printer", endpoint=answering(project_printer), methods=["POST"]),

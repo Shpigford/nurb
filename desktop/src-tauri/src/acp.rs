@@ -91,6 +91,9 @@ use events::{forward, permission_choice, permission_title, wire_string};
 /// The whole-project conversation rides the per-part session plumbing under a
 /// name no part file can have. The twin constant lives in desktop/src/Chat.tsx.
 pub(crate) const PROJECT_CHAT: &str = "//project";
+/// A part the person is starting inside a folder, before it has a name.
+pub(crate) const NEW_PART: &str = "//new";
+pub(crate) const NEW_PART_CONTEXT: &str = " The user is starting a new part in this project and is about to describe it. Make it as a new part alongside the others, and reuse the project's shared settings where they fit.";
 
 /// The project id an agent working directory belongs to; the app hands agents
 /// <appdata>/projects/<id> as their cwd, so the last segment is the id.
@@ -677,6 +680,7 @@ pub async fn send_prompt(
     let selected = match part.as_deref() {
         // A folder's own conversation; the twin constant lives in Chat.tsx.
         Some(PROJECT_CHAT) => " This conversation is about the project as a whole rather than one part.".to_string(),
+        Some(NEW_PART) => NEW_PART_CONTEXT.to_string(),
         Some(part) => format!(" This conversation is about the part \"{part}\", which is on screen beside the chat."),
         None => String::new(),
     };
