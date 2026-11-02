@@ -1,4 +1,4 @@
-import { CSSProperties, ReactNode } from 'react';
+import { CSSProperties, MouseEventHandler, ReactNode } from 'react';
 export interface StageProps {
     header?: ReactNode;
     children: ReactNode;
@@ -11,9 +11,10 @@ export interface StageProps {
     dragRegion?: boolean;
 }
 export default function Stage({ header, children, className, style, topInset, dragRegion }: StageProps): import("react").JSX.Element;
-export declare function StageColumn({ children, className }: {
+export declare function StageColumn({ children, className, onContextMenu, }: {
     children: ReactNode;
     className?: string;
+    onContextMenu?: MouseEventHandler;
 }): import("react").JSX.Element;
 export declare function StageEmpty({ children, className }: {
     children: ReactNode;

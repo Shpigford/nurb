@@ -17,6 +17,7 @@ import {
   IconButton,
   Lockup,
   Menu,
+  useContextMenu,
   PanelStrip,
   PartCard,
   ProgressBar,
@@ -146,6 +147,7 @@ export default function Library({
 }: Props) {
   const [query, setQuery] = useState("");
   const [confirm, setConfirm] = useState<Removal | null>(null);
+  const context = useContextMenu();
   const [failure, setFailure] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -385,6 +387,7 @@ export default function Library({
                   role="button"
                   tabIndex={selected || (showAll && index === 0) ? 0 : -1}
                   onClick={() => onSelectProject(summary.id)}
+                  onContextMenu={(e) => context.open(e, renaming === summary.id ? undefined : projectMenu(summary))}
                   onKeyDown={(e) => {
                     // The actions menu is a button inside this row. Its own keys
                     // are its own, or Enter would select the project instead of
@@ -476,7 +479,17 @@ export default function Library({
        * the window's own edge rather than stopping on a line in the air, and the
        * scrollbar sits in the right gutter instead of over the cards. Children put the
        * right gutter back with pr-4. */}
-      <StageColumn className="-mr-4 -mb-4">
+      {context.menu}
+      {/* A right-click on the shelf itself, between the cards, offers what its buttons do. */}
+      <StageColumn
+        className="-mr-4 -mb-4"
+        onContextMenu={(e) =>
+          context.open(e, [
+            { label: folder ? `New part in ${folder.name}` : "New part", onSelect: () => onNewPart(folder?.id) },
+            { label: "Import folder…", disabled: importing, onSelect: onImportFolder },
+          ])
+        }
+      >
         {importing ? (
           <div className="shrink-0 pr-4 pb-3">
             <ProgressBar value={null} label="Importing folder" pendingLabel="Reading the parts" />
