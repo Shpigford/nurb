@@ -77,6 +77,25 @@
 </div>
 
 <main class="wrap">
+  <article class="release" id="v1.1.0">
+    <div class="meta"><span class="ver">v1.1.0</span><time datetime="2026-11-02">November 2, 2026</time></div>
+    <ul>
+      <li><b class="tag new">new</b><span><b>New part in a project.</b> Start a part right inside a project from the library, the sidebar, or the workspace's project menu. Your AI can reuse the sizes the other parts in that project share, and the conversation becomes the new part's own.</span></li>
+      <li><b class="tag new">new</b><span><b>Attach any file.</b> Photos, PDFs and text files now reach Claude too, not just the other AIs. An attached 3MF, STL or other mesh reaches every AI as a picture of the model plus its size in mm, so you can drop in a file from your slicer and talk about it.</span></li>
+      <li><b class="tag">improved</b><span>Picking a model in the Model menu now switches the Claude chat you are in, instead of waiting for the next conversation.</span></li>
+      <li><b class="tag">improved</b><span>Library search finds a part by the name on its card, not only by its file name.</span></li>
+      <li><b class="tag">improved</b><span>Dragging a slider or chatting no longer waits while the slicer works out print time and filament.</span></li>
+      <li><b class="tag">fixed</b><span>Deleting a part could delete other parts that were not in a project with it. Now only that part goes. Adding a part to a project also brings its conversation and measurements along.</span></li>
+      <li><b class="tag">fixed</b><span>Renaming a part used to break any assembly that used it. The assemblies now follow the new name.</span></li>
+      <li><b class="tag">fixed</b><span>After your AI changed a part, downloading it or opening it in your slicer could use the old slider values. The sliders now follow every build, and Save as default saves on/off switches too.</span></li>
+      <li><b class="tag">fixed</b><span>When a part fails to build, it keeps its sliders and the banner says why it failed.</span></li>
+      <li><b class="tag">fixed</b><span>Diagonal printing could split a chunky part, like a cube on its corner, into loose pieces. It stays one piece now.</span></li>
+      <li><b class="tag">fixed</b><span>The print checks no longer flag a thin lip wrapped around a block, the roof of a rounded slot, or a narrow gap between two ribs as problems.</span></li>
+      <li><b class="tag">fixed</b><span>Switching AI or moving to another part no longer throws away a message you had typed but not sent.</span></li>
+      <li><b class="tag">fixed</b><span>Download 3MF failed when your slicer had no profile for your printer. It saves the file now.</span></li>
+      <li><b class="tag">fixed</b><span>A part could stay on Not built yet after a large import until the app restarted. It builds as soon as the import finishes.</span></li>
+    </ul>
+  </article>
   <article class="release" id="v1.0.1">
     <div class="meta"><span class="ver">v1.0.1</span><time datetime="2026-11-01">November 1, 2026</time></div>
     <ul>
