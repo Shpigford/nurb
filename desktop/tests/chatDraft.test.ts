@@ -4,6 +4,8 @@ import {
   AttachmentDraft,
   restoreDraftFiles,
   restoreDraftText,
+  stashDraft,
+  unstashDraft,
 } from "../src/chatDraft.ts";
 
 test("an auth failure preserves work composed during the failed turn", () => {
@@ -41,4 +43,14 @@ test("submission waits for every paste already being saved", async () => {
 
   assert.deepEqual(await submitted, ["first.png", "second.png"]);
   assert.deepEqual(shown, []);
+});
+
+test("a stashed draft outlives its column and comes back once", () => {
+  stashDraft("loose\u0000bin", { text: "make it taller", files: ["/tmp/a.png"] });
+  assert.deepEqual(unstashDraft("other\u0000bin"), { text: "", files: [] });
+  assert.deepEqual(unstashDraft("loose\u0000bin"), { text: "make it taller", files: ["/tmp/a.png"] });
+  assert.deepEqual(unstashDraft("loose\u0000bin"), { text: "", files: [] });
+  stashDraft("loose\u0000bin", { text: "kept", files: [] });
+  stashDraft("loose\u0000bin", { text: "  ", files: [] });
+  assert.deepEqual(unstashDraft("loose\u0000bin"), { text: "", files: [] });
 });
