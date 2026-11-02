@@ -10,6 +10,8 @@ a volume, an inverted one runs its booleans backwards, a degenerate one encloses
 nothing.
 """
 
+import zipfile
+
 import numpy as np
 import pytest
 import trimesh
@@ -260,20 +262,67 @@ def test_3mf_writes_a_mesh_whose_weld_collapses_a_triangle(tmp_path, monkeypatch
     assert model.count("<triangle ") == 1
 
 
-def test_3mf_says_what_to_do_instead_of_naming_a_missing_module(tmp_path):
-    """The other half of a model site download, and trimesh cannot read it here.
+def test_a_3mf_is_measured_and_not_imported(tmp_path):
+    """The other half of a model site download, read without trimesh's networkx path.
 
-    Without this the error is "part.3mf: No module named 'networkx'", which names an
-    implementation detail at the exact moment a first-time user is deciding whether
-    this tool works. Exporting STL from the slicer they already have is one menu item.
+    Without the reader the error was "part.3mf: No module named 'networkx'". It is
+    measured at its size like any mesh, and refused as a solid by name like OBJ.
     """
     target = tmp_path / "part.3mf"
     mesher = Mesher()
     mesher.add_shape(Box(20, 30, 40))
     mesher.write(str(target))
-    for call in (lambda: import_stl(target), lambda: scan.load(target)):
-        with pytest.raises(ValueError, match="export the plate as STL"):
-            call()
+    loaded, unit, source = scan.load(target)
+    assert tuple(sorted(loaded.extents)) == pytest.approx((20.0, 30.0, 40.0))
+    assert (unit, source) == ("mm", "file")
+    with pytest.raises(ValueError, match="only .stl converts"):
+        import_stl(target)
+
+
+def bambu_3mf(target):
+    """The layout Bambu Studio saves: the root model holds components, the meshes sit
+    in 3D/Objects, and both the component and the build item carry transforms."""
+    core = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+    prod = "http://schemas.microsoft.com/3dmanufacturing/production/2015/06"
+    box = trimesh.creation.box(extents=(10, 20, 30))
+    vertices = "".join(f'<vertex x="{x}" y="{y}" z="{z}"/>' for x, y, z in box.vertices)
+    triangles = "".join(f'<triangle v1="{a}" v2="{b}" v3="{c}"/>' for a, b, c in box.faces)
+    objects = (
+        f'<model unit="millimeter" xmlns="{core}"><resources>'
+        f'<object id="1" type="model"><mesh><vertices>{vertices}</vertices>'
+        f"<triangles>{triangles}</triangles></mesh></object></resources><build/></model>"
+    )
+    root = (
+        f'<model unit="millimeter" xmlns="{core}" xmlns:p="{prod}"><resources>'
+        f'<object id="2" type="model"><components>'
+        f'<component p:path="/3D/Objects/object_1.model" objectid="1" transform="2 0 0 0 2 0 0 0 2 0 0 0"/>'
+        f'<component p:path="/3D/Objects/object_1.model" objectid="1" transform="1 0 0 0 1 0 0 0 1 100 0 0"/>'
+        f"</components></object></resources><build>"
+        f'<item objectid="2" transform="1 0 0 0 1 0 0 0 1 0 0 15"/>'
+        f"</build></model>"
+    )
+    settings = '<config><object id="2"><metadata key="name" value="Bracket"/></object></config>'
+    with zipfile.ZipFile(target, "w") as z:
+        z.writestr("3D/3dmodel.model", root)
+        z.writestr("3D/Objects/object_1.model", objects)
+        z.writestr("Metadata/model_settings.config", settings)
+    return target
+
+
+def test_a_bambu_3mf_reads_its_components_from_their_own_files(tmp_path):
+    """One item, two copies of one mesh: one doubled, one moved 100mm along x."""
+    loaded, _, _ = scan.load(bambu_3mf(tmp_path / "bambu.3mf"))
+    # The doubled box spans x -10..10, the moved one 95..105; z is lifted 15 by the item.
+    assert loaded.bounds.ravel().tolist() == pytest.approx([-10, -20, -15, 105, 20, 45])
+    assert len(loaded.faces) == 24
+    assert [name for name, _ in loaded.metadata["objects"]] == ["Bracket"]
+
+
+def test_a_3mf_that_is_not_a_zip_says_so(tmp_path):
+    target = tmp_path / "broken.3mf"
+    target.write_text("not a zip")
+    with pytest.raises(ValueError, match="broken.3mf is not a 3MF"):
+        scan.load(target)
 
 
 def test_the_scan_report_and_the_import_agree_about_every_file(tmp_path):

@@ -56,7 +56,7 @@ pub(crate) async fn checkout(
     let path = format!("/api/projects/{project_id}/checkout");
     let request = serde_json::json!({ "directory": root.display().to_string() }).to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let (status, body) = loopback_post(port, &path, &request)
+        let (status, body) = loopback_post(port, &path, &request, CAPTURE_TIMEOUT)
             .map_err(|error| format!("Could not copy the project out: {error}"))?;
         if (200..300).contains(&status) {
             return Ok(());
@@ -94,12 +94,40 @@ pub(crate) async fn save_photo(
     })
     .to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let (status, body) = loopback_post(port, &path, &request)?;
+        let (status, body) = loopback_post(port, &path, &request, CAPTURE_TIMEOUT)?;
         if (200..300).contains(&status) {
             Ok(())
         } else {
             Err(format!("the serve answered {status}: {body}"))
         }
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// A downloaded mesh can run to a million triangles, and reading one plus drawing
+/// it takes the serve several seconds.
+const DESCRIBE_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// A mesh file as the serve sees it: its measurements in words, and a PNG of it
+/// from four sides. Claude cannot open a file at all, and no agent can be
+/// counted on to read a 3MF.
+pub(crate) async fn describe_mesh(serve: &ServeInfo, path: &str) -> Result<(String, Vec<u8>), String> {
+    use base64::Engine;
+    let port = serve.port;
+    let request = serde_json::json!({ "path": path }).to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (status, body) = loopback_post(port, "/api/mesh", &request, DESCRIBE_TIMEOUT)?;
+        let json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|_| format!("the serve answered {status}: {body}"))?;
+        if !(200..300).contains(&status) {
+            return Err(json["error"].as_str().unwrap_or(body.trim()).to_string());
+        }
+        let text = json["text"].as_str().ok_or("the serve sent no description")?.to_string();
+        let png = base64::engine::general_purpose::STANDARD
+            .decode(json["png"].as_str().unwrap_or_default())
+            .map_err(|e| format!("the serve sent a broken picture: {e}"))?;
+        Ok((text, png))
     })
     .await
     .map_err(|error| error.to_string())?
@@ -352,7 +380,7 @@ pub(crate) async fn capture(
     .to_string();
     let part = part.to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        let (status, body) = loopback_post(port, &path, &request)
+        let (status, body) = loopback_post(port, &path, &request, CAPTURE_TIMEOUT)
             .map_err(|error| format!("Could not save {part} back to the project: {error}"))?;
         let body: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
         if !(200..300).contains(&status) {
@@ -375,12 +403,12 @@ pub(crate) async fn capture(
 /// always on 127.0.0.1, so there is no TLS here and never will be, and it
 /// answers with Content-Length and honours Connection: close, which makes
 /// read-to-end the whole protocol.
-fn loopback_post(port: u16, path: &str, body: &str) -> Result<(u16, String), String> {
+fn loopback_post(port: u16, path: &str, body: &str, timeout: Duration) -> Result<(u16, String), String> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&address, CAPTURE_TIMEOUT)
         .map_err(|e| format!("connect to the serve: {e}"))?;
-    stream.set_read_timeout(Some(CAPTURE_TIMEOUT)).ok();
-    stream.set_write_timeout(Some(CAPTURE_TIMEOUT)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
     write!(
         stream,
         "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

@@ -642,7 +642,8 @@ pub async fn send_prompt(
         );
         // The part and the audience live in the CLI's system prompt, set when
         // the session started, so the turn carries the user's words and files.
-        let content = crate::claude::user_content(text, &attachments)?;
+        let meshes = describe_meshes(&app, &attachments).await?;
+        let content = crate::claude::user_content(text, &attachments, &meshes)?;
         remember_photos(&app, &project_key(&driver.project), &attachments).await;
         return driver.prompt(content).await;
     }
@@ -694,8 +695,17 @@ pub async fn send_prompt(
     if !text.trim().is_empty() {
         blocks.push(ContentBlock::Text(TextContent::new(text)));
     }
+    let meshes = describe_meshes(&app, &attachments).await?;
     for path in &attachments {
         blocks.push(attachment_block(std::path::Path::new(path))?);
+        // The agent gets the file, and also the view Claude gets, since none of
+        // them reads a 3MF on its own.
+        if let Some((text, png)) = meshes.get(path) {
+            use base64::Engine;
+            let data = base64::engine::general_purpose::STANDARD.encode(png);
+            blocks.push(ContentBlock::Image(ImageContent::new(data, "image/png")));
+            blocks.push(ContentBlock::Text(TextContent::new(text.clone())));
+        }
     }
     blocks.push(ContentBlock::Text(TextContent::new(context)));
     remember_photos(&app, &project_name, &attachments).await;
@@ -751,6 +761,40 @@ fn attachment_block(path: &std::path::Path) -> Result<ContentBlock, String> {
         base64::engine::general_purpose::STANDARD.encode(data),
         mime,
     )))
+}
+
+/// What the serve reads as a mesh: 3MF by its own reader, the rest through trimesh.
+const MESHES: [&str; 6] = ["3mf", "stl", "obj", "ply", "glb", "off"];
+
+pub(crate) fn is_mesh(path: &std::path::Path) -> bool {
+    !path.is_dir() && attachment_extension(path).is_some_and(|e| MESHES.contains(&e.as_str()))
+}
+
+/// Each attached mesh as the serve describes it, keyed by its path: its
+/// measurements in words and a picture from four sides.
+pub(crate) type Meshes = HashMap<String, (String, Vec<u8>)>;
+
+async fn describe_meshes(app: &tauri::AppHandle, attachments: &[String]) -> Result<Meshes, String> {
+    use tauri::Manager;
+    let mut meshes = Meshes::new();
+    let wanted: Vec<_> = attachments.iter().filter(|path| is_mesh(Path::new(path))).collect();
+    if wanted.is_empty() {
+        return Ok(meshes);
+    }
+    let handle = app.clone();
+    let serve = tauri::async_runtime::spawn_blocking(move || {
+        handle.state::<crate::supervisor::Supervisor>().ensure()
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    for path in wanted {
+        let name = attachment_name(Path::new(path))?;
+        let described = mcp::describe_mesh(&serve, path)
+            .await
+            .map_err(|error| format!("cannot read {name}: {error}"))?;
+        meshes.insert(path.clone(), described);
+    }
+    Ok(meshes)
 }
 
 /// A photo outlives the conversation it came in: picking another agent starts a
@@ -811,7 +855,15 @@ fn photo_name(name: &str, mime: &str) -> String {
 #[tauri::command]
 pub async fn check_attachments(attachments: Vec<String>, claude: bool) -> Result<(), String> {
     if claude {
-        return crate::claude::user_content(String::new(), &attachments).map(|_| ());
+        // A mesh is drawn when the turn goes out; here it only has to be small
+        // enough to read in reasonable time.
+        let (meshes, rest): (Vec<_>, Vec<_>) =
+            attachments.into_iter().partition(|path| is_mesh(Path::new(path)));
+        for path in &meshes {
+            let path = Path::new(path);
+            check_copy_size(path, &attachment_name(path)?)?;
+        }
+        return crate::claude::user_content(String::new(), &rest, &Meshes::new()).map(|_| ());
     }
     for path in &attachments {
         let path = std::path::Path::new(path);
