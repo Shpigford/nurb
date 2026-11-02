@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent,
   type ReactNode,
   type RefObject,
 } from "react"
@@ -81,7 +82,6 @@ export default function Menu({
   const menuRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const id = useId()
-  const checkable = items.some((item) => item.checked !== undefined)
   const openChange = useRef(onOpenChange)
   openChange.current = onOpenChange
   useEffect(() => {
@@ -193,51 +193,13 @@ export default function Menu({
               {filter && shown.length === 0 ? (
                 <div className="mono-id flex h-7 items-center px-3 text-faint">Nothing matches</div>
               ) : null}
-              {shown.map((item, index) => (
-                <Fragment key={index}>
-                  {item.section && item.section !== shown[index - 1]?.section ? (
-                    <>
-                      {index > 0 ? (
-                        <div className="my-1 border-t border-line-soft" role="separator" />
-                      ) : null}
-                      <div className="flex h-6 items-center px-3 font-mono text-[9.5px] leading-3 font-medium tracking-[0.12em] text-faint uppercase">
-                        {item.section}
-                      </div>
-                    </>
-                  ) : null}
-                  <button
-                    type="button"
-                    role={checkable ? "menuitemradio" : "menuitem"}
-                    aria-checked={checkable ? Boolean(item.checked) : undefined}
-                    disabled={item.disabled}
-                    title={item.title}
-                    onClick={(e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      item.onSelect()
-                      if (!item.keepOpen) setOpen(false)
-                    }}
-                    className={clsx(
-                      "chrome mono-id flex h-7 w-full items-center gap-2 px-3 text-left transition-colors focus-visible:bg-raised focus-visible:outline-none disabled:text-faint disabled:hover:bg-transparent",
-                      item.separated && "mt-1 border-t border-line-soft pt-px",
-                      item.tone === "danger"
-                        ? "text-fail hover:bg-fail-wash"
-                        : item.checked
-                          ? "text-ink hover:bg-raised"
-                          : "text-ink-soft hover:bg-raised hover:text-ink",
-                    )}
-                  >
-                    {checkable ? (
-                      <span className="flex size-3 shrink-0 items-center justify-center">
-                        {item.checked ? <Icon name="check" /> : null}
-                      </span>
-                    ) : null}
-                    {item.icon ? <Icon name={item.icon} /> : null}
-                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    {item.trailing ? <span className="shrink-0">{item.trailing}</span> : null}
-                  </button>
-                </Fragment>
-              ))}
+              <MenuRows
+                items={shown}
+                onPick={(item) => {
+                  item.onSelect()
+                  if (!item.keepOpen) setOpen(false)
+                }}
+              />
               {footer ? (
                 <div className="sticky bottom-0 mt-1 border-t border-line-soft bg-raised px-3 py-2 font-mono text-[9.5px] leading-3 tracking-[0.08em] text-muted uppercase">
                   {footer}
@@ -248,6 +210,131 @@ export default function Menu({
         </AnimatePresence>,
       )}
     </div>
+  )
+}
+
+// The same rows, opened by a right-click at the pointer. Call `open` from the
+// onContextMenu of the thing the menu is about, and render `menu` once anywhere;
+// it portals to the body, so one hook serves a whole list.
+export function useContextMenu() {
+  const [at, setAt] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null)
+  const [style, setStyle] = useState<CSSProperties>()
+  const menuRef = useRef<HTMLDivElement>(null)
+  const id = useId()
+
+  // Placed after it renders, so a click near the window's edge opens the menu inward.
+  useLayoutEffect(() => {
+    if (!at || !menuRef.current) return
+    const { width, height } = menuRef.current.getBoundingClientRect()
+    setStyle({
+      position: "fixed",
+      left: Math.max(8, Math.min(at.x, window.innerWidth - width - 8)),
+      top: Math.max(8, Math.min(at.y, window.innerHeight - height - 8)),
+    })
+  }, [at])
+
+  useEffect(() => {
+    if (!at) return
+    const close = (e: Event) => {
+      if (!menuRef.current?.contains(e.target as Node)) setAt(null)
+    }
+    const onKeyDown = (e: globalThis.KeyboardEvent) => e.key === "Escape" && setAt(null)
+    const onBlur = () => setAt(null)
+    document.addEventListener("pointerdown", close, true)
+    document.addEventListener("keydown", onKeyDown)
+    window.addEventListener("blur", onBlur)
+    window.addEventListener("scroll", onBlur, true)
+    return () => {
+      document.removeEventListener("pointerdown", close, true)
+      document.removeEventListener("keydown", onKeyDown)
+      window.removeEventListener("blur", onBlur)
+      window.removeEventListener("scroll", onBlur, true)
+    }
+  }, [at])
+
+  const open = (e: MouseEvent, items: MenuItem[] | undefined) => {
+    if (!items?.length) return
+    e.preventDefault()
+    e.stopPropagation()
+    setStyle({ position: "fixed", left: e.clientX, top: e.clientY, visibility: "hidden" })
+    setAt({ x: e.clientX, y: e.clientY, items })
+  }
+
+  const menu = portalize(
+    true,
+    <AnimatePresence>
+      {at ? (
+        <Popover
+          id={id}
+          ref={menuRef}
+          style={style}
+          className="z-30 min-w-[168px] overflow-hidden rounded-[6px] border border-panel-edge bg-ground py-1 shadow-[var(--shadow-panel)]"
+        >
+          <MenuRows
+            items={at.items}
+            onPick={(item) => {
+              item.onSelect()
+              if (!item.keepOpen) setAt(null)
+            }}
+          />
+        </Popover>
+      ) : null}
+    </AnimatePresence>,
+  )
+
+  return { open, menu }
+}
+
+// The rows themselves, shared by the "…" menu and the right-click one.
+function MenuRows({ items, onPick }: { items: MenuItem[]; onPick: (item: MenuItem) => void }) {
+  const checkable = items.some((item) => item.checked !== undefined)
+  return (
+    <>
+      {items.map((item, index) => (
+        <Fragment key={index}>
+          {item.section && item.section !== items[index - 1]?.section ? (
+            <>
+              {index > 0 ? (
+                <div className="my-1 border-t border-line-soft" role="separator" />
+              ) : null}
+              <div className="flex h-6 items-center px-3 font-mono text-[9.5px] leading-3 font-medium tracking-[0.12em] text-faint uppercase">
+                {item.section}
+              </div>
+            </>
+          ) : null}
+          <button
+            type="button"
+            role={checkable ? "menuitemradio" : "menuitem"}
+            aria-checked={checkable ? Boolean(item.checked) : undefined}
+            disabled={item.disabled}
+            title={item.title}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              onPick(item)
+            }}
+            className={clsx(
+              "chrome mono-id flex h-7 w-full items-center gap-2 px-3 text-left transition-colors focus-visible:bg-raised focus-visible:outline-none disabled:text-faint disabled:hover:bg-transparent",
+              item.separated && "mt-1 border-t border-line-soft pt-px",
+              item.tone === "danger"
+                ? "text-fail hover:bg-fail-wash"
+                : item.checked
+                  ? "text-ink hover:bg-raised"
+                  : "text-ink-soft hover:bg-raised hover:text-ink",
+            )}
+          >
+            {checkable ? (
+              <span className="flex size-3 shrink-0 items-center justify-center">
+                {item.checked ? <Icon name="check" /> : null}
+              </span>
+            ) : null}
+            {item.icon ? <Icon name={item.icon} /> : null}
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            {item.trailing ? <span className="shrink-0">{item.trailing}</span> : null}
+          </button>
+        </Fragment>
+      ))}
+    </>
   )
 }
 

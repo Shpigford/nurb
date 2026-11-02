@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react"
+import type { CSSProperties, MouseEventHandler, ReactNode } from "react"
 import clsx from "clsx"
 
 export interface StageProps {
@@ -30,9 +30,22 @@ export default function Stage({ header, children, className, style, topInset, dr
 
 // The viewer column. It fills whatever the chat panel and the rail leave and is
 // never a panel itself: the viewer paints the plate and the part straight onto the stage.
-export function StageColumn({ children, className }: { children: ReactNode; className?: string }) {
+export function StageColumn({
+  children,
+  className,
+  onContextMenu,
+}: {
+  children: ReactNode
+  className?: string
+  onContextMenu?: MouseEventHandler
+}) {
   return (
-    <div className={clsx("relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}>{children}</div>
+    <div
+      onContextMenu={onContextMenu}
+      className={clsx("relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden", className)}
+    >
+      {children}
+    </div>
   )
 }
 

@@ -13,10 +13,12 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import clsx from "clsx";
 import {
   ApprovalCard,
   AssistantMarkdown,
+  useContextMenu,
   Button,
   ChatPanel,
   changedSize,
@@ -136,9 +138,20 @@ const CLAUDE_SIGN_IN =
   "Sign in to Claude Code first: open a terminal, run claude, and follow the prompts. Then come back here.";
 
 /** A turn: who spoke and its number over the prose itself. */
-function Turn({ who, n, children }: { who: string; n?: string; children: ReactNode }) {
+// A right-click on a turn copies the whole of it, which a drag across a long
+// reply with tables and lists in it does badly.
+function Turn({ who, n, text, children }: { who: string; n?: string; text?: string; children: ReactNode }) {
+  const context = useContextMenu();
   return (
-    <div className="flex flex-col gap-1.5">
+    <div
+      className="flex flex-col gap-1.5"
+      onContextMenu={(e) => {
+        // A selection gets the webview's own Copy, which copies just that.
+        if (window.getSelection()?.toString()) return;
+        context.open(e, text ? [{ label: "Copy message", onSelect: () => void writeText(text) }] : undefined);
+      }}
+    >
+      {context.menu}
       <div className="flex items-baseline justify-between">
         <span className="mono-label text-muted">{who}</span>
         {n ? <span className="mono-caption text-faint [letter-spacing:0.1em]">{n}</span> : null}
@@ -176,7 +189,7 @@ function Stored({ message, who, n }: { message: Message; who: string; n?: string
   return (
     <div className="flex flex-col gap-4">
       {message.content || message.files?.length ? (
-        <Turn who={message.role === "user" ? "You" : who} n={n}>
+        <Turn who={message.role === "user" ? "You" : who} n={n} text={message.content ?? undefined}>
           {message.role === "user" ? (
             <>
               {message.content && (
@@ -1212,14 +1225,14 @@ function Chat({
           switch (item.kind) {
             case "user":
               return (
-                <Turn key={index} who="You" n={nextTurn()}>
+                <Turn key={index} who="You" n={nextTurn()} text={item.text}>
                   <p className="text-chat whitespace-pre-wrap text-ink-soft">{item.text}</p>
                   {item.files && <FileNames names={item.files} />}
                 </Turn>
               );
             case "agent":
               return (
-                <Turn key={index} who={label} n={nextTurn()}>
+                <Turn key={index} who={label} n={nextTurn()} text={item.text}>
                   <div className="text-chat text-ink-soft">
                     <AssistantMarkdown
                       content={item.text}

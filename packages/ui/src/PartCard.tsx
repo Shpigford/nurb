@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import Icon from "./Icon"
 import IsoBox from "./IsoBox"
-import Menu, { type MenuItem } from "./Menu"
+import Menu, { useContextMenu, type MenuItem } from "./Menu"
 import BlurUpImage from "./motion/BlurUpImage"
 import { formatBbox, relativeTime, rev } from "./format"
 
@@ -62,8 +62,13 @@ export default function PartCard({
   const failed = part.status === "failed"
   const building = part.status === "building"
   const pulse = usePulse(building, part.buildingSince)
+  const context = useContextMenu()
   return (
-    <div className="group relative flex flex-col rounded-[6px] border border-panel-edge bg-ground transition-shadow focus-within:shadow-[var(--shadow-panel)] hover:shadow-[var(--shadow-panel)]">
+    <div
+      onContextMenu={(e) => context.open(e, renaming ? undefined : menu)}
+      className="group relative flex flex-col rounded-[6px] border border-panel-edge bg-ground transition-shadow focus-within:shadow-[var(--shadow-panel)] hover:shadow-[var(--shadow-panel)]"
+    >
+      {context.menu}
       <button
         type="button"
         onClick={onOpen}

@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { MouseEvent, ReactNode } from 'react';
 import { IconName } from './Icon';
 export interface MenuItem {
     label: ReactNode;
@@ -40,3 +40,7 @@ export default function Menu({ label, items, align, className, menuClassName, tr
     /** A find field above the items, with this placeholder, for a list too long to scan. */
     filter?: string;
 }): import("react").JSX.Element;
+export declare function useContextMenu(): {
+    open: (e: MouseEvent, items: MenuItem[] | undefined) => void;
+    menu: ReactNode;
+};

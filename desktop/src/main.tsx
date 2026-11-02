@@ -12,6 +12,15 @@ readSoundPrefs();
 console.log("%cnurb — parts that fit.", "color:#ff5230;font-weight:700");
 console.log("Don't print this in PLA if it's going in a car.");
 
+// The webview's own menu offers only Reload, which throws away the session. Keep
+// it where it does something: text you can edit, and text you have selected.
+document.addEventListener("contextmenu", (e) => {
+  const target = e.target as HTMLElement;
+  if (target.closest("input, textarea, [contenteditable='true']")) return;
+  if (window.getSelection()?.toString()) return;
+  e.preventDefault();
+});
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <App />
