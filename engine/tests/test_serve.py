@@ -1237,6 +1237,32 @@ def test_a_photo_from_the_chat_is_what_find_photos_sees(home):
     ]
 
 
+def test_an_attached_mesh_comes_back_as_a_picture_and_its_size(home, tmp_path):
+    """The app's way to show an agent a 3MF or STL, since Claude cannot open one."""
+    import base64
+
+    from build123d import Box, Mesher
+
+    target = tmp_path / "bracket.3mf"
+    mesher = Mesher()
+    mesher.add_shape(Box(20, 30, 40))
+    mesher.write(str(target))
+
+    with serving(home, free_port()) as url:
+        status, _, body = post(f"{url}/api/mesh", {"path": str(target)})
+        assert status == 200
+        seen = json.loads(body)
+        assert '"bracket.3mf": 20 x 30 x 40 mm' in seen["text"]
+        assert base64.b64decode(seen["png"]).startswith(b"\x89PNG")
+
+        broken = tmp_path / "broken.3mf"
+        broken.write_text("not a zip")
+        for sent in ({"path": str(broken)}, {"path": str(tmp_path / "gone.stl")}, {}):
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                post(f"{url}/api/mesh", sent)
+            assert refused.value.code == 400
+
+
 def test_a_turn_remembers_the_files_sent_with_it(home):
     from nurb import db
 

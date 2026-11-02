@@ -160,7 +160,12 @@ const TEXT_LIMIT: usize = 100 * 1024;
 /// What one turn says: the user's words, then each file as a block the model
 /// reads itself. Every built-in tool is off, so a link to a path would be a
 /// file the CLI has no way to open.
-pub(crate) fn user_content(text: String, attachments: &[String]) -> Result<Value, String> {
+pub(crate) fn user_content(
+    text: String,
+    attachments: &[String],
+    meshes: &crate::acp::Meshes,
+) -> Result<Value, String> {
+    use base64::Engine;
     if attachments.is_empty() {
         return Ok(Value::String(text));
     }
@@ -169,6 +174,19 @@ pub(crate) fn user_content(text: String, attachments: &[String]) -> Result<Value
         blocks.push(serde_json::json!({ "type": "text", "text": text }));
     }
     for path in attachments {
+        // A mesh goes as the picture and measurements the serve made of it.
+        if let Some((description, png)) = meshes.get(path) {
+            blocks.push(serde_json::json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": base64::engine::general_purpose::STANDARD.encode(png),
+                },
+            }));
+            blocks.push(serde_json::json!({ "type": "text", "text": description }));
+            continue;
+        }
         blocks.push(attachment_block(Path::new(path))?);
     }
     Ok(Value::Array(blocks))
@@ -195,7 +213,7 @@ fn attachment_block(path: &Path) -> Result<Value, String> {
     let text = String::from_utf8(data)
         .ok()
         .filter(|text| !text.contains('\0'))
-        .ok_or_else(|| format!("Claude can't open {name}. It reads photos, PDFs and text files, so attach a screenshot of it instead."))?;
+        .ok_or_else(|| format!("Claude can't open {name}. It reads photos, PDFs, text files, and 3MF, STL or OBJ models, so attach a screenshot of it instead."))?;
     if text.len() > TEXT_LIMIT {
         return Err(format!("{name} is too long to attach (over 100KB of text)"));
     }
@@ -714,6 +732,7 @@ pub(crate) fn config_rows(prefs: &PrefStore) -> Vec<ConfigRow> {
 #[cfg(test)]
 mod tests {
     use super::{is_current, map_line, set_model_line, spawn, spawn_args, user_content, Signal};
+    use crate::acp::Meshes;
     use serde_json::Value;
 
     const STREAM: &str = include_str!("../tests/fixtures/claude-stream.jsonl");
@@ -772,11 +791,12 @@ mod tests {
         };
 
         // No files is the plain turn it has always been.
-        assert_eq!(user_content("taller".into(), &[]).unwrap(), Value::String("taller".into()));
+        assert_eq!(user_content("taller".into(), &[], &Meshes::new()).unwrap(), Value::String("taller".into()));
 
         let sent = user_content(
             "fit this".into(),
             &[file("photo.PNG", b"pixels"), file("manual.pdf", b"%PDF-1.4"), file("notes.txt", b"lip is 3mm")],
+            &Meshes::new(),
         )
         .unwrap();
         let blocks = sent.as_array().unwrap();
@@ -792,15 +812,22 @@ mod tests {
         assert!(blocks[3]["text"].as_str().unwrap().contains("lip is 3mm"));
 
         // A photo alone is a message, and it stays a photo with no empty words.
-        let alone = user_content("  ".into(), &[file("hook.jpg", b"pixels")]).unwrap();
+        let alone = user_content("  ".into(), &[file("hook.jpg", b"pixels")], &Meshes::new()).unwrap();
         assert_eq!(alone.as_array().unwrap().len(), 1);
         assert_eq!(alone[0]["type"], "image");
 
-        // What Claude has no way to read is refused by name, never dropped.
+        // A mesh goes as the picture and the words the serve made of it.
         let mesh = file("bracket.3mf", b"PK\x03\x04\xff\xfe");
-        assert!(user_content("hi".into(), &[mesh]).unwrap_err().contains("bracket.3mf"));
+        let described = Meshes::from([(mesh.clone(), ("20 x 30 x 40 mm".to_string(), b"png".to_vec()))]);
+        let sent = user_content("hi".into(), &[mesh.clone()], &described).unwrap();
+        assert_eq!(sent[1]["source"]["media_type"], "image/png");
+        assert_eq!(sent[2]["text"], "20 x 30 x 40 mm");
+
+        // What Claude has no way to read is refused by name, never dropped.
+        let binary = file("bracket.step", b"ISO\x00\xff");
+        assert!(user_content("hi".into(), &[binary], &Meshes::new()).unwrap_err().contains("bracket.step"));
         let long = file("huge.txt", &vec![b'a'; super::TEXT_LIMIT + 1]);
-        assert!(user_content("hi".into(), &[long]).unwrap_err().contains("too long"));
+        assert!(user_content("hi".into(), &[long], &Meshes::new()).unwrap_err().contains("too long"));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -19,11 +19,14 @@ part a thousand times off that still builds, so the guess is stated in the repor
 overridable rather than silent.
 """
 
+import math
 import pathlib
 import re
 from collections import defaultdict
 
 import numpy as np
+
+from . import threemf
 
 UNITS = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "in": 25.4}
 LONG = {"mm": "millimetres", "cm": "centimetres", "m": "metres", "in": "inches"}
@@ -63,16 +66,18 @@ def load(path, units=None):
     path = pathlib.Path(path)
     if not path.is_file():
         raise ValueError(f"no file at {path}")
-    if path.suffix.lower() == ".3mf":
-        # As common as STL on the model sites, and trimesh reads it only with networkx
-        # installed. "No module named 'networkx'" is not something a user can act on,
-        # and a dependency is not worth one format the slicer already converts.
-        raise ValueError(
-            f"{path.name} is a 3MF, which nurb does not read. Open it in your slicer "
-            f"and export the plate as STL, then run this on that file"
-        )
     try:
-        mesh = trimesh.load(str(path), force="mesh")
+        if path.suffix.lower() == ".3mf":
+            # trimesh reads 3MF only with networkx installed, so this reads it itself.
+            # A 3MF always declares its unit, and the reader has applied it.
+            objects = threemf.items(path)
+            mesh = trimesh.util.concatenate([m for _, m in objects])
+            mesh.units = "mm"
+            mesh.metadata["objects"] = objects
+        else:
+            mesh = trimesh.load(str(path), force="mesh")
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError(f"{path.name}: {exc}") from exc
     if not hasattr(mesh, "faces") or len(mesh.faces) == 0:
@@ -319,3 +324,104 @@ def _simplify(points, tolerance):
             keep[i] = True
             stack += [(a, i), (i, b)]
     return points[keep]
+
+
+# What a picture of an attached mesh draws at most. The rasterizer walks triangles one
+# at a time, about 70 microseconds each across the four views, and a download off a
+# model site can carry a million of them: a minute of waiting for a picture that looks
+# the same thinned. The measurements are always taken on the full mesh.
+PICTURED = 30_000
+
+
+def describe(path):
+    """A mesh someone attached to a chat, as (what it measures, a four-view PNG).
+
+    This is how an agent sees a file it cannot open: the picture shows the shape, the
+    words carry the millimetres the picture cannot. Nothing here says how to import
+    it, because the agent may not have the file at all, only this.
+    """
+    from . import raster
+
+    path = pathlib.Path(path)
+    mesh, unit, source = load(path)
+    read = {
+        "file": f"in {LONG[unit]}, as the file declares",
+        "guess": f"read as {LONG[unit]}, a guess from its size because the file names no unit",
+    }[source]
+    surface = "watertight" if mesh.is_watertight else "an open surface"
+    objects = mesh.metadata.get("objects", [])
+    if len(objects) > 1:
+        # A slicer file spreads its objects over plates, so the span of all of them is
+        # a number about the plates, and a picture of it is mostly empty bed.
+        shown = objects[:LISTED_OBJECTS]
+        lines = [
+            f'Attached mesh "{path.name}": {len(objects)} objects, {len(mesh.faces):,} '
+            f"triangles, {surface}, {read}. Sizes are x by y by z:"
+        ]
+        lines += [f"  {i}. {name}: {_size(m)} mm" for i, (name, m) in enumerate(shown, 1)]
+        if len(objects) > len(shown):
+            lines.append(f"  and {len(objects) - len(shown)} more, not pictured")
+        lines.append("The picture lays them out in rows in the order listed, left to right from the front.")
+        pictured = _laid_out([m for _, m in shown])
+    else:
+        lines = [
+            f'Attached mesh "{path.name}": {_size(mesh)} mm (x by y by z, {read}). '
+            f"{len(mesh.faces):,} triangles, {surface}."
+        ]
+        pictured = mesh
+    lines.append(
+        "The picture shows it from four sides: ISO from the front-left corner above, BACK "
+        "from the back-right corner above, TOP straight down, UNDER from below. A mesh "
+        "is only triangles, so it cannot be edited as it is: to change it, model it as "
+        "a part from these measurements."
+    )
+    picture = raster.composite(_thinned(pictured, PICTURED).export(file_type="glb"))
+    return "\n".join(lines), picture
+
+
+def _size(mesh):
+    return " x ".join(f"{v:.4g}" for v in mesh.extents)
+
+
+def _laid_out(meshes):
+    """Copies set down in a grid on z = 0, a gap apart, first at the front left."""
+    import trimesh
+
+    columns = math.ceil(math.sqrt(len(meshes)))
+    gap = 0.15 * max(float(m.extents[:2].max()) for m in meshes)
+    placed, y = [], 0.0
+    for row in range(0, len(meshes), columns):
+        x, depth = 0.0, 0.0
+        for m in meshes[row : row + columns]:
+            moved = m.copy()
+            moved.apply_translation([x - m.bounds[0][0], y - m.bounds[0][1], -m.bounds[0][2]])
+            placed.append(moved)
+            x += float(m.extents[0]) + gap
+            depth = max(depth, float(m.extents[1]))
+        y += depth + gap
+    return trimesh.util.concatenate(placed)
+
+
+LISTED_OBJECTS = 20
+
+
+def _thinned(mesh, limit):
+    """The mesh with vertices merged on a grid until it has at most `limit` triangles.
+
+    Vertex clustering: crude next to quadric decimation, but it is numpy alone and
+    plenty for a picture a few hundred pixels across.
+    """
+    import trimesh
+
+    cells = 512
+    while len(mesh.faces) > limit and cells >= 8:
+        step = float(mesh.extents.max()) / cells
+        keys = np.floor((mesh.vertices - mesh.bounds[0]) / step).astype(np.int64)
+        _, first, inverse = np.unique(keys, axis=0, return_index=True, return_inverse=True)
+        faces = inverse.reshape(-1)[mesh.faces]
+        keep = (faces[:, 0] != faces[:, 1]) & (faces[:, 1] != faces[:, 2]) & (faces[:, 0] != faces[:, 2])
+        thinned = trimesh.Trimesh(vertices=mesh.vertices[first], faces=faces[keep], process=False)
+        if len(thinned.faces) <= limit:
+            return thinned
+        cells //= 2
+    return mesh

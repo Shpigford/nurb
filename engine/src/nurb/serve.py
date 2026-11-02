@@ -993,6 +993,24 @@ def _routes(conn, lock, server, token, pid):
 
         return await acted(work)
 
+    async def mesh_describe(request):
+        """A mesh file attached to a chat, as its size in words and a four-view picture.
+
+        Off the database lock: it reads a file, not the store, and a dense mesh takes
+        seconds a build should not wait behind.
+        """
+        from . import scan
+
+        sent = await body_of(request)
+        path = word(sent, "path", "path must be the mesh file to describe")
+        if not path:
+            raise _Refused(400, "path must be the mesh file to describe")
+        try:
+            text, picture = await anyio.to_thread.run_sync(scan.describe, pathlib.Path(path).expanduser())
+        except ValueError as exc:
+            raise _Refused(400, str(exc)) from None
+        return JSONResponse({"text": text, "png": base64.b64encode(picture).decode()})
+
     async def project_rename(request):
         """Call a project something else. The name is a label, so nothing on disk moves."""
         sent = await body_of(request)
@@ -1671,6 +1689,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
         Route("/api/projects/{project_id}/attachments", endpoint=answering(project_attachment), methods=["POST"]),
+        Route("/api/mesh", endpoint=answering(mesh_describe), methods=["POST"]),
         Route("/api/projects/{project_id}/printer", endpoint=answering(project_printer), methods=["POST"]),
         Route("/api/projects/{project_id}/system", endpoint=answering(project_system)),
         Route("/api/projects/{project_id}/settings", endpoint=answering(project_setting), methods=["POST"]),

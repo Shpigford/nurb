@@ -75,6 +75,8 @@ engine/src/nurb/printers.toml    shipped printer profiles, named by a project's 
 engine/src/nurb/card.py          the card's AUTO block
 engine/src/nurb/extract.py       duplication across sibling parts, up to alpha-equivalence
 engine/src/nurb/mesh.py          import_stl(), the flat-faced meshes that can be a solid
+engine/src/nurb/scan.py          a mesh file measured, and described as words plus a picture for a chat attachment
+engine/src/nurb/threemf.py       the 3MF reader, standard library only, Bambu multi-file layout included
 engine/src/nurb/measurements.py  measured(), and the refusal to guess
 engine/src/nurb/edit.py          the keyword-default rewrite behind Apply
 engine/src/nurb/render.py        headless PNG through the numpy rasterizer in raster.py
