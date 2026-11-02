@@ -79,6 +79,7 @@ engine/src/nurb/scan.py          a mesh file measured, and described as words pl
 engine/src/nurb/threemf.py       the 3MF reader, standard library only, Bambu multi-file layout included
 engine/src/nurb/measurements.py  measured(), and the refusal to guess
 engine/src/nurb/edit.py          the keyword-default rewrite behind Apply
+engine/src/nurb/labels.py        a person's names for spots on a part, snapped to the surface and checked against each build
 engine/src/nurb/render.py        headless PNG through the numpy rasterizer in raster.py
 engine/src/nurb/raster.py        GLB in, flat-shaded PNG out: the four views, the composite, and the PNG encoder
 engine/src/nurb/slicing.py       the handoff to an installed slicer, and the two numbers back

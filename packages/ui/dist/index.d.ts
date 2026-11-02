@@ -15,7 +15,7 @@ export { default as SpecCard } from './SpecCard';
 export { default as MeasurementCard } from './MeasurementCard';
 export { changedSize } from './MeasurementCard';
 export { ViewerIsland } from './viewer/ViewerIsland';
-export type { ViewerIslandProps, CameraState, Section, Vec3 } from './viewer/ViewerIsland';
+export type { ViewerIslandProps, ViewerAnchor, CameraState, Section, Vec3 } from './viewer/ViewerIsland';
 export { default as ParamsPanel, NumberRow as ParamSlider } from './panels/ParamsPanel';
 export type { ParamsPanelProps } from './panels/ParamsPanel';
 export { default as ExportMenu } from './panels/ExportMenu';

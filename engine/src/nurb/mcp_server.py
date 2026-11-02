@@ -25,7 +25,7 @@ from mcp.server import Server
 from mcp.shared.exceptions import MCPError
 from mcp_types import INVALID_PARAMS
 
-from . import __version__, db, engine_run, raster, spec as spec_module
+from . import __version__, db, engine_run, labels, raster, spec as spec_module
 
 TOOLS_FILE = pathlib.Path(__file__).with_name("tools.json")
 
@@ -290,6 +290,7 @@ def _build(conn, project_id, part_row, base_url, deadline):
     }
     links, image = [], None
     if result["glb_bytes"] is not None:
+        payload.update(_labels_of(conn, part_row["id"], {"id": run_id, "glb": result["glb_bytes"]}))
         payload["views"] = raster.CAPTIONS
         payload["look_note"] = raster.LOOK_NOTE
         links.append(_render_link(project_id, part_row["name"]))
@@ -302,6 +303,90 @@ def _build(conn, project_id, part_row, base_url, deadline):
         image,
         bool(result.get("timed_out")),
     )
+
+
+LABELS_NOTE = (
+    "Labels are the person's names for spots on this part. Use those names when you talk "
+    "about those places, and read a label's point and facing to find the place in the source."
+)
+OFF_NOTE = (
+    "The part moved away from these labels, so they no longer mark what they named: {names}. "
+    "If the place still exists, move the label onto it with set_label; if the edit removed "
+    "it, tell the person."
+)
+
+
+def _labels_of(conn, part_id, run):
+    """What a result says about the part's labels: nothing when it has none."""
+    rows = db.labels_of(conn, part_id)
+    if not rows:
+        return {}
+    placed = labels.placed(rows, run)
+    out = {"labels": placed, "labels_note": LABELS_NOTE}
+    off = [entry["name"] for entry in placed if entry.get("on_part") is False]
+    if off:
+        out["labels_off_note"] = OFF_NOTE.format(names=", ".join(off))
+    return out
+
+
+def place_label(conn, part_id, name, point):
+    """Snap a point onto the part's newest geometry and keep it under `name`."""
+    run = db.latest_ok_run(conn, part_id)
+    if run is None:
+        raise ValueError("the part has not built yet, so there is no surface to label")
+    at, normal = labels.snap(run, point)
+    db.set_label(conn, part_id, name, at, normal)
+    return at, normal
+
+
+def set_label(conn, args, base_url):
+    project = _project(conn, args["project_id"])
+    row = _part(conn, project["id"], args["part_name"])
+    if row is None:
+        raise Refused(f"no part called {args['part_name']} in this project")
+    try:
+        at, normal = place_label(conn, row["id"], args["name"], args["point"])
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    moved = math.dist(at, args["point"])
+    _record(
+        conn,
+        project["id"],
+        "set_label",
+        args.get("note"),
+        f"labelled {args['name'].strip()} on {row['name']}",
+        {"part_name": row["name"]},
+    )
+    return _ok(
+        {
+            "name": args["name"].strip(),
+            "point": at,
+            "facing": labels.facing(normal),
+            # The point lands on the nearest surface; a large move means the spot asked
+            # for was not on the part, and the label may be somewhere else than meant.
+            "moved_to_surface_mm": round(moved, 2),
+        }
+    )
+
+
+def delete_label(conn, args, base_url):
+    project = _project(conn, args["project_id"])
+    row = _part(conn, project["id"], args["part_name"])
+    if row is None:
+        raise Refused(f"no part called {args['part_name']} in this project")
+    try:
+        db.delete_label(conn, row["id"], args["name"])
+    except ValueError as exc:
+        raise Refused(str(exc)) from None
+    _record(
+        conn,
+        project["id"],
+        "delete_label",
+        args.get("note"),
+        f"removed the label {args['name']} from {row['name']}",
+        {"part_name": row["name"]},
+    )
+    return _ok({"deleted": args["name"]})
 
 
 def _build_result(conn, project_id, part_row, base_url, tool, note, deadline, extra=None):
@@ -434,6 +519,7 @@ def get_project(conn, args, base_url):
             "kind": row["kind"],
             "source": row["source"],
             "last_build": _last_build(conn, row),
+            **(_labels_of(conn, row["id"], db.latest_ok_run(conn, row["id"])) if row["kind"] == "part" else {}),
         }
         for row in rows
     ]
@@ -1201,6 +1287,8 @@ HANDLERS = {
     "run_build": run_build,
     "read_findings": read_findings,
     "look": look,
+    "set_label": set_label,
+    "delete_label": delete_label,
 }
 
 
