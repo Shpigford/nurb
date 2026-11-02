@@ -1,4 +1,4 @@
-import { JSX } from 'react';
+import { JSX, ReactNode } from 'react';
 import { Object3D } from 'three';
 import { Finding } from '../types';
 export type Vec3 = [number, number, number];
@@ -10,6 +10,13 @@ export interface Section {
     axis: "x" | "y" | "z";
     /** 0..1 along the axis; dragging right keeps more material */
     t: number;
+}
+/** Page content pinned to a spot on the part: it rides along as the camera orbits. */
+export interface ViewerAnchor {
+    key: string;
+    /** In the part's own mm, the same space `onPick` reports. */
+    point: Vec3;
+    node: ReactNode;
 }
 export interface ViewerIslandProps {
     /** The part's GLB. Changing it swaps the geometry and keeps the camera. null clears the part. */
@@ -32,6 +39,8 @@ export interface ViewerIslandProps {
     /** Print-up axis of the part's coordinates. Default [0,0,1]. */
     up?: Vec3;
     section?: Section | null;
+    /** Drawn over the canvas, each with its top-left corner on its point. */
+    anchors?: ViewerAnchor[];
     /** A view to restore, taken when it can still see the part; compared by value, so a parent may re-send it freely. */
     camera?: CameraState | null;
     /** The user's orbits, debounced 250 ms after the last one. The component's own framing never reports. */

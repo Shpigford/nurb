@@ -58,6 +58,19 @@ export interface Part {
   /** The slider values the newest run was built at; empty when it ran on the defaults. */
   overrides: Params
   build: PartBuild | null
+  labels?: PartLabel[]
+}
+
+/** A person's name for a spot on the part, in the part's own mm. */
+export interface PartLabel {
+  name: string
+  point: [number, number, number]
+  normal: [number, number, number]
+  facing: string
+  /** How far the spot sits from the geometry on screen; missing when nothing has built. */
+  off_mm?: number
+  /** False once an edit moved the surface away, so the name no longer marks anything. */
+  on_part?: boolean
 }
 
 export interface ProjectMeasurement {
@@ -410,4 +423,31 @@ export async function deletePart(id: string): Promise<{ project_id: string; proj
   const res = await fetch(base + url, { method: "DELETE" })
   if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
   return (await res.json()) as { project_id: string; project_deleted: boolean }
+}
+
+/** Name a spot on the part, or move the label of that name there. The engine snaps it to the surface. */
+export async function setLabel(partId: string, name: string, point: [number, number, number]): Promise<void> {
+  const url = `/api/parts/${encodeURIComponent(partId)}/labels`
+  const res = await fetch(base + url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, point }),
+  })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+}
+
+export async function renameLabel(partId: string, name: string, to: string): Promise<void> {
+  const url = `/api/parts/${encodeURIComponent(partId)}/labels/${encodeURIComponent(name)}`
+  const res = await fetch(base + url, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: to }),
+  })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+}
+
+export async function deleteLabel(partId: string, name: string): Promise<void> {
+  const url = `/api/parts/${encodeURIComponent(partId)}/labels/${encodeURIComponent(name)}`
+  const res = await fetch(base + url, { method: "DELETE" })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
 }

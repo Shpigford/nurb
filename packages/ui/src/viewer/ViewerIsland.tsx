@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from "react"
+import { useEffect, useRef, useState, type JSX, type ReactNode } from "react"
 import clsx from "clsx"
 import {
   Box3,
@@ -53,6 +53,14 @@ export interface Section {
   t: number
 }
 
+/** Page content pinned to a spot on the part: it rides along as the camera orbits. */
+export interface ViewerAnchor {
+  key: string
+  /** In the part's own mm, the same space `onPick` reports. */
+  point: Vec3
+  node: ReactNode
+}
+
 export interface ViewerIslandProps {
   /** The part's GLB. Changing it swaps the geometry and keeps the camera. null clears the part. */
   glbUrl: string | null
@@ -71,6 +79,8 @@ export interface ViewerIslandProps {
   /** Print-up axis of the part's coordinates. Default [0,0,1]. */
   up?: Vec3
   section?: Section | null
+  /** Drawn over the canvas, each with its top-left corner on its point. */
+  anchors?: ViewerAnchor[]
   /** A view to restore, taken when it can still see the part; compared by value, so a parent may re-send it freely. */
   camera?: CameraState | null
   /** The user's orbits, debounced 250 ms after the last one. The component's own framing never reports. */
@@ -97,6 +107,8 @@ const NUDGE = Math.PI / 12
 const PURGE_DRAW = 1.8
 const PURGE_HOLD = 2
 const PURGE_OPACITY = 0.9
+/** How much stage an anchor wants to its right before it opens leftward instead. */
+const ANCHOR_ROOM = 320
 
 /** matchMedia is missing in jsdom and in a locked-down webview, and no answer means no preference. */
 const reducedMotion = (): boolean => {
@@ -252,6 +264,8 @@ interface Holder {
   purgeRaf: number
   camTimer: ReturnType<typeof setTimeout> | null
   render: () => void
+  /** Moves each anchor's element to where its point lands on screen. */
+  place: () => void
 }
 
 const sameCamera = (a: CameraState | null | undefined, b: CameraState | null | undefined) => {
@@ -541,6 +555,13 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
   const latest = useRef(props)
   latest.current = props
   const purged = useRef(false)
+  const anchorEls = useRef<(HTMLDivElement | null)[]>([])
+  const anchors = props.anchors ?? []
+  const anchorKey = anchors.map((a) => `${a.key}@${a.point.join(",")}`).join("|")
+
+  useEffect(() => {
+    holderRef.current?.render()
+  }, [anchorKey])
 
   useEffect(() => {
     const container = containerRef.current
@@ -593,6 +614,7 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
       purgeRaf: 0,
       camTimer: null,
       render: () => {},
+      place: () => {},
     }
     holderRef.current = h
     ;(container as HTMLDivElement & { __nurbViewer?: Holder }).__nurbViewer = h
@@ -632,7 +654,28 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
       const moving = h.controls.update()
       if (!moving) dropDamping(h) // the loop parks here, and a rebuild's render must not resume the orbit
       h.renderer.render(scene, view)
+      h.place()
       if (moving) h.render()
+    }
+    h.place = () => {
+      const mesh = h.part?.children.find((o) => (o as Mesh).isMesh && o.name !== "context")
+      for (const [i, anchor] of (latest.current.anchors ?? []).entries()) {
+        const el = anchorEls.current[i]
+        if (!el) continue
+        const at = mesh ? mesh.localToWorld(new Vector3(...anchor.point)).project(view) : null
+        // Behind the camera, or no part to stand on: nowhere to draw it.
+        if (!at || at.z > 1) {
+          el.style.visibility = "hidden"
+          continue
+        }
+        const x = ((at.x + 1) / 2) * h.lastW
+        // Near the right edge the content would run off the stage, so it opens leftward
+        // from its point; the content reads data-flip to mirror itself.
+        const flip = x > h.lastW - ANCHOR_ROOM
+        el.toggleAttribute("data-flip", flip)
+        el.style.visibility = "visible"
+        el.style.transform = `translate(${x}px, ${((1 - at.y) / 2) * h.lastH}px)${flip ? " translateX(-100%)" : ""}`
+      }
     }
     h.render = () => {
       if (!h.renderer || h.raf) return
@@ -960,6 +1003,21 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
         report(hit ? (hit.object.userData.finding as number) : null)
       }}
     >
+      {anchors.map((anchor, i) => (
+        <div
+          key={anchor.key}
+          ref={(el) => {
+            anchorEls.current[i] = el
+          }}
+          className="group pointer-events-none absolute top-0 left-0 z-10 *:pointer-events-auto"
+          style={{ visibility: "hidden" }}
+          // The stage reads a pointer-up as a pick; a click on a tag is not one.
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+        >
+          {anchor.node}
+        </div>
+      ))}
       {gridfinity && (
         <div className="mono-caption pointer-events-none absolute bottom-3 left-3 text-faint [letter-spacing:0.12em]">
           GRID 42.0 MM

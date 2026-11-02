@@ -815,5 +815,92 @@
    "readOnlyHint": true,
    "destructiveHint": false
   }
+ },
+ {
+  "name": "set_label",
+  "title": "Label a spot on the part",
+  "description": "Give a spot on the part a name, or move the label of that name to a new spot. Labels are how the person and you agree on what a place is called (\"lip\", \"hook\", \"left wall\"): the person sets most of them by clicking the part, and get_project and every build result list them with their point, which way the surface faces there, and whether the latest build still has surface at that point. When an edit moves a labelled place, move its label onto the place's new position so the name keeps meaning the same thing. The point snaps to the nearest surface of the part's latest build.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name",
+    "name",
+    "point"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 100,
+     "description": "The label's name in the person's words. An existing name moves that label."
+    },
+    "point": {
+     "type": "array",
+     "items": {
+      "type": "number"
+     },
+     "minItems": 3,
+     "maxItems": 3,
+     "description": "[x, y, z] in the part's own mm, on or near the surface."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  }
+ },
+ {
+  "name": "delete_label",
+  "title": "Remove a label",
+  "description": "Remove one of the part's labels. Only when the person asks, or when the place it named no longer exists and you have told them.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name",
+    "name"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    },
+    "name": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The label's exact name."
+    },
+    "note": {
+     "type": "string",
+     "description": "Plain words for the transcript: what this change is for."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": true
+  }
  }
 ]

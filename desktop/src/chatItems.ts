@@ -85,6 +85,7 @@ const ACTIVITY: [RegExp, string][] = [
   [/^(pin|amend)_spec$/, "planning the part"],
   [/^record_measurement$/, "noting the sizes"],
   [/^find_photos$/, "looking at the photos"],
+  [/^(set|delete)_label$/, "labelling the part"],
   [/^(write|edit)_(part|shared)_source$|^run_build$/, "building the part"],
   [/^(render|inspect|check|verify|compare)/, "checking the part"],
   [/^(export|slice)/, "preparing the print"],

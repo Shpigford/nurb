@@ -195,6 +195,21 @@ MIGRATIONS = [
     -- part's file name, lowercase with underscores, which a title cannot be.
     ALTER TABLE parts ADD COLUMN title TEXT;
     """,
+    """
+    -- What a person calls a spot on the part ("lip", "hook"), so they and the agent can
+    -- name the same place. A point and its surface normal in the part's own mm, never a
+    -- B-rep face: face ids do not survive an edit, and a point can be checked against
+    -- whatever the next build made.
+    CREATE TABLE labels (
+        id TEXT PRIMARY KEY,
+        part_id TEXT NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        x REAL NOT NULL, y REAL NOT NULL, z REAL NOT NULL,
+        nx REAL NOT NULL, ny REAL NOT NULL, nz REAL NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (part_id, name)
+    );
+    """,
 ]
 
 # What a run can carry besides its geometry: it is measured from one build, so it
@@ -662,6 +677,71 @@ def set_measurement(conn, project_id, name, value, how, unit="mm", provisional=F
                     (unit, how, int(provisional), row["id"]),
                 )
     changed("project", project_id, project_id)
+
+
+def set_label(conn, part_id, name, point, normal):
+    """Put a label on a spot, or move the one of that name there."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("a label needs a name")
+    if len(name) > NAME_LIMIT:
+        raise ValueError(f"a label's name is at most {NAME_LIMIT} characters")
+    with transaction(conn):
+        part = conn.execute("SELECT project_id FROM parts WHERE id = ?", (part_id,)).fetchone()
+        if part is None:
+            raise ValueError(f"no part {part_id!r}")
+        conn.execute(
+            "INSERT INTO labels (id, part_id, name, x, y, z, nx, ny, nz, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT (part_id, name) DO UPDATE SET"
+            " x = excluded.x, y = excluded.y, z = excluded.z,"
+            " nx = excluded.nx, ny = excluded.ny, nz = excluded.nz",
+            (new_id(), part_id, name, *map(float, point), *map(float, normal), now()),
+        )
+    changed("part", part_id, part["project_id"])
+    return name
+
+
+def rename_label(conn, part_id, name, to):
+    to = (to or "").strip()
+    if not to:
+        raise ValueError("a label needs a name")
+    if len(to) > NAME_LIMIT:
+        raise ValueError(f"a label's name is at most {NAME_LIMIT} characters")
+    with transaction(conn):
+        part = conn.execute("SELECT project_id FROM parts WHERE id = ?", (part_id,)).fetchone()
+        if part is None:
+            raise ValueError(f"no part {part_id!r}")
+        if to != name and conn.execute(
+            "SELECT 1 FROM labels WHERE part_id = ? AND name = ?", (part_id, to)
+        ).fetchone():
+            raise ValueError(f"this part already has a label called {to}")
+        updated = conn.execute(
+            "UPDATE labels SET name = ? WHERE part_id = ? AND name = ?", (to, part_id, name)
+        ).rowcount
+    if not updated:
+        raise ValueError(f"no label called {name}")
+    changed("part", part_id, part["project_id"])
+    return to
+
+
+def delete_label(conn, part_id, name):
+    with transaction(conn):
+        part = conn.execute("SELECT project_id FROM parts WHERE id = ?", (part_id,)).fetchone()
+        if part is None:
+            raise ValueError(f"no part {part_id!r}")
+        removed = conn.execute(
+            "DELETE FROM labels WHERE part_id = ? AND name = ?", (part_id, name)
+        ).rowcount
+    if not removed:
+        raise ValueError(f"no label called {name}")
+    changed("part", part_id, part["project_id"])
+
+
+def labels_of(conn, part_id):
+    return conn.execute(
+        "SELECT * FROM labels WHERE part_id = ? ORDER BY created_at, name", (part_id,)
+    ).fetchall()
 
 
 def get_project(conn, project_id):

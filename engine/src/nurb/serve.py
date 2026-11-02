@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 
-from . import db, edit, engine_run, materialize, mcp_server, spec
+from . import db, edit, engine_run, labels, materialize, mcp_server, spec
 
 STATE = "serve.json"
 LOCK = "serve.lock"
@@ -619,12 +619,19 @@ def _result(run, column):
     return json.loads(value) if value else None
 
 
+def _shown(conn, part, run):
+    """The run whose geometry is on screen: this one, or the last that built."""
+    if run is None:
+        return None
+    return run if run["status"] == "ok" else db.latest_ok_run(conn, part["id"])
+
+
 def _part_build(conn, project_id, part, run):
     if run is None:
         return None
     findings = json.loads(run["findings"])
     ok = run["status"] == "ok"
-    shown = run if ok else db.latest_ok_run(conn, part["id"])
+    shown = _shown(conn, part, run)
     return {
         "id": run["id"],
         "status": run["status"],
@@ -715,7 +722,14 @@ def _project(conn, project_id, part=None):
     if row is None:
         return None
     parts = [
-        _part_entry(conn, project_id, entry)
+        {
+            **_part_entry(conn, project_id, entry),
+            # Only the part page draws labels, so the library's read never measures them.
+            # Against the geometry on screen, the same run the build's glb_url names.
+            "labels": labels.placed(
+                db.labels_of(conn, entry["id"]), _shown(conn, entry, db.latest_run(conn, entry["id"]))
+            ),
+        }
         for entry in db.parts_of(conn, project_id)
         if entry["kind"] == "part"
     ]
@@ -1133,6 +1147,48 @@ def _routes(conn, lock, server, token, pid):
                     [r["id"] for r in rows if r["kind"] == "part" and name in reads.get(r["id"], [])], project_id
                 )
             return _system(conn, project_id)
+
+        return await acted(work)
+
+    async def part_label(request):
+        """Name a spot the person clicked, or move the label of that name there."""
+        sent = await body_of(request)
+        part_id = request.path_params["part_id"]
+
+        def work(conn):
+            point = sent.get("point")
+            if not (isinstance(point, list) and len(point) == 3 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in point)):
+                raise _Refused(400, "point must be three numbers in mm")
+            name = word(sent, "name", "a label needs a name", db.NAME_LIMIT)
+            try:
+                mcp_server.place_label(conn, part_id, name, point)
+            except ValueError as exc:
+                raise _Refused(400, str(exc))
+            return {"ok": True}
+
+        return await acted(work)
+
+    async def part_label_rename(request):
+        sent = await body_of(request)
+        part_id = request.path_params["part_id"]
+
+        def work(conn):
+            to = word(sent, "name", "a label needs a name", db.NAME_LIMIT)
+            try:
+                db.rename_label(conn, part_id, request.path_params["name"], to)
+            except ValueError as exc:
+                raise _Refused(400, str(exc))
+            return {"ok": True}
+
+        return await acted(work)
+
+    async def part_label_delete(request):
+        def work(conn):
+            try:
+                db.delete_label(conn, request.path_params["part_id"], request.path_params["name"])
+            except ValueError as exc:
+                raise _Refused(404, str(exc))
+            return {"ok": True}
 
         return await acted(work)
 
@@ -1725,6 +1781,9 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/printers/{profile}", endpoint=answering(printers_remove), methods=["DELETE"]),
         Route("/api/projects/{project_id}/checkout", endpoint=answering(project_checkout), methods=["POST"]),
         Route("/api/projects/{project_id}/parts/{part_name}/source", endpoint=answering(part_source), methods=["POST"]),
+        Route("/api/parts/{part_id}/labels", endpoint=answering(part_label), methods=["POST"]),
+        Route("/api/parts/{part_id}/labels/{name:path}", endpoint=answering(part_label_rename), methods=["PATCH"]),
+        Route("/api/parts/{part_id}/labels/{name:path}", endpoint=answering(part_label_delete), methods=["DELETE"]),
         Route("/api/parts/{part_id}/params", endpoint=answering(part_params), methods=["POST"]),
         Route("/api/parts/{part_id}/apply", endpoint=answering(part_apply), methods=["POST"]),
         Route("/api/parts/{part_id}/export", endpoint=answering(part_export), methods=["POST"]),

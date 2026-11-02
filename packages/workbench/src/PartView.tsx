@@ -32,14 +32,18 @@ import {
   type Param,
   type Params,
   type PinnedParam,
+  type ViewerAnchor,
 } from "@nurb/ui"
 import {
   absolute,
   applyParams,
   buildWithParams,
+  deleteLabel,
   exportPart,
   fetchPrinters,
+  renameLabel,
   renamePart,
+  setLabel,
   type ApplyResult,
   type PartBuild,
   type Project,
@@ -47,6 +51,7 @@ import {
 } from "./api"
 import { activity } from "./activity"
 import { loadCamera, saveCamera } from "./camera"
+import { LabelEditor, LabelTag } from "./Labels"
 import Slice from "./Slice"
 import { spotText } from "./spot"
 import { verdictOf, type Verdict } from "./verdict"
@@ -192,13 +197,13 @@ export default function PartView({
 }) {
   const projectId = project?.id ?? null
   const [highlight, setHighlight] = useState<number | null>(null)
-  // A refused rename says why for a few seconds, then gets out of the way.
-  const [renameError, setRenameError] = useState<string | null>(null)
+  // A refused rename or label move says why for a few seconds, then gets out of the way.
+  const [stageError, setStageError] = useState<string | null>(null)
   useEffect(() => {
-    if (!renameError) return
-    const timer = setTimeout(() => setRenameError(null), 5000)
+    if (!stageError) return
+    const timer = setTimeout(() => setStageError(null), 5000)
     return () => clearTimeout(timer)
-  }, [renameError])
+  }, [stageError])
   const [camera, setCamera] = useState<CameraState | null>(null)
 
   const [values, setValues] = useState<Params>({})
@@ -390,14 +395,85 @@ export default function PartView({
 
   // One click on the part, then back to orbiting: pointing is a single question.
   const [pointing, setPointing] = useState(false)
-  useEffect(() => setPointing(false), [part?.id])
+  // Labelling is the same single click, which opens a name field on the spot.
+  const [labelling, setLabelling] = useState(false)
+  // The label being named or renamed: `was` is its saved name, missing for a new spot.
+  const [draft, setDraft] = useState<{ point: [number, number, number]; was?: string } | null>(null)
+  // A label waiting for its new spot: label mode, but the click moves it instead of naming one.
+  const [moving, setMoving] = useState<string | null>(null)
+  useEffect(() => {
+    setPointing(false)
+    setLabelling(false)
+    setDraft(null)
+    setMoving(null)
+  }, [part?.id])
   const onPick = useCallback(
     ({ point, normal }: { point: [number, number, number]; normal: [number, number, number] }) => {
+      if (labelling) {
+        setLabelling(false)
+        if (moving && part) {
+          setMoving(null)
+          void setLabel(part.id, moving, point).catch((failure: unknown) =>
+            setStageError(failure instanceof Error ? failure.message : "The label did not move.")
+          )
+        } else setDraft({ point })
+        return
+      }
       setPointing(false)
       onPointAt?.(spotText(point, normal))
     },
-    [onPointAt]
+    [labelling, moving, part, onPointAt]
   )
+  const partId = part?.id
+  const anchors = useMemo<ViewerAnchor[]>(() => {
+    if (!partId) return []
+    const shown: ViewerAnchor[] = (part?.labels ?? [])
+      .filter((label) => label.name !== draft?.was)
+      .map((label) => ({
+        key: `label:${label.name}`,
+        point: label.point,
+        node: <LabelTag label={label} onOpen={() => setDraft({ point: label.point, was: label.name })} />,
+      }))
+    if (!draft) return shown
+    const was = draft.was
+    const close = () => setDraft(null)
+    const editor = (
+      <LabelEditor
+        key={was ?? draft.point.join(",")}
+        was={was}
+        onCancel={close}
+        onSave={async (name) => {
+          if (was === undefined) {
+            // Saving under a taken name would move that label here; Move is the way to do that.
+            if (part?.labels?.some((label) => label.name === name)) {
+              throw new Error(`This part already has a label called ${name}.`)
+            }
+            await setLabel(partId, name, draft.point)
+          } else if (name !== was) await renameLabel(partId, was, name)
+          close()
+        }}
+        onMove={
+          was === undefined
+            ? undefined
+            : () => {
+                close()
+                setPointing(false)
+                setMoving(was)
+                setLabelling(true)
+              }
+        }
+        onRemove={
+          was === undefined
+            ? undefined
+            : async () => {
+                await deleteLabel(partId, was)
+                close()
+              }
+        }
+      />
+    )
+    return [...shown, { key: "label-draft", point: draft.point, node: editor }]
+  }, [partId, part?.labels, draft])
 
   // The slicer the engine found, as the app name macOS opens files with. One that
   // came off PATH rather than out of an .app has nothing to open, so no row.
@@ -514,7 +590,7 @@ export default function PartView({
                   onRename={(name) =>
                     renamePart(part.id, name)
                       .then((renamed) => onPartRenamed?.(renamed.was, renamed.name))
-                      .catch((e) => setRenameError(e instanceof Error ? e.message : String(e)))
+                      .catch((e) => setStageError(e instanceof Error ? e.message : String(e)))
                   }
                 />
               ) : project && !project.folder ? (
@@ -606,7 +682,8 @@ export default function PartView({
             findings={findings}
             highlight={highlight}
             onHighlight={setHighlight}
-            onPick={pointing ? onPick : null}
+            onPick={pointing || labelling ? onPick : null}
+            anchors={anchors}
             bed={bedOf(project)}
             camera={camera}
             settleKey={settleKey}
@@ -642,15 +719,37 @@ export default function PartView({
             ) : null}
           </div>
         )}
-        {onPointAt && glbUrl ? (
-          <div className="absolute right-4 bottom-4 z-10">
-            <Button variant={pointing ? "accent" : "outline"} size="md" onClick={() => setPointing((v) => !v)}>
-              {pointing ? "Click a spot on the part" : "Point at the part"}
+        {glbUrl ? (
+          <div className="absolute right-4 bottom-4 z-10 flex gap-2">
+            <Button
+              variant={labelling ? "accent" : "outline"}
+              size="md"
+              onClick={() => {
+                setPointing(false)
+                setDraft(null)
+                setMoving(null)
+                setLabelling((v) => !v)
+              }}
+            >
+              {!labelling ? "Label a spot" : moving ? `Click the new spot for ${moving}` : "Click a spot to name it"}
             </Button>
+            {onPointAt ? (
+              <Button
+                variant={pointing ? "accent" : "outline"}
+                size="md"
+                onClick={() => {
+                  setLabelling(false)
+                  setMoving(null)
+                  setPointing((v) => !v)
+                }}
+              >
+                {pointing ? "Click a spot on the part" : "Point at the part"}
+              </Button>
+            ) : null}
           </div>
         ) : null}
         <StageBuilding open={building && !!glbUrl} expected={seconds} />
-        {renameError ? <StageNotice>{renameError}</StageNotice> : null}
+        {stageError ? <StageNotice>{stageError}</StageNotice> : null}
         {failedBuild ? (
           <StageNotice>
             {build?.shown_revision != null ? `Showing ${rev(build.shown_revision)} · ` : ""}
