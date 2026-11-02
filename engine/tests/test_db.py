@@ -526,6 +526,32 @@ def test_renaming_a_part_carries_its_transcript_and_its_function(tmp_path):
     conn.close()
 
 
+def test_renaming_a_part_rewrites_the_assemblies_that_use_it(tmp_path):
+    """use() opens parts/{name}.py, so a caller left saying the old name stops building."""
+    from nurb import builder
+
+    src = tmp_path / "src"
+    (src / "parts").mkdir(parents=True)
+    (src / "parts" / "hook.py").write_text(
+        "from nurb import *\n\n@part\ndef hook(width=20.0):\n    return Box(width, 40, 4)\n"
+    )
+    (src / "parts" / "on_the_wall.py").write_text(
+        "from nurb import *\n\n@assembly\ndef on_the_wall():\n    return use(\"hook\"), use('hook', width=30.0)\n"
+    )
+    conn = db.connect(tmp_path / "x.db")
+    project_id, _ = folder.import_folder(conn, src)
+    part = conn.execute("SELECT id FROM parts WHERE name = 'hook'").fetchone()
+    db.rename_part(conn, part["id"], "hook_bracket")
+
+    out = tmp_path / "out"
+    materialize.materialize(conn, project_id, into=out)
+    caller = (out / "parts" / "on_the_wall.py").read_text()
+    assert 'use("hook_bracket")' in caller and "use('hook_bracket', width=30.0)" in caller
+    shape, _, _ = builder.build(out / "parts" / "on_the_wall.py")
+    assert shape.volume > 0
+    conn.close()
+
+
 def test_a_rename_keeps_the_title_exactly_as_typed(tmp_path):
     """"Drill Bits" is the same part name as drill_bits, but it is still what the person
     asked to see, so it saves even when the file's name does not move."""

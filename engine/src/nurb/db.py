@@ -606,6 +606,15 @@ def rename_part(conn, part_id, name, title=None):
         add_revision(conn, part_id, renamed, card_md=current["card_md"], note=f"Renamed from {old}")
     else:
         changed("part", part_id, part["project_id"])
+    # use() opens parts/{name}.py, so a caller still saying the old name would stop
+    # building. It also accepts dashes for underscores.
+    called = re.compile(rf"""\buse\(\s*(["']){re.escape(old).replace("_", "[_-]")}\1""")
+    for row in parts_of(conn, part["project_id"]):
+        if row["id"] == part_id or not row["source"]:
+            continue
+        rewired = called.sub(lambda m: f"use({m[1]}{name}{m[1]}", row["source"])
+        if rewired != row["source"]:
+            add_revision(conn, row["id"], rewired, card_md=row["card_md"], note=f"{old} renamed to {name}")
     return name
 
 
