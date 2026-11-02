@@ -697,6 +697,16 @@ def test_min_wall_does_not_measure_across_a_chamfer_corner():
     assert only(shape, "min_wall", Context(min_wall=2.0)) == []
 
 
+def test_min_wall_does_not_measure_a_clearance_gap():
+    """Two 2mm ribs 0.6mm apart are two walls, not one 0.6mm section (#297).
+
+    A probe on a rib's gap face casts along a line, so the far side of the gap comes
+    back as a hit behind it. Only hits ahead of the probe can start the sphere.
+    """
+    ribs = Box(30, 10, 3) + Pos(-1.3, 0, 6.5) * Box(2, 10, 10) + Pos(1.3, 0, 6.5) * Box(2, 10, 10)
+    assert only(ribs, "min_wall") == []
+
+
 def test_a_part_that_builds_nothing_still_tessellates():
     """The `solids` rule has words for an empty part, and the dev loop has to reach them.
 
