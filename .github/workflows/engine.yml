@@ -12,6 +12,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The serve tests boot a fresh engine each and are half the suite's time, so they get
+    # their own runner. Public repos run parallel jobs for free.
+    strategy:
+      matrix:
+        shard:
+          - tests/test_serve.py
+          - tests --ignore=tests/test_serve.py
     steps:
       - uses: actions/checkout@v4
 
@@ -34,5 +41,5 @@ jobs:
 
       # The suite is CPU-bound OCCT builds and parallelizes almost perfectly: -n auto
       # cut it 3x on a laptop and the runner has four cores.
-      - run: uv run pytest -q -n auto
+      - run: uv run pytest -q -n auto ${{ matrix.shard }}
         working-directory: engine
