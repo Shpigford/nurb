@@ -387,11 +387,19 @@ def move_part(conn, part_id, project_id):
 
     Revisions follow by part_id and need no help. The turns of the transcript that were
     about this part move with it, renumbered onto the end of the target's transcript,
-    because sequence_number is only unique within one project.
+    because sequence_number is only unique within one project. A hidden container has one
+    chat with no part names on it, so all of it goes, stamped with this part's name.
+
+    Measurements belong to the project, so they are copied rather than moved: all of a
+    hidden container's, or the ones this part reads out of a folder its siblings still use.
+    A name the target already has keeps the target's number.
     """
     with transaction(conn):
         part = conn.execute(
-            "SELECT project_id, name, kind FROM parts WHERE id = ?", (part_id,)
+            "SELECT p.project_id, p.name, p.kind, j.folder, r.source FROM parts p"
+            " JOIN projects j ON j.id = p.project_id"
+            " LEFT JOIN part_revisions r ON r.id = p.current_revision_id WHERE p.id = ?",
+            (part_id,),
         ).fetchone()
         if part is None:
             raise ValueError(f"no part {part_id!r}")
@@ -413,17 +421,30 @@ def move_part(conn, part_id, project_id):
             "SELECT COALESCE(MAX(sequence_number), 0) FROM messages WHERE project_id = ?",
             (project_id,),
         ).fetchone()[0]
+        mine = "" if part["folder"] else " OR part IS NULL"
         moving = conn.execute(
-            "SELECT id FROM messages WHERE project_id = ? AND part = ? ORDER BY sequence_number",
+            f"SELECT id FROM messages WHERE project_id = ? AND (part = ?{mine}) ORDER BY sequence_number",
             (was, part["name"]),
         ).fetchall()
         for offset, row in enumerate(moving, start=1):
             conn.execute(
-                "UPDATE messages SET project_id = ?, sequence_number = ? WHERE id = ?",
-                (project_id, last + offset, row["id"]),
+                "UPDATE messages SET project_id = ?, part = ?, sequence_number = ? WHERE id = ?",
+                (project_id, part["name"], last + offset, row["id"]),
+            )
+        reads = measurement_names(part["source"])
+        for row in measurements_of(conn, was):
+            if part["folder"] and row["name"] not in reads:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO measurements"
+                " (id, project_id, name, value, unit, how, provisional, value_changed_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (new_id(), project_id, row["name"], row["value"], row["unit"], row["how"],
+                 row["provisional"], row["value_changed_at"]),
             )
     changed("part", part_id, project_id)
     changed("project", was, was)
+    changed("project", project_id, project_id)
     return was
 
 
@@ -501,19 +522,22 @@ def delete_project(conn, project_id):
 
 
 def delete_part(conn, part_id):
-    """Remove a part and every revision under it. A part alone in its container takes
-    the container with it, because an empty container has nothing left to show.
+    """Remove a part and every revision under it. The last part in a hidden container
+    takes the container with it, because an empty container has nothing left to show.
+    Count the siblings: nothing stops an agent writing a second part into a container.
     Returns (project_id, whether the whole project went)."""
     with transaction(conn):
         row = conn.execute(
-            "SELECT p.project_id, j.folder FROM parts p"
-            " JOIN projects j ON j.id = p.project_id WHERE p.id = ?",
+            "SELECT p.project_id, j.folder,"
+            " (SELECT COUNT(*) FROM parts s WHERE s.project_id = p.project_id"
+            "  AND s.kind = 'part' AND s.id != p.id) AS siblings"
+            " FROM parts p JOIN projects j ON j.id = p.project_id WHERE p.id = ?",
             (part_id,),
         ).fetchone()
         if row is None:
             raise ValueError(f"no part {part_id!r}")
         project_id = row["project_id"]
-        whole = not row["folder"]
+        whole = not row["folder"] and not row["siblings"]
         if whole:
             conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
         else:

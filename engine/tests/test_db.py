@@ -383,6 +383,66 @@ def test_a_project_is_a_container_until_it_is_promoted(tmp_path):
         conn.close()
 
 
+def test_deleting_one_part_spares_its_siblings_in_a_hidden_container(tmp_path):
+    conn = db.connect(tmp_path / "x.db")
+    try:
+        project_id = db.create_project(conn, "drab flange 1")
+        hook = db.create_part(conn, project_id, "hook", "from nurb import *\n")
+        shelf = db.create_part(conn, project_id, "shelf", "from nurb import *\n")
+        db.create_part(conn, project_id, "helper", "x = 1", kind="module")
+
+        assert db.delete_part(conn, hook) == (project_id, False)
+        names = [r["name"] for r in conn.execute("SELECT name FROM parts WHERE project_id = ?", (project_id,))]
+        assert sorted(names) == ["helper", "shelf"]
+
+        # The last part takes the container, and the helper module with it.
+        assert db.delete_part(conn, shelf) == (project_id, True)
+        assert db.get_project(conn, project_id) is None
+    finally:
+        conn.close()
+
+
+def test_moving_a_loose_part_takes_its_whole_chat_and_its_measurements(tmp_path):
+    conn = db.connect(tmp_path / "x.db")
+    try:
+        loose = db.create_project(conn, "drab flange 1")
+        target = db.create_project(conn, "target", folder=True)
+        part_id = db.create_part(conn, loose, "clip", 'from nurb import *\nspan = measured("span")\n')
+        db.set_measurement(conn, loose, "span", 40, "calipers")
+        db.set_measurement(conn, loose, "gap", 3, "calipers")
+        db.set_measurement(conn, target, "gap", 5, "ruler")
+        db.add_message(conn, loose, "user", "make a clip", {})
+
+        db.move_part(conn, part_id, target)
+
+        # The folder's own number wins a clash, because the folder owns its measurements.
+        values = {row["name"]: row["value"] for row in db.measurements_of(conn, target)}
+        assert values == {"gap": 5.0, "span": 40.0}
+        moved = conn.execute(
+            "SELECT content, part FROM messages WHERE project_id = ?", (target,)
+        ).fetchall()
+        assert [(row["content"], row["part"]) for row in moved] == [("make a clip", "clip")]
+    finally:
+        conn.close()
+
+
+def test_moving_a_part_out_of_a_folder_takes_the_measurements_it_reads(tmp_path):
+    conn = db.connect(tmp_path / "x.db")
+    try:
+        home = db.create_project(conn, "home", folder=True)
+        target = db.create_project(conn, "target", folder=True)
+        part_id = db.create_part(conn, home, "clip", 'from nurb import *\nspan = measured("span")\n')
+        db.set_measurement(conn, home, "span", 40, "calipers")
+        db.set_measurement(conn, home, "wall", 80, "tape")
+
+        db.move_part(conn, part_id, target)
+
+        assert [row["name"] for row in db.measurements_of(conn, target)] == ["span"]
+        assert [row["name"] for row in db.measurements_of(conn, home)] == ["span", "wall"]
+    finally:
+        conn.close()
+
+
 def test_moving_a_part_takes_its_history_and_its_chat(tmp_path):
     conn = db.connect(tmp_path / "x.db")
     try:
