@@ -428,10 +428,11 @@ export default function Library({
                       {summary.name}
                     </span>
                   )}
-                  <span className="mono-caption shrink-0 text-muted group-hover:hidden group-focus-within:hidden">
+                  {/* The count gives way to the row's actions, so no column sits empty at rest. An open menu keeps them, or its trigger would vanish under it. */}
+                  <span className="mono-caption shrink-0 text-muted group-hover:hidden group-focus-within:hidden group-has-[[aria-expanded=true]]:hidden">
                     {summary.parts}
                   </span>
-                  <span className="hidden shrink-0 group-hover:block group-focus-within:block">
+                  <span className="-mr-1 hidden shrink-0 items-center group-hover:flex group-focus-within:flex group-has-[[aria-expanded=true]]:flex">
                     <IconButton
                       icon="plus"
                       label={`New part in ${summary.name}`}
@@ -441,13 +442,12 @@ export default function Library({
                         onNewPart(summary.id);
                       }}
                     />
+                    <Menu
+                      portal
+                      label={`Actions for ${summary.name}`}
+                      items={projectMenu(summary)}
+                    />
                   </span>
-                  <Menu
-                    portal
-                    className="-mr-1 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100"
-                    label={`Actions for ${summary.name}`}
-                    items={projectMenu(summary)}
-                  />
                 </div>
               </li>
             );
