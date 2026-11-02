@@ -1581,3 +1581,52 @@ def test_the_project_panel_reads_and_tunes_the_system(tmp_path, monkeypatch):
     names = {r["id"]: r["name"] for r in db.parts_of(conn, project_id)}
     assert names[engine_run.take_rebuild()] == "lid" and engine_run.take_rebuild() is None
     conn.close()
+
+
+def test_a_build_that_hits_a_locked_database_is_tried_again(tmp_path, monkeypatch):
+    """An import holding the write lock past the busy timeout must not leave a part
+    on Not built yet until restart (#291)."""
+    import sqlite3
+    import threading
+    import time
+
+    from nurb import db, engine_run, serve
+
+    monkeypatch.setenv("NURB_HOME", str(tmp_path))
+    conn = db.connect()
+    project_id = db.create_project(conn, "shop")
+    db.create_part(conn, project_id, "cube", "from nurb import *\n\n@part\ndef cube(size=10.0):\n    return Box(size, size, size)\n")
+
+    holder = sqlite3.connect(tmp_path / "scratch.db", autocommit=True)
+    waiter = sqlite3.connect(tmp_path / "scratch.db", autocommit=True, timeout=0)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        waiter.execute("BEGIN IMMEDIATE")
+    except sqlite3.OperationalError as exc:
+        locked = exc
+    holder.close()
+    waiter.close()
+
+    real_run_build = engine_run.run_build
+    calls = []
+
+    def run_build(conn, part_id, **kwargs):
+        calls.append(part_id)
+        if len(calls) == 1:
+            raise locked
+        return real_run_build(conn, part_id, **kwargs)
+
+    monkeypatch.setattr(engine_run, "run_build", run_build)
+    wake, stop = threading.Event(), threading.Event()
+    wake.set()
+    worker = threading.Thread(target=serve.build_unbuilt, args=(wake, stop), daemon=True)
+    worker.start()
+    deadline = time.monotonic() + 120
+    while serve.next_unbuilt(conn) is not None and time.monotonic() < deadline:
+        time.sleep(0.2)
+    stop.set()
+    wake.set()
+    worker.join(timeout=30)
+
+    assert len(calls) == 2
+    assert serve.next_unbuilt(conn) is None
