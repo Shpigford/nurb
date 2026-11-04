@@ -432,3 +432,27 @@ def test_project_file_executable_mode_survives_checkout_and_materialize(conn, tm
     ):
         assert stat.S_IMODE((out / "viewer.command").stat().st_mode) & 0o111
         assert not stat.S_IMODE((out / "notes.txt").stat().st_mode) & 0o111
+
+
+def test_an_import_announces_its_parts_once_they_are_visible(conn, tmp_path):
+    """The background builder wakes on the change event and then reads on its own
+    connection, so an event fired inside the import's open transaction shows it
+    nothing and the parts stay unbuilt (#339).
+    """
+    seen = []
+
+    def listener(kind, row_id, project_id):
+        other = db.connect(tmp_path / "x.db")
+        try:
+            seen.append(other.execute("SELECT COUNT(*) FROM parts").fetchone()[0])
+        finally:
+            other.close()
+
+    db.listeners.append(listener)
+    try:
+        _, count = folder.import_folder(conn, DEMO)
+    finally:
+        db.listeners.remove(listener)
+
+    assert seen, "the import announced nothing, so nothing wakes the builder"
+    assert max(seen) >= count
