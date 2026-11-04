@@ -1348,38 +1348,47 @@ def _routes(conn, lock, server, token, pid):
         """The part as a file, built at the values the page is holding."""
         sent = await body_of(request)
 
-        def work(conn):
+        def prepare(conn):
+            """Everything the file needs that the store knows, and nothing slower."""
             part = _part_row(conn, request.path_params["part_id"])
             fmt = str(sent.get("format") or "").lower()
             if fmt not in EXPORTS:
                 raise _Refused(400, f"nurb exports {', '.join(EXPORTS)}, not {fmt!r}")
             values = _values(conn, part, sent.get("values"))
-            note = None
             if fmt == "glb":
                 # The viewer's geometry is already stored; only a different set of
                 # values is worth a rebuild.
                 run = _run_for(conn, part, values)
                 if run["glb"] is None:
                     raise _Refused(409, _said(run, part["name"]))
-                body = run["glb"]
-            else:
-                try:
-                    body, _, note = engine_run.export_part(
-                        conn, part["id"], fmt, overrides=values or None
-                    )
-                except ValueError as exc:
-                    raise _Refused(409, str(exc)) from None
-            headers = {
-                "Content-Disposition": f'attachment; filename="{part["name"]}.{fmt}"',
-                "Cache-Control": "no-store",
-            }
-            if note:
-                # What the 3MF carries besides geometry, for the note under the button.
-                # A header is one line, and a slicer's reason can run to several.
-                headers["X-Nurb-Print-Settings"] = " ".join(note.split())
-            return Response(body, media_type=EXPORTS[fmt], headers=headers)
+                return part["name"], fmt, run["glb"], None, None
+            # Only the part's identity under the lock. Exporting it is a round trip to
+            # the build worker, which imports the CAD kernel when it is not warm yet,
+            # and that is seconds of a held lock: a frozen app (issue #296).
+            try:
+                identity = engine_run.part_identity(conn, part["id"])
+            except ValueError as exc:
+                raise _Refused(409, str(exc)) from None
+            return part["name"], fmt, None, identity, values or None
 
-        return await acted(work)
+        name, fmt, body, identity, overrides = await query(prepare)
+        note = None
+        if body is None:
+            try:
+                body, _, note = await anyio.to_thread.run_sync(
+                    lambda: engine_run.export_geometry(identity, fmt, overrides=overrides)
+                )
+            except ValueError as exc:
+                raise _Refused(409, str(exc)) from None
+        headers = {
+            "Content-Disposition": f'attachment; filename="{name}.{fmt}"',
+            "Cache-Control": "no-store",
+        }
+        if note:
+            # What the 3MF carries besides geometry, for the note under the button.
+            # A header is one line, and a slicer's reason can run to several.
+            headers["X-Nurb-Print-Settings"] = " ".join(note.split())
+        return Response(body, media_type=EXPORTS[fmt], headers=headers)
 
     async def part_slice(request):
         """What this print costs: the two numbers only a slicer knows.
@@ -1390,9 +1399,9 @@ def _routes(conn, lock, server, token, pid):
         a picker, not a sentence about a file the user has never opened.
         """
 
-        def work(conn):
-            import tempfile
+        import tempfile
 
+        def work(conn):
             from . import checks, slicing
 
             part = _part_row(conn, request.path_params["part_id"])
@@ -1457,16 +1466,20 @@ def _routes(conn, lock, server, token, pid):
             if run is None:
                 return {"kind": "build", "error": f"{part['name']} has no build to slice"}
             overrides = json.loads(run["overrides"]) or None
+            # Only the part's identity here. Exporting it is a round trip to the build
+            # worker, which imports the CAD kernel when it is not warm yet, and that is
+            # seconds with the server lock held: the same frozen app the slicer used to
+            # cause (issue #296).
             try:
-                model, _, _ = engine_run.export_part(conn, part["id"], "stl", overrides=overrides)
+                identity = engine_run.part_identity(conn, part["id"])
             except ValueError as exc:
                 return {"kind": "build", "error": str(exc)}
-            return part["name"], run["id"], model, job, settings, profile
+            return part["name"], run["id"], identity, overrides, job, settings, profile
 
         prepared = await query(work)
         if isinstance(prepared, dict):
             return JSONResponse(prepared)
-        name, run_id, model, job, settings, profile = prepared
+        name, run_id, identity, overrides, job, settings, profile = prepared
 
         def sliced():
             from . import slicing
@@ -1474,6 +1487,12 @@ def _routes(conn, lock, server, token, pid):
             # Outside the server lock, because a slicer can take minutes and every build
             # starts one; one at a time, because two would fight over the same cores.
             with one_slicer, tempfile.TemporaryDirectory() as scratch:
+                try:
+                    model, _, _ = engine_run.export_geometry(
+                        identity, "stl", overrides=overrides
+                    )
+                except ValueError as exc:
+                    return {"kind": "build", "error": str(exc)}
                 stl = pathlib.Path(scratch) / f"{name}.stl"
                 stl.write_bytes(model)
                 try:

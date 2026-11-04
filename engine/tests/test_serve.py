@@ -925,6 +925,78 @@ def test_a_slice_in_flight_leaves_the_server_free(home):
         assert sliced["kind"] == "slice" and sliced["seconds"] == 3600
 
 
+# A serve whose export is slow and whose slicer is instant, which is a cold build
+# worker: a fresh one imports the CAD kernel before it can hand back an STL.
+SLOW_EXPORT = [
+    sys.executable,
+    "-c",
+    """
+import pathlib, runpy, sys, time
+from nurb import engine_run, slicing
+real = engine_run.export_geometry
+def export(*args, **kwargs):
+    time.sleep(5)
+    return real(*args, **kwargs)
+engine_run.export_geometry = export
+def run(model, target, *args, **kwargs):
+    return (3600, 12.0), pathlib.Path(target)
+slicing.app = lambda search=None, printer=None: pathlib.Path("/slow/OrcaSlicer")
+slicing.vendors = lambda exe: pathlib.Path("/slow")
+slicing.machine = lambda bundle, name: pathlib.Path("/slow/machine.json")
+slicing.profiles_for = lambda *a: (pathlib.Path("/slow/process.json"), pathlib.Path("/slow/pla.json"))
+slicing.run = run
+sys.argv = ["nurb.serve", *sys.argv[1:]]
+runpy.run_module("nurb.serve", run_name="__main__")
+""",
+]
+
+
+def test_the_stl_a_slice_needs_is_exported_off_the_server_lock(home):
+    """The slicer is not the only slow half of a slice. The STL it eats comes out of
+    the build worker, and a worker that is not warm yet imports the CAD kernel first,
+    which is seconds. Held under the server lock that is the same frozen app the
+    slicer used to cause (issue #296), one step earlier."""
+    import threading
+
+    project_id, part_id = a_slab()
+    with serving(home, free_port(), command=SLOW_EXPORT) as url:
+        post(f"{url}/api/projects/{project_id}/printer", {"profile": "bambu_x1c"})
+        sliced = {}
+        exporting = threading.Thread(
+            target=lambda: sliced.update(json.loads(post(f"{url}/api/parts/{part_id}/slice", {})[2]))
+        )
+        exporting.start()
+        time.sleep(1.5)  # the export is under way
+        started = time.monotonic()
+        get(f"{url}/api/projects/{project_id}")
+        assert time.monotonic() - started < 2
+        exporting.join()
+        assert sliced["kind"] == "slice" and sliced["seconds"] == 3600
+
+
+def test_a_download_in_flight_leaves_the_server_free(home):
+    """Download is the other route that waits on the build worker, and a cold one
+    imports the CAD kernel first. The file can take its time; the rest of the app
+    cannot wait for it."""
+    import threading
+
+    project_id, part_id = a_slab()
+    with serving(home, free_port(), command=SLOW_EXPORT) as url:
+        downloaded = {}
+        downloading = threading.Thread(
+            target=lambda: downloaded.update(
+                {"status": post(f"{url}/api/parts/{part_id}/export", {"format": "stl"})[0]}
+            )
+        )
+        downloading.start()
+        time.sleep(1.5)  # the export is under way
+        started = time.monotonic()
+        get(f"{url}/api/projects/{project_id}")
+        assert time.monotonic() - started < 2
+        downloading.join()
+        assert downloaded["status"] == 200
+
+
 # A serve with PrusaSlicer and nothing else, so a Prusa takes Prusa's route.
 PRUSA_ONLY = [
     sys.executable,
