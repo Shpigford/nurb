@@ -56,6 +56,8 @@ uv run pytest                 run the suite
 
 The suite includes the parts in `engine/examples/`. The npm workspace (`desktop/`, `packages/*`) is rooted at the repo root: `npm ci` there, then `npm run build --workspace packages/workbench` writes the page into `engine/src/nurb/workbench/`.
 
+`sh .claude/scripts/session-setup.sh` does that bootstrap for you: it installs whatever a fresh checkout is missing (`npm ci`, `uv sync`, the workbench build) in the background and prints the log path, and it does nothing when everything is already in place. Wait for `SESSION_SETUP_DONE` in `.claude/session-setup.log` before running the suite, a build or the serve. `--sync` also fetches origin and fast-forwards the branch onto `origin/main`, but only when the branch is clean and has no commits of its own; with local work it reports how far behind it is and leaves the merge to you. `--json` reports as Claude Code `SessionStart` hook output, for anyone who wants it wired to session start in their own settings.
+
 A project is rows in the local SQLite database, owned by the one serve process. A folder containing `parts/` is how a project comes in (Import) and goes back out (checkout), and there is no init step, and there never should be.
 
 A release is a version bump merged to main: `uv version X.Y.Z` in `engine/`, plus the matching semver `version` in `desktop/src-tauri/tauri.conf.json` and the matching `version` in `packages/ui/package.json` (a test enforces all three agree). `desktop/scripts/release.sh` builds the signed desktop app, uploads it to the `vX.Y.Z` GitHub release, and refreshes the updater feed the installed apps poll. The `/release` skill runs the whole ceremony end to end, changelog included.

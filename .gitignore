@@ -18,3 +18,6 @@ engine/src/nurb/workbench/
 .design/
 # Satoshi's license bars it from a public repository; packages/ui/scripts/fetch-satoshi.sh fetches it.
 packages/ui/fonts/Satoshi-Variable.ttf
+
+# Written by .claude/scripts/session-setup.sh
+.claude/session-setup.log
