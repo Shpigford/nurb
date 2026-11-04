@@ -1582,7 +1582,7 @@ def test_the_part_is_the_unit(home):
         assert moved == {"id": part_id, "project_id": shelves}
         after = json.loads(get(f"{url}/api/projects/{shelves}")[2])
         assert sorted(p["name"] for p in after["parts"]) == ["hook", "shelf"]
-        assert [m["content"] for m in after["messages"]] == ["taller"]
+        assert [m["content"] for m in after["messages"]] == ["taller", "hello"]
 
         with pytest.raises(urllib.error.HTTPError) as taken:
             post(f"{url}/api/parts/{shelf_id}/project", {"project_id": spares})

@@ -276,6 +276,10 @@ function Chat({
   const isNew = part === NEW_PART;
   // The transcript names a part only once it exists.
   const stamp = isProject || isNew ? null : part;
+  // A rename can land mid-turn, and the session's event handler outlives the render
+  // that made it, so a reply reads the name at the moment it arrives.
+  const stampRef = useRef(stamp);
+  stampRef.current = stamp;
   const aboutProject = wholeProject ?? isProject;
   const spoken = subject ?? (isProject ? "this project" : part);
   // Claude runs through the app's own driver, which stores the conversation in
@@ -330,6 +334,9 @@ function Chat({
   // ever reported its lists, which is only ever the first chat on this Mac.
   const [config, setConfig] = useState<ConfigRow[]>([]);
   const sessionRef = useRef<string | null>(null);
+  // The part named in a Claude session's system prompt, which cannot change once
+  // the process is up. Older than `part` after a rename.
+  const promptedPartRef = useRef(part);
   // A resume id is single-use after the adapter accepts it. Authentication
   // failures retain it; a dead resumed session must not replay it again.
   const resumeRef = useRef<string | null>(resume);
@@ -423,10 +430,11 @@ function Chat({
 
   // New conversation clears the composer; every other remount keeps it.
   const discardRef = useRef(false);
+  const keyRef = useRef(chatKey(path, part));
+  keyRef.current = chatKey(path, part);
   useEffect(() => {
     const box = inputRef.current;
-    const key = chatKey(path, part);
-    const draft = unstashDraft(key);
+    const draft = unstashDraft(keyRef.current);
     if (box && draft.text) {
       box.value = restoreDraftText(draft.text, box.value);
       grow();
@@ -434,9 +442,9 @@ function Chat({
     attachmentDraft.restore(draft.files);
     return () => {
       if (discardRef.current) return;
-      stashDraft(key, { text: box?.value ?? "", files: attachmentDraft.current });
+      stashDraft(keyRef.current, { text: box?.value ?? "", files: attachmentDraft.current });
     };
-  }, [path, part, attachmentDraft]);
+  }, [attachmentDraft]);
 
   useEffect(() => {
     // Dev-only test hook: the Rust side forwards loopback-socket text here so
@@ -520,7 +528,7 @@ function Chat({
           if (isClaude) {
             // Drop the streaming copy only once the row exists, or the text
             // blinks out for the refetch's round trip.
-            addMessage(projectId, "assistant", event.text, stamp)
+            addMessage(projectId, "assistant", event.text, stampRef.current)
               .then(() =>
                 setItems((list) => applyChatEvent(list, event, Date.now(), seqRef.current)),
               )
@@ -617,6 +625,7 @@ function Chat({
           throw new Error("chat closed");
         }
         sessionRef.current = session;
+        promptedPartRef.current = part;
         resumeRef.current = null;
         onSessionRef.current(session);
         // The live session is authoritative: it may have clamped a remembered
@@ -630,7 +639,7 @@ function Chat({
     })();
     startRef.current = start;
     return start;
-  }, [path, agent, applyEvent, refreshConfig]);
+  }, [path, part, agent, applyEvent, refreshConfig]);
 
   const restoreSession = useCallback(async () => {
     try {
@@ -720,9 +729,12 @@ function Chat({
           stored = true;
         }
         promptingRef.current = true;
+        const renamed = isClaude && promptedPartRef.current !== part;
+        promptedPartRef.current = part;
         await invoke<string>("send_prompt", {
           sessionId: session,
-          text,
+          // For the agent only: the transcript already holds what the person typed.
+          text: renamed ? `${text}\n\n(This part is now called "${part}". Use that name from here on.)` : text,
           part: part ?? null,
           attachments: files,
         });

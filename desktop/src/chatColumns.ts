@@ -1,4 +1,7 @@
 export type ChatColumn = {
+  // What the mounted Chat is keyed by. A part's name can change under a running
+  // turn, and remounting the column would end that turn.
+  id: number;
   path: string;
   part: string;
   agent: string | null;
@@ -12,6 +15,19 @@ export type ChatColumn = {
 // Paths can contain ":" or spaces, so map keys join on a NUL, which no
 // filesystem path can carry.
 export const chatKey = (path: string, part: string) => `${path}\u0000${part}`;
+
+/** The conversation follows its part to a new name. A column left under that name goes. */
+export function renameChatColumn(columns: ChatColumn[], path: string, was: string, name: string) {
+  return columns
+    .filter((column) => !(column.path === path && column.part === name))
+    .map((column) => (column.path === path && column.part === was ? { ...column, part: name } : column));
+}
+
+export function renameChatKey(chats: Record<string, boolean>, was: string, name: string) {
+  if (!(was in chats)) return chats;
+  const { [was]: flag, ...rest } = chats;
+  return { ...rest, [name]: flag };
+}
 
 export function retainChatColumns(
   columns: ChatColumn[],

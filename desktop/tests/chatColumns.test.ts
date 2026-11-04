@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   markChatSeen,
+  renameChatColumn,
+  renameChatKey,
   retainChatColumns,
   updateChatActivity,
+  chatKey,
   type ChatColumn,
 } from "../src/chatColumns.ts";
 
 const fresh = (path = "/projects/alpha"): ChatColumn => ({
+  id: 1,
   path,
   part: "bracket",
   agent: null,
@@ -73,4 +77,26 @@ test("an initial idle report does not invent unseen work", () => {
 
   assert.equal(next, columns);
   assert.equal(next[0].unseen, false);
+});
+
+test("a renamed column keeps its identity, and replaces a leftover under the new name", () => {
+  const old = { ...fresh(), id: 7 };
+  const leftover = { ...fresh(), id: 8, part: "shelf" };
+  const elsewhere = { ...fresh("/projects/beta"), id: 9 };
+  const next = renameChatColumn([old, leftover, elsewhere], "/projects/alpha", "bracket", "shelf");
+  assert.deepEqual(
+    next.map((column) => [column.id, column.part]),
+    [
+      [7, "shelf"],
+      [9, "bracket"],
+    ],
+  );
+});
+
+test("a running turn's busy flag follows the rename", () => {
+  const was = chatKey("/projects/alpha", "bracket");
+  const name = chatKey("/projects/alpha", "shelf");
+  assert.deepEqual(renameChatKey({ [was]: true }, was, name), { [name]: true });
+  const idle = {};
+  assert.equal(renameChatKey(idle, was, name), idle);
 });

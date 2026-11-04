@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import App from "./App"
+import PartView from "./PartView"
 import { messages, part, project, summaries } from "./fixtures"
 import { FakeSocket, installSocket } from "./socket-stub"
 
@@ -44,6 +45,22 @@ describe("workbench", () => {
     expect(await screen.findByRole("menuitemradio", { name: "lid" })).toHaveAttribute("aria-checked", "true")
     expect(screen.getByRole("menuitemradio", { name: "body" })).toHaveAttribute("aria-checked", "false")
     expect(screen.getByTestId("stage")).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1")
+  })
+
+  it("keeps the renamed part on stage while the host and the project disagree on its name", async () => {
+    const lid = part("lid", "/glb/p2/lid.glb?run=1")
+    const before = project("p2", "Second", [part("body", "/glb/p2/body.glb?run=1"), lid], messages)
+    const stage = () => screen.getByTestId("stage")
+    const { rerender } = render(<PartView project={before} partName="lid" />)
+    await waitFor(() => expect(stage()).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1"))
+
+    // The host has moved its selection; the refetched project has not landed.
+    rerender(<PartView project={before} partName="cap" />)
+    expect(stage()).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1")
+
+    const after = { ...before, parts: [before.parts[0], { ...lid, name: "cap", build: lid.build }] }
+    rerender(<PartView project={after} partName="cap" />)
+    expect(stage()).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1")
   })
 
   it("refetches on a build event and hands the viewer the new url", async () => {
