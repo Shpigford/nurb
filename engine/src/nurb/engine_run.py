@@ -396,41 +396,67 @@ def _part_row(conn, part_id):
     return row
 
 
-def _in_worker(conn, part_id, op, extra, overrides, profile, timeout, deadline):
-    """Run one op on a part's geometry in the warm worker. Returns its result dict."""
+def part_identity(conn, part_id):
+    """The three values the worker needs to find a part again: (database, project, name).
+
+    Read it under whatever lock guards the store, then hand it to `export_geometry`
+    with the lock let go.
+    """
     row = _part_row(conn, part_id)
-    remaining = (deadline - time.monotonic()) if deadline is not None else timeout
-    if remaining <= 0:
-        return _empty_result(f"this took longer than the {timeout:g} second deadline", timed_out=True)
-    request = {
-        "op": op,
-        "scratch_root": None,
-        "database_path": str(conn.execute("PRAGMA database_list").fetchone()["file"]),
-        "project_id": row["project_id"],
-        "part_name": row["name"],
-        "overrides": overrides,
-        "profile": profile,
-        "tolerance": 0.1,
-        **extra,
-    }
-    with _WORKER_LOCK:
-        return _WORKER.run(request, remaining)
+    database_path = str(conn.execute("PRAGMA database_list").fetchone()["file"])
+    return database_path, row["project_id"], row["name"]
 
 
-def export_part(conn, part_id, fmt, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS, deadline=None):
+def export_geometry(
+    identity, fmt, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS, deadline=None
+):
     """One part as a downloadable file: (bytes, filename, note).
+
+    Takes a `part_identity` rather than a connection, because the worker opens the
+    database itself and the round trip is the slow part: a worker that is not warm yet
+    imports the CAD kernel first, which is seconds. A caller holding a lock over the
+    store can let go of it before calling this.
 
     Raises ValueError with a sentence when there is no file to hand over, because the
     caller has a download to answer and nothing to attach.
     """
     if fmt not in ("3mf", "stl", "step"):
         raise ValueError(f"nurb does not export {fmt!r}. Have: 3mf, stl, step.")
-    result = _in_worker(
-        conn, part_id, "export", {"fmt": fmt}, overrides, profile, timeout, deadline
-    )
+    database_path, project_id, part_name = identity
+    remaining = (deadline - time.monotonic()) if deadline is not None else timeout
+    if remaining <= 0:
+        result = _empty_result(
+            f"this took longer than the {timeout:g} second deadline", timed_out=True
+        )
+    else:
+        request = {
+            "op": "export",
+            "scratch_root": None,
+            "database_path": database_path,
+            "project_id": project_id,
+            "part_name": part_name,
+            "overrides": overrides,
+            "profile": profile,
+            "tolerance": 0.1,
+            "fmt": fmt,
+        }
+        with _WORKER_LOCK:
+            result = _WORKER.run(request, remaining)
     if result.get("error") or not result.get("bytes"):
         raise ValueError(result.get("error") or "the export came back empty")
     return result["bytes"], result["filename"], result["note"]
+
+
+def export_part(conn, part_id, fmt, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS, deadline=None):
+    """One part as a downloadable file, read and exported in one call."""
+    return export_geometry(
+        part_identity(conn, part_id),
+        fmt,
+        overrides=overrides,
+        profile=profile,
+        timeout=timeout,
+        deadline=deadline,
+    )
 
 
 def _build_project(database_path, project_id, part_name, overrides, profile, timeout):

@@ -1390,9 +1390,9 @@ def _routes(conn, lock, server, token, pid):
         a picker, not a sentence about a file the user has never opened.
         """
 
-        def work(conn):
-            import tempfile
+        import tempfile
 
+        def work(conn):
             from . import checks, slicing
 
             part = _part_row(conn, request.path_params["part_id"])
@@ -1457,16 +1457,20 @@ def _routes(conn, lock, server, token, pid):
             if run is None:
                 return {"kind": "build", "error": f"{part['name']} has no build to slice"}
             overrides = json.loads(run["overrides"]) or None
+            # Only the part's identity here. Exporting it is a round trip to the build
+            # worker, which imports the CAD kernel when it is not warm yet, and that is
+            # seconds with the server lock held: the same frozen app the slicer used to
+            # cause (issue #296).
             try:
-                model, _, _ = engine_run.export_part(conn, part["id"], "stl", overrides=overrides)
+                identity = engine_run.part_identity(conn, part["id"])
             except ValueError as exc:
                 return {"kind": "build", "error": str(exc)}
-            return part["name"], run["id"], model, job, settings, profile
+            return part["name"], run["id"], identity, overrides, job, settings, profile
 
         prepared = await query(work)
         if isinstance(prepared, dict):
             return JSONResponse(prepared)
-        name, run_id, model, job, settings, profile = prepared
+        name, run_id, identity, overrides, job, settings, profile = prepared
 
         def sliced():
             from . import slicing
@@ -1474,6 +1478,12 @@ def _routes(conn, lock, server, token, pid):
             # Outside the server lock, because a slicer can take minutes and every build
             # starts one; one at a time, because two would fight over the same cores.
             with one_slicer, tempfile.TemporaryDirectory() as scratch:
+                try:
+                    model, _, _ = engine_run.export_geometry(
+                        identity, "stl", overrides=overrides
+                    )
+                except ValueError as exc:
+                    return {"kind": "build", "error": str(exc)}
                 stl = pathlib.Path(scratch) / f"{name}.stl"
                 stl.write_bytes(model)
                 try:
