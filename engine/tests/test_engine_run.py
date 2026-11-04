@@ -243,3 +243,45 @@ def test_overrides_reach_the_exported_geometry(conn, monkeypatch, tmp_path):
     plain, _, _ = engine_run.export_part(conn, part, "stl")
     wider, _, _ = engine_run.export_part(conn, part, "stl", overrides={"width": 40.0})
     assert plain != wider
+
+
+def test_a_revision_is_built_once_when_two_callers_race(conn, monkeypatch, tmp_path):
+    """The request that wrote the revision and the background builder both reach for
+    it, and the kernel ran twice (#334)."""
+    import threading
+
+    monkeypatch.setenv("NURB_HOME", str(tmp_path / "home"))
+    project_id = db.create_project(conn, "shop")
+    db.create_part(conn, project_id, "cube", CUBE)
+    part = part_id(conn, project_id, "cube")
+
+    builds = []
+
+    def slow_build(database_path, pid, part_name, overrides, profile, timeout):
+        builds.append(part_name)
+        time.sleep(0.5)
+        return engine_run._empty_result(None)
+
+    monkeypatch.setattr(engine_run, "_build_project", slow_build)
+
+    def build():
+        own = db.connect(tmp_path / "x.db")
+        try:
+            engine_run.run_build(own, part)
+        finally:
+            own.close()
+
+    threads = [threading.Thread(target=build) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert builds == ["cube"]
+    revision = conn.execute(
+        "SELECT current_revision_id FROM parts WHERE id = ?", (part,)
+    ).fetchone()[0]
+    runs = conn.execute(
+        "SELECT COUNT(*) FROM build_runs WHERE revision_id = ?", (revision,)
+    ).fetchone()[0]
+    assert runs == 1

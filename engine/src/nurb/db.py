@@ -13,6 +13,7 @@ import os
 import pathlib
 import re
 import sqlite3
+import threading
 import uuid
 
 # What a part may be called. It becomes a filename and a Python module name, so the
@@ -287,15 +288,20 @@ def transaction(conn):
     outer = not conn.in_transaction
     if outer:
         conn.execute("BEGIN IMMEDIATE")
+        held, _held.events = getattr(_held, "events", None), []
     try:
         yield conn
     except BaseException:
         if outer:
             conn.execute("ROLLBACK")
+            _held.events = held
         raise
     else:
         if outer:
             conn.execute("COMMIT")
+            queued, _held.events = _held.events, held
+            for event in queued:
+                changed(*event)
 
 
 def migrate(conn):
@@ -322,10 +328,24 @@ def migrate(conn):
 # here knows what a websocket is.
 listeners = []
 
+# Events raised while an outer transaction is still open, so a listener never hears
+# about a row it cannot read yet. An import wraps a project and all its parts in one
+# transaction, and the nested writes announce themselves from inside it; the builder
+# woke, read on its own connection, saw nothing, and the parts stayed unbuilt (#339).
+_held = threading.local()
+
 
 def changed(kind, row_id, project_id):
-    """Announce a write. Called after the transaction commits, so a listener that
-    reads the row back finds it."""
+    """Announce a write, once the transaction it belongs to has committed."""
+    queued = getattr(_held, "events", None)
+    if queued is not None:
+        if (kind, row_id, project_id) not in queued:
+            queued.append((kind, row_id, project_id))
+        return
+    _announce(kind, row_id, project_id)
+
+
+def _announce(kind, row_id, project_id):
     for listener in list(listeners):
         # The bus is a nudge to whoever is watching, never part of the write. A serve
         # shutting down closes its loop under a build thread's feet, and a page that
