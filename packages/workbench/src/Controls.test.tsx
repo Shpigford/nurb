@@ -45,7 +45,7 @@ function install(routes: Record<string, (body: Record<string, unknown> | null) =
     if (url === "/api/projects/p2" && method === "GET") return new Response(JSON.stringify(state))
     const handler = routes[`${method} ${url}`]
     if (!handler) return new Response("nothing here", { status: 404 })
-    const answer = handler(body)
+    const answer = await handler(body)
     return answer instanceof Response ? answer : new Response(JSON.stringify(answer))
   })
 }
@@ -363,6 +363,72 @@ describe("print time", () => {
     expect(await screen.findByText("OrcaSlicer has no profile for prusa_mk4.")).toBeInTheDocument()
     expect(await screen.findByText("Prusa MK4")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "change" })).toBeInTheDocument()
+  })
+
+  describe("when a build lands while the slicer is still working", () => {
+    // One slice per press, each held until the test says what the slicer answered.
+    function slicer() {
+      const pending: ((answer: unknown) => void)[] = []
+      install({
+        "GET /api/printers": () => BENCH,
+        "POST /api/parts/part-lid/slice": () => new Promise((resolve) => pending.push(resolve)),
+      })
+      return pending
+    }
+
+    const priced = (grams: number, run_id: string) => ({
+      kind: "slice",
+      profile: "prusa_mk4",
+      grams,
+      weight: `${grams}g`,
+      seconds: 4320,
+      spoken: "1h 12m",
+      run_id,
+    })
+
+    async function secondBuildMidSlice() {
+      state = {
+        ...withPart({ build: { ...base.build!, slice: null } }),
+        printer: { name: "prusa_mk4", bed: [250, 210, 220] },
+        printers: ["prusa_mk4"],
+      }
+      const pending = slicer()
+      render(<App />)
+      await userEvent.click(await screen.findByRole("button", { name: /SLICE/ }))
+      await waitFor(() => expect(pending).toHaveLength(1))
+
+      state = {
+        ...state,
+        parts: state.parts.map((p) => ({ ...p, build: { ...p.build!, id: "b2", slice: null } })),
+      }
+      FakeSocket.instances[0].emit({ kind: "build", id: "b2", project_id: "p2" })
+      await waitFor(() => expect(calls.filter((c) => c.url === "/api/projects/p2").length).toBeGreaterThan(1))
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      })
+      return pending
+    }
+
+    it("throws away the old build's numbers and prices the new build", async () => {
+      const pending = await secondBuildMidSlice()
+
+      await act(async () => pending[0](priced(42, base.build!.id)))
+
+      await waitFor(() => expect(pending).toHaveLength(2))
+      expect(screen.queryByText("42 g")).toBeNull()
+
+      await act(async () => pending[1](priced(99, "b2")))
+      expect(await screen.findByText("99 g")).toBeInTheDocument()
+    })
+
+    it("does not show a failed slice of the old build as the new build's error", async () => {
+      const pending = await secondBuildMidSlice()
+
+      await act(async () => pending[0](new Response(JSON.stringify({ error: "slicer crashed" }), { status: 500 })))
+
+      await waitFor(() => expect(pending).toHaveLength(2))
+      expect(screen.queryByText(/slicer crashed/)).toBeNull()
+    })
   })
 
   it("refetches the bench when a printer changes in Settings", async () => {

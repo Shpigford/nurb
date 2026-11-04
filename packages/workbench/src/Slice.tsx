@@ -116,19 +116,31 @@ export default function Slice({
     setStale(false)
     setPicking(false)
     cue("loading")
+    // A slice outlasts a build. An answer about a shape that has since been replaced
+    // says nothing about the one on screen, whether it is a number or a failure. The
+    // ask effect prices the new build once this one is out of the way. The server's
+    // run_id cannot settle this: after a failed build it names the last good run,
+    // which is correctly not the run on screen.
+    const pricing = shownFor.current
+    const movedOn = () => {
+      if (shownFor.current === pricing) return false
+      setStale(true)
+      return true
+    }
     try {
       const said = await slicePart(partId)
+      if (movedOn()) return
       setResult(said)
-      shownFor.current = runId
       // A slice that came back without numbers is a refusal, not an answer.
       cue(said.kind === "slice" ? "ready" : "error")
     } catch (failure) {
+      if (movedOn()) return
       setError(failure instanceof Error ? failure.message : "The slicer did not answer.")
       cue("error")
     } finally {
       setRunning(false)
     }
-  }, [partId, runId])
+  }, [partId])
 
   // A bench with a printer on it has already answered the only question the slice
   // needs, so the row carries the number rather than a button that fetches it.
