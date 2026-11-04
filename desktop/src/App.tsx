@@ -98,8 +98,9 @@ const writeProject = (id: string | null) => {
 
 function App() {
   const reduced = useReducedMotion() === true;
-  // null while the check runs, false when first-launch provisioning has work
-  // to do, true once the environment is healthy and the app can start.
+  // null while the check runs, which shows the engine screen rather than an
+  // empty window; false when first-launch provisioning has work to do; true once
+  // the environment is healthy and the app can start.
   const [ready, setReady] = useState<boolean | null>(null);
   const [served, setServed] = useState(false);
   // Settings hands this endpoint to a coding assistant on the same Mac.
@@ -199,6 +200,13 @@ function App() {
       invoke<string>("serve_log")
         .then((text) => setServeLog(text || null))
         .catch(() => setServeLog(null));
+      // The launch check never imports the engine, so a venv damaged since
+      // install first shows up here. Setup repairs it; Try again never could.
+      invoke<boolean>("parts_import_ok")
+        .then((ok) => {
+          if (!ok) setReady(false);
+        })
+        .catch(() => {});
     }
   }, []);
 
@@ -769,8 +777,6 @@ function App() {
     });
     setColumns((list) => updateChatActivity(list, path, part, agent, busy, visible, wasBusy));
   };
-
-  if (ready === null) return null;
 
   // Three screens stand in front of the app, and each one hands over rather than
   // cutting: the window dissolves from setup, to the engine starting, to the app.
