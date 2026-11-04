@@ -974,6 +974,29 @@ def test_the_stl_a_slice_needs_is_exported_off_the_server_lock(home):
         assert sliced["kind"] == "slice" and sliced["seconds"] == 3600
 
 
+def test_a_download_in_flight_leaves_the_server_free(home):
+    """Download is the other route that waits on the build worker, and a cold one
+    imports the CAD kernel first. The file can take its time; the rest of the app
+    cannot wait for it."""
+    import threading
+
+    project_id, part_id = a_slab()
+    with serving(home, free_port(), command=SLOW_EXPORT) as url:
+        downloaded = {}
+        downloading = threading.Thread(
+            target=lambda: downloaded.update(
+                {"status": post(f"{url}/api/parts/{part_id}/export", {"format": "stl"})[0]}
+            )
+        )
+        downloading.start()
+        time.sleep(1.5)  # the export is under way
+        started = time.monotonic()
+        get(f"{url}/api/projects/{project_id}")
+        assert time.monotonic() - started < 2
+        downloading.join()
+        assert downloaded["status"] == 200
+
+
 # A serve with PrusaSlicer and nothing else, so a Prusa takes Prusa's route.
 PRUSA_ONLY = [
     sys.executable,
