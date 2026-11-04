@@ -110,6 +110,9 @@ function permissionVariant(kind: string): "accent" | "outline" | "ghost" {
   return "ghost";
 }
 
+/** Word for word what the Claude driver says when a resume finds no transcript. */
+const RESTORE_FAILED = "Couldn't restore this conversation, so this is a fresh one.";
+
 // The first conversation on this Mac gets examples instead of an instruction: the
 // hard part of a first part is believing it can be asked for in plain words.
 const PRIMED_KEY = "nurb-composer-primed";
@@ -667,10 +670,15 @@ function Chat({
     async (text: string, files: string[]) => {
       sendingRef.current = true;
       stoppedRef.current = false;
-      // A refused file was about the draft this send replaces. Live notes sit below
-      // Claude's stored turns, so left alone it would trail every later reply.
+      // A refused file was about the draft this send replaces, and a failed restore
+      // has been said. Live notes sit below Claude's stored turns, so left alone
+      // either would trail every later reply.
       setItems((list) =>
-        list.filter((item) => item.kind !== "note" || item.text !== refusalRef.current),
+        list.filter(
+          (item) =>
+            item.kind !== "note" ||
+            (item.text !== refusalRef.current && !(isClaude && item.text === RESTORE_FAILED)),
+        ),
       );
       const localId = nextLocalIdRef.current++;
       // Claude's turn is stored, not replayed, so the line comes back from the

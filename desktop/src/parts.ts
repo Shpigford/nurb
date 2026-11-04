@@ -15,6 +15,14 @@ export function folders(projects: ProjectSummary[]): ProjectSummary[] {
   return projects.filter((project) => project.folder);
 }
 
+/**
+ * One folder's cards, from the list the library already holds. Reading the project
+ * instead would wait out a running build, and the shelf would look empty meanwhile.
+ */
+export function partsIn<T extends { project_id: string }>(parts: T[], projectId: string | null): T[] {
+  return parts.filter((part) => part.project_id === projectId);
+}
+
 export type MoveTarget = { id: string; name: string; parts: number };
 
 /** Where a part can go: every folder except the one already holding it. */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { folders, matchesSearch, messagesForPart, moveTargets, sortParts } from "../src/parts.ts";
+import { folders, matchesSearch, messagesForPart, moveTargets, partsIn, sortParts } from "../src/parts.ts";
 import type { Message } from "@nurb/ui";
 import type { LibraryPart, ProjectSummary } from "@nurb/workbench/api";
 
@@ -40,6 +40,16 @@ test("a part cannot move into the folder it is already in", () => {
 test("a loose part can move into every folder", () => {
   const list = [project("a", "Shelf", true, 3), project("b", "x", false)];
   assert.deepEqual(moveTargets(list, held("p1", "b")), [{ id: "a", name: "Shelf", parts: 3 }]);
+});
+
+test("a folder's cards come from the library, with no project read to wait on", () => {
+  const library = [held("p1", "a"), held("p2", "b"), held("p3", "a")];
+  assert.deepEqual(
+    partsIn(library, "a").map((p) => p.id),
+    ["p1", "p3"],
+  );
+  assert.deepEqual(partsIn(library, "empty"), []);
+  assert.deepEqual(partsIn(library, null), []);
 });
 
 test("a folder keeps one conversation per part and its own", () => {

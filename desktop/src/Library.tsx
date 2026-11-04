@@ -35,10 +35,9 @@ import {
   renameProject,
   type LibraryPart,
   type Part,
-  type Project,
   type ProjectSummary,
 } from "@nurb/workbench/api";
-import { folders, matchesSearch, sortParts, titleCase, type LibrarySort } from "./parts";
+import { folders, matchesSearch, partsIn, sortParts, titleCase, type LibrarySort } from "./parts";
 
 const SORTS: Record<LibrarySort, string> = { built: "Last built", name: "Name" };
 const SORT_KEY = "nurb.librarySort";
@@ -69,7 +68,6 @@ type Props = {
   /** Whether the rail is on All parts or on the selected folder. */
   showAll: boolean;
   projectId: string | null;
-  project: Project | null;
   updateReady: boolean;
   /** The sheet-28 card, anchored over the rail footer by this screen. */
   updateCard?: ReactNode;
@@ -128,7 +126,6 @@ export default function Library({
   allParts,
   showAll,
   projectId,
-  project,
   updateReady,
   updateCard,
   onShowUpdate,
@@ -188,16 +185,10 @@ export default function Library({
 
   // One shape for both views, so a card in a folder and a card in All parts are
   // the same card and lead to the same place.
-  const parts: LibraryPart[] = useMemo(() => {
-    if (showAll) return allParts;
-    if (!project) return [];
-    return project.parts.map((part) => ({
-      ...part,
-      project_id: project.id,
-      project_name: project.name,
-      folder: project.folder,
-    }));
-  }, [showAll, allParts, project]);
+  const parts = useMemo(
+    () => (showAll ? allParts : partsIn(allParts, projectId)),
+    [showAll, allParts, projectId],
+  );
 
   const [sort, setSort] = useState<LibrarySort>(readSort);
   const chooseSort = (next: LibrarySort) => {
@@ -298,7 +289,8 @@ export default function Library({
   };
 
   // The open folder is where a new part goes, so the button says so.
-  const folder = !showAll && project?.folder ? project : null;
+  const selected = projects.find((summary) => summary.id === projectId);
+  const folder = !showAll && selected?.folder ? selected : null;
 
   const header = (
     <FloatingHeader
@@ -512,7 +504,7 @@ export default function Library({
         ) : parts.length === 0 ? (
           <div className="flex min-h-0 flex-1 flex-col pr-4 pb-4">
             <EmptyShelf
-              caption={`No parts in ${project?.name ?? "this project"} yet. Start one here.`}
+              caption={`No parts in ${selected?.name ?? "this project"} yet. Start one here.`}
               primary={{ label: "New part", icon: "plus", onClick: () => onNewPart(projectId ?? undefined) }}
               secondary={{ label: "All parts", onClick: onSelectAll }}
             />
@@ -522,7 +514,7 @@ export default function Library({
             <div className="chrome flex h-[30px] shrink-0 items-center justify-between pr-4">
               <span className="mono-caption text-on-stage-muted">
                 {shown.length} {shown.length === 1 ? "part" : "parts"}
-                {showAll ? "" : project?.name ? ` · ${project.name}` : ""}
+                {showAll || !selected ? "" : ` · ${selected.name}`}
               </span>
               <Menu
                 portal

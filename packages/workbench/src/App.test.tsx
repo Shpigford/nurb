@@ -63,6 +63,18 @@ describe("workbench", () => {
     expect(stage()).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1")
   })
 
+  it("says the part is opening while a running build holds the project's read", async () => {
+    vi.stubGlobal("fetch", (url: string) =>
+      url === "/api/projects"
+        ? Promise.resolve(new Response(JSON.stringify({ projects: listed })))
+        : new Promise<Response>(() => {})
+    )
+    render(<App />)
+    expect(await screen.findAllByText("Opening part")).not.toHaveLength(0)
+    expect(screen.queryByText("No part yet")).not.toBeInTheDocument()
+    expect(screen.queryByText("NOT BUILT")).not.toBeInTheDocument()
+  })
+
   it("refetches on a build event and hands the viewer the new url", async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByTestId("stage")).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1"))

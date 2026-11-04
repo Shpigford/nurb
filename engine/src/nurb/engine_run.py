@@ -482,10 +482,68 @@ def run_build(
     timeout=BUILD_TIMEOUT_SECONDS,
     deadline=None,
 ):
-    """Build a part and record the attempt. Returns (run_id, result)."""
+    """Build a part and record the attempt. Returns (run_id, result).
+
+    Two callers reach for the same revision whenever a request writes one: the request
+    builds it, and the background builder wakes on that same change event and finds a
+    current revision with no run. Both used to build, so "Building" lasted twice as
+    long and the second result was thrown away (#334). The first caller through builds;
+    the others wait on its gate and read its run back.
+    """
     if deadline is None:
         deadline = time.monotonic() + timeout
     row = _part_row(conn, part_id)
+    revision_id = row["current_revision_id"]
+    with _INFLIGHT_LOCK:
+        gate = _INFLIGHT.setdefault(revision_id, _Inflight())
+        gate.waiters += 1
+    try:
+        with gate.lock:
+            if gate.run_id is not None and gate.overrides == (overrides or {}):
+                done = conn.execute(
+                    "SELECT * FROM build_runs WHERE id = ?", (gate.run_id,)
+                ).fetchone()
+                if done is not None:
+                    return gate.run_id, _result_of(done)
+            run_id, result = _build_and_record(conn, row, overrides, profile, timeout, deadline)
+            gate.run_id, gate.overrides = run_id, overrides or {}
+            return run_id, result
+    finally:
+        with _INFLIGHT_LOCK:
+            gate.waiters -= 1
+            if gate.waiters == 0:
+                _INFLIGHT.pop(revision_id, None)
+
+
+class _Inflight:
+    """One revision's build, and the run it left behind for whoever waited."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.waiters = 0
+        self.run_id = None
+        self.overrides = None
+
+
+_INFLIGHT = {}
+_INFLIGHT_LOCK = threading.Lock()
+
+
+def _result_of(row):
+    """A stored run read back in the shape a fresh build returns."""
+    return {
+        "glb_bytes": row["glb"],
+        "render": row["render"],
+        "params": json.loads(row["params"]),
+        "findings": json.loads(row["findings"]),
+        "stats": json.loads(row["stats"]),
+        "inspect": json.loads(row["inspect_report"]),
+        "error": row["error"],
+        "timed_out": False,
+    }
+
+
+def _build_and_record(conn, row, overrides, profile, timeout, deadline):
     started = db.now()
     remaining = deadline - time.monotonic()
     if remaining <= 0:
