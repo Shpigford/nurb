@@ -73,6 +73,7 @@ export default function App() {
   return (
     <PartView
       project={project}
+      opening={Boolean(projectId) && !project}
       partName={partName}
       onSelectPart={setPartName}
       onPartRenamed={(_, name) => setPartName(name)}

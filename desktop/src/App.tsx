@@ -840,6 +840,7 @@ function App() {
         ) : null}
         <PartView
           project={project}
+          opening={Boolean(projectId) && !project && !drafting}
           partName={partName}
           starting={drafting}
           onSelectPart={setPartName}
@@ -954,7 +955,6 @@ function App() {
           allParts={allParts}
           showAll={showAll}
           projectId={projectId}
-          project={project}
           updateReady={Boolean(update)}
           updateCard={updateCard}
           onShowUpdate={() => setUpdateDismissed(false)}

@@ -140,6 +140,7 @@ function browserDownload(filename: string, blob: Blob) {
 
 export default function PartView({
   project,
+  opening,
   partName,
   starting,
   onSelectPart,
@@ -157,6 +158,8 @@ export default function PartView({
   onOpenInSlicer,
 }: {
   project: Project | null
+  /** A project is chosen and its read has not landed, which a running build can hold up. */
+  opening?: boolean
   partName: string | null
   /** A new part is being described, so no sibling stands in for it until it exists. */
   starting?: boolean
@@ -599,6 +602,8 @@ export default function PartView({
                 project.name
               ) : project ? (
                 "New part"
+              ) : opening ? (
+                "Opening part"
               ) : (
                 "No part yet"
               )
@@ -611,7 +616,9 @@ export default function PartView({
               <HeaderDivider />
             </>
           ) : null}
-          <HeaderStatus tone={tone} label={building ? "BUILDING" : STATUS_LABEL[verdict]} detail={detail} />
+          {opening ? null : (
+            <HeaderStatus tone={tone} label={building ? "BUILDING" : STATUS_LABEL[verdict]} detail={detail} />
+          )}
         </>
       }
       end={
@@ -697,10 +704,20 @@ export default function PartView({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
             <EmptyProject
-              title={part ? (failedBuild ? `${part.name} did not build` : `${part.name} is not built yet`) : "No part yet"}
+              title={
+                part
+                  ? failedBuild
+                    ? `${part.name} did not build`
+                    : `${part.name} is not built yet`
+                  : opening
+                    ? "Opening part"
+                    : "No part yet"
+              }
               caption={
                 !part
-                  ? "It appears here, live, as soon as the plan is set."
+                  ? opening
+                    ? "This can take a moment while another part is building."
+                    : "It appears here, live, as soon as the plan is set."
                   : failedBuild
                     ? "The rail says what went wrong. Change a value or ask for a fix, and it rebuilds."
                     : "Build it once and it appears here. Dragging a parameter rebuilds it from then on."
