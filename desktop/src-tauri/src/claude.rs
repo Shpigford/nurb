@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
@@ -54,11 +54,32 @@ pub struct Drivers {
 
 pub(crate) struct Session {
     pub(crate) project: PathBuf,
-    pgid: i32,
-    stdin: tokio::sync::Mutex<ChildStdin>,
+    pgid: AtomicI32,
+    pipe: tokio::sync::Mutex<Pipe>,
     turn: Mutex<Option<oneshot::Sender<Result<String, String>>>>,
     /// Set by cancel, so the exit that follows reads as a stop, not a crash.
     stopped: AtomicBool,
+}
+
+/// The child's stdin and the prompt it has not answered yet. One lock, so a
+/// prompt is either in the child being replaced, and gets sent again, or waits
+/// and goes to the new one. It is never lost or doubled.
+struct Pipe {
+    stdin: ChildStdin,
+    unanswered: Option<Value>,
+}
+
+impl Pipe {
+    async fn write(&mut self, line: &Value) -> Result<(), String> {
+        self.stdin
+            .write_all(format!("{line}\n").as_bytes())
+            .await
+            .map_err(|e| format!("Claude stopped listening: {e}"))?;
+        self.stdin
+            .flush()
+            .await
+            .map_err(|e| format!("Claude stopped listening: {e}"))
+    }
 }
 
 impl Drivers {
@@ -90,9 +111,10 @@ impl Drivers {
 impl Session {
     fn signal(&self, signal: i32) {
         // A pgid of 0 would be the app's own group.
-        if self.pgid > 0 {
+        let pgid = self.pgid.load(Ordering::SeqCst);
+        if pgid > 0 {
             unsafe {
-                libc::killpg(self.pgid, signal);
+                libc::killpg(pgid, signal);
             }
         }
     }
@@ -112,7 +134,11 @@ impl Session {
             "type": "user",
             "message": { "role": "user", "content": content },
         });
-        self.write_line(line).await?;
+        {
+            let mut pipe = self.pipe.lock().await;
+            pipe.write(&line).await?;
+            pipe.unanswered = Some(line);
+        }
         wait.await
             .map_err(|_| "Claude stopped unexpectedly".to_string())?
     }
@@ -120,19 +146,7 @@ impl Session {
     /// Switches the running child, so the picker never names a model this
     /// chat is not on. The CLI takes it between turns or mid-turn alike.
     pub(crate) async fn set_model(&self, model: &str) -> Result<(), String> {
-        self.write_line(set_model_line(model)).await
-    }
-
-    async fn write_line(&self, line: Value) -> Result<(), String> {
-        let mut stdin = self.stdin.lock().await;
-        stdin
-            .write_all(format!("{line}\n").as_bytes())
-            .await
-            .map_err(|e| format!("Claude stopped listening: {e}"))?;
-        stdin
-            .flush()
-            .await
-            .map_err(|e| format!("Claude stopped listening: {e}"))
+        self.pipe.lock().await.write(&set_model_line(model)).await
     }
 
     /// SIGINT: measured on 2.1.272, the CLI answers with an
@@ -153,6 +167,12 @@ pub(crate) fn set_model_line(model: &str) -> Value {
         "request": { "subtype": "set_model", "model": model },
     })
 }
+
+/// How the CLI words a `--resume` of a session it has no transcript of.
+const LOST_SESSION: &str = "No conversation found";
+
+/// The ACP path says the same when its restore fails.
+const RESTORE_FAILED: &str = "Couldn't restore this conversation, so this is a fresh one.";
 
 /// More text than this would crowd out the conversation it was attached to.
 const TEXT_LIMIT: usize = 100 * 1024;
@@ -262,7 +282,19 @@ pub(crate) fn map_line(line: &Value) -> Vec<Signal> {
                 .get("is_error")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
-            text: string_of(line, "result").unwrap_or_default(),
+            // A turn that never ran has no `result`, only the CLI's `errors`.
+            text: string_of(line, "result").unwrap_or_else(|| {
+                line.get("errors")
+                    .and_then(Value::as_array)
+                    .map(|errors| {
+                        errors
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_default()
+            }),
         }],
         Some("system") if line.get("subtype").and_then(Value::as_str) == Some("init") => {
             let servers = line
@@ -526,31 +558,37 @@ pub(crate) async fn start(
         .await
         .map_err(|e| e.to_string())??
     };
-    let chosen = app.state::<PrefStore>().chosen(AgentKind::Claude.id());
-    let pick = |category: &str| {
-        chosen
-            .iter()
-            .find(|(key, _)| key == category)
-            .map(|(_, value)| value.clone())
-    };
-    let model = pick("model");
-    let effort = pick("thought_level");
     let project_id = crate::acp::project_key(&project);
+    let engine_root = app.state::<crate::env::Launcher>().engine_root();
+    // The picks are read per spawn: one made since the last child still counts.
+    let launch = {
+        let app = app.clone();
+        let project = project.clone();
+        move |session: &str, resume: bool| {
+            let chosen = app.state::<PrefStore>().chosen(AgentKind::Claude.id());
+            let pick = |category: &str| {
+                chosen
+                    .iter()
+                    .find(|(key, _)| key == category)
+                    .map(|(_, value)| value.as_str())
+            };
+            let args = spawn_args(
+                &serve.url,
+                &serve.token,
+                &project_id,
+                part.as_deref(),
+                pick("model"),
+                pick("thought_level"),
+                session,
+                resume,
+            );
+            spawn(&bin, args, &project, &engine_root)
+        }
+    };
     let session_id = resume
         .clone()
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let args = spawn_args(
-        &serve.url,
-        &serve.token,
-        &project_id,
-        part.as_deref(),
-        model.as_deref(),
-        effort.as_deref(),
-        &session_id,
-        resume.is_some(),
-    );
-    let engine_root = app.state::<crate::env::Launcher>().engine_root();
-    let mut child = spawn(&bin, args, &project, &engine_root)?;
+    let mut child = launch(&session_id, resume.is_some())?;
     let pgid = child.id().unwrap_or_default() as i32;
     let stdin = child.stdin.take().ok_or("Claude has no input pipe")?;
     let stdout = child.stdout.take().ok_or("Claude has no output pipe")?;
@@ -558,8 +596,11 @@ pub(crate) async fn start(
 
     let session = Arc::new(Session {
         project,
-        pgid,
-        stdin: tokio::sync::Mutex::new(stdin),
+        pgid: AtomicI32::new(pgid),
+        pipe: tokio::sync::Mutex::new(Pipe {
+            stdin,
+            unanswered: None,
+        }),
         turn: Mutex::new(None),
         stopped: AtomicBool::new(false),
     });
@@ -568,38 +609,37 @@ pub(crate) async fn start(
         .lock()
         .unwrap()
         .insert(session_id.clone(), session.clone());
-    tauri::async_runtime::spawn(read_stream(
-        app.clone(),
-        child,
-        stdout,
-        channel,
-        session,
-        session_id.clone(),
-    ));
+    let id = session_id.clone();
+    tauri::async_runtime::spawn(async move {
+        let fresh = || launch(&id, false);
+        read_stream(child, stdout, &channel, &session, &id, resume.is_some(), fresh).await;
+        app.state::<Drivers>().sessions.lock().unwrap().remove(&id);
+    });
     Ok(session_id)
 }
 
 /// One session's stdout, start to grave: events to the webview, and every
 /// turn resolved even when the process dies.
 async fn read_stream(
-    app: tauri::AppHandle,
     mut child: Child,
     stdout: tokio::process::ChildStdout,
-    channel: Channel<ChatEvent>,
-    session: Arc<Session>,
-    session_id: String,
+    channel: &Channel<ChatEvent>,
+    session: &Session,
+    session_id: &str,
+    resumed: bool,
+    fresh: impl Fn() -> Result<Child, String>,
 ) {
-    use tauri::Manager;
     // One session error per session: the column forgets the session on it.
     let mut reported = false;
+    let mut resumed = resumed;
     let mut lines = BufReader::new(stdout).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
+    'stream: while let Ok(Some(line)) = lines.next_line().await {
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
         for signal in map_line(&value) {
             match signal {
-                Signal::Event(event) => send(&channel, event),
+                Signal::Event(event) => send(channel, event),
                 Signal::Init {
                     session_id: id,
                     tools_ready,
@@ -608,7 +648,7 @@ async fn read_stream(
                     // The child is alive either way; a note says what it lacks.
                     if !tools_ready {
                         send(
-                            &channel,
+                            channel,
                             ChatEvent::Note {
                                 text: format!("The nurb tools did not connect ({detail}). Claude can talk, but it cannot touch the project until they do."),
                             },
@@ -623,22 +663,38 @@ async fn read_stream(
                     is_error,
                     text,
                 } => {
+                    let stopped = session.stopped.load(Ordering::SeqCst);
+                    if std::mem::take(&mut resumed)
+                        && is_error
+                        && !stopped
+                        && text.contains(LOST_SESSION)
+                    {
+                        let note = match start_over(&mut child, session, &fresh).await {
+                            Ok(stdout) => {
+                                lines = BufReader::new(stdout).lines();
+                                RESTORE_FAILED.to_string()
+                            }
+                            Err(error) => error,
+                        };
+                        send(channel, ChatEvent::Note { text: note });
+                        continue 'stream;
+                    }
                     // A failed turn leaves the child alive and waiting, so it
                     // is a note, not the end of the session. Being signed out
                     // is the exception: nothing more can happen in this child.
                     if is_error && looks_signed_out(&text) {
                         reported = true;
-                        send(&channel, ChatEvent::SessionError { message: "auth_required".into() });
+                        send(channel, ChatEvent::SessionError { message: "auth_required".into() });
                         session.signal(libc::SIGTERM);
-                    } else if is_error && !session.stopped.load(Ordering::SeqCst) {
+                    } else if is_error && !stopped {
                         let text = if text.is_empty() {
                             "Claude hit an error and stopped this turn.".to_string()
                         } else {
                             text
                         };
-                        send(&channel, ChatEvent::Note { text });
+                        send(channel, ChatEvent::Note { text });
                     }
-                    finish(&session, Ok(stop));
+                    finish(session, Ok(stop));
                 }
             }
         }
@@ -657,16 +713,38 @@ async fn read_stream(
         format!("Claude stopped unexpectedly (exit {code})")
     };
     if !reported {
-        send(&channel, ChatEvent::SessionError {
+        send(channel, ChatEvent::SessionError {
             message: message.clone(),
         });
     }
-    finish(&session, Err(message));
-    app.state::<Drivers>()
-        .sessions
-        .lock()
-        .unwrap()
-        .remove(&session_id);
+    finish(session, Err(message));
+}
+
+/// Replaces a child whose resume found no transcript, which the CLI deletes
+/// after 30 days by default. The new one takes the same id, so the column's
+/// session stays good, and answers whatever the old one was sent. The dead
+/// child would otherwise wait on stdin for its first line before it exits.
+async fn start_over(
+    child: &mut Child,
+    session: &Session,
+    fresh: &impl Fn() -> Result<Child, String>,
+) -> Result<tokio::process::ChildStdout, String> {
+    let mut pipe = session.pipe.lock().await;
+    session.signal(libc::SIGTERM);
+    let _ = child.wait().await;
+    let mut next = fresh()?;
+    let stdin = next.stdin.take().ok_or("Claude has no input pipe")?;
+    let stdout = next.stdout.take().ok_or("Claude has no output pipe")?;
+    drain_stderr(next.stderr.take());
+    session
+        .pgid
+        .store(next.id().unwrap_or_default() as i32, Ordering::SeqCst);
+    *child = next;
+    pipe.stdin = stdin;
+    if let Some(line) = pipe.unanswered.take() {
+        pipe.write(&line).await?;
+    }
+    Ok(stdout)
 }
 
 fn send(channel: &Channel<ChatEvent>, event: ChatEvent) {
@@ -732,9 +810,17 @@ pub(crate) fn config_rows(prefs: &PrefStore) -> Vec<ConfigRow> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_current, map_line, set_model_line, spawn, spawn_args, user_content, Signal};
+    use super::{
+        is_current, map_line, read_stream, set_model_line, spawn, spawn_args, user_content, Pipe,
+        Session, Signal,
+    };
     use crate::acp::Meshes;
     use serde_json::Value;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, AtomicI32};
+    use std::sync::{Arc, Mutex};
+    use tauri::ipc::{Channel, InvokeResponseBody};
 
     const STREAM: &str = include_str!("../tests/fixtures/claude-stream.jsonl");
 
@@ -870,6 +956,109 @@ mod tests {
         let default = spawn_args("http://x", "t", "box", None, Some("default"), Some("default"), "sid", true);
         assert!(!default.join(" ").contains("--model"));
         assert!(default.join(" ").contains("--resume sid"));
+    }
+
+    /// What 2.1.318 prints for a session it has no transcript of, before it has
+    /// read any input. It then sits waiting on stdin: issue #331.
+    const GONE: &str = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":0,"stop_reason":null,"session_id":"sid","errors":["No conversation found with session ID: sid"]}"#;
+
+    /// A driver session on a fake CLI, with the events it sends collected.
+    async fn fake_session(
+        dir: &Path,
+        script: &str,
+        resumed: bool,
+    ) -> (Arc<Session>, Arc<Mutex<Vec<Value>>>, tokio::task::JoinHandle<()>) {
+        std::fs::create_dir_all(dir).unwrap();
+        let bin = dir.join("claude");
+        std::fs::write(&bin, script).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let launch = {
+            let (bin, dir) = (bin.clone(), dir.to_path_buf());
+            move |resume: bool| {
+                let args = spawn_args("http://x", "t", "box", None, None, None, "sid", resume);
+                spawn(&bin, args, &dir, &dir)
+            }
+        };
+        let mut child = launch(resumed).unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let session = Arc::new(Session {
+            project: dir.to_path_buf(),
+            pgid: AtomicI32::new(child.id().unwrap() as i32),
+            pipe: tokio::sync::Mutex::new(Pipe {
+                stdin: child.stdin.take().unwrap(),
+                unanswered: None,
+            }),
+            turn: Mutex::new(None),
+            stopped: AtomicBool::new(false),
+        });
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let channel = {
+            let seen = seen.clone();
+            Channel::new(move |body| {
+                if let InvokeResponseBody::Json(json) = body {
+                    seen.lock().unwrap().push(serde_json::from_str(&json).unwrap());
+                }
+                Ok(())
+            })
+        };
+        let task = {
+            let session = session.clone();
+            tokio::spawn(async move {
+                read_stream(child, stdout, &channel, &session, "sid", resumed, || launch(false)).await;
+            })
+        };
+        (session, seen, task)
+    }
+
+    fn notes(seen: &Mutex<Vec<Value>>) -> Vec<String> {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == "note")
+            .map(|event| event["text"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// Issue #331: every send failed forever once the transcript was cleaned
+    /// up. The resume fails, a fresh child takes the same id, and the prompt
+    /// that was waiting is the one it answers.
+    #[tokio::test]
+    async fn a_resume_of_a_lost_session_starts_fresh_and_answers_the_prompt() {
+        let dir = std::env::temp_dir().join(format!("nurb-claude-gone-{}", std::process::id()));
+        let script = format!(
+            "#!/bin/sh\ncase \" $* \" in\n*' --resume '*) echo '{GONE}'; read line; exit 1;;\n*) echo \"$*\" | grep -q -- '--session-id sid' && read line && printf '%s\\n' \"$line\" > {received}; echo '{{\"type\":\"result\",\"is_error\":false,\"result\":\"hello\"}}'; cat > /dev/null;;\nesac\n",
+            received = dir.join("received").display(),
+        );
+        let (session, seen, task) = fake_session(&dir, &script, true).await;
+        let answer = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            session.prompt(Value::String("taller".into())),
+        )
+        .await
+        .expect("the turn never finished");
+        assert_eq!(answer.unwrap(), "end_turn");
+        let received = std::fs::read_to_string(dir.join("received")).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&received).unwrap()["message"]["content"], "taller");
+        assert_eq!(notes(&seen), vec![super::RESTORE_FAILED.to_string()]);
+        assert!(!seen.lock().unwrap().iter().any(|event| event["type"] == "session_error"), "{seen:?}");
+        session.signal(libc::SIGTERM);
+        task.await.unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The same words from a child that was not resuming are not a lost
+    /// transcript, and starting over there would loop for good.
+    #[tokio::test]
+    async fn only_a_resume_starts_over() {
+        let dir = std::env::temp_dir().join(format!("nurb-claude-noloop-{}", std::process::id()));
+        let script = format!("#!/bin/sh\necho x >> {count}; echo '{GONE}'; exit 1\n", count = dir.join("count").display());
+        let (session, seen, task) = fake_session(&dir, &script, false).await;
+        task.await.unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("count")).unwrap().lines().count(), 1);
+        // The note carries the CLI's own words rather than a generic line.
+        assert_eq!(notes(&seen), vec!["No conversation found with session ID: sid".to_string()]);
+        drop(session);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// The spawn path end to end against a fake CLI: the sandbox wrapper, the
