@@ -290,7 +290,11 @@ pub fn run() {
                 .unwrap_or(dir);
             std::fs::create_dir_all(&dir)?;
             let launcher = env::Launcher::resolve(dir.clone());
-            app.manage(Supervisor::new(launcher.clone(), dir.clone()));
+            app.manage(Supervisor::new(
+                launcher.clone(),
+                dir.clone(),
+                app.package_info().version.to_string(),
+            ));
             app.manage(launcher);
             app.manage(sessions::SessionStore::load(&dir));
             app.manage(prefs::PrefStore::load(&dir));
@@ -324,6 +328,7 @@ pub fn run() {
             agents::agent_statuses,
             agents::agent_login,
             provision::provision_status,
+            provision::parts_import_ok,
             provision::provision,
             provision::about_info
         ])

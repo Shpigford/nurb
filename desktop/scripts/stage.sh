@@ -1,10 +1,13 @@
 #!/bin/sh
 # Stages what the desktop app bundles for first-launch provisioning: the nurb
-# wheel built from this checkout, a fully pinned hash-locked resolution of its
-# dependencies, the committed adapter manifest/lock, and the uv sidecar
-# binaries for both darwin targets. Runs before every tauri dev/build (wheel
-# and Python lock are cheap and must track the checkout); the uv downloads are
-# skipped once present.
+# wheel built from this checkout, its dependencies as pinned by uv.lock, the
+# committed adapter manifest/lock, and the uv sidecar binaries for both darwin
+# targets. Runs before every tauri dev/build (wheel and Python lock are cheap and
+# must track the checkout); the uv downloads are skipped once present.
+#
+# The lock's bytes decide whether an installed app keeps its environment, so they
+# depend on uv.lock and nothing else: no header naming this checkout's path, and
+# no fresh resolve that picks up whatever is newest on the day of the build.
 set -eu
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -17,8 +20,8 @@ mkdir -p "$tauri/resources" "$tauri/binaries"
 
 rm -f "$tauri/resources"/nurb-*.whl
 uv build --wheel --project "$repo" -o "$tauri/resources" >/dev/null 2>&1
-uv pip compile "$repo/pyproject.toml" --universal --python-version 3.13 \
-  --generate-hashes --no-annotate -q -o "$tauri/resources/requirements.lock"
+uv export --project "$repo" --locked --no-dev --no-emit-project --no-header \
+  --no-annotate --format requirements-txt -q -o "$tauri/resources/requirements.lock"
 cp "$adapter_runtime/package.json" "$tauri/resources/adapter-package.json"
 cp "$adapter_runtime/package-lock.json" "$tauri/resources/adapter-package-lock.json"
 
