@@ -36,6 +36,8 @@ pub struct Supervisor {
     state: Mutex<SupervisorState>,
     changed: Condvar,
     launcher: crate::env::Launcher,
+    /// This app's version, which the bundled engine shares.
+    version: String,
     /// Set only for a debug test run, which gets its own home so it never
     /// touches the developer's ~/.config/nurb.
     home: Option<PathBuf>,
@@ -56,8 +58,8 @@ enum Phase {
 
 struct Running {
     info: ServeInfo,
-    /// `None` for a serve we adopted. Another process owns that one, so it is
-    /// never killed.
+    /// `None` for a serve we adopted. Another process owns that one, so quitting
+    /// never kills it.
     child: Option<Arc<ManagedChild>>,
 }
 
@@ -71,7 +73,7 @@ struct ChildState {
 }
 
 impl Supervisor {
-    pub fn new(launcher: crate::env::Launcher, data: PathBuf) -> Self {
+    pub fn new(launcher: crate::env::Launcher, data: PathBuf, version: String) -> Self {
         Self {
             state: Mutex::new(SupervisorState {
                 phase: Phase::Idle,
@@ -79,6 +81,7 @@ impl Supervisor {
             }),
             changed: Condvar::new(),
             launcher,
+            version,
             home: home_override(data),
         }
     }
@@ -150,12 +153,17 @@ impl Supervisor {
 
     fn start(&self) -> Result<Running, String> {
         // Whatever already holds this home's lock wins, including a serve
-        // another process started against the same home.
+        // another process started against the same home. The exception is one
+        // a crashed app left behind on another version: nothing else will ever
+        // stop it, and an update would keep talking to the old engine.
         if let Some(info) = self.published().filter(alive) {
-            return Ok(Running {
-                info,
-                child: None,
-            });
+            if !stale_orphan(&info, &self.version) {
+                return Ok(Running {
+                    info,
+                    child: None,
+                });
+            }
+            stop_serve(info.pid);
         }
         let first = match self.attempt() {
             Ok(running) => return Ok(running),
@@ -351,10 +359,55 @@ fn alive(info: &ServeInfo) -> bool {
     health_pid(info.port) == Some(info.pid)
 }
 
-fn health_pid(port: u16) -> Option<u32> {
+fn health(port: u16) -> Option<serde_json::Value> {
     let body = loopback_get(port, "/health").ok()?;
-    let health: serde_json::Value = serde_json::from_str(&body).ok()?;
-    health.get("pid")?.as_u64().map(|pid| pid as u32)
+    serde_json::from_str(&body).ok()
+}
+
+fn health_pid(port: u16) -> Option<u32> {
+    health(port)?.get("pid")?.as_u64().map(|pid| pid as u32)
+}
+
+/// A serve on another version with launchd as its parent, so no app or terminal
+/// owns it. Older engines report no version, which counts as another one. A
+/// mismatch alone is not enough: a serve with a living parent belongs to someone,
+/// such as a terminal or a dev build sharing this home.
+fn stale_orphan(info: &ServeInfo, version: &str) -> bool {
+    let reported = health(info.port);
+    let reported = reported
+        .as_ref()
+        .and_then(|health| health.get("version")?.as_str());
+    reported != Some(version) && parent_pid(info.pid) == Some(1)
+}
+
+fn parent_pid(pid: u32) -> Option<u32> {
+    let out = std::process::Command::new("/bin/ps")
+        .args(["-o", "ppid=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
+    String::from_utf8(out.stdout).ok()?.trim().parse().ok()
+}
+
+/// Waits for the exit, not just a closed port, because the file lock is what a
+/// replacement needs and it goes with the process. If this somehow fails, the
+/// replacement exits at the lock and the old serve is adopted, as before.
+fn stop_serve(pid: u32) {
+    let pid = pid as i32;
+    let gone_within = |tries: u32| {
+        (0..tries).any(|_| {
+            thread::sleep(Duration::from_millis(100));
+            unsafe { libc::kill(pid, 0) != 0 }
+        })
+    };
+    unsafe {
+        libc::kill(pid, libc::SIGTERM);
+    }
+    if !gone_within(20) {
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+        gone_within(20);
+    }
 }
 
 /// A minimal loopback GET. The serve always answers with Content-Length and
@@ -443,6 +496,9 @@ fn kill_tree(child: &ManagedChild) {
 mod tests {
     use super::*;
     use std::process::Command;
+    use std::sync::atomic::AtomicU64;
+
+    static FAKE_ID: AtomicU64 = AtomicU64::new(0);
 
     fn supervisor() -> Supervisor {
         Supervisor::new(
@@ -450,6 +506,7 @@ mod tests {
                 repo: PathBuf::from("."),
             },
             PathBuf::from("/test/data"),
+            "1.2.0".into(),
         )
     }
 
@@ -465,7 +522,17 @@ mod tests {
         std::fs::write(home.join("connect.json"), format!("{{\"token\": \"t\", \"port\": {free}}}")).unwrap();
         assert_eq!(supervisor.preferred_port().unwrap(), free);
 
-        let held = TcpListener::bind(("127.0.0.1", free)).unwrap();
+        // Retried because another test spawning a process can briefly keep the
+        // port that preferred_port just probed.
+        let held = (0..50)
+            .find_map(|_| {
+                let bound = TcpListener::bind(("127.0.0.1", free)).ok();
+                if bound.is_none() {
+                    thread::sleep(Duration::from_millis(20));
+                }
+                bound
+            })
+            .unwrap();
         assert_ne!(supervisor.preferred_port().unwrap(), free);
         drop(held);
 
@@ -485,6 +552,126 @@ mod tests {
         };
 
         assert!(!alive(&info));
+    }
+
+    /// A stand-in serve answering /health, its port returned once it is listening.
+    /// `orphan` leaves it with launchd as its parent, as a crashed app does.
+    fn fake_serve(version: Option<&str>, orphan: bool, ignores_term: bool) -> (u32, u16) {
+        let dir = std::env::temp_dir().join(format!(
+            "nurb-fake-serve-{}-{}",
+            std::process::id(),
+            FAKE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let version = version.map_or("None".to_string(), |v| format!("{v:?}"));
+        std::fs::write(
+            dir.join("serve.py"),
+            format!(
+                r#"
+import http.server, json, os, signal, sys
+if {ignores_term}: signal.signal(signal.SIGTERM, signal.SIG_IGN)
+health = {{"ok": True, "pid": os.getpid()}}
+if {version} is not None: health["version"] = {version}
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps(health).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *args): pass
+server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+with open("port.tmp", "w") as f: f.write(str(server.server_port))
+os.rename("port.tmp", "port")
+server.serve_forever()
+"#,
+                ignores_term = if ignores_term { "True" } else { "False" },
+            ),
+        )
+        .unwrap();
+        let line = "python3 serve.py >/dev/null 2>&1 </dev/null";
+        if orphan {
+            let status = Command::new("sh")
+                .args(["-c", &format!("{line} &")])
+                .current_dir(&dir)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        } else {
+            let child = Command::new("sh")
+                .args(["-c", &format!("exec {line}")])
+                .current_dir(&dir)
+                .spawn()
+                .unwrap();
+            // Held open for the rest of the test run: this process stays its parent.
+            std::mem::forget(child);
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let port: u16 = loop {
+            if let Ok(text) = std::fs::read_to_string(dir.join("port")) {
+                break text.parse().unwrap();
+            }
+            assert!(Instant::now() < deadline, "the fake serve never listened");
+            thread::sleep(Duration::from_millis(25));
+        };
+        let pid = health_pid(port).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+        (pid, port)
+    }
+
+    fn info(pid: u32, port: u16) -> ServeInfo {
+        ServeInfo {
+            url: format!("http://127.0.0.1:{port}"),
+            port,
+            pid,
+            token: "t".into(),
+        }
+    }
+
+    fn running(pid: u32) -> bool {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    // Only a leftover from a dead app on the wrong version is replaced. A serve
+    // with a living parent belongs to someone: a terminal, or another build of
+    // the app sharing this home.
+    #[test]
+    fn only_an_orphan_on_another_version_is_stale() {
+        let serves = [
+            (Some("1.1.0"), true, true),
+            (None, true, true),
+            (Some("1.2.0"), true, false),
+            (Some("1.1.0"), false, false),
+        ];
+        for (version, orphan, stale) in serves {
+            let (pid, port) = fake_serve(version, orphan, false);
+            // Reparenting to launchd is not instant once the shell exits.
+            if orphan {
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while parent_pid(pid) != Some(1) && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(25));
+                }
+            }
+            assert_eq!(
+                stale_orphan(&info(pid, port), "1.2.0"),
+                stale,
+                "{version:?} orphan={orphan}"
+            );
+            unsafe {
+                libc::kill(pid as i32, libc::SIGKILL);
+            }
+        }
+    }
+
+    #[test]
+    fn stopping_a_serve_outlasts_one_that_ignores_sigterm() {
+        let (polite, _) = fake_serve(None, true, false);
+        stop_serve(polite);
+        assert!(!running(polite));
+
+        let (stubborn, _) = fake_serve(None, true, true);
+        stop_serve(stubborn);
+        assert!(!running(stubborn));
     }
 
     #[test]

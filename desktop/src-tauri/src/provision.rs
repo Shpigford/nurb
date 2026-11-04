@@ -4,7 +4,8 @@
 //! from the bundled adapter lock gives chat a runtime. Everything
 //! streams phase events to the setup screen, and every component is checked
 //! and redone independently so an app update or a half-finished install
-//! repairs itself instead of wedging.
+//! repairs itself instead of wedging. Every release changes the wheel, so a new
+//! wheel on an unchanged lock replaces nurb alone and keeps the environment.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Write};
@@ -54,9 +55,9 @@ pub enum ProvisionEvent {
     Detail { line: String },
 }
 
-/// What a finished install looked like. Compared per component: changed wheel
-/// or lock contents redo the Python side, a new Node or adapter lock redoes
-/// the chat side, and neither touches the other.
+/// What a finished install looked like. Compared per component: a changed lock
+/// rebuilds the Python side, a changed wheel alone replaces nurb in it, a new
+/// Node or adapter lock redoes the chat side, and neither touches the other.
 #[derive(serde::Serialize, serde::Deserialize, Default, Clone)]
 struct Stamp {
     lock: String,
@@ -154,19 +155,50 @@ fn write_stamp(paths: &Paths, stamp: &Stamp) -> Result<(), String> {
     std::fs::write(paths.stamp(), json).map_err(|e| format!("could not record install: {e}"))
 }
 
-/// A venv that matches the bundled wheel and lock, and whose interpreter
-/// actually imports nurb: a stamp alone lies after a half-finished install.
+fn venv_runs(paths: &Paths, code: &str) -> bool {
+    Command::new(paths.venv_python())
+        .args(["-c", code])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn stamp_matches(res: &Resources, stamp: &Stamp) -> bool {
+    stamp.lock == res.lock_hash && stamp.wheel == res.wheel_hash
+}
+
+/// The launch check: a venv that matches the bundled wheel and lock, and whose
+/// interpreter can find nurb. A stamp alone lies after an interrupted repair,
+/// and the wheel installs last, so finding it means the install finished. It
+/// stops short of importing nurb, which loads OCCT and takes seconds warm and
+/// far longer after a reboot (issue #338). `parts_import` catches the rest.
 fn parts_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
+    stamp_matches(res, stamp)
+        && venv_runs(
+            paths,
+            "import importlib.util, sys; sys.exit(importlib.util.find_spec('nurb') is None)",
+        )
+}
+
+/// The slow proof, for when the engine has already failed or setup is deciding
+/// what to redo: damage inside the venv only shows up as a failed import.
+fn parts_import(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
+    stamp_matches(res, stamp) && venv_runs(paths, "import nurb")
+}
+
+/// Whether the environment holds what this app wants apart from nurb itself.
+/// The stamp's lock is cleared before a rebuild starts, so a match means that
+/// lock finished syncing. The Python check is there because the lock is
+/// universal: moving to a new Python would not change it.
+fn env_reusable(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
     stamp.lock == res.lock_hash
-        && stamp.wheel == res.wheel_hash
-        && Command::new(paths.venv_python())
-            .args(["-c", "import nurb"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false)
+        && venv_runs(
+            paths,
+            &format!("import sys; sys.exit('%d.%d' % sys.version_info[:2] != '{PYTHON_VERSION}')"),
+        )
 }
 
 fn chat_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
@@ -418,6 +450,22 @@ pub async fn provision_status(app: tauri::AppHandle) -> Result<bool, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Asked after the serve fails to start, so a venv damaged since install goes
+/// back through setup instead of failing the same way on every retry.
+#[tauri::command]
+pub async fn parts_import_ok(app: tauri::AppHandle) -> Result<bool, String> {
+    let launcher = app.state::<Launcher>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(paths) = launcher.paths() else {
+            return Ok(true);
+        };
+        let res = resources(&app)?;
+        Ok(parts_import(paths, &res, &read_stamp(paths)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn provision(
     app: tauri::AppHandle,
@@ -444,8 +492,18 @@ fn run(
     let res = resources(app)?;
     std::fs::create_dir_all(paths.data()).map_err(|e| format!("could not create app data: {e}"))?;
     let mut stamp = read_stamp(paths);
-    if !parts_ok(paths, &res, &stamp) {
-        provision_parts(&provisioner, paths, &res, channel)?;
+    if !parts_import(paths, &res, &stamp) {
+        // Installing nurb needs no network, so an update works offline. If the
+        // environment turns out to be damaged, the import fails and it rebuilds.
+        let kept = env_reusable(paths, &res, &stamp)
+            && install_nurb(&provisioner, paths, &res, channel)
+                .map_err(|why| {
+                    let _ = writeln!(std::io::stderr(), "[provision] rebuilding: {why}");
+                })
+                .is_ok();
+        if !kept {
+            provision_parts(&provisioner, paths, &res, &mut stamp, channel)?;
+        }
         stamp.lock = res.lock_hash.clone();
         stamp.wheel = res.wheel_hash.clone();
         write_stamp(paths, &stamp)?;
@@ -477,6 +535,7 @@ fn provision_parts(
     provisioner: &Provisioner,
     paths: &Paths,
     res: &Resources,
+    stamp: &mut Stamp,
     channel: &Channel<ProvisionEvent>,
 ) -> Result<(), String> {
     stage(channel, "python");
@@ -484,12 +543,7 @@ fn provision_parts(
     install.args(["python", "install", PYTHON_VERSION]);
     run_step(provisioner, channel, install, "the Python download")?;
 
-    // Always rebuilt from scratch: a stale or half-installed venv repairs by
-    // deletion, never by patching.
-    if paths.venv().exists() {
-        std::fs::remove_dir_all(paths.venv())
-            .map_err(|e| format!("could not clear the old environment: {e}"))?;
-    }
+    clear_env(paths, stamp)?;
     let mut venv = uv(paths)?;
     venv.arg("venv")
         .arg(paths.venv())
@@ -503,6 +557,30 @@ fn provision_parts(
         .arg(&res.lock);
     run_step(provisioner, channel, sync, "the CAD engine download")?;
 
+    install_nurb(provisioner, paths, res, channel)
+}
+
+/// A changed lock or a damaged venv repairs by deletion, never by patching. The
+/// stamp goes first, so a rebuild cut short never looks reusable to `env_reusable`.
+fn clear_env(paths: &Paths, stamp: &mut Stamp) -> Result<(), String> {
+    stamp.lock.clear();
+    stamp.wheel.clear();
+    write_stamp(paths, stamp)?;
+    if paths.venv().exists() {
+        std::fs::remove_dir_all(paths.venv())
+            .map_err(|e| format!("could not clear the old environment: {e}"))?;
+    }
+    Ok(())
+}
+
+/// The last step of a rebuild and the whole of an update. The warmup proves the
+/// result, since a venv damaged earlier fails here.
+fn install_nurb(
+    provisioner: &Provisioner,
+    paths: &Paths,
+    res: &Resources,
+    channel: &Channel<ProvisionEvent>,
+) -> Result<(), String> {
     let mut wheel = uv(paths)?;
     wheel
         .args(["pip", "install", "--no-deps", "--python"])
@@ -692,8 +770,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        chat_runtime_check, chat_runtime_ok, file_hash, occt_version, probe_version, wheel_version,
-        NPM_CI_ARGS, PROBE_ID,
+        chat_runtime_check, chat_runtime_ok, clear_env, env_reusable, file_hash, install_nurb,
+        occt_version, parts_import, parts_ok, probe_version, read_stamp, uv, wheel_version,
+        write_stamp, Provisioner, Resources, Stamp, NPM_CI_ARGS, PROBE_ID, PYTHON_VERSION,
     };
     use crate::env::{Paths, NODE_VERSION};
 
@@ -763,6 +842,242 @@ mod tests {
         hung.args(["-c", "sleep 5"]);
         let timed_out = probe_version(hung, &dir, "1.2.3", Duration::from_millis(50));
         assert_eq!(timed_out.unwrap_err(), "it did not finish within 0s");
+    }
+
+    /// A venv whose interpreter is a real python with `site` on its path.
+    fn fake_venv(site: &std::path::Path) -> Paths {
+        let dir = std::env::temp_dir().join(format!(
+            "nurb-parts-check-{}-{}",
+            std::process::id(),
+            PROBE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let paths = Paths::new(dir);
+        std::fs::create_dir_all(paths.venv_python().parent().unwrap()).unwrap();
+        std::fs::write(
+            paths.venv_python(),
+            format!(
+                "#!/bin/sh\nPYTHONPATH='{}' exec python3 \"$@\"\n",
+                site.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(paths.venv_python(), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        paths
+    }
+
+    fn resources_and_stamp() -> (Resources, Stamp) {
+        let res = Resources {
+            wheel: "w".into(),
+            wheel_hash: "wheel".into(),
+            lock: "l".into(),
+            lock_hash: "lock".into(),
+            adapter_package: "p".into(),
+            adapter_lock: "a".into(),
+            adapter_lock_hash: "adapters".into(),
+        };
+        let stamp = Stamp {
+            lock: "lock".into(),
+            wheel: "wheel".into(),
+            ..Stamp::default()
+        };
+        (res, stamp)
+    }
+
+    // The launch check runs before the window has anything to draw behind it,
+    // so it must never pay for the OCCT import (issue #338). A package that
+    // raises on import is how a test can tell the check never imported it.
+    #[test]
+    fn the_launch_check_finds_nurb_without_importing_it() {
+        let site = fake_site("raise SystemExit(1)");
+        let paths = fake_venv(&site);
+        let (res, stamp) = resources_and_stamp();
+        assert!(parts_ok(&paths, &res, &stamp));
+        assert!(!parts_import(&paths, &res, &stamp));
+
+        let stale = Stamp {
+            wheel: "older".into(),
+            ..stamp.clone()
+        };
+        assert!(!parts_ok(&paths, &res, &stale));
+
+        // The wheel installs last, so an interrupted install has no nurb at all.
+        std::fs::remove_dir_all(site.join("nurb")).unwrap();
+        assert!(!parts_ok(&paths, &res, &stamp));
+
+        std::fs::remove_file(paths.venv_python()).unwrap();
+        assert!(!parts_ok(&paths, &res, &stamp));
+
+        std::fs::remove_dir_all(paths.data()).unwrap();
+        std::fs::remove_dir_all(site).unwrap();
+    }
+
+    fn fake_site(init: &str) -> std::path::PathBuf {
+        let site = std::env::temp_dir().join(format!(
+            "nurb-parts-site-{}-{}",
+            std::process::id(),
+            PROBE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(site.join("nurb")).unwrap();
+        std::fs::write(site.join("nurb/__init__.py"), init).unwrap();
+        site
+    }
+
+    fn scratch_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "nurb-{name}-{}-{}",
+            std::process::id(),
+            PROBE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A real wheel, small enough to build in a test: one module and its metadata.
+    fn fake_wheel(name: &str, version: &str, body: &str) -> std::path::PathBuf {
+        let dir = scratch_dir("wheel");
+        let wheel = dir.join(format!("{name}-{version}-py3-none-any.whl"));
+        let script = format!(
+            r#"
+import sys, zipfile
+info = "{name}-{version}.dist-info"
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("{name}/__init__.py", {body:?})
+    z.writestr(info + "/METADATA", "Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
+    z.writestr(info + "/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+    z.writestr(info + "/RECORD", "")
+"#
+        );
+        let status = Command::new("python3")
+            .args(["-c", &script])
+            .arg(&wheel)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        wheel
+    }
+
+    fn venv_output(paths: &Paths, code: &str) -> String {
+        let out = Command::new(paths.venv_python())
+            .args(["-c", code])
+            .output()
+            .unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    fn uv_step(paths: &Paths, args: &[&str]) {
+        assert!(uv(paths).unwrap().args(args).status().unwrap().success());
+    }
+
+    // The update path against the real uv: nurb changes, and the rest of the
+    // environment is the same files as before (issue #333).
+    #[test]
+    fn a_new_wheel_replaces_nurb_and_keeps_the_environment() {
+        let paths = Paths::new(scratch_dir("update"));
+        let venv = paths.venv();
+        let venv = venv.to_str().unwrap();
+        let python = paths.venv_python();
+        let python = python.to_str().unwrap();
+        uv_step(&paths, &["venv", venv, "--python", "python3"]);
+        let cad = fake_wheel("build123d", "1.0.0", "");
+        uv_step(
+            &paths,
+            &["pip", "install", "--python", python, cad.to_str().unwrap()],
+        );
+        let cad_file = venv_output(&paths, "import build123d; print(build123d.__file__)");
+        let cad_written = std::fs::metadata(&cad_file).unwrap().modified().unwrap();
+        let old = fake_wheel("nurb", "1.0.0", "version = 'old'");
+        uv_step(
+            &paths,
+            &["pip", "install", "--python", python, old.to_str().unwrap()],
+        );
+
+        let (mut res, _) = resources_and_stamp();
+        let provisioner = Provisioner::new();
+        let channel = tauri::ipc::Channel::new(|_| Ok(()));
+        let print = "import nurb; print(nurb.version)";
+
+        res.wheel = fake_wheel("nurb", "2.0.0", "version = 'new'");
+        install_nurb(&provisioner, &paths, &res, &channel).unwrap();
+        assert_eq!(venv_output(&paths, print), "new");
+        assert_eq!(
+            std::fs::metadata(&cad_file).unwrap().modified().unwrap(),
+            cad_written
+        );
+
+        // Same version, different build, at the same path with the same mtime.
+        let built = std::fs::metadata(&res.wheel).unwrap().modified().unwrap();
+        std::fs::rename(
+            fake_wheel("nurb", "2.0.0", "version = 'rebuilt'"),
+            &res.wheel,
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&res.wheel)
+            .unwrap()
+            .set_modified(built)
+            .unwrap();
+        install_nurb(&provisioner, &paths, &res, &channel).unwrap();
+        assert_eq!(venv_output(&paths, print), "rebuilt");
+
+        // A wheel that cannot import is an error, so the caller rebuilds.
+        res.wheel = fake_wheel("nurb", "3.0.0", "raise SystemExit(1)");
+        assert!(install_nurb(&provisioner, &paths, &res, &channel).is_err());
+
+        std::fs::remove_dir_all(paths.data()).unwrap();
+    }
+
+    #[test]
+    fn only_a_matching_lock_and_python_keep_the_environment() {
+        let paths = Paths::new(scratch_dir("reusable"));
+        std::fs::create_dir_all(paths.venv_python().parent().unwrap()).unwrap();
+        let python = |version: &str| {
+            let script = format!(
+                "#!/bin/sh\nPYTHONPATH= exec python3 -c 'import sys; v=\"{version}\"; sys.exit(v != \"{PYTHON_VERSION}\")'\n"
+            );
+            std::fs::write(paths.venv_python(), script).unwrap();
+            std::fs::set_permissions(paths.venv_python(), std::fs::Permissions::from_mode(0o755))
+                .unwrap();
+        };
+        let (res, stamp) = resources_and_stamp();
+        let newer_wheel = Stamp {
+            wheel: "older".into(),
+            ..stamp.clone()
+        };
+        let new_lock = Stamp {
+            lock: "older".into(),
+            ..stamp.clone()
+        };
+
+        python(PYTHON_VERSION);
+        assert!(env_reusable(&paths, &res, &newer_wheel));
+        assert!(!env_reusable(&paths, &res, &new_lock));
+        python("3.0");
+        assert!(!env_reusable(&paths, &res, &newer_wheel));
+        std::fs::remove_file(paths.venv_python()).unwrap();
+        assert!(!env_reusable(&paths, &res, &newer_wheel));
+
+        std::fs::remove_dir_all(paths.data()).unwrap();
+    }
+
+    // A rebuild cut short leaves a partial venv. It must not read as a finished
+    // one on the next launch, or the update path would keep it.
+    #[test]
+    fn clearing_the_environment_forgets_the_lock_first() {
+        let paths = Paths::new(scratch_dir("clear"));
+        std::fs::create_dir_all(paths.venv()).unwrap();
+        let (res, mut stamp) = resources_and_stamp();
+        stamp.node = "kept".into();
+        write_stamp(&paths, &stamp).unwrap();
+
+        clear_env(&paths, &mut stamp).unwrap();
+
+        let on_disk = read_stamp(&paths);
+        assert_ne!(on_disk.lock, res.lock_hash);
+        assert_eq!(on_disk.node, "kept");
+        assert!(!paths.venv().exists());
+        std::fs::remove_dir_all(paths.data()).unwrap();
     }
 
     #[test]

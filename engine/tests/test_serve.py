@@ -18,6 +18,8 @@ import urllib.request
 
 import pytest
 
+import nurb
+
 SERVE = [sys.executable, "-m", "nurb.serve"]
 NOTCH = pathlib.Path(__file__).parents[1] / "examples" / "notch"
 TOOLS_JSON = pathlib.Path(__file__).parents[1] / "src" / "nurb" / "tools.json"
@@ -345,6 +347,13 @@ def test_mcp_bearer_required(home):
         status, payload = post_mcp(url, call, token=state_of(home)["token"])
         assert status == 200
         assert sorted(tool["name"] for tool in payload["result"]["tools"]) == tool_names()
+
+
+# The app reads this to tell a serve left over from an older install from its own.
+def test_health_names_the_running_version(home):
+    with serving(home, free_port()) as url:
+        health = json.loads(get(f"{url}/health")[2])
+    assert health["version"] == nurb.__version__
 
 
 def test_serve_rejects_non_loopback_hosts_on_every_route(home):

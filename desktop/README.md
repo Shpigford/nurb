@@ -19,9 +19,11 @@ Release builds never touch the dev environment. On first launch the app provisio
 
 - `python/`, `env/`: a managed CPython and a venv holding the bundled nurb wheel plus its hash-pinned lock, installed by the bundled uv sidecar.
 - `node/`, `adapters/`: the pinned Node LTS (downloaded from nodejs.org, checksum-verified), the Claude and Codex ACP adapters, and the official Gemini CLI, installed on the user's machine with `npm ci` from a committed integrity lock. Gemini speaks ACP natively through `--acp`; the app validates its Google AI Studio API key through ACP and stores the key in macOS Keychain, never app preferences. These packages are deliberately not bundled: the Claude Code binary inside `@anthropic-ai/claude-agent-sdk` is all-rights-reserved and must not be redistributed. Cursor and Grok speak ACP natively and are never provisioned at all: the app finds the CLI the vendor's own installer put on the machine (`~/.local/bin/cursor-agent`, `~/.grok/bin/grok`, then PATH; never the bare `agent`, which Grok's installer also claims). Until it exists the agent stays out of the rail; the rail's "need another agent?" help lists the missing ones with their installers.
-- `provisioned.json`: what was installed, compared per component on every launch. A changed wheel payload, Python lock, Node version, or adapter lock redoes only its own component; a broken venv is deleted and rebuilt.
+- `provisioned.json`: what was installed, compared per component on every launch. A changed Python lock rebuilds the venv, a changed wheel on the same lock replaces only nurb inside it (no network needed, so an update works offline), and a changed Node version or adapter lock redoes only its own component; a broken venv is deleted and rebuilt.
 
-`scripts/stage.sh` stages the bundle inputs before every build: the nurb wheel from this checkout, a `uv pip compile --universal --generate-hashes` lock, the committed adapter manifest and lock, and the uv binaries for both darwin targets (skipped once downloaded).
+A serve already answering for the home is adopted, except one left by a crashed app (its parent is launchd) on another version, which is stopped and replaced so an update never keeps talking to an old engine.
+
+`scripts/stage.sh` stages the bundle inputs before every build: the nurb wheel from this checkout, the dependencies as pinned by `engine/uv.lock` (`uv export`), the committed adapter manifest and lock, and the uv binaries for both darwin targets (skipped once downloaded).
 
 Debug-build test overrides, never compiled into release: `NURB_DESKTOP_PROVISIONED=1` makes a debug build use the provisioned environment, and `NURB_DESKTOP_DATA=<dir>` points the whole app (registry, sessions, provisioned env) at a scratch directory.
 

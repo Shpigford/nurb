@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 
-from . import db, edit, engine_run, labels, materialize, mcp_server, spec
+from . import __version__, db, edit, engine_run, labels, materialize, mcp_server, spec
 
 STATE = "serve.json"
 LOCK = "serve.lock"
@@ -1638,7 +1638,8 @@ def _routes(conn, lock, server, token, pid):
         return await acted(work)
 
     async def health(request):
-        return JSONResponse({"ok": True, "pid": pid})
+        # The version lets the app recognise a serve left over from an older install.
+        return JSONResponse({"ok": True, "pid": pid, "version": __version__})
 
     async def glb(request):
         name = request.path_params["part"]
