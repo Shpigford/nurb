@@ -365,6 +365,27 @@ def test_a_database_that_predates_folders_migrates_forward(tmp_path):
         conn.close()
 
 
+def test_promoting_a_container_hands_its_conversation_to_its_part(tmp_path):
+    conn = db.connect(tmp_path / "x.db")
+    try:
+        project_id = db.create_project(conn, "drab flange 1")
+        db.create_part(conn, project_id, "bracket", "x = 1\n")
+        db.add_message(conn, project_id, "user", "make it taller", None)
+        db.add_message(conn, project_id, "assistant", "done", None, part="bracket")
+
+        db.promote_to_folder(conn, project_id, "Shelf")
+        rows = conn.execute("SELECT part FROM messages WHERE project_id = ?", (project_id,)).fetchall()
+        assert [row["part"] for row in rows] == ["bracket", "bracket"]
+
+        # Once it is a folder, an unnamed row is the folder's own conversation.
+        db.add_message(conn, project_id, "user", "about the whole folder", None)
+        db.promote_to_folder(conn, project_id, "Shelves")
+        rows = conn.execute("SELECT part FROM messages WHERE project_id = ?", (project_id,)).fetchall()
+        assert [row["part"] for row in rows] == ["bracket", "bracket", None]
+    finally:
+        conn.close()
+
+
 def test_a_project_is_a_container_until_it_is_promoted(tmp_path):
     conn = db.connect(tmp_path / "x.db")
     try:

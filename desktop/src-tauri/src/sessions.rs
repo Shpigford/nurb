@@ -123,23 +123,24 @@ impl SessionStore {
         self.save_part_chats(&part_chats);
     }
 
-    /// A renamed part keeps its conversation: the pointer and every session that
-    /// last ran on it move to the new name.
+    /// A renamed part keeps its conversation: the pointer and the session it names
+    /// move to the new name. A session's metadata does not say which project it is
+    /// in, and part names repeat across projects, so only the pointer can pick it.
     pub fn rename_part(&self, project: &str, was: &str, name: &str) {
+        let mut moved = None;
         {
             let mut part_chats = self.part_chats.lock().unwrap();
             for chat in part_chats.iter_mut() {
                 if chat.project == project && chat.part == was {
                     chat.part = name.to_string();
+                    moved = chat.session_id.clone();
                 }
             }
             self.save_part_chats(&part_chats);
         }
         let mut sessions = self.sessions.lock().unwrap();
-        for meta in sessions.values_mut() {
-            if meta.part.as_deref() == Some(was) {
-                meta.part = Some(name.to_string());
-            }
+        if let Some(meta) = moved.and_then(|id| sessions.get_mut(&id)) {
+            meta.part = Some(name.to_string());
         }
         self.save_sessions(&sessions);
     }
@@ -219,6 +220,23 @@ mod tests {
         assert_eq!(store.saved_chat("p1", "shelf_bracket").map(|c| c.0), Some("s1".to_string()));
         assert!(store.saved_chat("p1", "bracket").is_none());
         assert_eq!(store.part_of("s1", "p1"), Some("shelf_bracket".to_string()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_rename_leaves_other_projects_alone() {
+        let dir = std::env::temp_dir().join(format!("nurb-rename-scope-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = SessionStore::load(&dir);
+        // Every loose part's chat sits under the same sentinel, so a promotion
+        // moving one project's must not touch another's.
+        store.record("s1", "claude", "p1", Some("//project".into()));
+        store.record("s2", "claude", "p2", Some("//project".into()));
+        store.rename_part("p1", "//project", "bracket");
+        assert_eq!(store.saved_chat("p1", "bracket").map(|c| c.0), Some("s1".to_string()));
+        assert_eq!(store.part_of("s1", "p1"), Some("bracket".to_string()));
+        assert_eq!(store.saved_chat("p2", "//project").map(|c| c.0), Some("s2".to_string()));
+        assert_eq!(store.part_of("s2", "p2"), Some("//project".to_string()));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

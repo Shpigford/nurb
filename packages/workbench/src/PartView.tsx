@@ -233,7 +233,14 @@ export default function PartView({
   const paramsPending = useRef(false)
 
   const parts = project?.parts ?? []
-  const part = parts.find((p) => p.name === partName) ?? (starting ? null : parts[0] ?? null)
+  // Selection is by name and a rename changes the name, so for the round trip the host
+  // and the project disagree on it. The part on stage stays put until they agree.
+  const shownId = useRef<string | null>(null)
+  const part =
+    parts.find((p) => p.name === partName) ??
+    (partName ? parts.find((p) => p.id === shownId.current) : undefined) ??
+    (starting ? null : parts[0] ?? null)
+  shownId.current = part?.id ?? null
   const build = part?.build ?? null
   const verdict = verdictOf(build)
   const glbUrl = build?.glb_url ?? null
@@ -280,9 +287,9 @@ export default function PartView({
       setCamera(null)
       return
     }
-    setCamera(loadCamera(projectId, part.name))
+    setCamera(loadCamera(part.id, projectId, part.name))
     setHighlight(null)
-  }, [projectId, part?.name])
+  }, [part?.id])
 
   // A part carries the overrides its newest run was built at, so the sliders open
   // where they were left rather than back at the declared defaults.
@@ -516,10 +523,10 @@ export default function PartView({
 
   const onCamera = useCallback(
     (state: CameraState) => {
-      if (projectId && part) saveCamera(projectId, part.name, state)
+      if (part) saveCamera(part.id, state)
       setCamera(state)
     },
-    [projectId, part?.name]
+    [part?.id]
   )
 
   // The build records its bounding box; the panel's footer reads a size.

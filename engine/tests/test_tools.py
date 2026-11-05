@@ -901,3 +901,21 @@ def test_get_project_leads_with_the_system_it_should_build_on(conn):
     [file] = project["system"]["shared_files"]
     assert file == {"name": "system", "settings": ["WALL"], "pieces": ["slab"], "used_by": 0}
     assert "Build new parts on its shared files" in project["system"]["note"]
+
+
+def test_a_tool_saying_a_part_s_old_name_is_told_the_new_one(conn):
+    project_id = db.create_project(conn, "shelf")
+    payload(call(conn, "write_part_source", {"project_id": project_id, "part_name": "cube", "source": CUBE}))
+    part = next(row for row in db.parts_of(conn, project_id) if row["name"] == "cube")
+    db.rename_part(conn, part["id"], "block")
+
+    # An agent mid-turn still says the old name. A save must not make a second part.
+    stale = {"project_id": project_id, "part_name": "cube", "source": CUBE}
+    refused = call(conn, "write_part_source", stale)
+    assert refused.is_error and "renamed to block" in refused.content[0].text
+    assert [row["name"] for row in db.parts_of(conn, project_id)] == ["block"]
+
+    # Once no running turn could mean the old part, the name is free again.
+    conn.execute("UPDATE part_revisions SET created_at = '2020-01-01T00:00:00+00:00'")
+    payload(call(conn, "write_part_source", stale))
+    assert sorted(row["name"] for row in db.parts_of(conn, project_id)) == ["block", "cube"]

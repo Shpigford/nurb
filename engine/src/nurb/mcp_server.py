@@ -1315,6 +1315,13 @@ def dispatch(conn, name, arguments, base_url, deadline=None):
     before = _sequence(conn, project_id) if project_id else 0
     started = time.monotonic()
     try:
+        # Saving under the old name would make a second part and leave the real one unchanged.
+        renamed = project_id and db.renamed_to(conn, project_id, arguments.get("part_name"))
+        if renamed:
+            raise Refused(
+                f"{arguments['part_name']} was just renamed to {renamed}; use {renamed} for that part. "
+                "A new part needs a different name for now."
+            )
         if name in BUILD_TOOLS:
             result = HANDLERS[name](conn, arguments, base_url, deadline=deadline)
         else:

@@ -407,16 +407,27 @@ def create_project(conn, name, printer_toml=None, folder=False):
 
 
 def promote_to_folder(conn, project_id, name):
-    """Turn a one-part container into a folder the user can see, and name it."""
+    """Turn a one-part container into a folder the user can see, and name it.
+
+    A container's chat has no part names on it, and in a folder an unnamed row is the
+    folder's own conversation, so the turns so far are stamped with the part they were about.
+    """
     name = (name or "").strip()
     if not name:
         raise ValueError("a folder needs a name")
     with transaction(conn):
-        updated = conn.execute(
-            "UPDATE projects SET folder = 1, name = ? WHERE id = ?", (name, project_id)
-        ).rowcount
-    if not updated:
-        raise ValueError(f"no project {project_id!r}")
+        project = get_project(conn, project_id)
+        if project is None:
+            raise ValueError(f"no project {project_id!r}")
+        conn.execute("UPDATE projects SET folder = 1, name = ? WHERE id = ?", (name, project_id))
+        parts = conn.execute(
+            "SELECT name FROM parts WHERE project_id = ? AND kind = 'part'", (project_id,)
+        ).fetchall()
+        if not project["folder"] and len(parts) == 1:
+            conn.execute(
+                "UPDATE messages SET part = ? WHERE project_id = ? AND part IS NULL",
+                (parts[0]["name"], project_id),
+            )
     changed("project", project_id, project_id)
     return name
 
@@ -655,6 +666,23 @@ def rename_part(conn, part_id, name, title=None):
         if rewired != row["source"]:
             add_revision(conn, row["id"], rewired, card_md=row["card_md"], note=f"{old} renamed to {name}")
     return name
+
+
+def renamed_to(conn, project_id, name, within=datetime.timedelta(minutes=15)):
+    """What the part called `name` a moment ago is called now, or None.
+
+    A rename can land while an agent is mid-turn and still saying the old name. The window
+    frees the name again, so a new part can have it once no turn could still mean the old one.
+    """
+    since = (datetime.datetime.now(datetime.timezone.utc) - within).isoformat()
+    row = conn.execute(
+        "SELECT p.name FROM part_revisions r JOIN parts p ON p.id = r.part_id"
+        " WHERE p.project_id = ? AND r.note = ? AND r.created_at > ?"
+        " AND NOT EXISTS (SELECT 1 FROM parts s WHERE s.project_id = ? AND s.name = ?)"
+        " ORDER BY r.created_at DESC LIMIT 1",
+        (project_id, f"Renamed from {name}", since, project_id, name),
+    ).fetchone()
+    return row["name"] if row else None
 
 
 def set_printer(conn, project_id, printer_toml):

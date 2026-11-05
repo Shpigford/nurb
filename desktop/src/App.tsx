@@ -27,6 +27,8 @@ import Chat, { AGENT_LABEL, NEW_PART, PROJECT_CHAT } from "./Chat";
 import {
   chatKey,
   markChatSeen,
+  renameChatColumn,
+  renameChatKey,
   retainChatColumns,
   updateChatActivity,
   type ChatColumn,
@@ -134,6 +136,10 @@ function App() {
   const [dirs, setDirs] = useState<Record<string, string>>({});
 
   const [columns, setColumns] = useState<ChatColumn[]>([]);
+  const lastColumnId = useRef(0);
+  // The folder just made, until its refetch says so itself: the chat has already
+  // moved to the part, and must not vanish for the round trip.
+  const [promoted, setPromoted] = useState<string | null>(null);
   const [busyChats, setBusyChats] = useState<Record<string, boolean>>({});
   const busyRef = useRef(busyChats);
   busyRef.current = busyChats;
@@ -267,11 +273,17 @@ function App() {
     void loadProjects();
   }, [missing, loadProjects]);
 
+  // The mounted column is the conversation, so it goes along, running turn and all.
+  const moveChat = useCallback((dir: string, was: string, name: string) => {
+    setColumns((list) => renameChatColumn(list, dir, was, name));
+    setBusyChats((map) => renameChatKey(map, chatKey(dir, was), chatKey(dir, name)));
+  }, []);
+
   // A rename moves the part's conversation and, when it is the open part, the selection.
   const partRenamed = (renamedIn: string, was: string, name: string) => {
     invoke("rename_part_chat", { projectId: renamedIn, was, name }).catch((e) => setError(String(e)));
     const dir = dirs[renamedIn];
-    setColumns((list) => list.map((col) => (col.path === dir && col.part === was ? { ...col, part: name } : col)));
+    if (dir) moveChat(dir, was, name);
     if (renamedIn === projectId) setPartName((open) => (open === was ? name : open));
   };
 
@@ -366,7 +378,8 @@ function App() {
   // A new part's own turns stay on its draft until the turn that wrote it ends.
   const drafting =
     draft !== null && draft.projectId === projectId && (partName === null || partName === draft.landed);
-  const chatPart = drafting ? NEW_PART : project?.folder ? partName ?? PROJECT_CHAT : PROJECT_CHAT;
+  const isFolder = project?.folder || promoted === projectId;
+  const chatPart = drafting ? NEW_PART : isFolder ? partName ?? PROJECT_CHAT : PROJECT_CHAT;
 
   // One chat per conversation, mounted for as long as its turn runs.
   useEffect(() => {
@@ -386,6 +399,7 @@ function App() {
             : [
                 ...list,
                 {
+                  id: ++lastColumnId.current,
                   path: dir,
                   part: chatPart,
                   agent: saved?.agent ?? null,
@@ -587,8 +601,8 @@ function App() {
     if (projectId === draft.projectId) setPartName((open) => open ?? made.name);
   }, [draft, allParts, projectId]);
 
-  // Handing the conversation over remounts its column, which would end a running
-  // turn, so it waits for the turn that wrote the part to finish.
+  // The turn that wrote the part is still storing unnamed rows, so the
+  // conversation is handed over once it finishes, or its last rows would be left out.
   useEffect(() => {
     if (!draft?.landed) return;
     const dir = dirs[draft.projectId];
@@ -597,12 +611,8 @@ function App() {
     setDraft(null);
     claimMessages(folderId, name, after).catch((e) => setError(String(e)));
     invoke("rename_part_chat", { projectId: folderId, was: NEW_PART, name }).catch((e) => setError(String(e)));
-    setColumns((list) =>
-      list
-        .filter((col) => !(col.path === dir && col.part === name))
-        .map((col) => (col.path === dir && col.part === NEW_PART ? { ...col, part: name } : col)),
-    );
-  }, [draft, dirs, busyChats]);
+    moveChat(dir, NEW_PART, name);
+  }, [draft, dirs, busyChats, moveChat]);
 
   // The part's own container becomes the folder when it has no project yet;
   // otherwise the folder is made and the part moves into it.
@@ -616,6 +626,11 @@ function App() {
           if (!part.folder) {
             const folder = await promoteToFolder(part.project_id, target.name);
             projectTarget = folder.id;
+            // The one conversation a loose part has is now that part's own.
+            await invoke("rename_part_chat", { projectId: folder.id, was: PROJECT_CHAT, name: part.name });
+            const dir = dirs[folder.id];
+            if (dir) moveChat(dir, PROJECT_CHAT, part.name);
+            setPromoted(folder.id);
           } else {
             const folder = await createProject(target.name, true);
             projectTarget = folder.id;
@@ -635,7 +650,7 @@ function App() {
         setMoving(false);
       }
     },
-    [loadProjects],
+    [loadProjects, dirs, moveChat],
   );
 
   const runImport = useCallback(
@@ -889,7 +904,7 @@ function App() {
                   col.path === activeDir && col.part === chatPart && screen === "workspace";
                 return (
                   <Chat
-                    key={`${col.path}:${col.part}:${col.gen}:${agent}`}
+                    key={`${col.id}:${col.gen}:${agent}`}
                     path={col.path}
                     part={col.part}
                     // A folder's own conversation speaks of the folder; every
