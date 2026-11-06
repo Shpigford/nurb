@@ -482,20 +482,25 @@ pub(crate) fn spawn_args(
     args
 }
 
-/// The child, under the same Seatbelt profile every agent runs in.
+/// The child, under the same OS sandbox every agent runs in (Seatbelt on
+/// macOS, bubblewrap plus seccomp on Linux). The second value says whether the
+/// kernel is actually confining it, which is false only on a Linux machine
+/// without a usable bubblewrap.
 pub(crate) fn spawn(
     bin: &Path,
     args: Vec<String>,
     project: &Path,
     engine_root: &Path,
-) -> Result<Child, String> {
-    let (program, args) = sandbox::wrap(
+) -> Result<(Child, bool), String> {
+    let (program, args, confined, guard) = sandbox::wrap(
         bin.to_string_lossy().into_owned(),
         args,
         project,
         engine_root,
-    );
-    tokio::process::Command::new(program)
+        ".claude",
+        None,
+    )?;
+    let child = tokio::process::Command::new(program)
         .args(args)
         .current_dir(project)
         .stdin(std::process::Stdio::piped())
@@ -503,7 +508,11 @@ pub(crate) fn spawn(
         .stderr(std::process::Stdio::piped())
         .process_group(0)
         .spawn()
-        .map_err(|e| format!("could not start Claude: {e}"))
+        .map_err(|e| format!("could not start Claude: {e}"));
+    // The Linux guard holds the seccomp filter's fd open until bwrap has
+    // inherited it, so it is dropped only after the spawn.
+    drop(guard);
+    Ok((child?, confined))
 }
 
 /// Installed, current enough, and signed in. All three are cheap, and each
@@ -582,7 +591,15 @@ pub(crate) async fn start(
                 session,
                 resume,
             );
-            spawn(&bin, args, &project, &engine_root)
+            spawn(&bin, args, &project, &engine_root).map(|(child, confined)| {
+                // Same rail notice the ACP agents raise: an unconfined agent
+                // is a fact about this machine the user should see.
+                if !confined {
+                    use tauri::Emitter;
+                    let _ = app.emit("agent-unsandboxed", ());
+                }
+                child
+            })
         }
     };
     let session_id = resume
@@ -976,7 +993,7 @@ mod tests {
             let (bin, dir) = (bin.clone(), dir.to_path_buf());
             move |resume: bool| {
                 let args = spawn_args("http://x", "t", "box", None, None, None, "sid", resume);
-                spawn(&bin, args, &dir, &dir)
+                spawn(&bin, args, &dir, &dir).map(|(child, _)| child)
             }
         };
         let mut child = launch(resumed).unwrap();
@@ -1085,7 +1102,7 @@ mod tests {
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let args = spawn_args("http://127.0.0.1:7373", "t", "box", None, None, None, "sid", false);
-        let mut child = spawn(&script, args, &dir, &dir).unwrap();
+        let (mut child, _) = spawn(&script, args, &dir, &dir).unwrap();
         let mut stdin = child.stdin.take().unwrap();
         stdin.write_all(b"{\"type\":\"user\"}\n").await.unwrap();
         stdin.flush().await.unwrap();
