@@ -5,7 +5,17 @@ import { ask, message, open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { cue, duration, ease, Icon, IconButton, LiveActivity, UpdateCard, useLiveActivity } from "@nurb/ui";
+import {
+  CollapsibleBanner,
+  cue,
+  duration,
+  ease,
+  Icon,
+  IconButton,
+  LiveActivity,
+  UpdateCard,
+  useLiveActivity,
+} from "@nurb/ui";
 import {
   claimMessages,
   configure,
@@ -149,6 +159,10 @@ function App() {
   const agentStatusRequests = useRef(createLatestRequestGate());
   const [signingIn, setSigningIn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Set once an agent starts without a kernel sandbox, which only happens on a
+  // Linux machine without a usable bubblewrap. It stays set: the agent keeps
+  // running, and repairing the host needs a restart.
+  const [unsandboxed, setUnsandboxed] = useState(false);
 
   const [defaultAgent, setDefaultAgent] = useState(
     () => localStorage.getItem("nurb-default-agent") ?? "claude",
@@ -483,6 +497,13 @@ function App() {
       setError(String(e));
     }
   }, [findUpdate, installUpdate]);
+
+  useEffect(() => {
+    const unlisten = listen("agent-unsandboxed", () => setUnsandboxed(true));
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
 
   useEffect(() => {
     const unlisten = listen("menu:check-updates", () => void checkUpdatesNow());
@@ -842,15 +863,26 @@ function App() {
   const app = (
     <>
       <div data-screen="workspace" hidden={screen !== "workspace"}>
-        {error ? (
-          <div
-            role="alert"
-            className="panel fixed top-[76px] left-1/2 z-20 flex -translate-x-1/2 items-center gap-3 px-3 py-2"
-          >
-            <span className="mono-label text-fail">{error}</span>
-            <button type="button" className="btn-label text-muted hover:text-ink" onClick={() => setError(null)}>
-              Dismiss
-            </button>
+        {unsandboxed || error ? (
+          // One spot for notices over the part, so an error and the sandbox
+          // warning stack instead of covering each other.
+          <div className="fixed top-[76px] left-1/2 z-20 flex w-max max-w-[min(560px,90vw)] -translate-x-1/2 flex-col items-center gap-2">
+            {unsandboxed ? (
+              <CollapsibleBanner
+                tone="warn"
+                dismissible={false}
+                title="This agent runs without a sandbox"
+                description="It can change files anywhere you can. Install bubblewrap and allow user namespaces, then reopen nurb."
+              />
+            ) : null}
+            {error ? (
+              <div role="alert" className="panel flex items-center gap-3 px-3 py-2">
+                <span className="mono-label text-fail">{error}</span>
+                <button type="button" className="btn-label text-muted hover:text-ink" onClick={() => setError(null)}>
+                  Dismiss
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         <PartView
