@@ -896,12 +896,12 @@ function App() {
             ),
             end: <IconButton icon="gear" label="Settings" onClick={() => setSettingsSection("agents")} />,
           }}
-          chat={
+          chat={(hidden) => (
             <>
               {columns.map((col) => {
                 const agent = col.agent ?? defaultAgent;
                 const visible =
-                  col.path === activeDir && col.part === chatPart && screen === "workspace";
+                  col.path === activeDir && col.part === chatPart && screen === "workspace" && !hidden;
                 return (
                   <Chat
                     key={`${col.id}:${col.gen}:${agent}`}
@@ -960,7 +960,7 @@ function App() {
                 );
               })}
             </>
-          }
+          )}
         />
       </div>
 

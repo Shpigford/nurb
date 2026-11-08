@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   BuildFailedBanner,
   Button,
@@ -11,6 +11,7 @@ import {
   HeaderStack,
   HeaderStatus,
   Icon,
+  IconButton,
   Lockup,
   Menu,
   ParamRail,
@@ -65,6 +66,15 @@ const DEBOUNCE_MS = 250
 // and only that one. Reading and claiming the key in one step means two builds
 // landing together cannot both think they were first.
 const FIRST_BUILD_KEY = "nurb-first-build"
+const CONVERSATION_HIDDEN_KEY = "nurb.conversation-hidden"
+
+function conversationHidden(): boolean {
+  try {
+    return localStorage.getItem(CONVERSATION_HIDDEN_KEY) === "true"
+  } catch {
+    return false
+  }
+}
 
 function claimFirstBuild(): boolean {
   try {
@@ -183,8 +193,10 @@ export default function PartView({
     start?: ReactNode
     end?: ReactNode
   }
-  /** The conversation column, 372 wide, left of the stage. */
-  chat?: ReactNode
+  /** The conversation column, 372 wide, left of the stage. A render function also
+   * receives its hidden state, so the desktop can pause input listeners without
+   * unmounting a running agent. */
+  chat?: ReactNode | ((hidden: boolean) => ReactNode)
   /** Room for a window titlebar above the header. */
   topInset?: number
   /** The desktop drags its window by the stage and the header bar. */
@@ -200,6 +212,15 @@ export default function PartView({
   onOpenInSlicer?: (filename: string, blob: Blob, app: string) => Promise<void>
 }) {
   const projectId = project?.id ?? null
+  const conversationId = useId()
+  const [chatHidden, setChatHidden] = useState(conversationHidden)
+  useEffect(() => {
+    try {
+      localStorage.setItem(CONVERSATION_HIDDEN_KEY, String(chatHidden))
+    } catch {
+      // The control still works when a webview refuses storage.
+    }
+  }, [chatHidden])
   const [highlight, setHighlight] = useState<number | null>(null)
   // A refused rename or label move says why for a few seconds, then gets out of the way.
   const [stageError, setStageError] = useState<string | null>(null)
@@ -431,6 +452,7 @@ export default function PartView({
         return
       }
       setPointing(false)
+      setChatHidden(false)
       onPointAt?.(spotText(point, normal))
     },
     [labelling, moving, part, onPointAt]
@@ -581,6 +603,21 @@ export default function PartView({
             <Lockup />
           </div>
           <HeaderDivider />
+          {chat ? (
+            <>
+              <HeaderIcons>
+                <IconButton
+                  icon="chat"
+                  label={chatHidden ? "Show conversation" : "Hide conversation"}
+                  active={!chatHidden}
+                  aria-expanded={!chatHidden}
+                  aria-controls={conversationId}
+                  onClick={() => setChatHidden((hidden) => !hidden)}
+                />
+              </HeaderIcons>
+              <HeaderDivider />
+            </>
+          ) : null}
         </>
       }
       cells={
@@ -682,7 +719,11 @@ export default function PartView({
 
   return (
     <Stage header={headerEl} topInset={topInset} dragRegion={dragRegion}>
-      {chat}
+      {chat ? (
+        <div id={conversationId} hidden={chatHidden} className={chatHidden ? undefined : "contents"}>
+          {typeof chat === "function" ? chat(chatHidden) : chat}
+        </div>
+      ) : null}
 
       <StageColumn>
         {/* The column is the package's; the geometry on it is what the tests read. */}
