@@ -279,6 +279,11 @@ pub fn run() {
         .manage(agents::Logins::new())
         .manage(provision::Provisioner::new())
         .setup(|app| {
+            // The login shell can take a second; ask it before the rail's
+            // first agent check needs the answer.
+            std::thread::spawn(|| {
+                env::user_path();
+            });
             let dir = app.path().app_data_dir()?;
             // Debug-only override so tests can point the whole app (sessions,
             // projects, provisioned env, the serve's home) at a scratch

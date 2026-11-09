@@ -97,21 +97,20 @@ impl Launcher {
         }
     }
 
-    /// PATH for adapter processes. On an end-user machine the only Python
-    /// environment (and the only node) anywhere is the provisioned one, so
-    /// their shells must see it. Checkout mode inherits the dev machine's
-    /// PATH untouched.
+    /// PATH for adapter processes. On an end-user machine the provisioned
+    /// Python environment and node come first, so their shells see those,
+    /// then the user's own PATH (see `user_path`) for the native CLIs and the
+    /// tools they run. Checkout mode inherits the dev machine's PATH
+    /// untouched.
     pub fn adapter_path(&self) -> Option<String> {
         match self {
             Self::Checkout { .. } => None,
-            Self::Provisioned { paths } => {
-                let inherited = std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into());
-                Some(format!(
-                    "{}:{}:{inherited}",
-                    paths.venv().join("bin").display(),
-                    paths.node_dir().join("bin").display(),
-                ))
-            }
+            Self::Provisioned { paths } => Some(format!(
+                "{}:{}:{}",
+                paths.venv().join("bin").display(),
+                paths.node_dir().join("bin").display(),
+                user_path(),
+            )),
         }
     }
 
@@ -215,6 +214,79 @@ impl Paths {
     }
 }
 
+/// The PATH the user's own terminal has. An app opened from Finder or the Dock
+/// inherits launchd's bare `/usr/bin:/bin:/usr/sbin:/sbin`, so an agent CLI
+/// installed with Homebrew or npm is invisible to it, and so are the node and
+/// git that CLI goes on to run. Asking the login shell once fixes both:
+/// detection searches this PATH, and every agent child is handed it. The
+/// Homebrew prefixes are appended as a cheap fallback for a shell that fails,
+/// hangs, or prints nothing parseable. Resolved on first use, which launch
+/// warms from a background thread so the first status check rarely waits.
+pub fn user_path() -> &'static str {
+    static USER_PATH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    USER_PATH.get_or_init(|| {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        merge_path(
+            shell_path(&shell, std::time::Duration::from_secs(3)).as_deref(),
+            std::env::var("PATH").ok().as_deref(),
+        )
+    })
+}
+
+const PATH_MARK: &str = "__NURB_PATH__";
+
+/// `$PATH` as an interactive login shell sees it, or None when the shell
+/// fails or outlasts the timeout. The markers fence the value off from
+/// anything the user's rc files print.
+fn shell_path(shell: &str, timeout: std::time::Duration) -> Option<String> {
+    use std::os::unix::process::CommandExt;
+    let child = Command::new(shell)
+        .args([
+            "-ilc",
+            &format!("printf '{PATH_MARK}%s{PATH_MARK}' \"$PATH\""),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn()
+        .ok()?;
+    let pgid = child.id() as i32;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    let Ok(Ok(output)) = rx.recv_timeout(timeout) else {
+        // Also kills whatever the rc files started, which would otherwise
+        // hold the pipe open.
+        unsafe {
+            libc::killpg(pgid, libc::SIGKILL);
+        }
+        return None;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (before, _) = text.rsplit_once(PATH_MARK)?;
+    let (_, path) = before.rsplit_once(PATH_MARK)?;
+    (!path.is_empty()).then(|| path.to_string())
+}
+
+/// The shell's PATH first, then the app's own, then the Homebrew prefixes,
+/// with repeats and empty entries dropped.
+fn merge_path(shell: Option<&str>, inherited: Option<&str>) -> String {
+    let mut dirs: Vec<&str> = Vec::new();
+    let fallback = "/opt/homebrew/bin:/usr/local/bin";
+    for dir in [shell, inherited, Some(fallback)]
+        .into_iter()
+        .flatten()
+        .flat_map(|path| path.split(':'))
+    {
+        if !dir.is_empty() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    dirs.join(":")
+}
+
 /// The bundled uv sidecar: Tauri strips the target-triple suffix and places
 /// it next to the app executable (Contents/MacOS in a bundle, target/debug
 /// during dev; tests run one level down in deps/).
@@ -231,5 +303,69 @@ pub fn uv_sidecar() -> Result<PathBuf, String> {
         Ok(uv)
     } else {
         Err(format!("bundled uv missing at {}", uv.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    fn fake_shell(name: &str, body: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("nurb-shell-{name}-{}", std::process::id()));
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    }
+
+    /// A noisy rc file must not leak into the PATH: only what sits between
+    /// the markers counts.
+    #[test]
+    fn the_shell_path_is_read_from_between_the_markers() {
+        // The fake ignores its flags and runs the printf the app passes in.
+        let shell = fake_shell(
+            "noisy",
+            "echo 'Welcome back!'\nPATH=/opt/homebrew/bin:/usr/bin eval \"$2\"\necho done",
+        );
+        assert_eq!(
+            super::shell_path(shell.to_str().unwrap(), Duration::from_secs(5)).as_deref(),
+            Some("/opt/homebrew/bin:/usr/bin")
+        );
+        std::fs::remove_file(shell).ok();
+    }
+
+    #[test]
+    fn a_hung_shell_gives_up_at_the_timeout() {
+        let shell = fake_shell("hung", "sleep 30");
+        let started = Instant::now();
+        assert_eq!(
+            super::shell_path(shell.to_str().unwrap(), Duration::from_millis(300)),
+            None
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        std::fs::remove_file(shell).ok();
+    }
+
+    #[test]
+    fn a_missing_shell_falls_back_to_the_homebrew_prefixes() {
+        assert_eq!(
+            super::shell_path("/nonexistent/shell", Duration::from_secs(1)),
+            None
+        );
+        assert_eq!(
+            super::merge_path(None, Some("/usr/bin:/bin")),
+            "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin"
+        );
+    }
+
+    #[test]
+    fn the_shell_path_leads_and_repeats_are_dropped() {
+        assert_eq!(
+            super::merge_path(
+                Some("/Users/me/.nvm/bin:/opt/homebrew/bin:/usr/bin"),
+                Some("/usr/bin:/bin:")
+            ),
+            "/Users/me/.nvm/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/local/bin"
+        );
     }
 }
