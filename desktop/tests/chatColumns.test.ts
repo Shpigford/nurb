@@ -58,9 +58,29 @@ test("a hidden completed turn survives unrelated project switches until shown", 
   assert.equal(retainChatColumns(completed, "/projects/beta", {}).length, 1);
   assert.equal(retainChatColumns(completed, "/projects/gamma", {}).length, 1);
 
-  const seen = markChatSeen(completed, "/projects/alpha", "bracket");
+  const seen = markChatSeen(completed, "/projects/alpha", "bracket", true);
   assert.equal(seen[0].unseen, false);
   assert.equal(retainChatColumns(seen, "/projects/beta", {}).length, 0);
+});
+
+test("returning to a part with its conversation collapsed preserves unseen results until expanded", () => {
+  const completed = updateChatActivity(
+    [{ ...fresh(), agent: "claude" }],
+    "/projects/alpha",
+    "bracket",
+    "claude",
+    false,
+    false,
+    true,
+  );
+  const reopened = markChatSeen(completed, "/projects/alpha", "bracket", false);
+  assert.equal(reopened, completed);
+  assert.equal(reopened[0].unseen, true);
+  assert.equal(retainChatColumns(reopened, "/projects/beta", {})[0], completed[0]);
+
+  const expanded = markChatSeen(reopened, "/projects/alpha", "bracket", true);
+  assert.equal(expanded[0].unseen, false);
+  assert.equal(retainChatColumns(expanded, "/projects/beta", {}).length, 0);
 });
 
 test("an initial idle report does not invent unseen work", () => {

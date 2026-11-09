@@ -1,8 +1,8 @@
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import PartView from "./PartView"
+import PartView, { conversationHidden } from "./PartView"
 import { part, project } from "./fixtures"
 
 vi.mock("@nurb/ui", async (importOriginal) => {
@@ -97,6 +97,36 @@ describe("conversation visibility", () => {
     expect(screen.getByText("Conversation text")).not.toBeVisible()
     fireEvent.click(screen.getByRole("button", { name: "Show conversation" }))
     expect(screen.getByText("Conversation text")).toBeVisible()
+  })
+
+  it("lets the host reveal a prepared prompt and keeps its header toggle in sync", () => {
+    localStorage.setItem("nurb.conversation-hidden", "true")
+    function Host() {
+      const [hidden, setHidden] = useState(conversationHidden)
+      const [seed, setSeed] = useState("")
+      return (
+        <>
+          <button onClick={() => { setHidden(false); setSeed("Make the arm shorter") }}>Ask the agent</button>
+          <PartView
+            project={bracket}
+            partName="bracket"
+            chatHidden={hidden}
+            onChatHiddenChange={setHidden}
+            chat={(hidden) => <input aria-label="Prepared prompt" value={hidden ? "" : seed} readOnly />}
+          />
+        </>
+      )
+    }
+    render(<Host />)
+    expect(screen.queryByRole("textbox", { name: "Prepared prompt" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Ask the agent" }))
+    expect(screen.getByRole("textbox", { name: "Prepared prompt" })).toHaveValue("Make the arm shorter")
+    expect(localStorage.getItem("nurb.conversation-hidden")).toBe("false")
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide conversation" }))
+    expect(screen.queryByRole("textbox", { name: "Prepared prompt" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Show conversation" }))
+    expect(screen.getByRole("textbox", { name: "Prepared prompt" })).toHaveValue("Make the arm shorter")
   })
 
   it("reveals the conversation when a picked spot is sent to the composer", () => {
