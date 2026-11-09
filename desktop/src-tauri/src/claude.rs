@@ -497,6 +497,9 @@ pub(crate) fn spawn(
     );
     tokio::process::Command::new(program)
         .args(args)
+        // An npm install of claude is a node script, and the agent runs git
+        // and friends: neither is on the bare PATH a Finder launch gets.
+        .env("PATH", crate::env::user_path())
         .current_dir(project)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -512,6 +515,7 @@ fn ready_binary() -> Result<PathBuf, String> {
     let bin = AgentKind::Claude.native_bin().ok_or("claude_missing")?;
     let version = std::process::Command::new(&bin)
         .arg("--version")
+        .env("PATH", crate::env::user_path())
         .output()
         .ok()
         .and_then(|out| String::from_utf8(out.stdout).ok())
@@ -522,6 +526,7 @@ fn ready_binary() -> Result<PathBuf, String> {
     }
     let signed_in = std::process::Command::new(&bin)
         .args(["auth", "status"])
+        .env("PATH", crate::env::user_path())
         .output()
         .map(|out| out.status.success())
         .unwrap_or(false);

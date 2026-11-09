@@ -105,7 +105,7 @@ impl AgentKind {
     }
 
     /// Where a native CLI actually is: the vendor installer's fixed spot
-    /// first, then PATH for nonstandard installs. None when it is not on this
+    /// first, then the user's shell PATH for Homebrew, npm and other installs. None when it is not on this
     /// machine, which is what "installed: false" means for these agents.
     pub fn native_bin(self) -> Option<PathBuf> {
         let (name, _) = self.native_command()?;
@@ -117,7 +117,7 @@ impl AgentKind {
             Self::Codex | Self::Gemini => return None,
         };
         let home = PathBuf::from(std::env::var("HOME").ok()?);
-        find_bin(name, &home, install_dirs, std::env::var_os("PATH"))
+        find_bin(name, &home, install_dirs, Some(crate::env::user_path().into()))
     }
 
     /// What a signed-out user needs, in the pane and the chat column.
@@ -231,7 +231,10 @@ fn driver_auth_status() -> (Option<bool>, Option<String>) {
     let Some(bin) = AgentKind::Claude.native_bin() else {
         return (None, None);
     };
-    let Ok(output) = Command::new(bin).args(["auth", "status", "--json"]).output() else {
+    let Ok(output) = Command::new(bin)
+        .args(["auth", "status", "--json"])
+        .env("PATH", crate::env::user_path())
+        .output() else {
         return (None, None);
     };
     let parsed = serde_json::from_slice::<serde_json::Value>(&output.stdout).ok();
@@ -334,7 +337,10 @@ fn cursor_auth_status(kind: AgentKind) -> (Option<bool>, Option<String>) {
     let Some(bin) = kind.native_bin() else {
         return (None, None);
     };
-    let Ok(output) = Command::new(bin).arg("status").output() else {
+    let Ok(output) = Command::new(bin)
+        .arg("status")
+        .env("PATH", crate::env::user_path())
+        .output() else {
         return (None, None);
     };
     let text = String::from_utf8_lossy(&output.stdout);
@@ -525,6 +531,23 @@ mod tests {
             Some(bin.join("cursor-agent"))
         );
         std::fs::remove_dir_all(home).unwrap();
+    }
+
+    /// Homebrew's cask puts claude in /opt/homebrew/bin, outside every
+    /// installer spot, so it is found through the PATH the shell reports.
+    #[test]
+    fn a_cli_outside_the_installer_spots_is_found_on_the_path() {
+        let root = std::env::temp_dir().join(format!("nurb-brew-bin-{}", std::process::id()));
+        let (home, brew) = (root.join("home"), root.join("homebrew/bin"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&brew).unwrap();
+        std::fs::write(brew.join("claude"), b"").unwrap();
+        let path = format!("/usr/bin:{}", brew.display());
+        assert_eq!(
+            super::find_bin("claude", &home, &[".local/bin", ".claude/local"], Some(path.into())),
+            Some(brew.join("claude"))
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// `agent_login` hands Codex a CODEX_PATH pointing at `.bin/codex`, which
