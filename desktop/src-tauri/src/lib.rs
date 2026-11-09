@@ -2,6 +2,8 @@ mod acp;
 mod agents;
 mod claude;
 mod env;
+#[cfg(target_os = "macos")]
+mod login_path;
 mod prefs;
 mod provision;
 mod sessions;
@@ -267,6 +269,10 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First, while this is the only thread: everything after spawns agents
+    // and engines that look themselves up on PATH.
+    #[cfg(target_os = "macos")]
+    login_path::adopt();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
