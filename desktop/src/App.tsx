@@ -20,7 +20,7 @@ import {
 } from "@nurb/workbench/api";
 import { reconnect, useLive } from "@nurb/workbench/live";
 import { useProject } from "@nurb/workbench/useProject";
-import PartView from "@nurb/workbench/PartView";
+import PartView, { conversationHidden } from "@nurb/workbench/PartView";
 import AddAgent from "./AddAgent";
 import Chat, { AGENT_LABEL, NEW_PART, PROJECT_CHAT } from "./Chat";
 import {
@@ -161,6 +161,7 @@ function App() {
   const [projectPanel, setProjectPanel] = useState<{ id: string; name: string } | null>(null);
   // A request waiting in a part's composer, put there by the project panel and never sent for the person.
   const [composerSeed, setComposerSeed] = useState<{ projectId: string; part: string; text: string } | null>(null);
+  const [chatHidden, setChatHidden] = useState(conversationHidden);
   const [showAddAgent, setShowAddAgent] = useState(false);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const geminiKeyResolver = useRef<((key: string | null) => void) | null>(null);
@@ -413,6 +414,7 @@ function App() {
   }, [projectId, dirs, chatPart]);
 
   const activeDir = projectId ? dirs[projectId] ?? null : null;
+  const chatVisible = screen === "workspace" && !chatHidden;
 
   // Who is at work on the part on screen, for the stage of a part with no design yet.
   const activeColumn = columns.find((col) => col.path === activeDir && col.part === chatPart);
@@ -426,13 +428,12 @@ function App() {
   }, [activeDir]);
 
   useEffect(() => {
-    // Seen means looked at, and the library is not the workspace: a turn that
-    // finished while the library was up stays unseen until the chat is on screen,
-    // or retainChatColumns would keep its adapter alive after a project switch.
-    if (activeDir && screen === "workspace") {
-      setColumns((list) => markChatSeen(list, activeDir, chatPart));
+    // A turn finished out of sight keeps its errors and replies until the
+    // conversation is shown, even when its part is already on stage.
+    if (activeDir) {
+      setColumns((list) => markChatSeen(list, activeDir, chatPart, chatVisible));
     }
-  }, [activeDir, screen, chatPart]);
+  }, [activeDir, chatVisible, chatPart]);
 
   const findUpdate = useCallback(async () => {
     if (!import.meta.env.PROD || found.current) return found.current?.update ?? null;
@@ -881,6 +882,8 @@ function App() {
         ) : null}
         <PartView
           project={project}
+          chatHidden={chatHidden}
+          onChatHiddenChange={setChatHidden}
           opening={Boolean(projectId) && !project && !drafting}
           partName={partName}
           starting={drafting}
@@ -923,12 +926,12 @@ function App() {
             ),
             end: <IconButton icon="gear" label="Settings" onClick={() => setSettingsSection("agents")} />,
           }}
-          chat={(hidden) => (
+          chat={
             <>
               {columns.map((col) => {
                 const agent = col.agent ?? defaultAgent;
                 const visible =
-                  col.path === activeDir && col.part === chatPart && screen === "workspace" && !hidden;
+                  col.path === activeDir && col.part === chatPart && chatVisible;
                 return (
                   <Chat
                     key={`${col.id}:${col.gen}:${agent}`}
@@ -999,7 +1002,7 @@ function App() {
                 );
               })}
             </>
-          )}
+          }
         />
       </div>
 
@@ -1041,6 +1044,7 @@ function App() {
             name={projectPanel.name}
             onClose={() => setProjectPanel(null)}
             onAsk={(part, text) => {
+              setChatHidden(false);
               setComposerSeed({ projectId: projectPanel.id, part, text });
               setProjectPanel(null);
               openPart(projectPanel.id, part);

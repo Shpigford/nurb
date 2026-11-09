@@ -68,7 +68,7 @@ const DEBOUNCE_MS = 250
 const FIRST_BUILD_KEY = "nurb-first-build"
 const CONVERSATION_HIDDEN_KEY = "nurb.conversation-hidden"
 
-function conversationHidden(): boolean {
+export function conversationHidden(): boolean {
   try {
     return localStorage.getItem(CONVERSATION_HIDDEN_KEY) === "true"
   } catch {
@@ -161,6 +161,8 @@ export default function PartView({
   onAddToProject,
   header,
   chat,
+  chatHidden: hostChatHidden,
+  onChatHiddenChange,
   topInset,
   dragRegion,
   onManagePrinters,
@@ -201,6 +203,9 @@ export default function PartView({
    * receives its hidden state, so the desktop can pause input listeners without
    * unmounting a running agent. */
   chat?: ReactNode | ((hidden: boolean) => ReactNode)
+  /** The desktop can reveal the conversation when another screen prepares a prompt. */
+  chatHidden?: boolean
+  onChatHiddenChange?: (hidden: boolean) => void
   /** Room for a window titlebar above the header. */
   topInset?: number
   /** The desktop drags its window by the stage and the header bar. */
@@ -217,7 +222,12 @@ export default function PartView({
 }) {
   const projectId = project?.id ?? null
   const conversationId = useId()
-  const [chatHidden, setChatHidden] = useState(conversationHidden)
+  const [localChatHidden, setLocalChatHidden] = useState(conversationHidden)
+  const chatHidden = hostChatHidden ?? localChatHidden
+  const setChatHidden = useCallback((hidden: boolean) => {
+    setLocalChatHidden(hidden)
+    onChatHiddenChange?.(hidden)
+  }, [onChatHiddenChange])
   useEffect(() => {
     try {
       localStorage.setItem(CONVERSATION_HIDDEN_KEY, String(chatHidden))
@@ -461,7 +471,7 @@ export default function PartView({
       setChatHidden(false)
       onPointAt?.(spotText(point, normal))
     },
-    [labelling, moving, part, onPointAt]
+    [labelling, moving, part, onPointAt, setChatHidden]
   )
   const partId = part?.id
   const anchors = useMemo<ViewerAnchor[]>(() => {
@@ -618,7 +628,7 @@ export default function PartView({
                   active={!chatHidden}
                   aria-expanded={!chatHidden}
                   aria-controls={conversationId}
-                  onClick={() => setChatHidden((hidden) => !hidden)}
+                  onClick={() => setChatHidden(!chatHidden)}
                 />
               </HeaderIcons>
               <HeaderDivider />
