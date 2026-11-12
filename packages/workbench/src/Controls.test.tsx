@@ -65,7 +65,10 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("sliders", () => {
+// Each slider test renders the whole app and waits out a debounce, a request and a
+// rebuild. A loaded CI runner has taken over a second for that chain, so the waits
+// below allow five, and the tests get room for two of them.
+describe("sliders", { timeout: 15000 }, () => {
   it("posts the whole value map once, after the debounce", async () => {
     state = withPart({
       params: [
@@ -88,7 +91,7 @@ describe("sliders", () => {
 
     act(() => void vi.advanceTimersByTime(200))
     vi.useRealTimers()
-    await waitFor(() => expect(sent("/params")).toHaveLength(1))
+    await waitFor(() => expect(sent("/params")).toHaveLength(1), { timeout: 5000 })
     expect(sent("/params")[0].body).toEqual({ values: { ribs: 6, wall: 3 } })
   })
 
@@ -122,7 +125,7 @@ describe("sliders", () => {
     act(() => void vi.advanceTimersByTime(300))
     vi.useRealTimers()
     // One cue per build, not one per frame of the drag.
-    await waitFor(() => expect(heard.filter((c) => c === "ready")).toHaveLength(1))
+    await waitFor(() => expect(heard.filter((c) => c === "ready")).toHaveLength(1), { timeout: 5000 })
   })
 
   it("locks a dimension the spec pinned instead of offering it as a slider", async () => {
@@ -212,7 +215,7 @@ describe("first build", () => {
     render(<App />)
 
     await userEvent.click(await screen.findByRole("button", { name: "Build lid" }))
-    await waitFor(() => expect(sent("/params")).toHaveLength(1))
+    await waitFor(() => expect(sent("/params")).toHaveLength(1), { timeout: 5000 })
     expect(sent("/params")[0].body).toEqual({ values: {} })
   })
 })
