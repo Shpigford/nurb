@@ -335,10 +335,14 @@ def test_the_core_one_and_the_other_current_prusas_are_shipped():
         "label": "Prusa CORE One L / L+",
         "brand": "Prusa",
     }
-    assert have["prusa_mk4"]["bed"] == [250.0, 210.0, 220.0]
-    assert have["prusa_mk3_5"]["bed"] == [250.0, 210.0, 210.0]
-    assert have["prusa_mk3s"]["bed"] == [250.0, 210.0, 210.0]
-    assert have["prusa_mk3s"]["prusaslicer"] == "Original Prusa i3 MK3S & MK3S+"
+    assert have["prusa_mk4s"]["label"] == "Prusa MK4 / MK4S"
+    assert have["prusa_mk3"] == {
+        "bed": [250.0, 210.0, 210.0],
+        "slicer": "Prusa MK3.5",
+        "prusaslicer": "Original Prusa MK3.5 & MK3.5S 0.4 nozzle",
+        "label": "Prusa MK3S / MK3.5",
+        "brand": "Prusa",
+    }
 
 
 def test_the_voron_printers_are_shipped_one_entry_per_size():
@@ -347,7 +351,7 @@ def test_the_voron_printers_are_shipped_one_entry_per_size():
     have = profiles()
     vorons = {name: block["bed"] for name, block in have.items() if block.get("brand") == "Voron"}
     assert vorons == {
-        "voron_0_2": [120.0, 120.0, 120.0],
+        "voron_0": [120.0, 120.0, 120.0],
         "voron_trident_250": [250.0, 250.0, 250.0],
         "voron_trident_300": [300.0, 300.0, 250.0],
         "voron_trident_350": [350.0, 350.0, 250.0],
@@ -356,7 +360,8 @@ def test_the_voron_printers_are_shipped_one_entry_per_size():
         "voron_2_4_350": [350.0, 350.0, 310.0],
         "voron_switchwire": [250.0, 210.0, 230.0],
     }
-    assert have["voron_0_2"]["slicer"] == "Voron 0.1"
+    assert have["voron_0"]["slicer"] == "Voron 0.1"
+    assert have["voron_0"]["label"] == "Voron 0.1 / 0.2"
     assert have["voron_switchwire"]["slicer"] == "Voron Switchwire 250"
 
 
