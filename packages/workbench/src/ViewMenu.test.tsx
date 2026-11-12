@@ -181,3 +181,47 @@ describe("the View menu", () => {
     expect(screen.queryByRole("menuitemcheckbox", { name: "Conversation" })).not.toBeInTheDocument()
   })
 })
+
+describe("the stage keys", () => {
+  const press = (key: string, init: KeyboardEventInit = {}) => fireEvent.keyDown(window, { key, ...init })
+
+  it("starts and stops labelling with L and Escape", () => {
+    render(<PartView project={bracket} partName="bracket" />)
+    press("l")
+    expect(screen.getByRole("button", { name: "Click a spot to name it" })).toBeInTheDocument()
+    press("Escape")
+    expect(screen.getByRole("button", { name: "Label a spot" })).toBeInTheDocument()
+  })
+
+  it("points at the part with P when the host can take the question", () => {
+    render(<PartView project={bracket} partName="bracket" onPointAt={() => {}} />)
+    press("p")
+    expect(screen.getByRole("button", { name: "Click a spot on the part" })).toBeInTheDocument()
+    press("p")
+    expect(screen.getByRole("button", { name: "Point at the part" })).toBeInTheDocument()
+  })
+
+  it("hides the conversation with Cmd+Backslash", () => {
+    render(<PartView project={bracket} partName="bracket" chat={<p>Conversation text</p>} />)
+    press("\\", { metaKey: true })
+    expect(screen.getByText("Conversation text")).not.toBeVisible()
+    press("\\", { ctrlKey: true })
+    expect(screen.getByText("Conversation text")).toBeVisible()
+  })
+
+  it("leaves keys typed in a field, with a modifier, or on a hidden stage alone", () => {
+    const { container } = render(
+      <div>
+        <input aria-label="Draft" />
+        <PartView project={bracket} partName="bracket" />
+      </div>,
+    )
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Draft" }), { key: "l" })
+    press("l", { metaKey: true })
+    expect(screen.getByRole("button", { name: "Label a spot" })).toBeInTheDocument()
+
+    container.firstElementChild!.setAttribute("hidden", "")
+    press("l")
+    expect(screen.getByRole("button", { name: "Label a spot", hidden: true })).toBeInTheDocument()
+  })
+})
