@@ -418,6 +418,23 @@ def _shaped(conn, row, payload):
     return shaped
 
 
+def _start_part(conn, project, content, asked):
+    """A part is in the library from the first thing said about it, not from the
+    agent's first write, which can be many minutes later or never. A folder's new
+    part is asked for; a part's own container starts one when it has none. Returns
+    the name to file the turn under: a container's turns carry no part name, so
+    only a folder's new part has one."""
+    if project["folder"]:
+        if not asked:
+            return None
+    elif conn.execute(
+        "SELECT 1 FROM parts WHERE project_id = ? AND kind = 'part'", (project["id"],)
+    ).fetchone():
+        return None
+    _, name = db.create_draft_part(conn, project["id"], db.draft_title(content))
+    return name if project["folder"] else None
+
+
 def _message(conn, row):
     """A stored message in the shape @nurb/ui renders."""
     payload = json.loads(row["payload"] or "{}")
@@ -975,7 +992,8 @@ def _routes(conn, lock, server, token, pid):
             # A photo alone is a legitimate message, so a file stands in for words.
             if not content and not files:
                 raise _Refused(400, "content must be what was said")
-            if db.get_project(conn, project_id) is None:
+            project = db.get_project(conn, project_id)
+            if project is None:
                 raise _Refused(404, "no project")
             part = word(sent, "part", "part must be the name of a part in this project") or None
             if part is not None and conn.execute(
@@ -984,30 +1002,26 @@ def _routes(conn, lock, server, token, pid):
             ).fetchone() is None:
                 raise _Refused(400, f"no part called {part} in this project")
             payload = {"files": files} if files else {}
-            message_id = db.add_message(conn, project_id, role, content, payload, part=part)
+            with db.transaction(conn):
+                if role == "user" and part is None:
+                    part = _start_part(conn, project, content, sent.get("new_part") is True)
+                message_id = db.add_message(conn, project_id, role, content, payload, part=part)
             row = conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
             return JSONResponse(_message(conn, row), status_code=201)
 
         return await acted(work)
 
-    async def project_message_claim(request):
-        """Give a new part the turns that described it before it had a name."""
+    async def project_draft(request):
+        """A first prompt to an agent whose turns the app does not store: the part
+        still goes in the library now, as it does for one whose turns are stored."""
         sent = await body_of(request)
 
         def work(conn):
-            project_id = request.path_params["project_id"]
-            part = word(sent, "part", "part must be the name of a part in this project")
-            after = sent.get("after")
-            if not isinstance(after, int) or isinstance(after, bool) or after < 0:
-                raise _Refused(400, "after must be the last turn before the new part was started")
-            if db.get_project(conn, project_id) is None:
+            project = db.get_project(conn, request.path_params["project_id"])
+            if project is None:
                 raise _Refused(404, "no project")
-            if conn.execute(
-                "SELECT 1 FROM parts WHERE project_id = ? AND name = ? AND kind = 'part'",
-                (project_id, part),
-            ).fetchone() is None:
-                raise _Refused(400, f"no part called {part} in this project")
-            return {"claimed": db.claim_messages(conn, project_id, part, after)}
+            content = word(sent, "content", "content must be what was said")
+            return {"part": _start_part(conn, project, content, sent.get("new_part") is True)}
 
         return await acted(work)
 
@@ -1811,7 +1825,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}", endpoint=answering(part_delete), methods=["DELETE"]),
         Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
-        Route("/api/projects/{project_id}/messages/claim", endpoint=answering(project_message_claim), methods=["POST"]),
+        Route("/api/projects/{project_id}/draft", endpoint=answering(project_draft), methods=["POST"]),
         Route("/api/projects/{project_id}/attachments", endpoint=answering(project_attachment), methods=["POST"]),
         Route("/api/mesh", endpoint=answering(mesh_describe), methods=["POST"]),
         Route("/api/projects/{project_id}/printer", endpoint=answering(project_printer), methods=["POST"]),

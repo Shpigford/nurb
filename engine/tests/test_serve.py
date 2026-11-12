@@ -1321,37 +1321,48 @@ def test_the_chat_column_can_write_both_sides_of_a_turn(home):
         assert unknown.value.code == 404
 
 
-def test_a_new_part_claims_the_turns_that_described_it(home):
+def test_the_first_prompt_puts_a_new_part_in_the_library(home):
+    from nurb import db
+
+    conn = db.connect()
+    loose = db.create_project(conn, "Feisty Chamfer")
+    conn.close()
+    with serving(home, free_port()) as url:
+        route = f"{url}/api/projects/{loose}/messages"
+        said = json.loads(post(route, {"role": "user", "content": "I want to create a door stopper for the back door, wedge shaped"})[2])
+        # A part's own container keeps its one conversation unnamed.
+        assert said["part"] is None
+        post(route, {"role": "assistant", "content": "on it"})
+        post(route, {"role": "user", "content": "make it 30 tall"})
+
+        parts = [p for p in json.loads(get(f"{url}/api/parts")[2])["parts"] if p["project_id"] == loose]
+        assert [(p["name"], p["title"], p["source"], p["build"]) for p in parts] == [
+            ("new_part", "I want to create a door stopper for…", None, None)
+        ]
+        detail = json.loads(get(f"{url}/api/projects/{loose}?part=new_part")[2])
+        assert detail["parts"][0]["revision"] is None
+
+
+def test_a_new_part_in_a_folder_is_asked_for_and_files_its_turns(home):
     from nurb import db
 
     conn = db.connect()
     shelves = db.create_project(conn, "shelves", folder=True)
+    db.create_part(conn, shelves, "new_part", SLAB.replace("slab", "new_part"))
     conn.close()
     with serving(home, free_port()) as url:
         route = f"{url}/api/projects/{shelves}/messages"
-        before = json.loads(post(route, {"role": "user", "content": "about the whole set"})[2])
-        post(route, {"role": "user", "content": "a bin, 40 wide"})
-        post(route, {"role": "assistant", "content": "made the bin"})
-        conn = db.connect()
-        db.create_part(conn, shelves, "bin", SLAB.replace("slab", "bin"))
-        conn.close()
-
-        claim = f"{route}/claim"
-        assert json.loads(post(claim, {"part": "bin", "after": before["sequence_number"]})[2]) == {"claimed": 2}
-        whole = json.loads(get(f"{url}/api/projects/{shelves}")[2])["messages"]
-        # The turn from before the new part was started stays the folder's.
-        assert [(m["content"], m["part"]) for m in whole] == [
-            ("about the whole set", None),
-            ("a bin, 40 wide", "bin"),
-            ("made the bin", "bin"),
-        ]
-
-        with pytest.raises(urllib.error.HTTPError) as unknown:
-            post(claim, {"part": "nope", "after": 0})
-        assert unknown.value.code == 400
-        with pytest.raises(urllib.error.HTTPError) as bad:
-            post(claim, {"part": "bin", "after": "x"})
-        assert bad.value.code == 400
+        # The folder's own conversation starts no part.
+        assert json.loads(post(route, {"role": "user", "content": "about the whole set"})[2])["part"] is None
+        said = json.loads(post(route, {"role": "user", "content": "a bin, 40 wide", "new_part": True})[2])
+        assert said["part"] == "new_part_2"
+        parts = {p["name"]: p for p in json.loads(get(f"{url}/api/projects/{shelves}")[2])["parts"]}
+        assert parts["new_part_2"]["title"] == "a bin, 40 wide"
+        assert parts["new_part_2"]["source"] is None
+        # An agent whose turns the app does not store starts its part the same way.
+        draft = f"{url}/api/projects/{shelves}/draft"
+        assert json.loads(post(draft, {"content": "a lid", "new_part": True})[2]) == {"part": "new_part_3"}
+        assert json.loads(post(draft, {"content": "more about the set"})[2]) == {"part": None}
 
 
 def test_a_photo_from_the_chat_is_what_find_photos_sees(home):

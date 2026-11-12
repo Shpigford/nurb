@@ -117,6 +117,58 @@ def test_a_part_that_raises_is_a_result_not_a_tool_failure(conn):
     assert 'parts/broken.py"' in first[1]
 
 
+def test_the_first_write_names_the_part_the_person_started(conn):
+    project_id = new_project(conn)
+    draft_id, _ = db.create_draft_part(conn, project_id, "a cube for the desk")
+    db.add_message(conn, project_id, "user", "a cube for the desk", {}, part="new_part")
+    shown = payload(call(conn, "get_project", {"project_id": project_id}))["parts"]
+    assert shown[0]["source"] is None and "write_part_source" in shown[0]["note"]
+
+    body = payload(
+        call(conn, "write_part_source", {"project_id": project_id, "part_name": "cube", "source": CUBE})
+    )
+    assert body["status"] == "ok"
+    parts = list(db.parts_of(conn, project_id))
+    # The same row, so the card and the open workspace keep it; the prompt's words give way.
+    assert [(p["id"], p["name"], p["title"]) for p in parts] == [(draft_id, "cube", None)]
+    assert parts[0]["source"] == CUBE
+    said = conn.execute("SELECT part FROM messages WHERE role = 'user'").fetchall()
+    assert [row["part"] for row in said] == ["cube"]
+
+    # Once it has source there is no draft left, so the next new name is a new part.
+    call(conn, "write_part_source", {"project_id": project_id, "part_name": "other", "source": CUBE.replace("cube", "other")})
+    assert sorted(p["name"] for p in db.parts_of(conn, project_id)) == ["cube", "other"]
+
+
+def test_in_a_folder_the_steps_before_the_first_write_join_the_new_part(conn):
+    project_id = db.create_project(conn, "desk", folder=True)
+    db.add_message(conn, project_id, "user", "about the whole desk", {})
+    db.create_draft_part(conn, project_id, "a cube")
+    db.add_message(conn, project_id, "user", "a cube", {}, part="new_part")
+    call(conn, "get_project", {"project_id": project_id})
+    call(conn, "write_part_source", {"project_id": project_id, "part_name": "cube", "source": CUBE})
+    rows = conn.execute("SELECT content, part FROM messages ORDER BY sequence_number").fetchall()
+    # The turn from before the part was started stays the folder's own.
+    assert rows[0]["part"] is None
+    assert {row["part"] for row in rows[1:]} == {"cube"}
+
+
+def test_the_placeholder_name_is_refused(conn):
+    project_id = new_project(conn)
+    db.create_draft_part(conn, project_id, "a cube")
+    said = message(call(conn, "write_part_source", {"project_id": project_id, "part_name": "new_part", "source": CUBE}))
+    assert "placeholder" in said
+
+
+def test_a_title_the_person_typed_outlives_the_first_write(conn):
+    project_id = new_project(conn)
+    draft_id, _ = db.create_draft_part(conn, project_id, "a cube")
+    db.rename_part(conn, draft_id, "desk_cube", title="Desk cube")
+    call(conn, "write_part_source", {"project_id": project_id, "part_name": "cube", "source": CUBE})
+    row = conn.execute("SELECT name, title FROM parts WHERE id = ?", (draft_id,)).fetchone()
+    assert (row["name"], row["title"]) == ("cube", "Desk cube")
+
+
 def _png(block):
     assert block.type == "image"
     assert block.mime_type == "image/png"

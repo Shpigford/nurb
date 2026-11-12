@@ -49,6 +49,17 @@ describe("PartCard", () => {
     expect(stalled.container.querySelector('[data-build="stalled"]')).toBeTruthy()
   })
 
+  it("says a draft is being designed while its agent works, and never shows a revision", () => {
+    const draft: PartCardPart = { id: "d1", name: "A door stopper for the back door", identifier: "new_part", status: "draft" }
+    render(<PartCard part={{ ...draft, designing: true }} onOpen={() => {}} />)
+    expect(screen.getByText("Being designed")).toBeTruthy()
+    expect(screen.queryByText("new_part")).toBeNull()
+    expect(screen.queryByText(/REV/)).toBeNull()
+    cleanup()
+    render(<PartCard part={draft} onOpen={() => {}} />)
+    expect(screen.getByText("No design yet")).toBeTruthy()
+  })
+
   it("renders the menu when it has items", () => {
     render(<PartCard part={built} onOpen={() => {}} menu={[{ label: "Delete", onSelect: () => {} }]} />)
     expect(screen.getByRole("button", { name: "More for Shelf bracket" })).toBeTruthy()

@@ -51,9 +51,17 @@ export function messagesForPart(
 
 export type LibrarySort = "built" | "name";
 
-type Sortable = { name: string; title?: string | null; build?: { finished_at: string | null } | null };
+type Sortable = {
+  name: string;
+  title?: string | null;
+  source?: string | null;
+  build?: { finished_at: string | null } | null;
+};
 const cardName = (part: Sortable) => part.title ?? titleCase(part.name);
 const builtAt = (part: Sortable) => part.build?.finished_at ?? "";
+
+/** Described and not written yet: the engine makes the row on the first prompt. */
+export const isDraft = (part: { source?: string | null }) => part.source === null;
 
 /** Search reads the name on the card as well as the slug, so "reward chart" finds reward_chart. */
 export function matchesSearch(part: Sortable, query: string): boolean {
@@ -61,11 +69,16 @@ export function matchesSearch(part: Sortable, query: string): boolean {
   return [part.name, cardName(part)].some((name) => name.toLowerCase().includes(needle));
 }
 
-/** Newest build first, never-built last; or by the name on the card. */
+/**
+ * Drafts first, since a part just started is the one being looked for; then the
+ * newest build first and never-built last, or by the name on the card.
+ */
 export function sortParts<T extends Sortable>(parts: T[], sort: LibrarySort): T[] {
   return [...parts].sort((a, b) =>
-    sort === "built" && builtAt(a) !== builtAt(b)
-      ? builtAt(b).localeCompare(builtAt(a))
-      : cardName(a).localeCompare(cardName(b)),
+    isDraft(a) !== isDraft(b)
+      ? Number(isDraft(b)) - Number(isDraft(a))
+      : sort === "built" && builtAt(a) !== builtAt(b)
+        ? builtAt(b).localeCompare(builtAt(a))
+        : cardName(a).localeCompare(cardName(b)),
   );
 }

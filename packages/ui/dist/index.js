@@ -9220,14 +9220,14 @@ function jy({
   renaming: i,
   onRename: s
 }) {
-  const r = Hm(e.bbox), o = Km(e.builtAt), a = e.status === "failed", l = e.status === "building", u = P0(l, e.buildingSince), d = y0();
+  const r = Hm(e.bbox), o = Km(e.builtAt), a = e.status === "failed", l = e.status === "building", u = e.status === "draft", d = P0(l, e.buildingSince), h = y0();
   return /* @__PURE__ */ y(
     "div",
     {
-      onContextMenu: (h) => d.open(h, i ? void 0 : n),
+      onContextMenu: (f) => h.open(f, i ? void 0 : n),
       className: "group relative flex flex-col rounded-[6px] border border-panel-edge bg-ground transition-shadow focus-within:shadow-[var(--shadow-panel)] hover:shadow-[var(--shadow-panel)]",
       children: [
-        d.menu,
+        h.menu,
         /* @__PURE__ */ c(
           "button",
           {
@@ -9237,21 +9237,27 @@ function jy({
             className: "absolute inset-0 z-10 rounded-[6px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           }
         ),
-        /* @__PURE__ */ c("div", { className: "relative h-[148px] overflow-hidden rounded-t-[6px] border-b border-line-soft bg-ground", children: e.thumbnailUrl ? (
-          // The card owns the box, so the frame fills it instead of its own ratio,
-          // and the whole part stays in frame rather than being cropped to it.
-          /* @__PURE__ */ c(
-            A0,
-            {
-              src: e.thumbnailUrl,
-              alt: "",
-              width: 4,
-              height: 3,
-              placeholder: "transparent",
-              className: "h-full rounded-none! [&_img]:object-contain [&_img]:p-2"
-            }
-          )
-        ) : /* @__PURE__ */ c(p0, { bbox: e.bbox, ghost: !e.bbox, className: "size-full" }) }),
+        /* @__PURE__ */ c(
+          "div",
+          {
+            className: `relative h-[148px] overflow-hidden rounded-t-[6px] border-b border-line-soft ${u ? "bg-raised/60" : "bg-ground"}`,
+            children: u ? null : e.thumbnailUrl ? (
+              // The card owns the box, so the frame fills it instead of its own ratio,
+              // and the whole part stays in frame rather than being cropped to it.
+              /* @__PURE__ */ c(
+                A0,
+                {
+                  src: e.thumbnailUrl,
+                  alt: "",
+                  width: 4,
+                  height: 3,
+                  placeholder: "transparent",
+                  className: "h-full rounded-none! [&_img]:object-contain [&_img]:p-2"
+                }
+              )
+            ) : /* @__PURE__ */ c(p0, { bbox: e.bbox, ghost: !e.bbox, className: "size-full" })
+          }
+        ),
         n && n.length > 0 ? /* @__PURE__ */ c("div", { className: "absolute top-2 right-2 z-20 flex items-center gap-1 transition-opacity lg:opacity-0 lg:group-focus-within:opacity-100 lg:group-hover:opacity-100 lg:has-[[aria-expanded=true]]:opacity-100", children: /* @__PURE__ */ c(
           g0,
           {
@@ -9262,24 +9268,27 @@ function jy({
         ) }) : null,
         /* @__PURE__ */ y("div", { className: "flex flex-col gap-1.5 px-[13px] py-[11px]", children: [
           /* @__PURE__ */ y("div", { className: "flex items-center gap-2", children: [
-            i ? /* @__PURE__ */ c(M0, { name: e.name, onDone: (h) => s?.(h) }) : /* @__PURE__ */ c("h2", { className: "min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold tracking-[-0.01em] text-ink", children: e.name }),
+            i ? /* @__PURE__ */ c(M0, { name: e.name, onDone: (f) => s?.(f) }) : /* @__PURE__ */ c("h2", { className: "min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold tracking-[-0.01em] text-ink", children: e.name }),
             a ? /* @__PURE__ */ c("span", { className: "text-warn", children: /* @__PURE__ */ c(z, { name: "warning" }) }) : l ? /* @__PURE__ */ c(
               "span",
               {
-                "data-build": u ? "running" : "stalled",
-                className: `size-1.5 rounded-full bg-accent${u ? " motion-safe:animate-pulse" : ""}`
+                "data-build": d ? "running" : "stalled",
+                className: `size-1.5 rounded-full bg-accent${d ? " motion-safe:animate-pulse" : ""}`
               }
             ) : e.status === "built" ? /* @__PURE__ */ c("span", { className: "text-pass", children: /* @__PURE__ */ c(z, { name: "check" }) }) : null
           ] }),
           /* @__PURE__ */ y("p", { className: "mono-caption truncate text-muted normal-case [letter-spacing:0.08em]", children: [
-            e.identifier ?? "",
-            e.identifier && r ? " · " : "",
+            u ? " " : e.identifier ?? "",
+            !u && e.identifier && r ? " · " : "",
             r ? `${r} mm` : ""
           ] })
         ] }),
         /* @__PURE__ */ y("div", { className: "mono-caption flex items-center justify-between border-t border-line-soft px-[13px] py-2 text-muted [letter-spacing:0.08em]", children: [
-          /* @__PURE__ */ c("span", { children: o ? `Built ${o}` : "Not built yet" }),
-          /* @__PURE__ */ c("span", { className: a ? "text-warn" : void 0, children: a ? "Failed" : e.folder ?? jt(e.revision) })
+          u ? /* @__PURE__ */ y("span", { className: "flex items-center gap-2", children: [
+            e.designing ? /* @__PURE__ */ c("span", { "aria-hidden": "true", className: "size-1.5 rounded-full bg-accent motion-safe:animate-pulse" }) : null,
+            e.designing ? "Being designed" : "No design yet"
+          ] }) : /* @__PURE__ */ c("span", { children: o ? `Built ${o}` : "Not built yet" }),
+          /* @__PURE__ */ c("span", { className: a ? "text-warn" : void 0, children: a ? "Failed" : e.folder ?? (u ? "" : jt(e.revision)) })
         ] })
       ]
     }

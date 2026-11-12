@@ -162,5 +162,13 @@ test("the working line names the running call in plain words", () => {
     [{ type: "tool_call", id: "t2", title: "edit_part_source", kind: "nurb", status: "in_progress" }, START + 20],
   ]);
   assert.equal(activity(running), "building the part");
-  assert.equal(activity([]), "working");
+  // A long build is still the build, however quiet it is.
+  assert.equal(activity(running, 10 * 60_000), "building the part");
+});
+
+test("with no call running the line says the agent is thinking, and for how long once it is quiet", () => {
+  assert.equal(activity([]), "thinking");
+  assert.equal(activity([], 29_000), "thinking");
+  assert.equal(activity([], 45_000), "thinking (45 s)");
+  assert.equal(activity([], 19.5 * 60_000), "thinking (19 min)");
 });
