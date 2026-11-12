@@ -834,6 +834,7 @@ export default function PartView({
             <Button
               variant={labelling ? "accent" : "outline"}
               size="md"
+              icon="tag"
               onClick={() => {
                 setPointing(false)
                 setDraft(null)
