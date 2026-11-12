@@ -324,6 +324,7 @@ pub fn run() {
             acp::list_sessions,
             acp::send_prompt,
             acp::check_attachments,
+            acp::attachment_thumbnail,
             acp::cancel_turn,
             acp::respond_permission,
             acp::chat_config,

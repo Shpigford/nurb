@@ -125,6 +125,8 @@ export interface Message {
   attachments?: MessageAttachment[]
   /** The names of the files sent with this turn. */
   files?: string[]
+  /** A small picture for each of `files`, in order, or null for a file that is not a photo. */
+  thumbnails?: (string | null)[]
   sequence_number?: number
   created_at: string
   /** The part this line belongs to. Null is a folder's project-wide conversation. */
