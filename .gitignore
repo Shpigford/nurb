@@ -21,3 +21,6 @@ packages/ui/fonts/Satoshi-Variable.ttf
 
 # Written by .claude/scripts/session-setup.sh
 .claude/session-setup.log
+
+# Vite build cache
+packages/workbench/tmp/
