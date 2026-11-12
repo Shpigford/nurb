@@ -303,9 +303,10 @@ export function addMessage(
   role: "user" | "assistant",
   content: string,
   part?: string | null,
-  files?: string[]
+  files?: string[],
+  thumbnails?: (string | null)[]
 ): Promise<Message> {
-  return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, { role, content, part, files })
+  return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, { role, content, part, files, thumbnails })
 }
 
 /** Hand a new part the folder's unnamed turns after `after`, the ones that described it. */

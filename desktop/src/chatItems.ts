@@ -25,7 +25,7 @@ export type ChatEvent =
   | { type: "session_error"; message: string };
 
 export type Item =
-  | { kind: "user"; text: string; files?: string[]; localId?: number }
+  | { kind: "user"; text: string; files?: string[]; thumbnails?: (string | null)[]; localId?: number }
   | { kind: "agent"; text: string }
   | { kind: "thought"; text: string }
   // `tool` and `seq` let a nurb step find its own transcript row: the row the
