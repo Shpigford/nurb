@@ -65,6 +65,36 @@ const DEBOUNCE_MS = 250
 // and only that one. Reading and claiming the key in one step means two builds
 // landing together cannot both think they were first.
 const FIRST_BUILD_KEY = "nurb-first-build"
+const CONVERSATION_HIDDEN_KEY = "nurb.conversation-hidden"
+const LABELS_HIDDEN_KEY = "nurb.labels-hidden"
+const MARKERS_HIDDEN_KEY = "nurb.markers-hidden"
+
+function readHidden(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === "true"
+  } catch {
+    return false
+  }
+}
+
+function saveHidden(key: string, hidden: boolean) {
+  try {
+    localStorage.setItem(key, String(hidden))
+  } catch {
+    // The View menu still works when a webview refuses storage.
+  }
+}
+
+export function conversationHidden(): boolean {
+  return readHidden(CONVERSATION_HIDDEN_KEY)
+}
+
+// A View menu choice that outlives a reload.
+function useHidden(key: string) {
+  const [hidden, setHidden] = useState(() => readHidden(key))
+  useEffect(() => saveHidden(key, hidden), [key, hidden])
+  return [hidden, setHidden] as const
+}
 
 function claimFirstBuild(): boolean {
   try {
@@ -151,6 +181,8 @@ export default function PartView({
   onAddToProject,
   header,
   chat,
+  chatHidden: hostChatHidden,
+  onChatHiddenChange,
   topInset,
   dragRegion,
   onManagePrinters,
@@ -187,8 +219,11 @@ export default function PartView({
     start?: ReactNode
     end?: ReactNode
   }
-  /** The conversation column, 372 wide, left of the stage. */
+  /** The conversation column, 372 wide, left of the stage. Hiding it keeps it mounted. */
   chat?: ReactNode
+  /** The desktop owns this so it can reveal the conversation when another screen prepares a prompt. */
+  chatHidden?: boolean
+  onChatHiddenChange?: (hidden: boolean) => void
   /** Room for a window titlebar above the header. */
   topInset?: number
   /** The desktop drags its window by the stage and the header bar. */
@@ -204,6 +239,15 @@ export default function PartView({
   onOpenInSlicer?: (filename: string, blob: Blob, app: string) => Promise<void>
 }) {
   const projectId = project?.id ?? null
+  const [localChatHidden, setLocalChatHidden] = useState(conversationHidden)
+  const chatHidden = hostChatHidden ?? localChatHidden
+  const setChatHidden = useCallback((hidden: boolean) => {
+    setLocalChatHidden(hidden)
+    onChatHiddenChange?.(hidden)
+  }, [onChatHiddenChange])
+  useEffect(() => saveHidden(CONVERSATION_HIDDEN_KEY, chatHidden), [chatHidden])
+  const [labelsHidden, setLabelsHidden] = useHidden(LABELS_HIDDEN_KEY)
+  const [markersHidden, setMarkersHidden] = useHidden(MARKERS_HIDDEN_KEY)
   const [highlight, setHighlight] = useState<number | null>(null)
   // A refused rename or label move says why for a few seconds, then gets out of the way.
   const [stageError, setStageError] = useState<string | null>(null)
@@ -437,14 +481,15 @@ export default function PartView({
         return
       }
       setPointing(false)
+      setChatHidden(false)
       onPointAt?.(spotText(point, normal))
     },
-    [labelling, moving, part, onPointAt]
+    [labelling, moving, part, onPointAt, setChatHidden]
   )
   const partId = part?.id
   const anchors = useMemo<ViewerAnchor[]>(() => {
     if (!partId) return []
-    const shown: ViewerAnchor[] = (part?.labels ?? [])
+    const shown: ViewerAnchor[] = (labelsHidden ? [] : part?.labels ?? [])
       .filter((label) => label.name !== draft?.was)
       .map((label) => ({
         key: `label:${label.name}`,
@@ -490,7 +535,7 @@ export default function PartView({
       />
     )
     return [...shown, { key: "label-draft", point: draft.point, node: editor }]
-  }, [partId, part?.labels, draft])
+  }, [partId, part?.labels, draft, labelsHidden])
 
   // The slicer this part's printer opens in, as the app name macOS opens files with.
   // It follows the printer, so a Prusa opens in PrusaSlicer when it is here. One that
@@ -688,7 +733,11 @@ export default function PartView({
 
   return (
     <Stage header={headerEl} topInset={topInset} dragRegion={dragRegion}>
-      {chat}
+      {chat ? (
+        <div hidden={chatHidden} className={chatHidden ? undefined : "contents"}>
+          {chat}
+        </div>
+      ) : null}
 
       <StageColumn>
         {/* The column is the package's; the geometry on it is what the tests read. */}
@@ -701,9 +750,11 @@ export default function PartView({
           <ViewerIsland
             key={part?.id}
             glbUrl={absolute(glbUrl)}
-            findings={findings}
-            highlight={highlight}
-            onHighlight={setHighlight}
+            // A finding picked in the checks panel still shows its marker while the rest are hidden.
+            findings={!markersHidden ? findings : highlight != null && findings[highlight] ? [findings[highlight]] : []}
+            highlight={markersHidden && highlight != null ? 0 : highlight}
+            // With one marker shown, its index in the viewer is 0, not its index in the checks.
+            onHighlight={markersHidden ? (index) => index == null && setHighlight(null) : setHighlight}
             onPick={pointing || labelling ? onPick : null}
             anchors={anchors}
             bed={bedOf(project)}
@@ -761,14 +812,36 @@ export default function PartView({
         )}
         {glbUrl ? (
           <div className="absolute right-4 bottom-4 z-10 flex gap-2">
+            {/* What is drawn on the stage, beside the other stage tools. Most people keep it all on. */}
+            <Menu
+              label="View"
+              above
+              trigger={() => (
+                <span className="btn-label flex items-center gap-2">
+                  <Icon name="eye" />
+                  View
+                </span>
+              )}
+              triggerClassName="h-9 rounded-[3px] border border-line bg-ground pr-3 pl-2.5 text-ink-soft hover:border-panel-edge hover:text-ink"
+              items={[
+                ...(chat
+                  ? [{ label: "Conversation", checkbox: true, checked: !chatHidden, keepOpen: true, onSelect: () => setChatHidden(!chatHidden) }]
+                  : []),
+                { label: "Spot labels", checkbox: true, checked: !labelsHidden, keepOpen: true, onSelect: () => setLabelsHidden((v) => !v) },
+                { label: "Check markers", checkbox: true, checked: !markersHidden, keepOpen: true, onSelect: () => setMarkersHidden((v) => !v) },
+              ]}
+            />
             <Button
               variant={labelling ? "accent" : "outline"}
               size="md"
+              icon="tag"
               onClick={() => {
                 setPointing(false)
                 setDraft(null)
                 setMoving(null)
                 setLabelling((v) => !v)
+                // Labelling among hidden labels would mean naming spots blind.
+                setLabelsHidden(false)
               }}
             >
               {!labelling ? "Label a spot" : moving ? `Click the new spot for ${moving}` : "Click a spot to name it"}
@@ -777,6 +850,7 @@ export default function PartView({
               <Button
                 variant={pointing ? "accent" : "outline"}
                 size="md"
+                icon="pointer"
                 onClick={() => {
                   setLabelling(false)
                   setMoving(null)

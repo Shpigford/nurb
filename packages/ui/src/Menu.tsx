@@ -30,6 +30,8 @@ export interface MenuItem {
   separated?: boolean
   /** A radio-style menu: the checked item carries a check, the rest keep the slot. */
   checked?: boolean
+  /** An on/off row that toggles on its own, beside others that do too. */
+  checkbox?: boolean
   /** A hint at the row's end (a "sign in" pill, a model's note). */
   trailing?: ReactNode
   /** Eyebrow above this item; consecutive items with the same section share one. */
@@ -45,6 +47,7 @@ export default function Menu({
   label,
   items,
   align = "right",
+  above,
   className,
   menuClassName,
   trigger,
@@ -58,6 +61,8 @@ export default function Menu({
   label: string
   items: MenuItem[]
   align?: "left" | "right"
+  /** Open upward, for a trigger near the bottom of the window. */
+  above?: boolean
   className?: string
   menuClassName?: string
   /** Replaces the "…" glyph; the button chrome stays. */
@@ -97,16 +102,12 @@ export default function Menu({
     if (!open || !portal) return
     const rect = triggerRef.current?.getBoundingClientRect()
     if (!rect) return
-    setAnchor(
-      align === "right"
-        ? {
-            position: "fixed",
-            top: rect.bottom + 4,
-            right: window.innerWidth - rect.right,
-          }
-        : { position: "fixed", top: rect.bottom + 4, left: rect.left },
-    )
-  }, [open, portal, align])
+    setAnchor({
+      position: "fixed",
+      ...(above ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
+      ...(align === "right" ? { right: window.innerWidth - rect.right } : { left: rect.left }),
+    })
+  }, [open, portal, align, above])
 
   useEffect(() => {
     if (!open) return
@@ -165,7 +166,7 @@ export default function Menu({
               className={clsx(
                 "z-30 min-w-[168px] overflow-hidden rounded-[6px] border border-panel-edge bg-ground shadow-[var(--shadow-panel)]",
                 footer ? "pt-1" : "py-1",
-                !portal && "absolute top-full mt-1",
+                !portal && (above ? "absolute bottom-full mb-1" : "absolute top-full mt-1"),
                 !portal && (align === "right" ? "right-0" : "left-0"),
                 menuClassName,
               )}
@@ -304,7 +305,7 @@ function MenuRows({ items, onPick }: { items: MenuItem[]; onPick: (item: MenuIte
           ) : null}
           <button
             type="button"
-            role={checkable ? "menuitemradio" : "menuitem"}
+            role={item.checkbox ? "menuitemcheckbox" : checkable ? "menuitemradio" : "menuitem"}
             aria-checked={checkable ? Boolean(item.checked) : undefined}
             disabled={item.disabled}
             title={item.title}

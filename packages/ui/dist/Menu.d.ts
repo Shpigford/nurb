@@ -9,6 +9,8 @@ export interface MenuItem {
     separated?: boolean;
     /** A radio-style menu: the checked item carries a check, the rest keep the slot. */
     checked?: boolean;
+    /** An on/off row that toggles on its own, beside others that do too. */
+    checkbox?: boolean;
     /** A hint at the row's end (a "sign in" pill, a model's note). */
     trailing?: ReactNode;
     /** Eyebrow above this item; consecutive items with the same section share one. */
@@ -19,10 +21,12 @@ export interface MenuItem {
     /** Hover text, for a note too long to sit in the row. */
     title?: string;
 }
-export default function Menu({ label, items, align, className, menuClassName, trigger, footer, portal, disabled, triggerClassName, onOpenChange, filter, }: {
+export default function Menu({ label, items, align, above, className, menuClassName, trigger, footer, portal, disabled, triggerClassName, onOpenChange, filter, }: {
     label: string;
     items: MenuItem[];
     align?: "left" | "right";
+    /** Open upward, for a trigger near the bottom of the window. */
+    above?: boolean;
     className?: string;
     menuClassName?: string;
     /** Replaces the "…" glyph; the button chrome stays. */

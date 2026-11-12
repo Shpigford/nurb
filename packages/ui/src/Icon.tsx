@@ -9,7 +9,7 @@ import type { ReactNode, SVGProps } from "react"
 // 11810 download · 11809 expand · 12597 eye · 61037 link · 2020 chevron-up
 // 1903 minus · 11742 arrow-up · 61842 media-stop (glyph) · 62372 loader
 // 11984 chat-bubble · 12594 dots · 1897 trash · 12065 ruler · 12602 gear
-// 12383 user · 60577 rect-logout · 1942 box · 12591 copy · 1976 folder.
+// 12383 user · 60577 rect-logout · 1942 box · 12591 copy · 1976 folder · 2012 tag · 1955 pointer.
 
 export type IconName =
   | "chevron-left"
@@ -41,6 +41,8 @@ export type IconName =
   | "box"
   | "copy"
   | "folder"
+  | "tag"
+  | "pointer"
 
 const PATHS: Record<IconName, ReactNode> = {
   "chevron-left": <polyline points="7.75 1.75 3.5 6 7.75 10.25" />,
@@ -220,6 +222,15 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="m.75,7.25V3.25c0-1.105.895-2,2-2h1.701c.607,0,1.18.275,1.56.748l.603.752h2.636c1.105,0,2,.895,2,2v2.5" />
       <path d="m2.75,5.25h6.5c1.105,0,2,.895,2,2v1.5c0,1.105-.895,2-2,2H2.75c-1.105,0-2-.895-2-2v-1.5c0-1.105.895-2,2-2Z" />
     </>
+  ),
+  tag: (
+    <>
+      <circle cx="4" cy="4" r="1" fill="currentColor" stroke="none" />
+      <path d="m1.25,2.25v3.086c0,.265.105.52.293.707l4.105,4.105c.781.781,2.047.781,2.828,0l1.672-1.672c.781-.781.781-2.047,0-2.828L6.043,1.543c-.188-.188-.442-.293-.707-.293h-3.086c-.552,0-1,.448-1,1Z" />
+    </>
+  ),
+  pointer: (
+    <path d="m1.455.814l9.367,3.422c.447.163.434.801-.019.946l-4.258,1.363-1.363,4.258c-.145.454-.782.467-.946.019L.814,1.455c-.146-.399.242-.787.641-.641Z" />
   ),
 }
 
