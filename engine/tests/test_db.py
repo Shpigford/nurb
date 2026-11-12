@@ -586,3 +586,34 @@ def test_a_rename_keeps_the_title_exactly_as_typed(tmp_path):
     row = conn.execute("SELECT name, title FROM parts WHERE id = ?", (part["id"],)).fetchone()
     assert (row["name"], row["title"]) == ("shelf_bracket", "Shelf Bracket")
     conn.close()
+
+
+def test_a_draft_part_has_no_revision_and_a_free_name(tmp_path):
+    conn = db.connect(tmp_path / "x.db")
+    project_id = db.create_project(conn, "shelves", folder=True)
+    first, name = db.create_draft_part(conn, project_id, "a bin")
+    assert name == "new_part"
+    _, second = db.create_draft_part(conn, project_id, None)
+    assert second == "new_part_2"
+    row = conn.execute("SELECT current_revision_id, title FROM parts WHERE id = ?", (first,)).fetchone()
+    assert (row["current_revision_id"], row["title"]) == (None, "a bin")
+    # The newest draft is the one being described; an older one was walked away from.
+    assert db.draft_of(conn, project_id)["name"] == "new_part_2"
+    conn.close()
+
+
+def test_a_draft_never_takes_a_deleted_parts_name(tmp_path):
+    conn = db.connect(tmp_path / "x.db")
+    project_id = db.create_project(conn, "shelves", folder=True)
+    gone, _ = db.create_draft_part(conn, project_id, "a bin")
+    db.add_message(conn, project_id, "user", "a bin", {}, part="new_part")
+    db.delete_part(conn, gone)
+    _, name = db.create_draft_part(conn, project_id, "a lid")
+    assert name == "new_part_2"
+    conn.close()
+
+
+def test_a_draft_is_titled_by_the_opening_words():
+    assert db.draft_title("  a hook   for the shed ") == "a hook for the shed"
+    assert db.draft_title("one two three four five six seven eight, nine ten") == "one two three four five six seven eight…"
+    assert db.draft_title("") is None

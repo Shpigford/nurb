@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ask, message, open as pickFolder } from "@tauri-apps/plugin-dialog";
@@ -7,7 +7,6 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cue, duration, ease, Icon, IconButton, LiveActivity, UpdateCard, useLiveActivity } from "@nurb/ui";
 import {
-  claimMessages,
   configure,
   createProject,
   fetchProject,
@@ -38,7 +37,7 @@ import { createLatestRequestGate } from "./latestRequest";
 import Library from "./Library";
 import ProjectPanel from "./ProjectPanel";
 import { openInSlicer, saveToDownloads } from "./downloads";
-import { messagesForPart, moveTargets, titleCase } from "./parts";
+import { isDraft, messagesForPart, moveTargets, titleCase } from "./parts";
 import ProjectPicker from "./ProjectPicker";
 import Setup from "./Setup";
 import Settings, { type AboutInfo, type SettingsSection } from "./Settings";
@@ -49,7 +48,9 @@ type PickTarget = { id: string | null; name: string; project_id: string; folder:
 
 // A part being started inside a folder: the parts the folder already had, its
 // last turn before the draft, and the part once the agent has written it.
-type Draft = { projectId: string; had: string[]; after: number; landed: string | null };
+// A new part in a folder, from the click until its row exists. The names the folder
+// already had tell the new row apart.
+type Draft = { projectId: string; had: string[] };
 
 type ServeInfo = {
   url: string;
@@ -375,9 +376,8 @@ function App() {
   // A folder keeps a conversation for each part in it, plus one about the folder
   // itself. A project holding a single part has one conversation, and the part
   // and the project are the same thing, so it is the project's.
-  // A new part's own turns stay on its draft until the turn that wrote it ends.
-  const drafting =
-    draft !== null && draft.projectId === projectId && (partName === null || partName === draft.landed);
+  // A new part has a conversation of its own before it has a row to file it under.
+  const drafting = draft !== null && draft.projectId === projectId && partName === null;
   const isFolder = project?.folder || promoted === projectId;
   const chatPart = drafting ? NEW_PART : isFolder ? partName ?? PROJECT_CHAT : PROJECT_CHAT;
 
@@ -413,6 +413,13 @@ function App() {
   }, [projectId, dirs, chatPart]);
 
   const activeDir = projectId ? dirs[projectId] ?? null : null;
+
+  // Who is at work on the part on screen, for the stage of a part with no design yet.
+  const activeColumn = columns.find((col) => col.path === activeDir && col.part === chatPart);
+  const designer =
+    activeDir && busyChats[chatKey(activeDir, chatPart)]
+      ? AGENT_LABEL[activeColumn?.agent ?? defaultAgent] ?? null
+      : null;
 
   useEffect(() => {
     setColumns((list) => retainChatColumns(list, activeDir, busyRef.current));
@@ -554,8 +561,8 @@ function App() {
   // A new part is its own container until the person puts it in a project, so
   // the library never shows an empty shelf waiting to be filled.
   // Inside a folder the part is started there, so the agent works beside its
-  // siblings and their shared sizes; the conversation becomes the part's once
-  // the agent has written it.
+  // siblings and their shared sizes. The engine makes the part's row with the
+  // first prompt, and the conversation becomes the part's from then on.
   const newPart = useCallback(async (folderId?: string) => {
     setLibraryError(null);
     try {
@@ -566,12 +573,7 @@ function App() {
         if (!running) {
           await invoke("select_part_chat", { projectId: folderId, part: NEW_PART, sessionId: null });
           setColumns((list) => list.filter((col) => !(col.path === dir && col.part === NEW_PART)));
-          setDraft({
-            projectId: folderId,
-            had: folder.parts.map((part) => part.name),
-            after: Math.max(0, ...folder.messages.map((message) => message.sequence_number ?? 0)),
-            landed: null,
-          });
+          setDraft({ projectId: folderId, had: folder.parts.map((part) => part.name) });
         }
         setProjectId(folderId);
         setPartName(null);
@@ -592,27 +594,51 @@ function App() {
     }
   }, [loadProjects, dirs]);
 
-  // The first part the folder did not have when the draft began is the one it made.
+  // The first part the folder did not have when the draft began is the one it
+  // made: the row the first prompt created, or for an agent that stores no
+  // transcript, the part it wrote. The column is keyed by a stable id, so the
+  // running turn moves with it.
   useEffect(() => {
-    if (!draft || draft.landed) return;
+    if (!draft) return;
     const made = allParts.find((part) => part.project_id === draft.projectId && !draft.had.includes(part.name));
     if (!made) return;
-    setDraft({ ...draft, landed: made.name });
-    if (projectId === draft.projectId) setPartName((open) => open ?? made.name);
-  }, [draft, allParts, projectId]);
-
-  // The turn that wrote the part is still storing unnamed rows, so the
-  // conversation is handed over once it finishes, or its last rows would be left out.
-  useEffect(() => {
-    if (!draft?.landed) return;
-    const dir = dirs[draft.projectId];
-    if (!dir || busyChats[chatKey(dir, NEW_PART)]) return;
-    const { projectId: folderId, landed: name, after } = draft;
     setDraft(null);
-    claimMessages(folderId, name, after).catch((e) => setError(String(e)));
-    invoke("rename_part_chat", { projectId: folderId, was: NEW_PART, name }).catch((e) => setError(String(e)));
-    moveChat(dir, NEW_PART, name);
-  }, [draft, dirs, busyChats, moveChat]);
+    invoke("rename_part_chat", { projectId: draft.projectId, was: NEW_PART, name: made.name }).catch((e) =>
+      setError(String(e)),
+    );
+    const dir = dirs[draft.projectId];
+    if (dir) moveChat(dir, NEW_PART, made.name);
+    if (projectId === draft.projectId) setPartName((open) => open ?? made.name);
+  }, [draft, allParts, projectId, dirs, moveChat]);
+
+  // The agent's first write names a draft. Nothing in the shell asked for that
+  // rename, so the conversation and the selection follow it here. A rename the
+  // person makes keeps the draft without source and is handled where it is made.
+  const partRenamedRef = useRef(partRenamed);
+  partRenamedRef.current = partRenamed;
+  const draftNames = useRef(new Map<string, string>());
+  useEffect(() => {
+    const before = draftNames.current;
+    draftNames.current = new Map(allParts.filter(isDraft).map((part) => [part.id, part.name]));
+    for (const part of allParts) {
+      const was = before.get(part.id);
+      if (was && was !== part.name && !isDraft(part)) partRenamedRef.current(part.project_id, was, part.name);
+    }
+  }, [allParts]);
+
+  // A card says its part is being designed while that part's conversation has a turn running.
+  const designing = useMemo(
+    () =>
+      new Set(
+        allParts
+          .filter((part) => {
+            const dir = dirs[part.project_id];
+            return Boolean(dir && busyChats[chatKey(dir, part.folder ? part.name : PROJECT_CHAT)]);
+          })
+          .map((part) => part.id),
+      ),
+    [allParts, dirs, busyChats],
+  );
 
   // The part's own container becomes the folder when it has no project yet;
   // otherwise the folder is made and the part moves into it.
@@ -858,6 +884,7 @@ function App() {
           opening={Boolean(projectId) && !project && !drafting}
           partName={partName}
           starting={drafting}
+          designer={designer}
           onSelectPart={setPartName}
           onOpenProject={project && projectId ? () => setProjectPanel({ id: projectId, name: project.name }) : undefined}
           onNewPart={project?.folder ? () => void newPart(project.id) : undefined}
@@ -910,23 +937,35 @@ function App() {
                     // A folder's own conversation speaks of the folder; every
                     // other column speaks of the part it belongs to.
                     wholeProject={Boolean(project?.folder) && col.part === PROJECT_CHAT}
+                    // A draft's name is a placeholder the agent replaces, so it is "this part".
                     subject={
                       col.part === NEW_PART
                         ? project?.name ?? "this project"
                         : col.part === PROJECT_CHAT
                         ? project?.folder
                           ? project.name
-                          : project?.parts[0]?.name ?? "this part"
+                          : project?.parts[0] && !isDraft(project.parts[0])
+                          ? project.parts[0].name
+                          : "this part"
+                        : project?.parts.some((p) => p.name === col.part && isDraft(p))
+                        ? "this part"
                         : col.part
                     }
                     // The selected project's transcript, whichever screen is up:
                     // an empty list resets the column's sequence floor, and a step
                     // recorded against zero is pruned the moment the list returns.
                     messages={
+                      // The first prompt is filed under the row it created, a moment
+                      // before the column follows it there.
                       col.path === activeDir && col.part === NEW_PART
-                        ? (project?.messages ?? []).filter(
-                            (m) => (m.part ?? null) === null && (m.sequence_number ?? 0) > (draft?.after ?? 0),
-                          )
+                        ? draft
+                          ? (project?.messages ?? []).filter(
+                              (m) =>
+                                m.part != null &&
+                                !draft.had.includes(m.part) &&
+                                project?.parts.some((p) => p.name === m.part),
+                            )
+                          : []
                         : col.path === activeDir
                         ? messagesForPart(
                             project?.messages ?? [],
@@ -968,6 +1007,7 @@ function App() {
         <Library
           projects={projects}
           allParts={allParts}
+          designing={designing}
           showAll={showAll}
           projectId={projectId}
           updateReady={Boolean(update)}

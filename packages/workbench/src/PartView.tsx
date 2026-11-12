@@ -143,6 +143,7 @@ export default function PartView({
   opening,
   partName,
   starting,
+  designer,
   onSelectPart,
   onPartRenamed,
   onOpenProject,
@@ -163,6 +164,9 @@ export default function PartView({
   partName: string | null
   /** A new part is being described, so no sibling stands in for it until it exists. */
   starting?: boolean
+  /** Who is designing the part right now ("Claude"), while that turn runs. Only a
+   * part with no design yet says so on its stage. */
+  designer?: string | null
   /** The header's part switcher changes parts, and whoever owns the selection is told. */
   onSelectPart?: (name: string) => void
   /** A rename from the header. The host moves its selection (and any conversation) along. */
@@ -247,6 +251,8 @@ export default function PartView({
   const runId = build?.id ?? null
   const findings = build?.findings ?? []
   const failedBuild = build?.status === "error"
+  // Described and not written yet: the person's words are all there is.
+  const noDesign = part != null && part.source == null
 
   const hasFindings = findings.length > 0
 
@@ -566,7 +572,7 @@ export default function PartView({
 
   const heightMm = stats?.size_mm?.[2] ?? null
   const seconds = buildSeconds(build)
-  const detail = [rev(part?.revision ?? 0), seconds == null ? null : elapsedLabel(seconds)]
+  const detail = [noDesign ? null : rev(part?.revision ?? 0), seconds == null ? null : elapsedLabel(seconds)]
     .filter(Boolean)
     .join(" · ")
   const tone: HeaderTone = building ? "building" : verdict
@@ -712,7 +718,11 @@ export default function PartView({
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
             <EmptyProject
               title={
-                part
+                noDesign
+                  ? designer
+                    ? `${designer} is designing this part`
+                    : "No design yet"
+                  : part
                   ? failedBuild
                     ? `${part.name} did not build`
                     : `${part.name} is not built yet`
@@ -721,7 +731,11 @@ export default function PartView({
                     : "No part yet"
               }
               caption={
-                !part
+                noDesign
+                  ? designer
+                    ? "It appears here, live, as soon as the first version builds."
+                    : "Describe the part in the chat and it appears here."
+                  : !part
                   ? opening
                     ? "This can take a moment while another part is building."
                     : "It appears here, live, as soon as the plan is set."
@@ -730,7 +744,7 @@ export default function PartView({
                     : "Build it once and it appears here. Dragging a parameter rebuilds it from then on."
               }
             />
-            {part && !build ? (
+            {part && !build && !noDesign ? (
               <>
                 <Button
                   variant="accent"
@@ -785,8 +799,9 @@ export default function PartView({
         </div>
       </StageColumn>
 
-      {/* Sheet 30: an empty project has no rail; the stage runs to the edge. */}
-      {part ? (
+      {/* Sheet 30: an empty project has no rail; the stage runs to the edge. So does a
+       * part with no design yet, which has nothing to adjust. */}
+      {part && !noDesign ? (
         <ParamRail
           count={part?.params?.length ?? 0}
           pinned={pinned}
@@ -876,7 +891,7 @@ export default function PartView({
                   partId={part.id}
                   export={runExport}
                   status={sliceStatus}
-                  revision={part.revision}
+                  revision={part.revision ?? 0}
                   runId={runId}
                   openIn={slicer ? { name: slicer.name, open: openInSlicer } : null}
                 />

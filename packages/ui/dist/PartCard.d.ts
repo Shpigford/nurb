@@ -4,7 +4,10 @@ export interface PartCardPart {
     name: string;
     identifier?: string;
     bbox?: number[] | null;
-    status: "built" | "failed" | "building" | "unbuilt";
+    /** A draft is described and not written yet, so there is nothing to build. */
+    status: "built" | "failed" | "building" | "unbuilt" | "draft";
+    /** A draft whose agent turn is running right now. */
+    designing?: boolean;
     revision?: number | null;
     builtAt?: string | null;
     thumbnailUrl?: string | null;

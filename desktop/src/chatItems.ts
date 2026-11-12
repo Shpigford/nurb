@@ -91,15 +91,25 @@ const ACTIVITY: [RegExp, string][] = [
   [/^(export|slice)/, "preparing the print"],
 ];
 
-/** "building the part" while that is the newest running call, else "working". */
-export function activity(items: Item[]): string {
+// How long a silence lasts before the line says how long. A model can think for
+// twenty minutes with nothing to show, and a line that never changes reads as a hang.
+export const QUIET_MS = 30_000;
+
+/**
+ * "building the part" while that is the newest running call. With no call running
+ * the agent is thinking, and once it has been quiet a while the line says for how
+ * long: "thinking (4 min)".
+ */
+export function activity(items: Item[], quietMs = 0): string {
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i];
     if (item.kind !== "step" || item.step.status !== "running") continue;
     const tool = (item.tool ?? "").replace(/^mcp__nurb__/, "");
     return ACTIVITY.find(([pattern]) => pattern.test(tool))?.[1] ?? "working";
   }
-  return "working";
+  if (quietMs < QUIET_MS) return "thinking";
+  const seconds = Math.floor(quietMs / 1000);
+  return `thinking (${seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min`})`;
 }
 
 const STEP_STATUS: Record<string, StepStatus> = {

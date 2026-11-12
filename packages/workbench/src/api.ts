@@ -50,9 +50,10 @@ export interface Part {
   /** What the person calls it, exactly as typed; null until they rename it. */
   title?: string | null
   kind: string
-  revision_id: string
-  revision: number
-  source: string
+  /** Null while the part is a draft: described, and not written yet. */
+  revision_id: string | null
+  revision: number | null
+  source: string | null
   card_md: string | null
   params: Param[]
   /** The slider values the newest run was built at; empty when it ran on the defaults. */
@@ -297,6 +298,8 @@ export function setPrinter(projectId: string, profile: string): Promise<{ printe
 /**
  * Put one line of the conversation in the transcript. Naming a part files the
  * line under that part; without one it belongs to the folder's own conversation.
+ * `newPart` says the line starts a new part in a folder, which the engine creates
+ * then and there, so the reply carries the part it was filed under.
  */
 export function addMessage(
   projectId: string,
@@ -304,14 +307,26 @@ export function addMessage(
   content: string,
   part?: string | null,
   files?: string[],
-  thumbnails?: (string | null)[]
+  thumbnails?: (string | null)[],
+  newPart?: boolean
 ): Promise<Message> {
-  return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, { role, content, part, files, thumbnails })
+  return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, {
+    role,
+    content,
+    part,
+    files,
+    thumbnails,
+    new_part: newPart || undefined,
+  })
 }
 
-/** Hand a new part the folder's unnamed turns after `after`, the ones that described it. */
-export function claimMessages(projectId: string, part: string, after: number): Promise<{ claimed: number }> {
-  return post(`/api/projects/${encodeURIComponent(projectId)}/messages/claim`, { part, after })
+/**
+ * Put a new part in the library from its first prompt, for an agent whose turns
+ * the app does not store. Same rule as a stored first prompt: a folder starts one
+ * when asked, a part's own container when it has none.
+ */
+export function startPart(projectId: string, content: string, newPart: boolean): Promise<{ part: string | null }> {
+  return post(`/api/projects/${encodeURIComponent(projectId)}/draft`, { content, new_part: newPart })
 }
 
 /** A folder is a project the person named; without one the project holds a single part. */

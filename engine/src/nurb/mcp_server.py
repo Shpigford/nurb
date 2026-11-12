@@ -232,6 +232,13 @@ def _project(conn, project_id):
     return row
 
 
+# A part the person has started describing and nothing has written yet.
+DRAFT_NOTE = (
+    "This part has no source yet: the person has only described it. Write it with "
+    "write_part_source under a name that says what it is, and this part takes that name."
+)
+
+
 def _part(conn, project_id, name):
     """The project's part by name, or None. Modules are not parts to a tool."""
     for row in db.parts_of(conn, project_id):
@@ -419,7 +426,11 @@ def part_repeats(conn, project_id, name):
     """What this part repeats from its siblings, in the words a build result uses."""
     from . import shared
 
-    sources = {row["name"]: row["source"] for row in db.parts_of(conn, project_id) if row["kind"] == "part"}
+    sources = {
+        row["name"]: row["source"]
+        for row in db.parts_of(conn, project_id)
+        if row["kind"] == "part" and row["source"] is not None
+    }
     if len(sources) < 2 or name not in sources:
         return []
     found = []
@@ -520,6 +531,11 @@ def get_project(conn, args, base_url):
             "source": row["source"],
             "last_build": _last_build(conn, row),
             **(_labels_of(conn, row["id"], db.latest_ok_run(conn, row["id"])) if row["kind"] == "part" else {}),
+            **(
+                {"note": DRAFT_NOTE}
+                if row["kind"] == "part" and row["source"] is None
+                else {}
+            ),
         }
         for row in rows
     ]
@@ -827,10 +843,18 @@ def write_part_source(conn, args, base_url, deadline=None):
     project = _project(conn, args["project_id"])
     name, source = args["part_name"], args["source"]
     row = _part(conn, project["id"], name)
+    if row is not None and row["source"] is None and db.DRAFT_NAMES.match(name):
+        raise Refused(f"{name} is a placeholder; write the part under a name that says what it is")
     if row is None:
         if any(other["name"] == name for other in db.parts_of(conn, project["id"])):
             raise Refused(f"{name} is a module in this project; pick another name")
-        db.create_part(conn, project["id"], name, source)
+        # The part the person started describing is already in the library, so the
+        # first write names it rather than adding a second card beside it.
+        draft = db.draft_of(conn, project["id"])
+        if draft is not None:
+            db.adopt_draft(conn, draft["id"], name, source, note=args.get("note"))
+        else:
+            db.create_part(conn, project["id"], name, source)
     elif row["source"] == source:
         _record(
             conn,

@@ -31,7 +31,10 @@ export interface PartCardPart {
   name: string
   identifier?: string
   bbox?: number[] | null
-  status: "built" | "failed" | "building" | "unbuilt"
+  /** A draft is described and not written yet, so there is nothing to build. */
+  status: "built" | "failed" | "building" | "unbuilt" | "draft"
+  /** A draft whose agent turn is running right now. */
+  designing?: boolean
   revision?: number | null
   builtAt?: string | null
   thumbnailUrl?: string | null
@@ -61,6 +64,7 @@ export default function PartCard({
   const built = relativeTime(part.builtAt)
   const failed = part.status === "failed"
   const building = part.status === "building"
+  const draft = part.status === "draft"
   const pulse = usePulse(building, part.buildingSince)
   const context = useContextMenu()
   return (
@@ -75,8 +79,11 @@ export default function PartCard({
         aria-label={`Open ${part.name}`}
         className="absolute inset-0 z-10 rounded-[6px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       />
-      <div className="relative h-[148px] overflow-hidden rounded-t-[6px] border-b border-line-soft bg-ground">
-        {part.thumbnailUrl ? (
+      {/* A draft has no geometry yet, so its picture is a plain panel rather than a box. */}
+      <div
+        className={`relative h-[148px] overflow-hidden rounded-t-[6px] border-b border-line-soft ${draft ? "bg-raised/60" : "bg-ground"}`}
+      >
+        {draft ? null : part.thumbnailUrl ? (
           // The card owns the box, so the frame fills it instead of its own ratio,
           // and the whole part stays in frame rather than being cropped to it.
           <BlurUpImage
@@ -122,16 +129,26 @@ export default function PartCard({
             <span className="text-pass"><Icon name="check" /></span>
           ) : null}
         </div>
+        {/* A draft's name is a placeholder the agent replaces, so it is not shown. */}
         <p className="mono-caption truncate text-muted normal-case [letter-spacing:0.08em]">
-          {part.identifier ?? ""}
-          {part.identifier && dims ? " · " : ""}
+          {draft ? "\u00a0" : part.identifier ?? ""}
+          {!draft && part.identifier && dims ? " · " : ""}
           {dims ? `${dims} mm` : ""}
         </p>
       </div>
       <div className="mono-caption flex items-center justify-between border-t border-line-soft px-[13px] py-2 text-muted [letter-spacing:0.08em]">
-        <span>{built ? `Built ${built}` : "Not built yet"}</span>
+        {draft ? (
+          <span className="flex items-center gap-2">
+            {part.designing ? (
+              <span aria-hidden="true" className="size-1.5 rounded-full bg-accent motion-safe:animate-pulse" />
+            ) : null}
+            {part.designing ? "Being designed" : "No design yet"}
+          </span>
+        ) : (
+          <span>{built ? `Built ${built}` : "Not built yet"}</span>
+        )}
         <span className={failed ? "text-warn" : undefined}>
-          {failed ? "Failed" : (part.folder ?? rev(part.revision))}
+          {failed ? "Failed" : (part.folder ?? (draft ? "" : rev(part.revision)))}
         </span>
       </div>
     </div>

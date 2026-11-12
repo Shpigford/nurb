@@ -523,6 +523,88 @@ def create_part(conn, project_id, name, source, card_md=None, kind="part"):
     return part_id
 
 
+# A part the person has started describing, before any agent has written it.
+DRAFT_NAME = "new_part"
+DRAFT_NAMES = re.compile(rf"^{DRAFT_NAME}(_\d+)?\Z")
+DRAFT_TITLE_WORDS = 8
+
+
+def draft_title(text):
+    """The first words a person typed about a part, which name its card until it has a name."""
+    words = (text or "").split()
+    if not words:
+        return None
+    title = " ".join(words[:DRAFT_TITLE_WORDS])
+    if len(words) > DRAFT_TITLE_WORDS:
+        title = title.rstrip(",.;:!?") + "…"
+    return title[:NAME_LIMIT]
+
+
+def create_draft_part(conn, project_id, title=None):
+    """A part with no revision yet, so it is in the library from the first prompt.
+    Returns (part_id, name)."""
+    part_id = new_id()
+    with transaction(conn):
+        # A deleted part's turns stay behind under its name, and a draft that took
+        # the name would open on someone else's conversation.
+        taken = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM parts WHERE project_id = ?"
+                " UNION SELECT part FROM messages WHERE project_id = ? AND part IS NOT NULL",
+                (project_id, project_id),
+            )
+        }
+        name, count = DRAFT_NAME, 1
+        while name in taken:
+            count += 1
+            name = f"{DRAFT_NAME}_{count}"
+        conn.execute(
+            "INSERT INTO parts (id, project_id, name, kind, title, created_at) VALUES (?, ?, ?, 'part', ?, ?)",
+            (part_id, project_id, name, title, now()),
+        )
+    changed("part", part_id, project_id)
+    return part_id, name
+
+
+def draft_of(conn, project_id):
+    """The project's newest part with no source yet, or None. An older draft is one the
+    person walked away from; the newest is the one being described now."""
+    return conn.execute(
+        "SELECT * FROM parts WHERE project_id = ? AND kind = 'part' AND current_revision_id IS NULL"
+        " ORDER BY created_at DESC LIMIT 1",
+        (project_id,),
+    ).fetchone()
+
+
+def adopt_draft(conn, part_id, name, source, note=None):
+    """An agent's first source for a draft, under the name the agent chose. The id stays,
+    so the card and the open workspace keep the part, and the conversation follows the
+    name. The opening words of the prompt give way to the agent's name; a title the
+    person typed stays."""
+    with transaction(conn):
+        row = conn.execute(
+            "SELECT p.project_id, p.name, j.folder FROM parts p JOIN projects j ON j.id = p.project_id"
+            " WHERE p.id = ?",
+            (part_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"no part {part_id!r}")
+        if DRAFT_NAMES.match(row["name"]):
+            conn.execute("UPDATE parts SET title = NULL WHERE id = ?", (part_id,))
+        if row["folder"]:
+            # The steps the agent took before it named the part (reading the guide,
+            # pinning the plan) carry no part name, and in a folder an unnamed row is
+            # the folder's own conversation. They are this part's, from its first prompt on.
+            conn.execute(
+                "UPDATE messages SET part = ? WHERE project_id = ? AND part IS NULL AND sequence_number >"
+                " (SELECT MIN(sequence_number) FROM messages WHERE project_id = ? AND part = ?)",
+                (row["name"], row["project_id"], row["project_id"], row["name"]),
+            )
+        rename_part(conn, part_id, name)
+        add_revision(conn, part_id, source, note=note)
+
+
 def add_revision(conn, part_id, source, card_md=None, note=None):
     revision_id = new_id()
     with transaction(conn):
@@ -864,22 +946,6 @@ def add_message(conn, project_id, role, content, payload, part=None):
         )
     changed("message", message_id, project_id)
     return message_id
-
-
-def claim_messages(conn, project_id, part, after):
-    """Stamp a folder's unnamed turns after `after` with the part they made.
-
-    A new part in a folder is described before it has a name, so its first turns are
-    stored without one and handed to the part once the agent has written it.
-    """
-    with transaction(conn):
-        claimed = conn.execute(
-            "UPDATE messages SET part = ? WHERE project_id = ? AND part IS NULL AND sequence_number > ?",
-            (part, project_id, after),
-        ).rowcount
-    if claimed:
-        changed("message", None, project_id)
-    return claimed
 
 
 def latest_run(conn, part_id, revision_id=None):

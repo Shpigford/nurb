@@ -37,7 +37,7 @@ import {
   type Part,
   type ProjectSummary,
 } from "@nurb/workbench/api";
-import { folders, matchesSearch, partsIn, sortParts, titleCase, type LibrarySort } from "./parts";
+import { folders, isDraft, matchesSearch, partsIn, sortParts, titleCase, type LibrarySort } from "./parts";
 
 const SORTS: Record<LibrarySort, string> = { built: "Last built", name: "Name" };
 const SORT_KEY = "nurb.librarySort";
@@ -65,6 +65,8 @@ type Props = {
   projects: ProjectSummary[];
   /** Every part in the library, which is what "All parts" shows. */
   allParts: LibraryPart[];
+  /** The ids of the parts whose agent turn is running. */
+  designing: Set<string>;
   /** Whether the rail is on All parts or on the selected folder. */
   showAll: boolean;
   projectId: string | null;
@@ -95,9 +97,11 @@ type Props = {
 // The card wants the shape of the last build, not the build itself. The folder
 // name rides along when the part is in one, because the footer says that instead
 // of the revision.
-function toCard(part: Part, folder?: string | null): PartCardPart {
+function toCard(part: Part, folder?: string | null, designing = false): PartCardPart {
   const build = part.build;
-  const status: PartCardPart["status"] = !build
+  const status: PartCardPart["status"] = isDraft(part)
+    ? "draft"
+    : !build
     ? "unbuilt"
     : !build.finished_at
       ? "building"
@@ -116,6 +120,7 @@ function toCard(part: Part, folder?: string | null): PartCardPart {
     buildingSince: status === "building" ? build?.started_at ?? null : null,
     thumbnailUrl: build?.thumbnail_url ? absolute(build.thumbnail_url) : null,
     folder: folder ?? null,
+    designing,
   };
 }
 
@@ -124,6 +129,7 @@ function toCard(part: Part, folder?: string | null): PartCardPart {
 export default function Library({
   projects,
   allParts,
+  designing,
   showAll,
   projectId,
   updateReady,
@@ -561,7 +567,7 @@ export default function Library({
                         transition={{ duration: reduced ? 0 : duration.settle, ease: OUT }}
                       >
                         <PartCard
-                          part={toCard(part, part.folder ? part.project_name : null)}
+                          part={toCard(part, part.folder ? part.project_name : null, designing.has(part.id))}
                           menu={partMenu(part)}
                           renaming={renamingPart === part.id}
                           onRename={(name) => endPartRename(part, name)}

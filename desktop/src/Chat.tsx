@@ -34,7 +34,7 @@ import {
   type MenuItem,
   type Message,
 } from "@nurb/ui";
-import { addMessage } from "@nurb/workbench/api";
+import { addMessage, startPart } from "@nurb/workbench/api";
 import {
   activity,
   applyChatEvent,
@@ -55,6 +55,8 @@ export const PROJECT_CHAT = "//project";
 // A part being started inside a folder has no name yet. Its turns are stored
 // unnamed and handed to the part once the agent writes it. Twin in acp.rs.
 export const NEW_PART = "//new";
+// The engine's name for a part before the agent names it.
+const DRAFT_NAME = /^new_part(_\d+)?$/;
 
 type Permission = { id: number; title: string; options: PermissionOption[] };
 
@@ -297,6 +299,9 @@ function Chat({
   // that made it, so a reply reads the name at the moment it arrives.
   const stampRef = useRef(stamp);
   stampRef.current = stamp;
+  // A first prompt starts its part once. The column moves to the new row a moment
+  // later, and a second send before it does must not start another.
+  const startedRef = useRef(false);
   const aboutProject = wholeProject ?? isProject;
   const spoken = subject ?? (isProject ? "this project" : part);
   // Claude runs through the app's own driver, which stores the conversation in
@@ -362,10 +367,20 @@ function Chat({
   // The newest stored row, read at event time so a step remembers where the
   // transcript stood when it was called.
   const seqRef = useRef(0);
+  // When the agent last said anything, so a long silent think shows its length.
+  // The clock only ticks while a turn runs.
+  const quietSince = useRef(Date.now());
+  const [clock, setClock] = useState(() => Date.now());
   seqRef.current = messages.reduce((top, m) => Math.max(top, m.sequence_number ?? 0), 0);
   useEffect(() => {
     setItems((list) => pruneLanded(list, landed ?? messages));
   }, [landed, messages]);
+  useEffect(() => {
+    if (!busy) return;
+    setClock(Date.now());
+    const timer = setInterval(() => setClock(Date.now()), 5_000);
+    return () => clearInterval(timer);
+  }, [busy]);
   // The model and effort this conversation runs on. Empty before the agent has
   // ever reported its lists, which is only ever the first chat on this Mac.
   const [config, setConfig] = useState<ConfigRow[]>([]);
@@ -545,6 +560,7 @@ function Chat({
 
   const applyEvent = useCallback(
     (event: ChatEvent) => {
+      quietSince.current = Date.now();
       switch (event.type) {
         case "session_info":
           // Titles have no home since the visible session list went away.
@@ -730,6 +746,7 @@ function Chat({
           },
         ]);
       }
+      quietSince.current = Date.now();
       setBusy(true);
       onBusyRef.current(true);
       // The send is the only half of the turn that makes a sound. Stopping is
@@ -762,25 +779,41 @@ function Chat({
           restoreDraft();
           return;
         }
+        const starting = (isNew || (isProject && !aboutProject)) && !startedRef.current;
+        let started: string | null = null;
         if (isClaude) {
-          await addMessage(
+          const said = await addMessage(
             projectId,
             "user",
             text,
             stamp,
             files.length ? files.map(basename) : undefined,
             sentThumbnails,
+            isNew && starting,
           );
+          started = said.part ?? null;
           stored = true;
+        } else if (starting) {
+          // This agent keeps its own transcript, so the part is started on its own.
+          started = (await startPart(projectId, text, isNew)).part;
         }
+        if (starting) startedRef.current = true;
         promptingRef.current = true;
-        const renamed = isClaude && promptedPartRef.current !== part;
+        // A new part's chat moves to the row its first prompt made, a placeholder the
+        // agent's first write replaces, so that move is no rename to announce.
+        const renamed =
+          isClaude &&
+          promptedPartRef.current !== part &&
+          promptedPartRef.current !== NEW_PART &&
+          !DRAFT_NAME.test(promptedPartRef.current);
         promptedPartRef.current = part;
         await invoke<string>("send_prompt", {
           sessionId: session,
           // For the agent only: the transcript already holds what the person typed.
           text: renamed ? `${text}\n\n(This part is now called "${part}". Use that name from here on.)` : text,
-          part: part ?? null,
+          // Claude's part rides in its system prompt, and this only says where the
+          // session is filed: under the new part's row once the first prompt made one.
+          part: (isClaude && isNew && started) || part || null,
           attachments: files,
         });
         completed = true;
@@ -810,7 +843,7 @@ function Chat({
         if (completed) cue(document.hasFocus() ? "ready" : "arrival");
       }
     },
-    [ensureSession, part, attachmentDraft, isClaude, projectId, thumbnailOf],
+    [ensureSession, part, wholeProject, attachmentDraft, isClaude, projectId, thumbnailOf],
   );
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1364,7 +1397,7 @@ function Chat({
               className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
               aria-hidden="true"
             />
-            {label} is {activity(items)}…
+            {label} is {activity(items, Math.max(0, clock - quietSince.current))}…
           </p>
         )}
         {authNeeded !== "none" && (
