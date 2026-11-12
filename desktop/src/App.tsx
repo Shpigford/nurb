@@ -430,8 +430,8 @@ function App() {
   useEffect(() => {
     // A turn finished out of sight keeps its errors and replies until the
     // conversation is shown, even when its part is already on stage.
-    if (activeDir) {
-      setColumns((list) => markChatSeen(list, activeDir, chatPart, chatVisible));
+    if (activeDir && chatVisible) {
+      setColumns((list) => markChatSeen(list, activeDir, chatPart));
     }
   }, [activeDir, chatVisible, chatPart]);
 

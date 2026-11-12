@@ -8854,7 +8854,7 @@ function mc({ items: e, onPick: t }) {
       "button",
       {
         type: "button",
-        role: n ? "menuitemradio" : "menuitem",
+        role: i.checkbox ? "menuitemcheckbox" : n ? "menuitemradio" : "menuitem",
         "aria-checked": n ? !!i.checked : void 0,
         disabled: i.disabled,
         title: i.title,

@@ -68,8 +68,7 @@ export function updateChatActivity(
   return changed ? next : columns;
 }
 
-export function markChatSeen(columns: ChatColumn[], path: string, part: string, visible: boolean) {
-  if (!visible) return columns;
+export function markChatSeen(columns: ChatColumn[], path: string, part: string) {
   let changed = false;
   const next = columns.map((column) => {
     if (column.path !== path || column.part !== part || !column.unseen) return column;

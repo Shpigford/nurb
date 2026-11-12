@@ -30,6 +30,8 @@ export interface MenuItem {
   separated?: boolean
   /** A radio-style menu: the checked item carries a check, the rest keep the slot. */
   checked?: boolean
+  /** An on/off row that toggles on its own, beside others that do too. */
+  checkbox?: boolean
   /** A hint at the row's end (a "sign in" pill, a model's note). */
   trailing?: ReactNode
   /** Eyebrow above this item; consecutive items with the same section share one. */
@@ -304,7 +306,7 @@ function MenuRows({ items, onPick }: { items: MenuItem[]; onPick: (item: MenuIte
           ) : null}
           <button
             type="button"
-            role={checkable ? "menuitemradio" : "menuitem"}
+            role={item.checkbox ? "menuitemcheckbox" : checkable ? "menuitemradio" : "menuitem"}
             aria-checked={checkable ? Boolean(item.checked) : undefined}
             disabled={item.disabled}
             title={item.title}
