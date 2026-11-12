@@ -274,6 +274,18 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
+        // Size, position and maximized only: restoring visibility or
+        // decorations would fight the overlay title bar and the hidden-window
+        // startup path.
+        .plugin(
+            tauri_plugin_window_state::Builder::new()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::SIZE
+                        | tauri_plugin_window_state::StateFlags::POSITION
+                        | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                )
+                .build(),
+        )
         .manage(acp::Chats::new())
         .manage(claude::Drivers::new())
         .manage(agents::Logins::new())
