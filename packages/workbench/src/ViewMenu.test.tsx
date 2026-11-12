@@ -41,12 +41,12 @@ const bracket = project("p1", "Bracket", [bracketPart], [])
 
 // The menu stays open after a pick, so only open it when it is closed.
 function toggle(name: string) {
-  if (!screen.queryByRole("menu")) fireEvent.click(screen.getByRole("button", { name: "Show or hide" }))
+  if (!screen.queryByRole("menu")) fireEvent.click(screen.getByRole("button", { name: "View" }))
   fireEvent.click(screen.getByRole("menuitemcheckbox", { name }))
 }
 
 function item(name: string) {
-  if (!screen.queryByRole("menu")) fireEvent.click(screen.getByRole("button", { name: "Show or hide" }))
+  if (!screen.queryByRole("menu")) fireEvent.click(screen.getByRole("button", { name: "View" }))
   return screen.getByRole("menuitemcheckbox", { name })
 }
 

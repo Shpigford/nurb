@@ -725,22 +725,7 @@ export default function PartView({
               <span className="mono-label">Add to project</span>
             </button>
           ) : null}
-          <HeaderIcons className="border-l border-line">
-            <Menu
-              label="Show or hide"
-              portal
-              trigger={() => <Icon name="eye" />}
-              triggerClassName="size-7 rounded-[4px] text-ink-soft hover:bg-raised hover:text-ink"
-              items={[
-                ...(chat
-                  ? [{ label: "Conversation", checkbox: true, checked: !chatHidden, keepOpen: true, onSelect: () => setChatHidden(!chatHidden) }]
-                  : []),
-                { label: "Spot labels", checkbox: true, checked: !labelsHidden, keepOpen: true, onSelect: () => setLabelsHidden((v) => !v) },
-                { label: "Check markers", checkbox: true, checked: !markersHidden, keepOpen: true, onSelect: () => setMarkersHidden((v) => !v) },
-              ]}
-            />
-            {header?.end}
-          </HeaderIcons>
+          {header?.end ? <HeaderIcons>{header.end}</HeaderIcons> : null}
         </>
       }
     />
@@ -827,6 +812,25 @@ export default function PartView({
         )}
         {glbUrl ? (
           <div className="absolute right-4 bottom-4 z-10 flex gap-2">
+            {/* What is drawn on the stage, beside the other stage tools. Most people keep it all on. */}
+            <Menu
+              label="View"
+              above
+              trigger={() => (
+                <span className="btn-label flex items-center gap-2">
+                  <Icon name="eye" />
+                  View
+                </span>
+              )}
+              triggerClassName="h-9 rounded-[3px] border border-line bg-ground pr-3 pl-2.5 text-ink-soft hover:border-panel-edge hover:text-ink"
+              items={[
+                ...(chat
+                  ? [{ label: "Conversation", checkbox: true, checked: !chatHidden, keepOpen: true, onSelect: () => setChatHidden(!chatHidden) }]
+                  : []),
+                { label: "Spot labels", checkbox: true, checked: !labelsHidden, keepOpen: true, onSelect: () => setLabelsHidden((v) => !v) },
+                { label: "Check markers", checkbox: true, checked: !markersHidden, keepOpen: true, onSelect: () => setMarkersHidden((v) => !v) },
+              ]}
+            />
             <Button
               variant={labelling ? "accent" : "outline"}
               size="md"
