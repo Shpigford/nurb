@@ -468,6 +468,51 @@ export default function PartView({
     setDraft(null)
     setMoving(null)
   }, [part?.id])
+  const toggleLabelling = () => {
+    setPointing(false)
+    setDraft(null)
+    setMoving(null)
+    setLabelling((v) => !v)
+    // Labelling among hidden labels would mean naming spots blind.
+    setLabelsHidden(false)
+  }
+  const togglePointing = () => {
+    setLabelling(false)
+    setMoving(null)
+    setPointing((v) => !v)
+  }
+  // The stage's keys, shown beside the controls they press. Typing in a field
+  // or a dialog never reaches them, and a key held with Cmd or Ctrl belongs to
+  // the browser or the app, except Cmd+\, which hides the conversation.
+  const tools = useRef<HTMLDivElement>(null)
+  const keys = useRef<(event: KeyboardEvent) => void>(() => {})
+  keys.current = (event) => {
+    // The shell keeps this screen mounted under the library and lays settings
+    // over it; a stage whose tools are hidden or covered takes no keys.
+    if (event.defaultPrevented || event.isComposing || !stageOnTop(tools.current)) return
+    const target = event.target
+    if (target instanceof Element && target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return
+    const mod = event.metaKey || event.ctrlKey
+    if (mod && !event.altKey && !event.shiftKey && event.key === "\\" && chat) {
+      setChatHidden(!chatHidden)
+    } else if (mod || event.altKey) {
+      return
+    } else if (event.key === "l" || event.key === "L") {
+      toggleLabelling()
+    } else if ((event.key === "p" || event.key === "P") && onPointAt) {
+      togglePointing()
+    } else if (event.key === "Escape" && (labelling || pointing) && !draft) {
+      setLabelling(false)
+      setPointing(false)
+      setMoving(null)
+    } else return
+    event.preventDefault()
+  }
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => keys.current(event)
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [])
   const onPick = useCallback(
     ({ point, normal }: { point: [number, number, number]; normal: [number, number, number] }) => {
       if (labelling) {
@@ -811,7 +856,7 @@ export default function PartView({
           </div>
         )}
         {glbUrl ? (
-          <div className="absolute right-4 bottom-4 z-10 flex gap-2">
+          <div ref={tools} className="absolute right-4 bottom-4 z-10 flex gap-2">
             {/* What is drawn on the stage, beside the other stage tools. Most people keep it all on. */}
             <Menu
               label="View"
@@ -825,7 +870,7 @@ export default function PartView({
               triggerClassName="h-9 rounded-[3px] border border-line bg-ground pr-3 pl-2.5 text-ink-soft hover:border-panel-edge hover:text-ink"
               items={[
                 ...(chat
-                  ? [{ label: "Conversation", checkbox: true, checked: !chatHidden, keepOpen: true, onSelect: () => setChatHidden(!chatHidden) }]
+                  ? [{ label: "Conversation", checkbox: true, checked: !chatHidden, keepOpen: true, trailing: <Shortcut keys={"⌘\\"} />, onSelect: () => setChatHidden(!chatHidden) }]
                   : []),
                 { label: "Spot labels", checkbox: true, checked: !labelsHidden, keepOpen: true, onSelect: () => setLabelsHidden((v) => !v) },
                 { label: "Check markers", checkbox: true, checked: !markersHidden, keepOpen: true, onSelect: () => setMarkersHidden((v) => !v) },
@@ -835,14 +880,8 @@ export default function PartView({
               variant={labelling ? "accent" : "outline"}
               size="md"
               icon="tag"
-              onClick={() => {
-                setPointing(false)
-                setDraft(null)
-                setMoving(null)
-                setLabelling((v) => !v)
-                // Labelling among hidden labels would mean naming spots blind.
-                setLabelsHidden(false)
-              }}
+              title="Label a spot (L)"
+              onClick={toggleLabelling}
             >
               {!labelling ? "Label a spot" : moving ? `Click the new spot for ${moving}` : "Click a spot to name it"}
             </Button>
@@ -851,11 +890,8 @@ export default function PartView({
                 variant={pointing ? "accent" : "outline"}
                 size="md"
                 icon="pointer"
-                onClick={() => {
-                  setLabelling(false)
-                  setMoving(null)
-                  setPointing((v) => !v)
-                }}
+                title="Point at the part (P)"
+                onClick={togglePointing}
               >
                 {pointing ? "Click a spot on the part" : "Point at the part"}
               </Button>
@@ -1033,4 +1069,18 @@ function sharedLine(shared: { name: string; used_by: string[] }[]): string | und
   if (users === 0) return `${files} · no part uses ${shared.length === 1 ? "it" : "them"} yet`
   const parts = users === 1 ? "1 part uses" : `${users} parts use`
   return `${files} · ${parts} ${shared.length === 1 ? "it" : "them"}`
+}
+
+/** A key hint at the end of a menu row. */
+function Shortcut({ keys }: { keys: string }) {
+  return <kbd aria-hidden="true" className="mono-caption text-faint">{keys}</kbd>
+}
+
+/** Whether these stage tools are shown and nothing covers them. */
+function stageOnTop(tools: HTMLElement | null): boolean {
+  if (!tools || tools.closest("[hidden]")) return false
+  const box = tools.getBoundingClientRect()
+  // jsdom has no layout, so a missing hit test counts as uncovered.
+  const hit = document.elementFromPoint?.(box.left + box.width / 2, box.top + box.height / 2)
+  return !hit || tools.contains(hit)
 }

@@ -119,6 +119,8 @@ function App() {
   // The library opens on every part at once; a folder narrows it.
   const [allParts, setAllParts] = useState<LibraryPart[]>([]);
   const [showAll, setShowAll] = useState(true);
+  // Bumped by Find Parts, which focuses the library's search.
+  const [findKey, setFindKey] = useState(0);
   // The part waiting for a project, and what the picker has to say about it. A
   // part the person has not described yet has no row of its own, so the picker
   // works from the container it would live in.
@@ -499,6 +501,18 @@ function App() {
     };
   }, [checkUpdatesNow]);
 
+  // The menu bar's shortcuts, read through a ref so the listeners are set once
+  // and still act on this render's state.
+  const shortcuts = useRef<Record<string, () => void>>({});
+  useEffect(() => {
+    const unlisten = ["new-part", "import-folder", "find", "library", "settings"].map((action) =>
+      listen(`menu:${action}`, () => shortcuts.current[action]?.()),
+    );
+    return () => {
+      for (const off of unlisten) off.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
+
   const refreshAgents = useCallback(async () => {
     const isLatest = agentStatusRequests.current.begin();
     setAgentStatusState((state) => (state === "ready" ? state : "loading"));
@@ -824,6 +838,41 @@ function App() {
   // cutting: the window dissolves from setup, to the engine starting, to the app.
   const gate = ready === false ? "setup" : !served ? "engine" : "app";
 
+  // Each shortcut goes where its button would: a new part lands in the open
+  // folder, the same one the library's button names.
+  const leaveOverlays = () => {
+    setSettingsSection(null);
+    setProjectPanel(null);
+  };
+  const openFolder =
+    screen === "workspace"
+      ? project?.folder ? project.id : undefined
+      : !showAll && projects.find((summary) => summary.id === projectId)?.folder ? projectId ?? undefined : undefined;
+  shortcuts.current =
+    gate !== "app"
+      ? {}
+      : {
+          "new-part": () => {
+            leaveOverlays();
+            void newPart(openFolder);
+          },
+          "import-folder": () => {
+            leaveOverlays();
+            setScreen("library");
+            void pickAndImport();
+          },
+          find: () => {
+            leaveOverlays();
+            setScreen("library");
+            setFindKey((key) => key + 1);
+          },
+          library: () => {
+            leaveOverlays();
+            setScreen("library");
+          },
+          settings: () => setSettingsSection((section) => section ?? "agents"),
+        };
+
   const chatAgents = agentStatuses
     .filter((status) => status.installed)
     .map((status) => ({
@@ -917,6 +966,7 @@ function App() {
               <button
                 type="button"
                 aria-label="Back to library"
+                title="Back to library (⌘[)"
                 onClick={() => setScreen("library")}
                 className="chrome flex h-full items-center gap-1.5 px-4 text-muted transition-colors hover:text-ink"
               >
@@ -924,7 +974,7 @@ function App() {
                 <span className="mono-label">Library</span>
               </button>
             ),
-            end: <IconButton icon="gear" label="Settings" onClick={() => setSettingsSection("agents")} />,
+            end: <IconButton icon="gear" label="Settings" title="Settings (⌘,)" onClick={() => setSettingsSection("agents")} />,
           }}
           chat={
             <>
@@ -1012,6 +1062,7 @@ function App() {
           allParts={allParts}
           designing={designing}
           showAll={showAll}
+          findKey={findKey}
           projectId={projectId}
           updateReady={Boolean(update)}
           updateCard={updateCard}

@@ -69,6 +69,8 @@ type Props = {
   designing: Set<string>;
   /** Whether the rail is on All parts or on the selected folder. */
   showAll: boolean;
+  /** Bumped by Find Parts in the menu bar, which focuses the search. */
+  findKey: number;
   projectId: string | null;
   updateReady: boolean;
   /** The sheet-28 card, anchored over the rail footer by this screen. */
@@ -131,6 +133,7 @@ export default function Library({
   allParts,
   designing,
   showAll,
+  findKey,
   projectId,
   updateReady,
   updateCard,
@@ -165,6 +168,13 @@ export default function Library({
   // Enter and Escape both take the input away, and its blur would ask a second time.
   const settled = useRef(false);
   const listRef = useRef<HTMLUListElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  // The screen is unhidden in the same commit, so the input can take focus now.
+  useEffect(() => {
+    if (!findKey) return;
+    searchRef.current?.focus();
+    searchRef.current?.select();
+  }, [findKey]);
 
   // The rail names folders only; a part's own container has no name to show.
   const rail = useMemo(() => folders(projects), [projects]);
@@ -321,15 +331,17 @@ export default function Library({
           <label className="flex h-8 w-[230px] items-center gap-2 rounded-[3px] border border-line bg-ground px-2.5 focus-within:border-panel-edge">
             <Icon name="search" className="shrink-0 text-faint" />
             <input
+              ref={searchRef}
               type="search"
               aria-label="Search parts"
+              title="Search parts (⌘F)"
               placeholder="Search parts"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="mono-label min-w-0 flex-1 bg-transparent text-ink uppercase placeholder:text-faint focus:outline-none [&::-webkit-search-cancel-button]:appearance-none"
             />
           </label>
-          <Button variant="outline" size="md" icon="folder" onClick={onImportFolder} disabled={importing}>
+          <Button variant="outline" size="md" icon="folder" onClick={onImportFolder} disabled={importing} title="Import folder (⌘O)">
             {importing ? "Importing…" : "Import folder"}
           </Button>
           <Button
@@ -337,6 +349,7 @@ export default function Library({
             size="md"
             icon="plus"
             onClick={() => onNewPart(folder?.id)}
+            title="New part (⌘N)"
             className="max-w-[260px]"
           >
             <span className="min-w-0 truncate">{folder ? `New part in ${folder.name}` : "New part"}</span>
@@ -469,7 +482,7 @@ export default function Library({
               Update ready
             </button>
           ) : null}
-          <IconButton className="ml-auto" icon="gear" label="Settings" onClick={onSettings} />
+          <IconButton className="ml-auto" icon="gear" label="Settings" title="Settings (⌘,)" onClick={onSettings} />
         </div>
       </aside>
 

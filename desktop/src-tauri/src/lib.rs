@@ -232,13 +232,49 @@ fn test_hook(app: AppHandle) {
 /// outside world, alongside the same pair in the about box. "Check for Updates…"
 /// sits under About where every Mac app keeps it; the webview owns the update
 /// state, so the click is forwarded there as an event.
+///
+/// The app's keyboard shortcuts live here too, as menu items, so the menu bar is
+/// where a person finds them. Each one is forwarded to the webview, which owns
+/// the screens, as `menu:<action>`.
 fn install_menu(app: &AppHandle) -> tauri::Result<()> {
-    use tauri::menu::{Menu, MenuItem, HELP_SUBMENU_ID};
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, HELP_SUBMENU_ID};
     let menu = Menu::default(app)?;
-    if let Some(appmenu) = menu.items()?.first().and_then(|i| i.as_submenu().cloned()) {
-        appmenu.insert(
-            &MenuItem::with_id(app, "app:check-updates", "Check for Updates…", true, None::<&str>)?,
+    let item = |id: &str, text: &str, key: &str| MenuItem::with_id(app, id, text, true, Some(key));
+    let submenus: Vec<_> = menu.items()?.iter().filter_map(|i| i.as_submenu().cloned()).collect();
+    let named = |name: &str| submenus.iter().find(|s| s.text().is_ok_and(|t| t == name)).cloned();
+    if let Some(appmenu) = submenus.first() {
+        appmenu.insert_items(
+            &[
+                &MenuItem::with_id(app, "app:check-updates", "Check for Updates…", true, None::<&str>)?,
+                &PredefinedMenuItem::separator(app)?,
+                &item("shortcut:settings", "Settings…", "CmdOrCtrl+,")?,
+            ],
             1,
+        )?;
+    }
+    if let Some(file) = named("File") {
+        file.insert_items(
+            &[
+                &item("shortcut:new-part", "New Part", "CmdOrCtrl+N")?,
+                &item("shortcut:import-folder", "Import Folder…", "CmdOrCtrl+O")?,
+                &PredefinedMenuItem::separator(app)?,
+            ],
+            0,
+        )?;
+    }
+    if let Some(edit) = named("Edit") {
+        edit.append_items(&[
+            &PredefinedMenuItem::separator(app)?,
+            &item("shortcut:find", "Find Parts", "CmdOrCtrl+F")?,
+        ])?;
+    }
+    if let Some(view) = named("View") {
+        view.insert_items(
+            &[
+                &item("shortcut:library", "Back to Library", "CmdOrCtrl+[")?,
+                &PredefinedMenuItem::separator(app)?,
+            ],
+            0,
         )?;
     }
     if let Some(help) = menu.get(HELP_SUBMENU_ID).and_then(|i| i.as_submenu().cloned()) {
@@ -251,7 +287,12 @@ fn install_menu(app: &AppHandle) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         use tauri::Emitter;
         use tauri_plugin_opener::OpenerExt;
-        let url = match event.id().as_ref() {
+        let id = event.id().as_ref();
+        if let Some(action) = id.strip_prefix("shortcut:") {
+            let _ = app.emit(&format!("menu:{action}"), ());
+            return;
+        }
+        let url = match id {
             "app:check-updates" => {
                 let _ = app.emit("menu:check-updates", ());
                 return;
