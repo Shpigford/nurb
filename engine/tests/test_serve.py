@@ -1642,7 +1642,11 @@ def test_the_workshop_holds_the_printers_and_names_the_default(home):
     with serving(home, free_port()) as url:
         empty = json.loads(get(f"{url}/api/printers")[2])
         assert empty["printers"] == []
-        assert len(empty["catalogue"]) == 16
+        # Every shipped profile, counted from the list itself so adding a printer does
+        # not also mean editing this number.
+        from nurb.checks import profiles
+
+        assert [p["name"] for p in empty["catalogue"]] == list(profiles())
         first = empty["catalogue"][0]
         assert first["name"] == "bambu_x1c"
         assert first["label"] == "Bambu Lab X1 Carbon"

@@ -316,6 +316,55 @@ def test_anycubic_kobra_2_profile_matches_the_vendor_and_slicer():
     }
 
 
+def test_the_core_one_and_the_other_current_prusas_are_shipped():
+    """The only Prusas were the MK4S, MINI and XL, so a CORE One or CORE One L owner had
+    no profile to name and every print estimate dead-ended at the picker. Each preset
+    name is one PrusaSlicer's and OrcaSlicer's own bundles carry."""
+    have = profiles()
+    assert have["prusa_core_one"] == {
+        "bed": [250.0, 220.0, 270.0],
+        "slicer": "Prusa CORE One",
+        "prusaslicer": "Prusa CORE One 0.4 nozzle",
+        "label": "Prusa CORE One / One+",
+        "brand": "Prusa",
+    }
+    assert have["prusa_core_one_l"] == {
+        "bed": [300.0, 300.0, 330.0],
+        "slicer": "Prusa CORE One L",
+        "prusaslicer": "Prusa CORE One L 0.4 nozzle",
+        "label": "Prusa CORE One L / L+",
+        "brand": "Prusa",
+    }
+    assert have["prusa_mk4s"]["label"] == "Prusa MK4 / MK4S"
+    assert have["prusa_mk3"] == {
+        "bed": [250.0, 210.0, 210.0],
+        "slicer": "Prusa MK3.5",
+        "prusaslicer": "Original Prusa MK3.5 & MK3.5S 0.4 nozzle",
+        "label": "Prusa MK3S / MK3.5",
+        "brand": "Prusa",
+    }
+
+
+def test_the_voron_printers_are_shipped_one_entry_per_size():
+    """A Voron is sold by size, and OrcaSlicer carries one machine per size, so each size
+    is its own profile rather than a setting on one."""
+    have = profiles()
+    vorons = {name: block["bed"] for name, block in have.items() if block.get("brand") == "Voron"}
+    assert vorons == {
+        "voron_0": [120.0, 120.0, 120.0],
+        "voron_trident_250": [250.0, 250.0, 250.0],
+        "voron_trident_300": [300.0, 300.0, 250.0],
+        "voron_trident_350": [350.0, 350.0, 250.0],
+        "voron_2_4_250": [250.0, 250.0, 210.0],
+        "voron_2_4_300": [300.0, 300.0, 260.0],
+        "voron_2_4_350": [350.0, 350.0, 310.0],
+        "voron_switchwire": [250.0, 210.0, 230.0],
+    }
+    assert have["voron_0"]["slicer"] == "Voron 0.1"
+    assert have["voron_0"]["label"] == "Voron 0.1 / 0.2"
+    assert have["voron_switchwire"]["slicer"] == "Voron Switchwire 250"
+
+
 def test_the_workshop_list_adds_removes_and_hands_on_the_default(tmp_path):
     """A printer is a fact about the workshop, so the list and its default live in
     the global config and a project with no printer.toml inherits them."""

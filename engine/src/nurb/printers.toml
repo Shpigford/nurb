@@ -79,11 +79,34 @@ slicer = "Bambu Lab H2S"
 label = "Bambu Lab H2S"
 brand = "Bambu Lab"
 
+# Machines that share a build volume share one entry, which slices with the newest
+# one's presets. The check reads only the bed, and slicing always uses a 0.4mm nozzle.
 [prusa_mk4s]
 bed = [250.0, 210.0, 220.0]
 slicer = "Prusa MK4S"
 prusaslicer = "Original Prusa MK4S 0.4 nozzle"
-label = "Prusa MK4S"
+label = "Prusa MK4 / MK4S"
+brand = "Prusa"
+
+[prusa_core_one]
+bed = [250.0, 220.0, 270.0]
+slicer = "Prusa CORE One"
+prusaslicer = "Prusa CORE One 0.4 nozzle"
+label = "Prusa CORE One / One+"
+brand = "Prusa"
+
+[prusa_core_one_l]
+bed = [300.0, 300.0, 330.0]
+slicer = "Prusa CORE One L"
+prusaslicer = "Prusa CORE One L 0.4 nozzle"
+label = "Prusa CORE One L / L+"
+brand = "Prusa"
+
+[prusa_mk3]
+bed = [250.0, 210.0, 210.0]
+slicer = "Prusa MK3.5"
+prusaslicer = "Original Prusa MK3.5 & MK3.5S 0.4 nozzle"
+label = "Prusa MK3S / MK3.5"
 brand = "Prusa"
 
 [prusa_mini]
@@ -117,3 +140,58 @@ bed = [220.0, 220.0, 250.0]
 slicer = "Anycubic Kobra 2"
 label = "Anycubic Kobra 2"
 brand = "Anycubic"
+
+# Voron publishes the V0.2's and the Trident's volumes in their repositories' READMEs.
+# The V0.1 and V0.2 share a volume, and OrcaSlicer slices both as "Voron 0.1".
+[voron_0]
+bed = [120.0, 120.0, 120.0]
+slicer = "Voron 0.1"
+label = "Voron 0.1 / 0.2"
+brand = "Voron"
+
+[voron_trident_250]
+bed = [250.0, 250.0, 250.0]
+slicer = "Voron Trident 250"
+label = "Voron Trident 250"
+brand = "Voron"
+
+[voron_trident_300]
+bed = [300.0, 300.0, 250.0]
+slicer = "Voron Trident 300"
+label = "Voron Trident 300"
+brand = "Voron"
+
+[voron_trident_350]
+bed = [350.0, 350.0, 250.0]
+slicer = "Voron Trident 350"
+label = "Voron Trident 350"
+brand = "Voron"
+
+# The V2.4 is sold by its X and Y size. Its Z is the stepper_z position_max in Voron's
+# own Klipper configs, the smaller of the two they give (the M8P configs allow 30mm
+# more), so a part that passes here fits every stock build.
+[voron_2_4_250]
+bed = [250.0, 250.0, 210.0]
+slicer = "Voron 2.4 250"
+label = "Voron 2.4 250"
+brand = "Voron"
+
+[voron_2_4_300]
+bed = [300.0, 300.0, 260.0]
+slicer = "Voron 2.4 300"
+label = "Voron 2.4 300"
+brand = "Voron"
+
+[voron_2_4_350]
+bed = [350.0, 350.0, 310.0]
+slicer = "Voron 2.4 350"
+label = "Voron 2.4 350"
+brand = "Voron"
+
+# The Switchwire's manual specifies a Prusa MK52 style bed, which Prusa prints 250 x 210
+# on. Z is the smallest stepper_z position_max in Voron's own configs.
+[voron_switchwire]
+bed = [250.0, 210.0, 230.0]
+slicer = "Voron Switchwire 250"
+label = "Voron Switchwire"
+brand = "Voron"
