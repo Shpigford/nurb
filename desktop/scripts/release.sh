@@ -244,6 +244,7 @@ fi
 
 echo "🔨 Building nurb desktop v$VERSION for Apple silicon and Intel (signed + notarized)..."
 ARTIFACTS="$(mktemp -d)"
+COMMIT="$(git rev-parse HEAD)"
 
 for target in aarch64-apple-darwin x86_64-apple-darwin; do
   arch="${target%%-*}"
@@ -255,27 +256,50 @@ for target in aarch64-apple-darwin x86_64-apple-darwin; do
     dmg_name="nurb-intel.dmg"
   fi
 
-  # A cross-target build needs its Rust standard library even when the host is
-  # Apple silicon. Xcode supplies the macOS SDK and linker for both slices.
-  rustup target add "$target"
-  npm run tauri build -- --target "$target"
-
   BUNDLE="src-tauri/target/$target/release/bundle"
   APP="$BUNDLE/macos/nurb.app"
   TARGZ="$BUNDLE/macos/nurb.app.tar.gz"
   DMG="$BUNDLE/dmg/nurb_${VERSION}_${dmg_arch}.dmg"
   UPDATE="nurb-${arch}.app.tar.gz"
+  # Each build notarizes the app, and the DMG is notarized after it: two trips
+  # through Apple's queue per target. A run killed partway leaves a finished
+  # build behind, so the stamp records which version and commit produced it
+  # and the hashes of the files the build never touches again. A rerun reuses
+  # a build only when all of that still matches; anything else rebuilds.
+  STAMP="$BUNDLE/release-stamp"
+  if [ -d "$APP" ] && [ -f "$DMG" ] && [ "$(head -1 "$STAMP" 2>/dev/null)" = "$VERSION $COMMIT" ] \
+    && tail -n +2 "$STAMP" | shasum -a 256 -c --status 2>/dev/null; then
+    REUSED=1
+    echo "♻️  Reusing the $arch build of $VERSION from an earlier run of this commit."
+  else
+    REUSED=0
+    rm -f "$STAMP"
+    # A cross-target build needs its Rust standard library even when the host is
+    # Apple silicon. Xcode supplies the macOS SDK and linker for both slices.
+    rustup target add "$target"
+    npm run tauri build -- --target "$target"
+    { echo "$VERSION $COMMIT"; shasum -a 256 "$TARGZ" "$TARGZ.sig"; } > "$STAMP"
+  fi
 
   echo "🔎 Verifying the $arch signing chain..."
   codesign --verify --deep --strict "$APP"
   spctl --assess --type execute "$APP"
   xcrun stapler validate "$APP"
 
-  echo "🔏 Notarizing the $arch DMG..."
-  xcrun notarytool submit "$DMG" \
-    --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
-    --wait
-  xcrun stapler staple "$DMG"
+  # Stapling the DMG of a reused build either finds its ticket already there
+  # or fetches the one Apple issued after the earlier run stopped waiting.
+  # Only a DMG Apple never accepted goes back into the queue.
+  if [ "$REUSED" = 1 ] && xcrun stapler validate "$DMG" >/dev/null 2>&1; then
+    echo "✅ The $arch DMG is already notarized and stapled."
+  elif [ "$REUSED" = 1 ] && xcrun stapler staple "$DMG" >/dev/null 2>&1; then
+    echo "✅ Stapled the $arch DMG with the ticket from an earlier notarization."
+  else
+    echo "🔏 Notarizing the $arch DMG..."
+    xcrun notarytool submit "$DMG" \
+      --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
+      --wait
+    xcrun stapler staple "$DMG"
+  fi
 
   # Tauri names every target's updater archive nurb.app.tar.gz. Give each one
   # a target-specific release name before the second build can overwrite it.
