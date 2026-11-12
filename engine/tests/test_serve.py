@@ -1457,6 +1457,19 @@ def test_a_turn_remembers_the_files_sent_with_it(home):
             post(route, {"role": "user", "content": "hi", "files": "hook.jpg"})
         assert not_names.value.code == 400
 
+        # A photo keeps its small picture, in the order of the files; anything else gets null.
+        thumb = "data:image/jpeg;base64,AAAA"
+        sent = {"role": "user", "content": "", "files": ["hook.jpg", "notes.pdf"], "thumbnails": [thumb, None]}
+        assert post(route, sent)[0] == 201
+        detail = json.loads(get(f"{url}/api/projects/{project_id}")[2])
+        assert detail["messages"][-1]["thumbnails"] == [thumb, None]
+        assert detail["messages"][0]["thumbnails"] == []
+
+        for bad in ([thumb], ["https://example.com/a.jpg", None], [thumb, 7]):
+            with pytest.raises(urllib.error.HTTPError) as refused:
+                post(route, {**sent, "thumbnails": bad})
+            assert refused.value.code == 400
+
 
 def test_a_part_file_from_a_folder_is_captured_as_a_revision(home):
     from nurb import db

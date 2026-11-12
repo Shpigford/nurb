@@ -942,6 +942,49 @@ fn converted_to_jpeg(path: &std::path::Path, name: &str) -> Result<Vec<u8>, Stri
     data
 }
 
+/// A small picture of an attached photo, as a data URL, for the chat to show in
+/// place of its name; None for any other file. Small, because a sent turn keeps
+/// it in the transcript, and the file itself may be gone by the next visit.
+#[tauri::command]
+pub async fn attachment_thumbnail(path: String) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || thumbnail(Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn thumbnail(path: &Path) -> Result<Option<String>, String> {
+    // PNG and GIF are often screenshots with transparency, which JPEG fills black.
+    let (format, mime, extension) = match attachment_extension(path).as_deref() {
+        Some("png") | Some("gif") => ("png", "image/png", "png"),
+        Some("jpg" | "jpeg" | "webp" | "heic" | "heif" | "tif" | "tiff" | "bmp" | "avif") => {
+            ("jpeg", "image/jpeg", "jpg")
+        }
+        _ => return Ok(None),
+    };
+    let name = attachment_name(path)?;
+    let dir = attachment_dir(&name)?;
+    let out = dir.join(format!("thumbnail.{extension}"));
+    let made = std::process::Command::new("/usr/bin/sips")
+        .args(["-s", "format", format, "-s", "formatOptions", "70", "-Z", "240"])
+        .arg(path)
+        .arg("--out")
+        .arg(&out)
+        .output();
+    let data = match made {
+        Ok(made) if made.status.success() => std::fs::read(&out).ok(),
+        _ => None,
+    };
+    std::fs::remove_dir_all(&dir).ok();
+    use base64::Engine;
+    // A photo sips cannot open still sends; it just shows by name.
+    Ok(data.map(|data| {
+        format!(
+            "data:{mime};base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(data)
+        )
+    }))
+}
+
 /// The copy happens before the prompt goes out, where Stop cannot reach it, so a
 /// file too big to copy quickly is refused rather than left to look like a hang.
 fn check_copy_size(path: &std::path::Path, name: &str) -> Result<(), String> {

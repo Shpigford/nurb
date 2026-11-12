@@ -177,14 +177,26 @@ function isWork(message: Message): boolean {
   return payload?.type === "measurement" && !changedSize(payload.measurement);
 }
 
-function FileNames({ names }: { names: string[] }) {
+// What was sent with a turn: a photo as itself, anything else by name.
+function Attached({ names, thumbnails }: { names: string[]; thumbnails?: (string | null)[] }) {
   return (
-    <span className="mt-1.5 flex flex-wrap gap-1">
-      {names.map((name, i) => (
-        <span key={i} className="mono-id rounded-[3px] bg-raised px-1.5 py-0.5 text-muted">
-          {name}
-        </span>
-      ))}
+    <span className="mt-1.5 flex flex-wrap items-start gap-1.5">
+      {names.map((name, i) => {
+        const thumbnail = thumbnails?.[i];
+        return thumbnail ? (
+          <img
+            key={i}
+            src={thumbnail}
+            alt={name}
+            title={name}
+            className="size-20 rounded-[4px] border border-line object-cover"
+          />
+        ) : (
+          <span key={i} className="mono-id rounded-[3px] bg-raised px-1.5 py-0.5 text-muted">
+            {name}
+          </span>
+        );
+      })}
     </span>
   );
 }
@@ -200,7 +212,9 @@ function Stored({ message, who, n }: { message: Message; who: string; n?: string
               {message.content && (
                 <p className="text-chat whitespace-pre-wrap text-ink-soft">{message.content}</p>
               )}
-              {message.files?.length ? <FileNames names={message.files} /> : null}
+              {message.files?.length ? (
+                <Attached names={message.files} thumbnails={message.thumbnails} />
+              ) : null}
             </>
           ) : (
             <div className="text-chat text-ink-soft">
@@ -316,6 +330,25 @@ function Chat({
     attachmentDraftRef.current = new AttachmentDraft(setAttachments);
   }
   const attachmentDraft = attachmentDraftRef.current;
+  // A photo in the draft shows as a picture. One request per path, kept, so the
+  // send reuses the picture the composer already shows.
+  const thumbnailRequests = useRef(new Map<string, Promise<string | null>>());
+  const thumbnailOf = useCallback((path: string) => {
+    let request = thumbnailRequests.current.get(path);
+    if (!request) {
+      request = invoke<string | null>("attachment_thumbnail", { path }).catch(() => null);
+      thumbnailRequests.current.set(path, request);
+    }
+    return request;
+  }, []);
+  const [thumbnails, setThumbnails] = useState<Record<string, string | null>>({});
+  useEffect(() => {
+    for (const path of attachments) {
+      void thumbnailOf(path).then((url) =>
+        setThumbnails((known) => (path in known ? known : { ...known, [path]: url })),
+      );
+    }
+  }, [attachments, thumbnailOf]);
   const [dropping, setDropping] = useState(false);
   // One drag over the composer fires enter and leave for every child it crosses,
   // so the hint follows a depth count rather than the last event seen.
@@ -686,6 +719,8 @@ function Chat({
     async (text: string, files: string[]) => {
       sendingRef.current = true;
       stoppedRef.current = false;
+      const pictures = await Promise.all(files.map(thumbnailOf));
+      const sentThumbnails = pictures.some(Boolean) ? pictures : undefined;
       // A refused file was about the draft this send replaces, and a failed restore
       // has been said. Live notes sit below Claude's stored turns, so left alone
       // either would trail every later reply.
@@ -706,6 +741,7 @@ function Chat({
             kind: "user",
             text,
             files: files.length ? files.map(basename) : undefined,
+            thumbnails: sentThumbnails,
             localId,
           },
         ]);
@@ -752,6 +788,7 @@ function Chat({
             text,
             stamp,
             files.length ? files.map(basename) : undefined,
+            sentThumbnails,
             isNew && starting,
           );
           started = said.part ?? null;
@@ -806,7 +843,7 @@ function Chat({
         if (completed) cue(document.hasFocus() ? "ready" : "arrival");
       }
     },
-    [ensureSession, part, wholeProject, attachmentDraft, isClaude, projectId],
+    [ensureSession, part, wholeProject, attachmentDraft, isClaude, projectId, thumbnailOf],
   );
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1169,23 +1206,42 @@ function Chat({
         >
           <DropHint active={dropping} />
           {attachments.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {attachments.map((path) => (
-                <span
-                  key={path}
-                  className="mono-id inline-flex items-center gap-1 rounded-[3px] bg-raised px-1.5 py-0.5 text-muted"
-                >
-                  <span className="max-w-[140px] truncate">{basename(path)}</span>
-                  <button
-                    type="button"
-                    className="text-faint hover:text-ink"
-                    aria-label={`remove ${basename(path)}`}
-                    onClick={() => attachmentDraft.remove(path)}
+            <div className="flex flex-wrap items-start gap-1.5">
+              {attachments.map((path) =>
+                thumbnails[path] ? (
+                  <span key={path} className="relative">
+                    <img
+                      src={thumbnails[path]!}
+                      alt={basename(path)}
+                      title={basename(path)}
+                      className="size-14 rounded-[4px] border border-line object-cover"
+                    />
+                    <button
+                      type="button"
+                      className="absolute top-1 right-1 grid size-4 place-items-center rounded-[3px] bg-ground/90 text-muted hover:text-ink"
+                      aria-label={`remove ${basename(path)}`}
+                      onClick={() => attachmentDraft.remove(path)}
+                    >
+                      <Icon name="xmark" className="size-2.5" />
+                    </button>
+                  </span>
+                ) : (
+                  <span
+                    key={path}
+                    className="mono-id inline-flex items-center gap-1 self-start rounded-[3px] bg-raised px-1.5 py-0.5 text-muted"
                   >
-                    <Icon name="xmark" className="size-2.5" />
-                  </button>
-                </span>
-              ))}
+                    <span className="max-w-[140px] truncate">{basename(path)}</span>
+                    <button
+                      type="button"
+                      className="text-faint hover:text-ink"
+                      aria-label={`remove ${basename(path)}`}
+                      onClick={() => attachmentDraft.remove(path)}
+                    >
+                      <Icon name="xmark" className="size-2.5" />
+                    </button>
+                  </span>
+                ),
+              )}
             </div>
           )}
           <span className="relative block">
@@ -1280,7 +1336,7 @@ function Chat({
               return (
                 <Turn key={index} who="You" n={nextTurn()} text={item.text}>
                   <p className="text-chat whitespace-pre-wrap text-ink-soft">{item.text}</p>
-                  {item.files && <FileNames names={item.files} />}
+                  {item.files && <Attached names={item.files} thumbnails={item.thumbnails} />}
                 </Turn>
               );
             case "agent":

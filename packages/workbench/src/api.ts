@@ -307,6 +307,7 @@ export function addMessage(
   content: string,
   part?: string | null,
   files?: string[],
+  thumbnails?: (string | null)[],
   newPart?: boolean
 ): Promise<Message> {
   return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, {
@@ -314,6 +315,7 @@ export function addMessage(
     content,
     part,
     files,
+    thumbnails,
     new_part: newPart || undefined,
   })
 }

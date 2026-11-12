@@ -446,6 +446,7 @@ def _message(conn, row):
         "created_at": row["created_at"],
         "part": row["part"],
         "files": payload.get("files") or [],
+        "thumbnails": payload.get("thumbnails") or [],
         "payload": _shaped(conn, row, payload),
     }
 
@@ -1001,7 +1002,22 @@ def _routes(conn, lock, server, token, pid):
                 (project_id, part),
             ).fetchone() is None:
                 raise _Refused(400, f"no part called {part} in this project")
+            # A small picture per file, in the same order, so the transcript can show a
+            # photo rather than its name. Null for a file that is not a photo.
+            thumbnails = sent.get("thumbnails") or []
+            if (
+                not isinstance(thumbnails, list)
+                or len(thumbnails) not in (0, len(files))
+                or not all(
+                    thumb is None
+                    or (isinstance(thumb, str) and thumb.startswith("data:image/") and len(thumb) <= 400_000)
+                    for thumb in thumbnails
+                )
+            ):
+                raise _Refused(400, "thumbnails must be one small image data URL or null per file")
             payload = {"files": files} if files else {}
+            if any(thumbnails):
+                payload["thumbnails"] = thumbnails
             with db.transaction(conn):
                 if role == "user" and part is None:
                     part = _start_part(conn, project, content, sent.get("new_part") is True)
