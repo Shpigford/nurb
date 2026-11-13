@@ -211,6 +211,12 @@ MIGRATIONS = [
         UNIQUE (part_id, name)
     );
     """,
+    # A hidden container that an agent built a whole set into, before a second part
+    # turned one into a folder (see _fold_container), shows up in the library.
+    lambda conn: [
+        _fold_container(conn, row[0])
+        for row in conn.execute("SELECT id FROM projects WHERE folder = 0").fetchall()
+    ],
 ]
 
 # What a run can carry besides its geometry: it is measured from one build, so it
@@ -312,6 +318,11 @@ def migrate(conn):
         )
     for i, sql in enumerate(MIGRATIONS, start=1):
         if i <= have:
+            continue
+        if callable(sql):
+            with transaction(conn):
+                sql(conn)
+                conn.execute(f"PRAGMA user_version = {i}")
             continue
         try:
             conn.executescript(
@@ -519,8 +530,44 @@ def create_part(conn, project_id, name, source, card_md=None, kind="part"):
         conn.execute(
             "UPDATE parts SET current_revision_id = ? WHERE id = ?", (revision_id, part_id)
         )
+        if kind == "part":
+            _fold_container(conn, project_id)
     changed("part", part_id, project_id)
     return part_id
+
+
+def folder_name(names):
+    """What a set of parts is called together: the words their names share ("vise_body",
+    "vise_jaw" is "Vise"), or the first part's name when they share none."""
+    words = [name.split("_") for name in names]
+    shared = []
+    for column in zip(*words):
+        if len(set(column)) > 1:
+            break
+        shared.append(column[0])
+    spoken = " ".join(shared or words[0])
+    return spoken[:1].upper() + spoken[1:]
+
+
+def _fold_container(conn, project_id):
+    """A hidden container holds one part. When a second lands in it, the agent is
+    building a set, so the container becomes a folder the library shows, named for
+    the set rather than by its placeholder. Its conversation stays unnamed, which in a
+    folder makes it the folder's own: it was about the whole set."""
+    if conn.execute("SELECT folder FROM projects WHERE id = ?", (project_id,)).fetchone()[0]:
+        return
+    names = [
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM parts WHERE project_id = ? AND kind = 'part' ORDER BY created_at",
+            (project_id,),
+        )
+    ]
+    if len(names) > 1:
+        conn.execute(
+            "UPDATE projects SET folder = 1, name = ? WHERE id = ?", (folder_name(names), project_id)
+        )
+        changed("project", project_id, project_id)
 
 
 # A part the person has started describing, before any agent has written it.

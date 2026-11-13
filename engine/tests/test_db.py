@@ -404,21 +404,51 @@ def test_a_project_is_a_container_until_it_is_promoted(tmp_path):
         conn.close()
 
 
-def test_deleting_one_part_spares_its_siblings_in_a_hidden_container(tmp_path):
+def test_a_second_part_turns_its_container_into_a_folder_named_for_the_set(tmp_path):
     conn = db.connect(tmp_path / "x.db")
     try:
-        project_id = db.create_project(conn, "drab flange 1")
-        hook = db.create_part(conn, project_id, "hook", "from nurb import *\n")
-        shelf = db.create_part(conn, project_id, "shelf", "from nurb import *\n")
+        project_id = db.create_project(conn, "Peppy Calibration Cube")
+        db.create_part(conn, project_id, "vise_body", "from nurb import *\n")
         db.create_part(conn, project_id, "helper", "x = 1", kind="module")
+        db.add_message(conn, project_id, "user", "make me a vise", None)
+        assert db.get_project(conn, project_id)["folder"] == 0
 
-        assert db.delete_part(conn, hook) == (project_id, False)
-        names = [r["name"] for r in conn.execute("SELECT name FROM parts WHERE project_id = ?", (project_id,))]
-        assert sorted(names) == ["helper", "shelf"]
+        db.create_part(conn, project_id, "vise_jaw", "from nurb import *\n")
+        row = db.get_project(conn, project_id)
+        assert (row["folder"], row["name"]) == (1, "Vise")
+        # The chat that built the set is the folder's own, not one part's.
+        assert [r["part"] for r in conn.execute("SELECT part FROM messages")] == [None]
 
-        # The last part takes the container, and the helper module with it.
-        assert db.delete_part(conn, shelf) == (project_id, True)
-        assert db.get_project(conn, project_id) is None
+        # A folder keeps its name, the person's or this one, as more parts land.
+        db.rename_project(conn, project_id, "Bench vise")
+        db.create_part(conn, project_id, "knob", "from nurb import *\n")
+        assert db.get_project(conn, project_id)["name"] == "Bench vise"
+    finally:
+        conn.close()
+
+
+def test_a_set_shares_its_leading_words_or_takes_its_first_part_name():
+    assert db.folder_name(["vise_body", "vise_jaw", "vise"]) == "Vise"
+    assert db.folder_name(["cable_clip_small", "cable_clip_large"]) == "Cable clip"
+    assert db.folder_name(["hook", "shelf"]) == "Hook"
+
+
+def test_the_upgrade_folds_a_container_that_already_holds_a_set(tmp_path):
+    conn = db.connect(tmp_path / "x.db")
+    try:
+        project_id = db.create_project(conn, "Peppy Calibration Cube")
+        db.create_part(conn, project_id, "vise_body", "from nurb import *\n")
+        db.create_part(conn, project_id, "vise_jaw", "from nurb import *\n")
+        alone = db.create_project(conn, "Jolly Raft")
+        db.create_part(conn, alone, "hook", "from nurb import *\n")
+        # As a nurb before the fold left it.
+        conn.execute("UPDATE projects SET folder = 0, name = 'Peppy Calibration Cube'")
+        conn.execute(f"PRAGMA user_version = {len(db.MIGRATIONS) - 1}")
+        db.migrate(conn)
+
+        row = db.get_project(conn, project_id)
+        assert (row["folder"], row["name"]) == (1, "Vise")
+        assert db.get_project(conn, alone)["folder"] == 0
     finally:
         conn.close()
 

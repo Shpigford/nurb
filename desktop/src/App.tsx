@@ -143,6 +143,11 @@ function App() {
   // The folder just made, until its refetch says so itself: the chat has already
   // moved to the part, and must not vanish for the round trip.
   const [promoted, setPromoted] = useState<string | null>(null);
+  // The engine makes a part's container a folder when the agent writes a second part
+  // into it. The conversation that built them is then the folder's own, so it stays
+  // on screen, running turn and all, until the person picks a part or leaves.
+  const [heldChat, setHeldChat] = useState<string | null>(null);
+  const seenFolder = useRef<{ id: string; folder: boolean } | null>(null);
   const [busyChats, setBusyChats] = useState<Record<string, boolean>>({});
   const busyRef = useRef(busyChats);
   busyRef.current = busyChats;
@@ -299,6 +304,14 @@ function App() {
 
   useEffect(() => writeProject(projectId), [projectId]);
 
+  useEffect(() => {
+    if (!project) return;
+    const seen = seenFolder.current;
+    if (seen?.id === project.id && !seen.folder && project.folder && promoted !== project.id) setHeldChat(project.id);
+    seenFolder.current = { id: project.id, folder: project.folder };
+  }, [project, promoted]);
+  useEffect(() => setHeldChat(null), [projectId, partName]);
+
   // The part page speaks to the window through one event, so a panel deep in the
   // workbench can put its work in the pod without knowing the shell exists.
   useEffect(() => {
@@ -382,7 +395,11 @@ function App() {
   // A new part has a conversation of its own before it has a row to file it under.
   const drafting = draft !== null && draft.projectId === projectId && partName === null;
   const isFolder = project?.folder || promoted === projectId;
-  const chatPart = drafting ? NEW_PART : isFolder ? partName ?? PROJECT_CHAT : PROJECT_CHAT;
+  const chatPart = drafting
+    ? NEW_PART
+    : isFolder && heldChat !== projectId
+    ? partName ?? PROJECT_CHAT
+    : PROJECT_CHAT;
 
   // One chat per conversation, mounted for as long as its turn runs.
   useEffect(() => {
