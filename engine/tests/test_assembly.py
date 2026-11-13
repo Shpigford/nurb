@@ -261,3 +261,56 @@ def tray(width=40.0, open_deg=0.0):
     shape, _, _ = builder.build(path)
     assert round(shape.bounding_box().size.X, 3) == 40
     assert shape._nurb_scene.hinges[0].param == "open_deg"
+
+
+THREADED_ASM = '''from nurb import *
+
+
+@assembly
+def pair(gap=0.0):
+    # Two plates stood on edge and pushed into each other, the way a screw sits in its
+    # nut: a fit check, nothing like how either one prints.
+    a = Pos(0, 0, 10) * Rot(90, 0, 0) * use("plate")
+    b = Pos(gap, 0, 10) * Rot(0, 90, 0) * use("plate", width=20.0)
+    return a, b, obstacle(Pos(0, 0, -50) * Box(100, 100, 10), "the desk")
+'''
+
+
+def test_an_assembly_prints_as_its_parts_laid_flat_and_apart(project):
+    write(project, "plate", PLATE)
+    shape, _, _ = builder.build(write(project, "pair", THREADED_ASM))
+    plate = builder.print_set(shape)
+    # The desk is context, never printed; each plate keeps its own overrides.
+    assert [s.label for s in plate] == ["plate", "plate"]
+    sizes = sorted(round(s.bounding_box().size.X) for s in plate)
+    assert sizes == [10, 20]
+    boxes = [s.bounding_box() for s in plate]
+    # Back in the orientation each was modelled to print in, sitting on the bed...
+    assert all(round(b.min.Z, 6) == 0 and round(b.size.Z, 6) == 2 for b in boxes)
+    # ...and side by side, where the assembly had them through each other.
+    assert boxes[0].max.X < boxes[1].min.X or boxes[1].max.X < boxes[0].min.X
+
+
+def test_a_part_prints_as_itself(project):
+    shape, _, _ = builder.build(write(project, "plate", PLATE))
+    assert builder.print_set(shape) == [shape]
+
+
+def test_a_print_set_wraps_onto_a_new_row_at_the_bed_edge(project):
+    write(project, "plate", PLATE)
+    shape, _, _ = builder.build(write(project, "pair", THREADED_ASM))
+    a, b = (s.bounding_box() for s in builder.print_set(shape, bed=(25, 25, 25)))
+    assert a.max.Y < b.min.Y  # 10 + 5 gap + 20 is past 25, so the second starts a row
+
+
+def test_a_print_set_3mf_keeps_one_named_object_per_part(project, tmp_path):
+    import re
+    import zipfile
+
+    write(project, "plate", PLATE)
+    shape, _, _ = builder.build(write(project, "pair", THREADED_ASM))
+    target = tmp_path / "pair.3mf"
+    builder.write_3mf(builder.print_set(shape), target)
+    model = zipfile.ZipFile(target).read("3D/3dmodel.model").decode()
+    assert re.findall(r'<object [^>]*name="([^"]*)"', model) == ["plate", "plate"]
+    assert model.count("<item ") == 2

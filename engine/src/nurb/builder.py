@@ -350,6 +350,43 @@ def write_stl(shape, target):
     export_stl(shape, str(target), tolerance=0.01, angular_tolerance=0.2)
 
 
+def print_set(shape, bed=(256.0, 256.0, 256.0), gap=5.0):
+    """What actually goes on the plate: one solid per physical part, laid out flat.
+
+    A part is itself. An assembly is the parts it placed, each back in the orientation
+    it was modelled to print in, because the assembled scene is for checking fit: its
+    screw is threaded through its nut and its jaw stands on its clamping face, and a
+    slicer handed that scene prints the pose instead of the parts. Repeats print as
+    many times as they were placed; obstacles were never use()d, so they never print.
+
+    Rows run along X and wrap at the bed's width, centred on the origin the way a
+    single part is. A slicer that arranges on load will repack them, and one that
+    does not still opens a plate with nothing overlapping.
+    """
+    from build123d import Pos
+
+    scene = getattr(shape, "_nurb_scene", None)
+    if scene is None:
+        return [shape]
+    out, x, y, row, width = [], 0.0, 0.0, 0.0, 0.0
+    for instance in scene.instances:
+        solid = instance.solid
+        box = solid.bounding_box()
+        if x and x + box.size.X > bed[0]:
+            x, y, row = 0.0, y + row + gap, 0.0
+        out.append((instance.path, (x - box.min.X, y - box.min.Y, -box.min.Z), solid))
+        width = max(width, x + box.size.X)
+        x += box.size.X + gap
+        row = max(row, box.size.Y)
+    depth = y + row
+    placed = []
+    for path, (dx, dy, dz), solid in out:
+        moved = Pos(dx - width / 2, dy - depth / 2, dz) * solid
+        moved.label = pathlib.Path(path).stem
+        placed.append(moved)
+    return placed
+
+
 def write_3mf(shape, target):
     """Write a 3MF from the same tessellation the viewer and the STL already use.
 
@@ -368,6 +405,37 @@ def write_3mf(shape, target):
     from build123d import Mesher
 
     target = pathlib.Path(target)
+    # A list is a plate of separate parts (see print_set), and each one stays its own
+    # object: welded into one mesh, two parts that touch become one body that a
+    # slicer's "split to objects" can no longer pull apart.
+    shapes = shape if isinstance(shape, list) else [shape]
+    meshes = [(getattr(s, "label", "") or "", _welded(s)) for s in shapes]
+    meshes = [(name, m) for name, m in meshes if len(m.faces)]
+    # lib3mf will happily write an empty model, and a downloaded file that opens to an
+    # empty plate is worse than a refusal: it looks like it worked. A part that
+    # tessellates to nothing is what the `solids` rule is for, so say that.
+    if not meshes:
+        target.unlink(missing_ok=True)
+        raise BuildError(f"{target.stem} has no geometry to export; the build's findings say why")
+    # Mesher is still what owns the lib3mf handle, the millimetre unit and the write,
+    # so the platform's library layout stays build123d's problem. Only its meshing and
+    # its validity gate are skipped.
+    mesher = Mesher()
+    for name, welded in meshes:
+        obj = mesher.model.AddMeshObject()
+        obj.SetGeometry(
+            [lib3mf.Position(Coordinates=(x, y, z)) for x, y, z in welded.vertices.tolist()],
+            [lib3mf.Triangle(Indices=(a, b, c)) for a, b, c in welded.faces.tolist()],
+        )
+        obj.SetType(lib3mf.ObjectType.Model)
+        if name:
+            obj.SetName(name)
+        mesher.model.AddBuildItem(obj, mesher.wrapper.GetIdentityTransform())
+    mesher.write(str(target))
+
+
+def _welded(shape):
+    """The export tessellation with shared vertices, ready for lib3mf."""
     mesh = to_mesh(shape, 0.01)
     # A 3MF indexes shared vertices, while `to_mesh` splits them per face to keep the
     # viewer's edges crisp. Rebuilding welds them, which is both what the format wants
@@ -387,24 +455,7 @@ def write_3mf(shape, target):
         if not keep.all():
             welded.update_faces(keep)
             welded.remove_unreferenced_vertices()
-    # lib3mf will happily write an empty model, and a downloaded file that opens to an
-    # empty plate is worse than a refusal: it looks like it worked. A part that
-    # tessellates to nothing is what the `solids` rule is for, so say that.
-    if not len(welded.faces):
-        target.unlink(missing_ok=True)
-        raise BuildError(f"{target.stem} has no geometry to export; the build's findings say why")
-    # Mesher is still what owns the lib3mf handle, the millimetre unit and the write,
-    # so the platform's library layout stays build123d's problem. Only its meshing and
-    # its validity gate are skipped.
-    mesher = Mesher()
-    obj = mesher.model.AddMeshObject()
-    obj.SetGeometry(
-        [lib3mf.Position(Coordinates=(x, y, z)) for x, y, z in welded.vertices.tolist()],
-        [lib3mf.Triangle(Indices=(a, b, c)) for a, b, c in welded.faces.tolist()],
-    )
-    obj.SetType(lib3mf.ObjectType.Model)
-    mesher.model.AddBuildItem(obj, mesher.wrapper.GetIdentityTransform())
-    mesher.write(str(target))
+    return welded
 
 
 def stl_triangles(target):

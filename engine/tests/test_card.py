@@ -237,7 +237,7 @@ def test_the_real_cards_are_current():
             built.append((name, shape, ctx, checks.run(shape, ctx)))
         _, shape, ctx, found = built[0]
         want = card.render(card.facts(shape, ctx, found, variants=built[1:]))
-        assert want in part.with_suffix(".md").read_text(), f"{part.stem}: run nurb card"
+        assert want in part.with_suffix(".md").read_text(encoding="utf-8"), f"{part.stem}: run nurb card"
 
 
 # --- what changed since the card was written ---------------------------------

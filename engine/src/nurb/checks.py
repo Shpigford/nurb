@@ -28,6 +28,7 @@ LABELS = {
     # Covers both of this rule's states, which is why it is not "loose pieces": the
     # same rule fires on a part that came apart and on one that built nothing at all.
     "solids": "not one piece",
+    "mesh": "mesh has holes",
     "overhang": "steep slope",
     "floating": "starts on air",
     "hole_ceiling": "hole on air",
@@ -246,6 +247,60 @@ def solids(shape, ctx):
             "Whatever should join them is touching at a point, or missing",
             value=len(bodies),
             where=tuple(round(v, 2) for v in stray.center()),
+        )
+    ]
+
+
+# Registered before every rule that calls bounding_box(), which throws the cached
+# triangulation away: in this order the rule reads the mesh the viewer's GLB already
+# paid for instead of meshing the part a second time.
+@rule("mesh")
+def mesh(shape, ctx):
+    """A valid solid whose triangles do not close, which is what the slicer receives.
+
+    Every other rule reads the B-rep, and a B-rep can be valid while its tessellation
+    is not. The case that found this: a thread's runout cone and the shaft's tip cone
+    were the same 45 degree surface, so the boolean fused them into one face with a
+    slit in it, an edge running through the face twice. OCCT cannot mesh that face, so
+    the STL and the 3MF carried 68 edges shared by three or more triangles. The checks
+    passed, and the slicer's repair on load printed the slit as loose junk.
+
+    The test is the one a slicer makes: weld the mesh and count edges not shared by
+    exactly two triangles. The STL and 3MF are meshed finer than this, but a slit or a
+    fold is topology, and it breaks the mesh at any tolerance.
+    """
+    import numpy as np
+    import trimesh
+
+    from .builder import to_mesh
+
+    triangles = to_mesh(shape, 0.1)
+    if not len(triangles.faces):
+        return []  # nothing meshed is the `solids` rule's to report
+    welded = trimesh.Trimesh(vertices=triangles.vertices, faces=triangles.faces, process=True)
+    edges = np.sort(welded.faces[:, [0, 1, 1, 2, 2, 0]].reshape(-1, 2), axis=1)
+    unique, counts = np.unique(edges, axis=0, return_counts=True)
+    bad = unique[counts != 2]
+    if not len(bad):
+        return []
+    # The broken edges cluster at the fault, so point at the one nearest their median
+    # rather than at their mean, which lands in empty air when there are two faults.
+    middles = welded.vertices[bad].mean(axis=1)
+    centre = np.median(middles, axis=0)
+    spot = middles[np.argmin(np.linalg.norm(middles - centre, axis=1))]
+    return [
+        Finding(
+            "mesh",
+            FAIL,
+            f"{len(bad)} mesh edges are not shared by exactly two triangles, so the STL and "
+            "3MF do not close and the slicer's repair adds junk here. Most often two faces "
+            "lie on one surface (cones with the same apex and slope, cylinders with the same "
+            "axis and radius) and the boolean fused them into a face with a slit. Change "
+            "one so they no longer coincide",
+            plain="the file a slicer gets has a flaw here, and the slicer's repair will "
+            "leave stray bits on the print",
+            value=len(bad),
+            where=tuple(round(float(v), 2) for v in spot),
         )
     ]
 

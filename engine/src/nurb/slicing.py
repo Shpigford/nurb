@@ -82,7 +82,10 @@ def tuned(shape, ctx=None):
 
     settings = dict(TUNED)
     notes = [f"gyroid {settings['sparse_infill_density']}", f"{settings['wall_loops']} walls"]
-    found = checks.run(shape, ctx, only=set(BRIM_RULES))
+    # A plate of parts gets a brim when any one of them needs it: the setting is the
+    # plate's, and the part that peels takes the print with it.
+    shapes = shape if isinstance(shape, list) else [shape]
+    found = [f for s in shapes for f in checks.run(s, ctx, only=set(BRIM_RULES))]
     if found:
         settings["brim_type"] = "outer_only"
         settings["brim_width"] = "5"

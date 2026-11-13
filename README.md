@@ -46,6 +46,7 @@ The AI cannot see, so the checks are its eyes. Rules run against the exact solid
 
 ```
 solids            more than one body, or none: a part that came apart
+mesh              a valid solid whose triangles do not close, as the slicer would see it
 overhang          downward faces past 45 degrees, bridges told from cantilevers
 floating          a region whose first layer would be laid on air
 hole_ceiling      a blind hole's flat ceiling, the counterbore case

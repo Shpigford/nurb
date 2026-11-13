@@ -110,6 +110,9 @@ class PrintInstance:
 
     path: str
     overrides: tuple = ()
+    # The part as built, in the orientation it was modelled to print in. Kept so an
+    # export can lay the set out on a plate without building every part again.
+    solid: object = field(default=None, compare=False, repr=False)
 
 
 NODE = "joint{}"  # the GLB node for scene.hinges[i]; the exporter and the payload both speak it
@@ -222,7 +225,9 @@ def use(name, **overrides):
     shape.label = name
     nested = getattr(shape, "_nurb_scene", None)
     if nested is None:
-        rec.instances.append(PrintInstance(str(path), tuple(sorted(overrides.items()))))
+        rec.instances.append(
+            PrintInstance(str(path), tuple(sorted(overrides.items())), _built[key])
+        )
     else:
         # A nested assembly is not itself printable. Its leaf instances already carry
         # the exact overrides used while building it, so flatten those without losing
