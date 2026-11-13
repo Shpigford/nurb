@@ -258,14 +258,20 @@ export function applyParams(partId: string, values: Params): Promise<ApplyResult
   return post(partUrl(partId, "apply"), { values })
 }
 
-export async function exportPart(partId: string, format: ExportFormat, values: Params): Promise<Blob> {
+/** The file, and the server's one line about what is in it: how many parts went on the
+ * plate, and which print settings rode along or why none did. */
+export async function exportPart(
+  partId: string,
+  format: ExportFormat,
+  values: Params
+): Promise<{ blob: Blob; note: string | null }> {
   const res = await fetch(base + partUrl(partId, "export"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ format, values }),
   })
   if (!res.ok) throw await refusal(res, "The download did not finish.")
-  return res.blob()
+  return { blob: await res.blob(), note: res.headers.get("X-Nurb-Print-Settings") }
 }
 
 export function slicePart(partId: string): Promise<SliceResult> {

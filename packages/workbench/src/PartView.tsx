@@ -438,9 +438,10 @@ export default function PartView({
       const id = `export-${part.id}-${format}-${Date.now()}`
       activity({ id, title: `Exporting ${filename}`, tone: "working" })
       try {
-        const blob = await exportPart(part.id, format, values)
+        const { blob, note } = await exportPart(part.id, format, values)
         const where = onSaveFile ? await onSaveFile(filename, blob) : browserDownload(filename, blob)
-        activity({ id, title: `Exporting ${filename}`, detail: where ? `Saved to ${where}` : "Saved", tone: "done" })
+        const saved = where ? `Saved to ${where}` : "Saved"
+        activity({ id, title: `Exporting ${filename}`, detail: note ? `${saved}. ${note}` : saved, tone: "done" })
       } catch (failure) {
         activity({
           id,
@@ -608,8 +609,10 @@ export default function PartView({
     const id = `slicer-${part.id}-${Date.now()}`
     activity({ id, title: `Opening ${filename} in ${slicer.name}`, tone: "working" })
     try {
-      await onOpenInSlicer(filename, await exportPart(part.id, "3mf", values), slicer.app)
-      activity({ id, title: `Opening ${filename} in ${slicer.name}`, detail: "Saved to Downloads", tone: "done" })
+      const { blob, note } = await exportPart(part.id, "3mf", values)
+      await onOpenInSlicer(filename, blob, slicer.app)
+      const detail = note ? `Saved to Downloads. ${note}` : "Saved to Downloads"
+      activity({ id, title: `Opening ${filename} in ${slicer.name}`, detail, tone: "done" })
     } catch (failure) {
       const detail = failure instanceof Error ? failure.message : `${slicer.name} did not open it.`
       activity({ id, title: `Opening ${filename} in ${slicer.name}`, detail, tone: "fail" })

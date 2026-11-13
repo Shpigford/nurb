@@ -6,7 +6,7 @@ finding is obvious from the geometry: a known angle, a known count, a known tip.
 
 from math import cos, radians, sin, tan
 
-from build123d import Align, Axis, Box, Cylinder, Plane, Pos, Rot, extrude, Polygon
+from build123d import Align, Axis, Box, Cone, Cylinder, Plane, Pos, Rot, extrude, Polygon
 import pytest
 
 from nurb.checks import FAIL, WARN, Context, run
@@ -53,6 +53,40 @@ def test_a_part_in_pieces_silences_the_other_rules():
     shelf = Pos(8 + 15, 0, 20) * Box(30, 20, 4, align=(Align.CENTER, Align.CENTER, Align.MIN))
     found = run(post + shelf)
     assert [f.rule for f in found] == ["solids"]
+
+
+# --- mesh --------------------------------------------------------------------
+
+
+def _tip_with_collar(collar_rise):
+    """A shaft tapering 45 degrees into a 4mm tip, and half a collar fading into it.
+
+    At a 3mm rise the collar's cone is the tip's cone, same apex and slope, which is
+    the vise screw's thread runout with the helix taken out.
+    """
+    up = (Align.CENTER, Align.CENTER, Align.MIN)
+    shaft = Cylinder(4.8, 10, align=up) + Pos(0, 0, 10) * Cone(4.8, 4, 0.8, align=up)
+    collar = Cylinder(7, 10.8 - collar_rise, align=up) + Pos(0, 0, 10.8 - collar_rise) * Cone(
+        7, 4, collar_rise, align=up
+    )
+    return shaft + (Pos(0, 5, 5) * Box(20, 10, 20) & collar)
+
+
+def test_a_box_meshes_closed():
+    assert only(Box(20, 20, 20), "mesh") == []
+
+
+def test_two_faces_on_one_cone_leave_a_mesh_that_does_not_close():
+    shape = _tip_with_collar(3.0)
+    assert shape.is_valid and len(shape.solids()) == 1  # every B-rep rule is satisfied
+    found = only(shape, "mesh")
+    assert len(found) == 1
+    assert found[0].severity == FAIL
+    assert found[0].where[2] == pytest.approx(10, abs=1.5)  # at the tip, not the base
+
+
+def test_a_different_slope_meshes_closed():
+    assert only(_tip_with_collar(4.5), "mesh") == []
 
 
 # --- overhang ----------------------------------------------------------------

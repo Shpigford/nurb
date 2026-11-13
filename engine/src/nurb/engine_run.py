@@ -226,7 +226,7 @@ def _export_in_process(
     """
     import tempfile
 
-    from build123d import export_step
+    from build123d import Compound, export_step
 
     from . import slicing
 
@@ -234,14 +234,17 @@ def _export_in_process(
         scratch_root, part_name, overrides, profile, database_path, project_id
     )
     note = None
+    # STEP is for CAD and keeps an assembly assembled; the print formats get the parts.
+    plate = builder.print_set(shape, ctx.bed) if fmt in ("3mf", "stl") else [shape]
+    laid_out = f"{len(plate)} parts laid out to print" if len(plate) > 1 else None
     with tempfile.TemporaryDirectory() as scratch:
         target = pathlib.Path(scratch) / f"{part_name}.{fmt}"
         if fmt == "3mf":
-            builder.write_3mf(shape, target)
+            builder.write_3mf(plate, target)
             kit, why = slicing.kit(root)
             if kit:
                 machine, process, filament, exe = kit
-                settings, notes = slicing.tuned(shape, ctx)
+                settings, notes = slicing.tuned(plate, ctx)
                 try:
                     slicing.write_project(
                         target, target, machine, process, filament, exe, settings=settings
@@ -254,8 +257,9 @@ def _export_in_process(
                     # The CLI's reason names a file; here the picker is on the page.
                     why = "choose a printer to embed tuned settings"
                 note = f"geometry only: {why}"
+            note = ", ".join(n for n in (laid_out, note) if n)
         elif fmt == "stl":
-            builder.write_stl(shape, target)
+            builder.write_stl(plate[0] if len(plate) == 1 else Compound(children=plate), target)
         elif fmt == "step":
             export_step(shape, str(target))
         else:
