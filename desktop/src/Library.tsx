@@ -114,7 +114,6 @@ function toCard(part: Part, folder?: string | null, designing = false): PartCard
   return {
     id: part.id,
     name: part.title ?? titleCase(part.name),
-    identifier: part.name,
     bbox: Array.isArray(bbox) ? bbox : null,
     status,
     revision: part.revision,
