@@ -328,7 +328,7 @@ export default function Library({
       }
       end={
         <div className="flex h-full items-center gap-2 px-3">
-          <label className="flex h-8 w-[230px] items-center gap-2 rounded-[3px] border border-line bg-ground px-2.5 focus-within:border-panel-edge">
+          <label className="flex h-9 w-[230px] items-center gap-2 rounded-[3px] border border-line bg-ground px-2.5 focus-within:border-panel-edge">
             <Icon name="search" className="shrink-0 text-faint" />
             <input
               ref={searchRef}
