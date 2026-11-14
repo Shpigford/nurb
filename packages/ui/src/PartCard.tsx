@@ -4,6 +4,7 @@ import IsoBox from "./IsoBox"
 import Menu, { useContextMenu, type MenuItem } from "./Menu"
 import BlurUpImage from "./motion/BlurUpImage"
 import { formatBbox, relativeTime, rev } from "./format"
+import { useIsDark } from "./theme"
 
 // A build that has been running longer than this has stalled, and a dot still
 // pulsing would say it is fine.
@@ -68,6 +69,9 @@ export default function PartCard({
   const draft = part.status === "draft"
   const pulse = usePulse(building, part.buildingSince)
   const context = useContextMenu()
+  // The picture carries its own floor shadow, drawn for the card's ground.
+  const dark = useIsDark()
+  const thumbnail = part.thumbnailUrl && dark ? `${part.thumbnailUrl}&theme=dark` : (part.thumbnailUrl ?? undefined)
   return (
     <div
       onContextMenu={(e) => context.open(e, renaming ? undefined : menu)}
@@ -88,7 +92,7 @@ export default function PartCard({
           // The card owns the box, so the frame fills it instead of its own ratio,
           // and the whole part stays in frame rather than being cropped to it.
           <BlurUpImage
-            src={part.thumbnailUrl}
+            src={thumbnail}
             alt=""
             width={4}
             height={3}

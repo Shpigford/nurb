@@ -16,8 +16,12 @@ import {
   bedLine,
   cue,
   readSoundPrefs,
+  readThemeChoice,
+  SegmentedControl,
   setSoundEnabled,
   setSoundVolume,
+  setThemeChoice,
+  type ThemeChoice,
 } from "@nurb/ui";
 import {
   addPrinter,
@@ -28,6 +32,7 @@ import {
   type Workshop,
 } from "@nurb/workbench/api";
 import { connectCommands, maskToken } from "./connect";
+import { syncWindowTheme } from "./windowTheme";
 import About from "./About";
 import { AGENT_LABEL } from "./Chat";
 
@@ -109,6 +114,7 @@ export default function Settings({
 }: Props) {
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
+  const [theme, setTheme] = useState(readThemeChoice);
   // The rail's error line is on another screen, so a failed sign-in reports here.
   const [signInError, setSignInError] = useState<string | null>(null);
   // One key per copyable row, so only the row you pressed says so.
@@ -453,6 +459,29 @@ export default function Settings({
                 <section className="flex flex-col gap-3.5 px-7 py-5.5">
                   <SectionHead title="General" note="How nurb behaves on this Mac." />
                   <div className="flex flex-col gap-2.5 border-y border-line-soft py-2.5">
+                    <div className="flex items-center justify-between gap-6 border-b border-line-soft pb-2.5">
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="font-mono text-[11px] text-ink">Appearance</span>
+                        <span className="text-[13.5px] leading-[18px] text-muted">
+                          System matches your Mac's light or dark setting.
+                        </span>
+                      </div>
+                      <SegmentedControl
+                        label="Appearance"
+                        options={[
+                          { value: "system", label: "System" },
+                          { value: "light", label: "Light" },
+                          { value: "dark", label: "Dark" },
+                        ]}
+                        value={theme}
+                        onValueChange={(value) => {
+                          setThemeChoice(value as ThemeChoice);
+                          syncWindowTheme();
+                          setTheme(value as ThemeChoice);
+                        }}
+                        className="shrink-0"
+                      />
+                    </div>
                     <div className="flex items-center justify-between gap-6">
                       <div className="flex min-w-0 flex-col gap-0.5">
                         <span className="font-mono text-[11px] text-ink">Sounds</span>

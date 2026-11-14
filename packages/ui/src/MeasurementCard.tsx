@@ -58,7 +58,7 @@ export default function MeasurementCard({
               <button
                 type="button"
                 onClick={() => onAccept(measurement.name)}
-                className="btn-label chrome rounded-control focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent bg-ink px-2 py-1 text-white transition-colors hover:bg-ink-soft"
+                className="btn-label chrome rounded-control focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent bg-ink px-2 py-1 text-ground transition-colors hover:bg-ink-soft"
               >
                 Accept
               </button>
@@ -85,7 +85,7 @@ export default function MeasurementCard({
                 type="button"
                 onClick={() => onRebuild(stale)}
                 disabled={rebuilding}
-                className="btn-label chrome rounded-control focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent bg-ink px-2 py-1 text-white transition-colors hover:bg-ink-soft disabled:opacity-60"
+                className="btn-label chrome rounded-control focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent bg-ink px-2 py-1 text-ground transition-colors hover:bg-ink-soft disabled:opacity-60"
               >
                 {rebuilding ? "Rebuilding…" : "Rebuild"}
               </button>

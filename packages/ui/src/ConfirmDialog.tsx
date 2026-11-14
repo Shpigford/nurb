@@ -51,7 +51,7 @@ export default function ConfirmDialog({
         if (e.target === e.currentTarget) onCancel()
       }}
       // The scrim fades on its own, because ::backdrop is not ours to animate from script.
-      className="panel m-auto w-[320px] max-w-[calc(100vw-32px)] p-0 text-ink backdrop:bg-ink/30 backdrop:transition-colors backdrop:duration-[240ms] starting:backdrop:bg-ink/0"
+      className="panel m-auto w-[320px] max-w-[calc(100vw-32px)] p-0 text-ink backdrop:bg-scrim/30 backdrop:transition-colors backdrop:duration-[240ms] starting:backdrop:bg-scrim/0"
     >
       <div className="flex flex-col gap-1.5 px-4 pt-4 pb-3.5">
         <h2 id="confirm-title" className="font-display text-[16px] leading-5 font-bold tracking-[-0.02em] text-ink">

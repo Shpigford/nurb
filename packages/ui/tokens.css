@@ -47,6 +47,7 @@
   --color-line-soft: #e8edf4;
   --color-line: #dce3ed;
   --color-panel-edge: #bdcee2;
+  --color-scrim: #121821;
 
   /* Text */
   --color-faint: #6f7c8d;
@@ -95,6 +96,47 @@
 
   --breakpoint-md: 768px;
   --breakpoint-lg: 1024px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+/* Dark. The same slate ramp turned over: the stage drops furthest, panels sit a
+   step above it, and the accent keeps its hue while the text-weight reds and
+   semantics lift so they still read on a dark ground. The part's own colours do
+   not change, because the part is the subject and it is printed in this colour.
+   theme.ts sets data-theme from the person's choice or the system. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-ground: #161b22;
+  --color-raised: #1e252f;
+  --color-stage: #0e1218;
+  --color-stage-line: #222b37;
+  --color-line-soft: #212833;
+  --color-line: #2a3340;
+  --color-panel-edge: #36414f;
+  --color-scrim: #000000;
+
+  --color-faint: #7c8798;
+  --color-muted: #8d98a8;
+  --color-on-stage-muted: #8f9bad;
+  --color-ink-soft: #c2cad5;
+  --color-ink: #edf1f6;
+
+  --color-accent-hover: #ff6a4c;
+  --color-accent-ink: #ff7a5c;
+  --color-accent-wash: #3a1c15;
+  --color-pass: #2bc27a;
+  --color-pass-wash: #10281d;
+  --color-warn: #f0a024;
+  --color-warn-wash: #2c2311;
+  --color-fail: #ff5468;
+  --color-fail-wash: #35161b;
+
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4), 0 3px 8px rgb(0 0 0 / 0.3);
+  --shadow-control: 0 1px 2px rgb(0 0 0 / 0.4);
 }
 
 /* ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@ import {
   glowMesh,
   glowOutline,
   palette,
+  stageColors,
   pinMesh,
   plate,
   plateGroup,
@@ -568,7 +569,7 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
     if (!container) return
 
     const scene = new Scene()
-    scene.background = new Color(palette.stage)
+    scene.background = new Color(stageColors().stage)
     const view = new PerspectiveCamera(45, 1, 0.1, 10000)
     view.up.set(0, 0, 1) // before OrbitControls, which reads it; never Object3D.DEFAULT_UP
     const root = new Group()
@@ -717,7 +718,16 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
     }
     h.controls?.addEventListener("change", onChange)
 
+    // A theme switch repaints the stage and redraws the bed in place; the part keeps its colour.
+    const themeWatch = new MutationObserver(() => {
+      scene.background = new Color(stageColors().stage)
+      if (h.plateSize) syncPlate(h, h.plateSize)
+      h.render()
+    })
+    themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] })
+
     return () => {
+      themeWatch.disconnect()
       // StrictMode mounts, unmounts and mounts again, so a leaked context here is two contexts.
       observer.disconnect()
       if (h.raf) cancelAnimationFrame(h.raf)

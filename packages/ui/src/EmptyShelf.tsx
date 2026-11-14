@@ -1,6 +1,6 @@
 import Button from "./Button"
 import type { IconName } from "./Icon"
-import { brand } from "./brand"
+import { brand, maskOf } from "./brand"
 
 // The shelf before anything is on it. The bracket is the ghost of a part.
 export default function EmptyShelf({
@@ -18,7 +18,7 @@ export default function EmptyShelf({
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-7 pb-16">
-      <img src={brand.ghostBracket} alt="" aria-hidden="true" className="h-[300px] w-auto select-none" />
+      <span aria-hidden="true" style={maskOf(brand.ghostBracket)} className="h-[300px] w-[231px] bg-panel-edge" />
       <div className="flex flex-col items-center gap-2">
         <h2 className="font-display text-[20px] leading-[26px] tracking-[-0.022em] text-balance text-ink">
           Empty shelf. What’s rattling around your bench?

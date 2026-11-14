@@ -1,5 +1,7 @@
 export { cue, readSoundPrefs, setSoundEnabled, setSoundVolume } from './sound';
 export type { Cue, SoundPrefs } from './sound';
+export { isDark, readThemeChoice, setThemeChoice, startTheme, useIsDark } from './theme';
+export type { ThemeChoice } from './theme';
 export { duration, ease } from './motion/tokens';
 export { useCopyToClipboard } from './motion/useCopyToClipboard';
 export type { CopyStatus, UseCopyToClipboardOptions } from './motion/useCopyToClipboard';
