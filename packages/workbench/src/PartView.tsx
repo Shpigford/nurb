@@ -773,7 +773,7 @@ export default function PartView({
               <span className="mono-label">Add to project</span>
             </button>
           ) : null}
-          {header?.end ? <HeaderIcons>{header.end}</HeaderIcons> : null}
+          {header?.end ? <HeaderIcons className="border-l border-line">{header.end}</HeaderIcons> : null}
         </>
       }
     />

@@ -324,6 +324,7 @@ export default function Library({
             <span className="mono-label text-ink">Library</span>
             <span className="absolute inset-x-0 bottom-0 h-0.5 bg-accent" />
           </div>
+          <HeaderDivider />
         </>
       }
       end={
