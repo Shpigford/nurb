@@ -244,7 +244,18 @@ async fn probe_tools(
     let cwd = data.join("probe").join(kind.id());
     std::fs::create_dir_all(&cwd).ok()?;
     let (program, args) = launcher.adapter(kind);
-    let (program, args) = sandbox::wrap(program, args, &cwd, &launcher.engine_root());
+    let agent_home = crate::agents::custom_agent_home(kind);
+    // The probe has no rail to warn, so an unconfined spawn is reported by the
+    // chat and session paths that run beside it, not here.
+    let (program, args, _confined, sandbox_guard) = sandbox::wrap(
+        program,
+        args,
+        &cwd,
+        &launcher.engine_root(),
+        &agent_dot(kind),
+        agent_home.as_deref(),
+    )
+    .ok()?;
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -254,7 +265,9 @@ async fn probe_tools(
             config = config.env("GEMINI_API_KEY", key);
         }
     }
-    let (stdin, stdout, stderr, child) = AcpAgent::new(config).spawn_process().ok()?;
+    let spawned = AcpAgent::new(config).spawn_process();
+    drop(sandbox_guard);
+    let (stdin, stdout, stderr, child) = spawned.ok()?;
     let pgid = child.id() as i32;
     drain_stderr(kind, stderr);
     let said = Arc::new(Mutex::new(String::new()));
@@ -458,13 +471,14 @@ pub async fn list_sessions(
         .filter(|kind| *kind != AgentKind::Claude)
         .filter(|kind| kind.native_command().is_none() || launcher.adapter_available(*kind))
         .map(|kind| {
+            let app = app.clone();
             let launcher = launcher.clone();
             let project = project.clone();
             let serve = serve.clone();
             (
                 kind,
                 tauri::async_runtime::spawn(async move {
-                    agent_sessions(&launcher, kind, project, serve).await
+                    agent_sessions(&app, &launcher, kind, project, serve).await
                 }),
             )
         })
@@ -524,6 +538,7 @@ pub async fn list_sessions(
 /// while `nextCursor` still points at more, so an empty page never means done,
 /// only an absent cursor does.
 async fn agent_sessions(
+    app: &tauri::AppHandle,
     launcher: &crate::env::Launcher,
     kind: AgentKind,
     project: PathBuf,
@@ -537,7 +552,19 @@ async fn agent_sessions(
     String,
 > {
     let (program, args) = launcher.adapter(kind);
-    let (program, args) = sandbox::wrap(program, args, &project, &launcher.engine_root());
+    let agent_home = crate::agents::custom_agent_home(kind);
+    let (program, args, confined, sandbox_guard) = sandbox::wrap(
+        program,
+        args,
+        &project,
+        &launcher.engine_root(),
+        &agent_dot(kind),
+        agent_home.as_deref(),
+    )?;
+    if !confined {
+        use tauri::Emitter;
+        let _ = app.emit("agent-unsandboxed", ());
+    }
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -548,9 +575,9 @@ async fn agent_sessions(
         }
     }
     let agent = AcpAgent::new(config);
-    let (stdin, stdout, stderr, child) = agent
-        .spawn_process()
-        .map_err(|error| friendly(kind, error))?;
+    let spawned = agent.spawn_process();
+    drop(sandbox_guard);
+    let (stdin, stdout, stderr, child) = spawned.map_err(|error| friendly(kind, error))?;
     let pgid = child.id() as i32;
     drain_stderr(kind, stderr);
     let listed = tokio::time::timeout(
@@ -1690,7 +1717,7 @@ pub async fn probe_chat_config(
     let launcher = app.state::<crate::env::Launcher>().inner().clone();
     let serve = serve_entry(&app, false).await;
     let (_, config, model_rows) =
-        agent_sessions(&launcher, kind, PathBuf::from(path), serve).await?;
+        agent_sessions(&app, &launcher, kind, PathBuf::from(path), serve).await?;
     let prefs = app.state::<PrefStore>();
     prefs.cache(kind.id(), config);
     if kind == AgentKind::Grok {
@@ -1834,7 +1861,28 @@ async fn run_chat(
         None => project.clone(),
     };
     let (program, args) = launcher.adapter(kind);
-    let (program, args) = sandbox::wrap(program, args, &cwd, &launcher.engine_root());
+    let agent_home = crate::agents::custom_agent_home(kind);
+    let wrapped = sandbox::wrap(
+        program,
+        args,
+        &cwd,
+        &launcher.engine_root(),
+        &agent_dot(kind),
+        agent_home.as_deref(),
+    );
+    let (program, args, confined, sandbox_guard) = match wrapped {
+        Ok(wrapped) => wrapped,
+        Err(error) => {
+            let _ = ready_tx.send(Err(agent_client_protocol::Error::new(-32603, error)));
+            return;
+        }
+    };
+    // An adapter the kernel is not confining is a fact about the user's
+    // machine, not a diagnostic. The rail says so for as long as it is true.
+    if !confined {
+        use tauri::Emitter;
+        let _ = app.emit("agent-unsandboxed", ());
+    }
     let mut config = AcpAgentConfig::new(program).args(args);
     if let Some(path) = launcher.adapter_path() {
         config = config.env("PATH", path);
@@ -1845,7 +1893,9 @@ async fn run_chat(
         }
     }
     let agent = AcpAgent::new(config);
-    let (stdin, stdout, stderr, child) = match agent.spawn_process() {
+    let spawned = agent.spawn_process();
+    drop(sandbox_guard);
+    let (stdin, stdout, stderr, child) = match spawned {
         Ok(spawned) => spawned,
         Err(error) => {
             let _ = ready_tx.send(Err(error));
@@ -2200,6 +2250,13 @@ fn drain_stderr(kind: AgentKind, stderr: async_process::ChildStderr) {
             let _ = writeln!(std::io::stderr(), "[acp:{}] {line}", kind.id());
         }
     });
+}
+
+/// The default `$HOME` prefix an agent keeps its state under (`claude` ->
+/// `~/.claude`, `~/.claude.json`). Codex's explicit `CODEX_HOME` is passed
+/// beside it when present.
+fn agent_dot(kind: AgentKind) -> String {
+    format!(".{}", kind.id())
 }
 
 /// -32000 is ACP's auth-required code, so it means signed out for every
