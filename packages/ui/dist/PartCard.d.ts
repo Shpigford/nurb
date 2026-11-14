@@ -2,7 +2,6 @@ import { MenuItem } from './Menu';
 export interface PartCardPart {
     id: string;
     name: string;
-    identifier?: string;
     bbox?: number[] | null;
     /** A draft is described and not written yet, so there is nothing to build. */
     status: "built" | "failed" | "building" | "unbuilt" | "draft";

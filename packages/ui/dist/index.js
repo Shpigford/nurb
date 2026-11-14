@@ -9224,14 +9224,14 @@ function jy({
   renaming: i,
   onRename: s
 }) {
-  const r = Hm(e.bbox), o = Km(e.builtAt), a = e.status === "failed", l = e.status === "building", u = e.status === "draft", d = P0(l, e.buildingSince), h = y0();
+  const r = Hm(e.bbox), o = e.folder && e.folder.toLowerCase() !== e.name.toLowerCase() ? e.folder : null, a = Km(e.builtAt), l = e.status === "failed", u = e.status === "building", d = e.status === "draft", h = P0(u, e.buildingSince), f = y0();
   return /* @__PURE__ */ y(
     "div",
     {
-      onContextMenu: (f) => h.open(f, i ? void 0 : n),
+      onContextMenu: (p) => f.open(p, i ? void 0 : n),
       className: "group relative flex flex-col rounded-[6px] border border-panel-edge bg-ground transition-shadow focus-within:shadow-[var(--shadow-panel)] hover:shadow-[var(--shadow-panel)]",
       children: [
-        h.menu,
+        f.menu,
         /* @__PURE__ */ c(
           "button",
           {
@@ -9244,8 +9244,8 @@ function jy({
         /* @__PURE__ */ c(
           "div",
           {
-            className: `relative h-[148px] overflow-hidden rounded-t-[6px] border-b border-line-soft ${u ? "bg-raised/60" : "bg-ground"}`,
-            children: u ? null : e.thumbnailUrl ? (
+            className: `relative h-[148px] overflow-hidden rounded-t-[6px] border-b border-line-soft ${d ? "bg-raised/60" : "bg-ground"}`,
+            children: d ? null : e.thumbnailUrl ? (
               // The card owns the box, so the frame fills it instead of its own ratio,
               // and the whole part stays in frame rather than being cropped to it.
               /* @__PURE__ */ c(
@@ -9272,27 +9272,23 @@ function jy({
         ) }) : null,
         /* @__PURE__ */ y("div", { className: "flex flex-col gap-1.5 px-[13px] py-[11px]", children: [
           /* @__PURE__ */ y("div", { className: "flex items-center gap-2", children: [
-            i ? /* @__PURE__ */ c(M0, { name: e.name, onDone: (f) => s?.(f) }) : /* @__PURE__ */ c("h2", { className: "min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold tracking-[-0.01em] text-ink", children: e.name }),
-            a ? /* @__PURE__ */ c("span", { className: "text-warn", children: /* @__PURE__ */ c(z, { name: "warning" }) }) : l ? /* @__PURE__ */ c(
+            i ? /* @__PURE__ */ c(M0, { name: e.name, onDone: (p) => s?.(p) }) : /* @__PURE__ */ c("h2", { className: "min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold tracking-[-0.01em] text-ink", children: e.name }),
+            l ? /* @__PURE__ */ c("span", { className: "text-warn", children: /* @__PURE__ */ c(z, { name: "warning" }) }) : u ? /* @__PURE__ */ c(
               "span",
               {
-                "data-build": d ? "running" : "stalled",
-                className: `size-1.5 rounded-full bg-accent${d ? " motion-safe:animate-pulse" : ""}`
+                "data-build": h ? "running" : "stalled",
+                className: `size-1.5 rounded-full bg-accent${h ? " motion-safe:animate-pulse" : ""}`
               }
             ) : e.status === "built" ? /* @__PURE__ */ c("span", { className: "text-pass", children: /* @__PURE__ */ c(z, { name: "check" }) }) : null
           ] }),
-          /* @__PURE__ */ y("p", { className: "mono-caption truncate text-muted normal-case [letter-spacing:0.08em]", children: [
-            u ? " " : e.identifier ?? "",
-            !u && e.identifier && r ? " · " : "",
-            r ? `${r} mm` : ""
-          ] })
+          /* @__PURE__ */ c("p", { className: "mono-caption truncate text-muted normal-case [letter-spacing:0.08em]", children: r ? `${r} mm` : " " })
         ] }),
         /* @__PURE__ */ y("div", { className: "mono-caption flex items-center justify-between border-t border-line-soft px-[13px] py-2 text-muted [letter-spacing:0.08em]", children: [
-          u ? /* @__PURE__ */ y("span", { className: "flex items-center gap-2", children: [
+          d ? /* @__PURE__ */ y("span", { className: "flex items-center gap-2", children: [
             e.designing ? /* @__PURE__ */ c("span", { "aria-hidden": "true", className: "size-1.5 rounded-full bg-accent motion-safe:animate-pulse" }) : null,
             e.designing ? "Being designed" : "No design yet"
-          ] }) : /* @__PURE__ */ c("span", { children: o ? `Built ${o}` : "Not built yet" }),
-          /* @__PURE__ */ c("span", { className: a ? "text-warn" : void 0, children: a ? "Failed" : e.folder ?? (u ? "" : jt(e.revision)) })
+          ] }) : /* @__PURE__ */ c("span", { children: a ? `Built ${a}` : "Not built yet" }),
+          /* @__PURE__ */ c("span", { className: l ? "text-warn" : void 0, children: l ? "Failed" : o ?? (d ? "" : jt(e.revision)) })
         ] })
       ]
     }

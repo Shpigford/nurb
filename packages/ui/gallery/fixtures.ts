@@ -197,16 +197,16 @@ export const libraryProjects: { id: string; name: string; count: number }[] = [
 const BUILT = (hours: number) => new Date(Date.now() - hours * 3600 * 1000).toISOString()
 
 export const libraryParts: PartCardPart[] = [
-  { id: "p1", name: "Rail bracket", identifier: "rail_bracket", bbox: [80, 120, 24], status: "built", revision: 27, builtAt: BUILT(0.3) },
-  { id: "p2", name: "Gridfinity bin 2x1", identifier: "bin_2x1", bbox: [84, 42, 50], status: "built", revision: 12, builtAt: BUILT(1.1) },
-  { id: "p3", name: "Vac hose adapter", identifier: "vac_adapter", bbox: [62, 62, 48], status: "failed", revision: 5, builtAt: BUILT(2.4) },
-  { id: "p4", name: "Drill index block", identifier: "drill_index", bbox: [160, 60, 28], status: "built", revision: 9, builtAt: BUILT(3.8) },
-  { id: "p5", name: "Shelf pin", identifier: "shelf_pin", bbox: [18, 18, 34], status: "built", revision: 4, builtAt: BUILT(5) },
-  { id: "p6", name: "Wall plate", identifier: "wall_plate", bbox: [120, 120, 6], status: "building", revision: 3, builtAt: BUILT(6) },
-  { id: "p7", name: "Caliper stand", identifier: "caliper_stand", bbox: [180, 44, 40], status: "built", revision: 11, builtAt: BUILT(9) },
-  { id: "p8", name: "Spool holder arm", identifier: "spool_arm", bbox: [140, 36, 64], status: "built", revision: 18, builtAt: BUILT(26) },
-  { id: "p9", name: "Hex key rack", identifier: "hex_rack", bbox: [110, 30, 22], status: "built", revision: 6, builtAt: BUILT(30) },
-  { id: "p10", name: "Filament clip", identifier: "filament_clip", bbox: [24, 18, 12], status: "built", revision: 2, builtAt: BUILT(48) },
-  { id: "p11", name: "Nozzle tray", identifier: "nozzle_tray", bbox: [90, 60, 16], status: "unbuilt", revision: null, builtAt: null },
-  { id: "p12", name: "Cable comb", identifier: "cable_comb", bbox: [70, 14, 10], status: "built", revision: 8, builtAt: BUILT(72) },
+  { id: "p1", name: "Rail bracket", bbox: [80, 120, 24], status: "built", revision: 27, builtAt: BUILT(0.3) },
+  { id: "p2", name: "Gridfinity bin 2x1", bbox: [84, 42, 50], status: "built", revision: 12, builtAt: BUILT(1.1) },
+  { id: "p3", name: "Vac hose adapter", bbox: [62, 62, 48], status: "failed", revision: 5, builtAt: BUILT(2.4) },
+  { id: "p4", name: "Drill index block", bbox: [160, 60, 28], status: "built", revision: 9, builtAt: BUILT(3.8) },
+  { id: "p5", name: "Shelf pin", bbox: [18, 18, 34], status: "built", revision: 4, builtAt: BUILT(5) },
+  { id: "p6", name: "Wall plate", bbox: [120, 120, 6], status: "building", revision: 3, builtAt: BUILT(6) },
+  { id: "p7", name: "Caliper stand", bbox: [180, 44, 40], status: "built", revision: 11, builtAt: BUILT(9) },
+  { id: "p8", name: "Spool holder arm", bbox: [140, 36, 64], status: "built", revision: 18, builtAt: BUILT(26) },
+  { id: "p9", name: "Hex key rack", bbox: [110, 30, 22], status: "built", revision: 6, builtAt: BUILT(30) },
+  { id: "p10", name: "Filament clip", bbox: [24, 18, 12], status: "built", revision: 2, builtAt: BUILT(48) },
+  { id: "p11", name: "Nozzle tray", bbox: [90, 60, 16], status: "unbuilt", revision: null, builtAt: null },
+  { id: "p12", name: "Cable comb", bbox: [70, 14, 10], status: "built", revision: 8, builtAt: BUILT(72) },
 ]
