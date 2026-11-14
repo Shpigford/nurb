@@ -7,7 +7,6 @@ afterEach(cleanup)
 const built: PartCardPart = {
   id: "p1",
   name: "Shelf bracket",
-  identifier: "shelf_bracket",
   bbox: [80, 40, 20],
   status: "built",
   revision: 4,
@@ -19,10 +18,18 @@ describe("PartCard", () => {
     const seen: string[] = []
     render(<PartCard part={built} onOpen={() => seen.push("open")} />)
     expect(screen.getByText("REV 04")).toBeTruthy()
-    expect(screen.getByText("80 × 40 × 20 mm", { exact: false })).toBeTruthy()
+    expect(screen.getByText("80 × 40 × 20 mm")).toBeTruthy()
     expect(screen.getByText("Built 2d ago")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Open Shelf bracket" }))
     expect(seen).toEqual(["open"])
+  })
+
+  it("names the project only when it differs from the part", () => {
+    render(<PartCard part={{ ...built, folder: "Shelf bracket" }} onOpen={() => {}} />)
+    expect(screen.getByText("REV 04")).toBeTruthy()
+    cleanup()
+    render(<PartCard part={{ ...built, folder: "Garage wall" }} onOpen={() => {}} />)
+    expect(screen.getByText("Garage wall")).toBeTruthy()
   })
 
   it("says Failed instead of a revision", () => {
@@ -50,10 +57,9 @@ describe("PartCard", () => {
   })
 
   it("says a draft is being designed while its agent works, and never shows a revision", () => {
-    const draft: PartCardPart = { id: "d1", name: "A door stopper for the back door", identifier: "new_part", status: "draft" }
+    const draft: PartCardPart = { id: "d1", name: "A door stopper for the back door", status: "draft" }
     render(<PartCard part={{ ...draft, designing: true }} onOpen={() => {}} />)
     expect(screen.getByText("Being designed")).toBeTruthy()
-    expect(screen.queryByText("new_part")).toBeNull()
     expect(screen.queryByText(/REV/)).toBeNull()
     cleanup()
     render(<PartCard part={draft} onOpen={() => {}} />)

@@ -29,7 +29,6 @@ function usePulse(building: boolean, since?: string | null): boolean {
 export interface PartCardPart {
   id: string
   name: string
-  identifier?: string
   bbox?: number[] | null
   /** A draft is described and not written yet, so there is nothing to build. */
   status: "built" | "failed" | "building" | "unbuilt" | "draft"
@@ -61,6 +60,8 @@ export default function PartCard({
   onRename?: (name: string | null) => void
 }) {
   const dims = formatBbox(part.bbox)
+  // A project named after its first part would repeat the title, so the revision shows instead.
+  const folder = part.folder && part.folder.toLowerCase() !== part.name.toLowerCase() ? part.folder : null
   const built = relativeTime(part.builtAt)
   const failed = part.status === "failed"
   const building = part.status === "building"
@@ -129,11 +130,9 @@ export default function PartCard({
             <span className="text-pass"><Icon name="check" /></span>
           ) : null}
         </div>
-        {/* A draft's name is a placeholder the agent replaces, so it is not shown. */}
+        {/* The name is the title above, so this line is the size alone. A space keeps the height when there is none. */}
         <p className="mono-caption truncate text-muted normal-case [letter-spacing:0.08em]">
-          {draft ? "\u00a0" : part.identifier ?? ""}
-          {!draft && part.identifier && dims ? " · " : ""}
-          {dims ? `${dims} mm` : ""}
+          {dims ? `${dims} mm` : "\u00a0"}
         </p>
       </div>
       <div className="mono-caption flex items-center justify-between border-t border-line-soft px-[13px] py-2 text-muted [letter-spacing:0.08em]">
@@ -148,7 +147,7 @@ export default function PartCard({
           <span>{built ? `Built ${built}` : "Not built yet"}</span>
         )}
         <span className={failed ? "text-warn" : undefined}>
-          {failed ? "Failed" : (part.folder ?? (draft ? "" : rev(part.revision)))}
+          {failed ? "Failed" : (folder ?? (draft ? "" : rev(part.revision)))}
         </span>
       </div>
     </div>
