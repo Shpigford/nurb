@@ -39,7 +39,7 @@ export default function ProjectPicker({
       onClick={(e) => {
         if (e.target === e.currentTarget) onCancel();
       }}
-      className="panel m-auto w-[340px] max-w-[calc(100vw-32px)] p-0 text-ink backdrop:bg-ink/30"
+      className="panel m-auto w-[340px] max-w-[calc(100vw-32px)] p-0 text-ink backdrop:bg-scrim/30"
     >
       <div className="flex flex-col gap-1.5 px-4 pt-4 pb-3">
         <h2

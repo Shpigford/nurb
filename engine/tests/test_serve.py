@@ -1787,6 +1787,9 @@ def test_library_thumbnail_is_one_view_on_a_transparent_ground(tmp_path, monkeyp
     assert image.mode == "RGBA" and image.size == (640, 480)
     assert image.getpixel((0, 0))[3] == 0
     assert run_id in serve.THUMBNAILS
+    dark = client.get(f"/thumbnail/{project_id}/{part['name']}.png?run={run_id}&theme=dark")
+    assert dark.status_code == 200 and dark.content != response.content
+    assert f"{run_id}:dark" in serve.THUMBNAILS
     assert client.get(f"/thumbnail/{project_id}/{part['name']}.png?run=nope").status_code == 404
     conn.close()
 

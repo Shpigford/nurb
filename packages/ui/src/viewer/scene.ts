@@ -30,6 +30,7 @@ import type { Light, Material, Object3D, PerspectiveCamera, Plane } from "three"
 import { Frustum } from "three"
 import type { OrbitControls } from "three/addons/controls/OrbitControls.js"
 import type { Severity } from "../types"
+import { isDark } from "../theme"
 
 // The light palette, decided in PROGRESS.md Phase 7. The part wears the brand accent, as
 // the design draws it: --color-accent for the material, --color-part-edge for the outline.
@@ -54,6 +55,13 @@ export const palette = {
 } as const
 
 export type Palette = typeof palette
+
+// The stage and the bed follow the theme; the part, its lights and the marks do not, so
+// a part looks the same printed colour in either. Dark mirrors --color-stage in tokens.css.
+export const stageColors = () =>
+  isDark()
+    ? { stage: 0x0e1218, gridMinor: 0x1a212b, gridMajor: 0x252e3b, gridBorder: 0x3a4657 }
+    : { stage: palette.stage, gridMinor: palette.gridMinor, gridMajor: palette.gridMajor, gridBorder: palette.gridBorder }
 
 const GLOW_OPACITY: Record<Severity, number> = { fail: 0.4, warn: 0.38 }
 export const HIGHLIGHT_OPACITY = 0.62
@@ -108,11 +116,12 @@ export function plate([w, d]: [number, number], pitch = 10): Group {
     -hw, -hd, 0, hw, -hd, 0, hw, -hd, 0, hw, hd, 0,
     hw, hd, 0, -hw, hd, 0, -hw, hd, 0, -hw, -hd, 0,
   ]
+  const colors = stageColors()
   const group = new Group()
   group.add(
-    segments(minor, new LineBasicMaterial({ color: palette.gridMinor })),
-    segments(major, new LineBasicMaterial({ color: palette.gridMajor })),
-    segments(border, new LineBasicMaterial({ color: palette.gridBorder })),
+    segments(minor, new LineBasicMaterial({ color: colors.gridMinor })),
+    segments(major, new LineBasicMaterial({ color: colors.gridMajor })),
+    segments(border, new LineBasicMaterial({ color: colors.gridBorder })),
     segments(cross, new LineBasicMaterial({ color: palette.accent, transparent: true, opacity: 0.35 }))
   )
   return group

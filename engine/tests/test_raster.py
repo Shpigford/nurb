@@ -219,3 +219,10 @@ def test_encode_png_round_trips_through_zlib():
 def test_a_cut_past_the_part_says_where_the_part_is():
     with pytest.raises(raster.Unrenderable, match=r"z=40 misses the part, which spans z -?0 to 20"):
         raster.render(_box_glb(), cut=("z", 40.0))
+
+
+def test_a_dark_ground_gets_a_dark_shadow():
+    image = raster.frame(_box_glb(), width=240, height=160, ghost=False, shadow=raster.SHADOW_DARK)
+    tones = _tones(image)
+    assert raster.SHADOW_DARK in tones
+    assert raster.SHADOW not in tones

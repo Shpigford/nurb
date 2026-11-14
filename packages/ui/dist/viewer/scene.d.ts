@@ -16,6 +16,12 @@ export declare const palette: {
     readonly cap: 7169436;
 };
 export type Palette = typeof palette;
+export declare const stageColors: () => {
+    stage: number;
+    gridMinor: number;
+    gridMajor: number;
+    gridBorder: number;
+};
 export declare const HIGHLIGHT_OPACITY = 0.62;
 /**
  * One bright key, a little ambient. The key is steep and strong on purpose: the part's own

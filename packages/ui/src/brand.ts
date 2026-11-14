@@ -12,3 +12,9 @@ import squiggle from "../brand/404-squiggle.svg?no-inline"
 // The brand marks as URLs, so a consumer points at them instead of copying the
 // files into its own public directory and letting the two drift.
 export const brand = { lockup, mark, markOutline, markSmall, favicon, authPlane, ghostBracket, squiggle } as const
+
+/** A one-colour brand drawing as a mask, so a token can paint it and it follows the theme. */
+export const maskOf = (src: string) => ({
+  WebkitMask: `url("${src}") center / contain no-repeat`,
+  mask: `url("${src}") center / contain no-repeat`,
+})

@@ -1,12 +1,15 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { readSoundPrefs } from "@nurb/ui";
+import { readSoundPrefs, startTheme } from "@nurb/ui";
 import App from "./App";
+import { syncWindowTheme } from "./windowTheme";
 import "./tailwind.css";
 
 // Reading the prefs is what pushes them into the sound layer, and Settings may
 // never open, so the first cue of the session has to find the saved volume here.
 readSoundPrefs();
+startTheme();
+syncWindowTheme();
 
 // For whoever opens the inspector. The mark keeps its dash; it is the wordmark.
 console.log("%cnurb — parts that fit.", "color:#ff5230;font-weight:700");

@@ -54,6 +54,9 @@ SIDE = (0xC4, 0x2D, 0x12)
 UNDER = (0x9E, 0x24, 0x10)
 EDGE = (0xA3, 0x24, 0x09)
 SHADOW = (0xEE, 0xF2, 0xF8)
+# The same pool of shade for a picture that sits on the dark theme's ground, which a
+# light ellipse would light up instead of setting the part down on.
+SHADOW_DARK = (0x0E, 0x12, 0x18)
 GHOST = (0x8B, 0x95, 0xA6)
 GHOST_EDGE = (0x4B, 0x55, 0x66)
 GHOST_ALPHA = 0.42
@@ -79,16 +82,16 @@ def looks(glb_bytes, names, width=WIDTH, height=HEIGHT, cut=None):
     return out
 
 
-def render(glb_bytes, width=WIDTH, height=HEIGHT, view=None, cut=None):
+def render(glb_bytes, width=WIDTH, height=HEIGHT, view=None, cut=None, shadow=SHADOW):
     """PNG bytes for one view, with the `context` scenery left out."""
-    return encode_png(frame(glb_bytes, view, width, height, ghost=False, cut=cut))
+    return encode_png(frame(glb_bytes, view, width, height, ghost=False, cut=cut, shadow=shadow))
 
 
-def frame(glb_bytes, view=None, width=WIDTH, height=HEIGHT, ghost=True, cut=None):
+def frame(glb_bytes, view=None, width=WIDTH, height=HEIGHT, ghost=True, cut=None, shadow=SHADOW):
     """The picture as an (h, w, 4) uint8 array, which is what both PNG paths render."""
     mesh, scenery = _split(glb_bytes)
     direction = _direction(view)
-    return _frame(*_sliced(mesh, cut, direction), scenery if ghost else None, width, height, direction)
+    return _frame(*_sliced(mesh, cut, direction), scenery if ghost else None, width, height, direction, shadow)
 
 
 def composite(glb_bytes, tile=TILE, cut=None):
@@ -192,7 +195,7 @@ def _camera(verts, view, width, height):
     return project, scale
 
 
-def _frame(mesh, cap_normal, ghost, width, height, view):
+def _frame(mesh, cap_normal, ghost, width, height, view, shadow=SHADOW):
     if len(mesh.faces) + (len(ghost.faces) if ghost is not None else 0) > MAX_FACES:
         raise Unrenderable(f"too many triangles to draw ({len(mesh.faces)})")
 
@@ -244,7 +247,7 @@ def _frame(mesh, cap_normal, ghost, width, height, view):
             np.full_like(t, lo[2]),
         ], axis=1)
         gpts, _ = project(ground)
-        _fill_polygon(under, gpts[:, 0], gpts[:, 1], SHADOW)
+        _fill_polygon(under, gpts[:, 0], gpts[:, 1], shadow)
     image = _over(color, under)
 
     return _halve(image) if ss > 1 else image

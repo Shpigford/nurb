@@ -1731,18 +1731,24 @@ def _routes(conn, lock, server, token, pid):
 
         project_id, name = request.path_params["project_id"], request.path_params["part"]
         run_id = request.query_params.get("run", "")
-        png = THUMBNAILS.get(run_id)
+        # A dark card asks for its own shadow; the light one stays the default.
+        dark = request.query_params.get("theme") == "dark"
+        key = f"{run_id}:dark" if dark else run_id
+        png = THUMBNAILS.get(key)
         if png is None:
             glb = await query(lambda conn: _thumbnail_glb(conn, project_id, name, run_id))
             if glb is None:
                 return PlainTextResponse("no thumbnail", status_code=404)
             try:
-                png = await anyio.to_thread.run_sync(lambda: raster.render(glb, width=640, height=480, view="iso"))
+                shadow = raster.SHADOW_DARK if dark else raster.SHADOW
+                png = await anyio.to_thread.run_sync(
+                    lambda: raster.render(glb, width=640, height=480, view="iso", shadow=shadow)
+                )
             except Exception:
                 return PlainTextResponse("no thumbnail", status_code=404)
             if len(THUMBNAILS) > 1000:
                 THUMBNAILS.clear()
-            THUMBNAILS[run_id] = png
+            THUMBNAILS[key] = png
         return Response(png, media_type="image/png", headers={"Cache-Control": "max-age=31536000, immutable"})
 
     async def projects(request):

@@ -135,8 +135,10 @@ export default function BlurUpImage({
         initial={false}
         // Only opacity and scale animate once sharp: an animated filter repaints the whole image every frame.
         animate={
+          // The instant path clears the blur too: a src swapped back to a cached image
+          // lands here straight from the loading pose, and would otherwise keep it.
           still
-            ? { opacity: shown ? 1 : 0 }
+            ? { opacity: shown ? 1 : 0, filter: "blur(0px)", scale: 1 }
             : shown
               ? { opacity: 1, filter: "blur(0px)", scale: 1 }
               : { opacity: 0, filter: `blur(${blur}px)`, scale: 1.06 }
