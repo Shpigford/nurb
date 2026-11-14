@@ -32,6 +32,14 @@ test("the rail lists folders and hides the containers", () => {
   );
 });
 
+test("the rail alphabetizes folders regardless of case", () => {
+  const list = [project("a", "notch", true), project("b", "Akrobins", true), project("c", "birdhouses", true)];
+  assert.deepEqual(
+    folders(list).map((p) => p.name),
+    ["Akrobins", "birdhouses", "notch"],
+  );
+});
+
 test("a part cannot move into the folder it is already in", () => {
   const list = [project("a", "Shelf", true, 3), project("b", "Rack", true, 2), project("c", "x", false)];
   assert.deepEqual(moveTargets(list, held("p1", "a")), [{ id: "b", name: "Rack", parts: 2 }]);

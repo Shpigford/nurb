@@ -10,9 +10,11 @@ export function titleCase(name: string): string {
   return spoken.charAt(0).toUpperCase() + spoken.slice(1);
 }
 
-/** The rail's Projects section: the folders, in the order the library listed them. */
+/** The rail's Projects section: the folders, alphabetized by name. */
 export function folders(projects: ProjectSummary[]): ProjectSummary[] {
-  return projects.filter((project) => project.folder);
+  return projects
+    .filter((project) => project.folder)
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true }));
 }
 
 /**
