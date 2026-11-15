@@ -53,6 +53,7 @@ import {
 import { activity } from "./activity"
 import { loadCamera, saveCamera } from "./camera"
 import { LabelEditor, LabelTag } from "./Labels"
+import AssemblyStrip, { assemblyOf } from "./AssemblyStrip"
 import Slice from "./Slice"
 import { spotText } from "./spot"
 import { verdictOf, type Verdict } from "./verdict"
@@ -287,7 +288,7 @@ export default function PartView({
   const part =
     parts.find((p) => p.name === partName) ??
     (partName ? parts.find((p) => p.id === shownId.current) : undefined) ??
-    (starting ? null : parts[0] ?? null)
+    (starting ? null : parts.find((p) => !p.assembly) ?? parts[0] ?? null)
   shownId.current = part?.id ?? null
   const build = part?.build ?? null
   const verdict = verdictOf(build)
@@ -753,7 +754,8 @@ export default function PartView({
               )}
               items={[
                 ...(onNewPart ? [{ label: `New part in ${project.name}`, onSelect: onNewPart }] : []),
-                ...parts.map((p, index) => ({
+                // A part inside an assembly is reached from the assembly's strip.
+                ...parts.filter((p) => !p.assembly || p.name === part?.name).map((p, index) => ({
                   separated: Boolean(onNewPart) && index === 0,
                   label: p.title ?? p.name,
                   checked: p.name === part?.name,
@@ -901,6 +903,7 @@ export default function PartView({
             ) : null}
           </div>
         ) : null}
+        {onSelectPart ? <AssemblyStrip group={assemblyOf(part, parts)} selected={part} onSelect={onSelectPart} /> : null}
         <StageBuilding open={building && !!glbUrl} expected={seconds} />
         {stageError ? <StageNotice>{stageError}</StageNotice> : null}
         {failedBuild ? (

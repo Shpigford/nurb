@@ -60,6 +60,10 @@ export interface Part {
   overrides: Params
   build: PartBuild | null
   labels?: PartLabel[]
+  /** The sibling parts this assembly places; empty for a plain part. */
+  uses?: string[]
+  /** The assembly this part is inside, which the library shows in its place. */
+  assembly?: string | null
 }
 
 /** A person's name for a spot on the part, in the part's own mm. */

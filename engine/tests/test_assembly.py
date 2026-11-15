@@ -314,3 +314,16 @@ def test_a_print_set_3mf_keeps_one_named_object_per_part(project, tmp_path):
     model = zipfile.ZipFile(target).read("3D/3dmodel.model").decode()
     assert re.findall(r'<object [^>]*name="([^"]*)"', model) == ["plate", "plate"]
     assert model.count("<item ") == 2
+
+
+def test_placed_parts_are_read_from_the_source():
+    from nurb import shared
+
+    source = 'def one(m):\n    return use("arm", mirror=m)\n\ndef f():\n    return one(0), one(1), use("knob-cap"), use(name)\n'
+    assert shared.placed(source) == ("arm", "knob_cap")
+    assert shared.placed("def broken(:") == ()
+    # Nested assemblies resolve to the outermost one, and a loop does not hang.
+    sources = {"vise": 'use("jaw_set")', "jaw_set": 'use("jaw")', "jaw": "", "a": 'use("b")', "b": 'use("a")'}
+    owners = shared.owners(sources)
+    assert owners["jaw_set"] == "vise" and owners["jaw"] == "vise"
+    assert set(owners) == {"jaw_set", "jaw"}
