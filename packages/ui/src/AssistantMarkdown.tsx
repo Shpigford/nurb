@@ -1,9 +1,10 @@
 import Markdown, { type Components } from "react-markdown"
+import remarkGfm from "remark-gfm"
 import clsx from "clsx"
 import { ASSISTANT_MARKDOWN_DISALLOWED_ELEMENTS } from "./assistantMarkdownPolicy"
 
-// Assistant replies are markdown (the intake model bolds its questions and
-// numbers them). react-markdown escapes raw HTML by default, so model output
+// Assistant replies are GitHub-flavored markdown (the intake model bolds its
+// questions and numbers them, and size comparisons come as tables). react-markdown escapes raw HTML by default, so model output
 // cannot inject markup; skipHtml drops it entirely instead of showing tags.
 // `streaming` draws the caret after the last rendered node (see .md-streaming
 // in tokens.css); a sibling span would land below the paragraph or list that
@@ -26,14 +27,30 @@ const COMPONENTS: Components = {
   code: ({ node: _node, className, ...props }) => (
     <code className={clsx("rounded-[3px] bg-raised px-1 font-mono text-[0.85em] text-ink", className)} {...props} />
   ),
+  // Replies compare sizes in tables. The wrapper scrolls a wide one sideways
+  // instead of letting it push the chat column wider.
+  table: ({ node: _node, ...props }) => (
+    <div className="mt-2 overflow-x-auto">
+      <table className="w-full border-collapse text-left text-[12.5px] leading-[18px]" {...props} />
+    </div>
+  ),
+  th: ({ node: _node, ...props }) => (
+    <th className="border-b border-line px-2 py-1.5 align-bottom font-semibold text-ink first:pl-0" {...props} />
+  ),
+  td: ({ node: _node, ...props }) => (
+    <td className="border-b border-line px-2 py-1.5 align-top first:pl-0" {...props} />
+  ),
   a: ({ node: _node, ...props }) => <a className="underline decoration-1 underline-offset-[3px] hover:text-accent-ink" target="_blank" rel="noreferrer" {...props} />,
 }
+
+const REMARK_PLUGINS = [remarkGfm]
 
 export default function AssistantMarkdown({ content, streaming = false }: { content: string; streaming?: boolean }) {
   return (
     <div className={clsx(streaming && "md-streaming")}>
       <Markdown
         skipHtml
+        remarkPlugins={REMARK_PLUGINS}
         disallowedElements={ASSISTANT_MARKDOWN_DISALLOWED_ELEMENTS}
         components={COMPONENTS}
       >
