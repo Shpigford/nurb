@@ -14,6 +14,11 @@ Two things I still need:
 
 The doctrine on this is in [the print rules](https://nurb.app/rules).
 
+| Weak spot | Before | Now | Effect at 1000 N |
+| --- | --- | --- | --- |
+| Base | 6 mm thick | 12 mm thick | stress drops from about 47 to about 15 MPa |
+| Screw neck | 6 mm | 7.4 mm | squeeze drops from about 35 to about 23 MPa |
+
 \`\`\`python
 @part
 def bracket(wall=2.0, hook_depth=18.0):

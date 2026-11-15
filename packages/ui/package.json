@@ -39,7 +39,8 @@
     "clsx": "^2.1.1",
     "cuelume": "^0.2.2",
     "motion": "^13.4.0",
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.13",

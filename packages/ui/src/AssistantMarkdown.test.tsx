@@ -29,4 +29,14 @@ describe("AssistantMarkdown", () => {
     const { container } = render(<AssistantMarkdown content="Thinking" streaming />)
     expect(container.firstElementChild).toHaveClass("md-streaming")
   })
+
+  // A reply's size comparison is a GFM table; without the plugin it shows as pipes.
+  it("renders a table instead of its pipes", () => {
+    const { container } = render(
+      <AssistantMarkdown content={"| Part | Before | Now |\n| --- | --- | --- |\n| Base | 6 mm | 12 mm |"} />
+    )
+    expect(container.querySelectorAll("th")).toHaveLength(3)
+    expect(container.querySelector("td")).toHaveTextContent("Base")
+    expect(container.textContent).not.toContain("|")
+  })
 })
