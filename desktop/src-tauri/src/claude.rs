@@ -48,6 +48,10 @@ const EFFORTS: [(&str, &str); 6] = [
     ("max", "Max"),
 ];
 
+/// Fast mode. The CLI bills it as extra usage on top of the plan, so the
+/// picker says so beside the switch.
+const SPEEDS: [(&str, &str); 2] = [("off", "Off"), ("on", "On")];
+
 pub struct Drivers {
     sessions: Mutex<HashMap<String, Arc<Session>>>,
 }
@@ -149,6 +153,11 @@ impl Session {
         self.pipe.lock().await.write(&set_model_line(model)).await
     }
 
+    /// Fast mode also lands on the running child, from its next request on.
+    pub(crate) async fn set_fast(&self, on: bool) -> Result<(), String> {
+        self.pipe.lock().await.write(&set_fast_line(on)).await
+    }
+
     /// SIGINT: measured on 2.1.272, the CLI answers with an
     /// `error_during_execution` result and exits, so a stop ends the child.
     /// The session itself survives on disk and the next message resumes it.
@@ -165,6 +174,17 @@ pub(crate) fn set_model_line(model: &str) -> Value {
         "type": "control_request",
         "request_id": uuid::Uuid::new_v4().to_string(),
         "request": { "subtype": "set_model", "model": model },
+    })
+}
+
+/// The same settings `--settings` carries at spawn. Fast mode in print mode is
+/// opt-in through flag settings only; the user's own settings file is not read
+/// for it.
+pub(crate) fn set_fast_line(on: bool) -> Value {
+    serde_json::json!({
+        "type": "control_request",
+        "request_id": uuid::Uuid::new_v4().to_string(),
+        "request": { "subtype": "apply_flag_settings", "settings": { "fastMode": on } },
     })
 }
 
@@ -256,6 +276,9 @@ pub(crate) enum Signal {
         stop: String,
         is_error: bool,
         text: String,
+        /// Why fast mode did not run although it was asked for. The CLI
+        /// says `sdk_opt_in_required` when it simply was not asked.
+        fast_blocked: Option<String>,
     },
 }
 
@@ -295,6 +318,8 @@ pub(crate) fn map_line(line: &Value) -> Vec<Signal> {
                     })
                     .unwrap_or_default()
             }),
+            fast_blocked: string_of(line, "fast_mode_disabled_reason")
+                .filter(|reason| reason != "sdk_opt_in_required"),
         }],
         Some("system") if line.get("subtype").and_then(Value::as_str) == Some("init") => {
             let servers = line
@@ -419,6 +444,7 @@ pub(crate) fn spawn_args(
     part: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
+    fast: bool,
     session: &str,
     resume: bool,
 ) -> Vec<String> {
@@ -458,6 +484,10 @@ pub(crate) fn spawn_args(
     if let Some(effort) = effort.filter(|effort| *effort != "default") {
         args.push("--effort".into());
         args.push(effort.to_string());
+    }
+    if fast {
+        args.push("--settings".into());
+        args.push(r#"{"fastMode":true}"#.into());
     }
     // The CLI says nothing, not even init, until the first prompt arrives on
     // stdin, so the session id is minted here and handed to it rather than
@@ -584,6 +614,7 @@ pub(crate) async fn start(
                 part.as_deref(),
                 pick("model"),
                 pick("thought_level"),
+                pick("fast") == Some("on"),
                 session,
                 resume,
             );
@@ -637,6 +668,8 @@ async fn read_stream(
     // One session error per session: the column forgets the session on it.
     let mut reported = false;
     let mut resumed = resumed;
+    // Said once per reason, not once per turn.
+    let mut fast_said: Option<String> = None;
     let mut lines = BufReader::new(stdout).lines();
     'stream: while let Ok(Some(line)) = lines.next_line().await {
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
@@ -667,7 +700,12 @@ async fn read_stream(
                     stop,
                     is_error,
                     text,
+                    fast_blocked,
                 } => {
+                    if let Some(reason) = fast_blocked.filter(|r| fast_said.as_ref() != Some(r)) {
+                        send(channel, ChatEvent::Note { text: fast_note(&reason) });
+                        fast_said = Some(reason);
+                    }
                     let stopped = session.stopped.load(Ordering::SeqCst);
                     if std::mem::take(&mut resumed)
                         && is_error
@@ -763,6 +801,16 @@ fn finish(session: &Session, outcome: Result<String, String>) {
     }
 }
 
+/// Fast mode was picked but the CLI ran at normal speed. Without this the
+/// switch reads as working.
+fn fast_note(reason: &str) -> String {
+    match reason {
+        "extra_usage_disabled" => "Fast mode didn't turn on. Claude charges it as extra usage, which is off for your Claude account. Turn on extra usage in Claude's settings to use it.".into(),
+        "model_not_allowed" => "Fast mode didn't turn on, because this model doesn't offer it. Pick another model to use it.".into(),
+        other => format!("Fast mode didn't turn on ({other}), so Claude is running at normal speed."),
+    }
+}
+
 fn looks_signed_out(text: &str) -> bool {
     let text = text.to_ascii_lowercase();
     text.contains("invalid api key")
@@ -781,43 +829,45 @@ fn drain_stderr(stderr: Option<tokio::process::ChildStderr>) {
     });
 }
 
-/// The driver's picker: the model and how hard it thinks, both passed at
-/// spawn. A model pick also switches the running child; thinking waits for
-/// the next session.
+/// The driver's picker: the model, how hard it thinks, and fast mode, all
+/// passed at spawn. A model or fast pick also switches the running child;
+/// thinking waits for the next session.
 pub(crate) fn config_rows(prefs: &PrefStore) -> Vec<ConfigRow> {
     let chosen = prefs.chosen(AgentKind::Claude.id());
-    let pick = |category: &str| {
+    let pick = |category: &str, fallback: &str| {
         chosen
             .iter()
             .find(|(key, _)| key == category)
             .map(|(_, value)| value.clone())
-            .unwrap_or_else(|| "default".into())
+            .unwrap_or_else(|| fallback.into())
     };
-    let row = |category: &str, name: &str, options: &[(&str, &str)], suggested: &str| ConfigRow {
+    // `noted` is the one option that gets a word beside it.
+    let row = |category: &str, name: &str, options: &[(&str, &str)], noted: (&str, &str), fallback: &str| ConfigRow {
         id: category.into(),
         category: category.into(),
         name: name.into(),
-        value: pick(category),
+        value: pick(category, fallback),
         options: options
             .iter()
             .map(|(value, label)| ConfigChoice {
                 value: (*value).into(),
                 name: (*label).into(),
-                description: (*value == suggested).then(|| "recommended".into()),
+                description: (*value == noted.0).then(|| noted.1.into()),
             })
             .collect(),
     };
     vec![
-        row("model", "Model", &MODELS, "fable"),
-        row("thought_level", "Thinking", &EFFORTS, "default"),
+        row("model", "Model", &MODELS, ("fable", "recommended"), "default"),
+        row("thought_level", "Thinking", &EFFORTS, ("default", "recommended"), "default"),
+        row("fast", "Fast mode", &SPEEDS, ("on", "extra usage"), "off"),
     ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        is_current, map_line, read_stream, set_model_line, spawn, spawn_args, user_content, Pipe,
-        Session, Signal,
+        is_current, map_line, read_stream, set_fast_line, set_model_line, spawn, spawn_args,
+        user_content, Pipe, Session, Signal,
     };
     use crate::acp::Meshes;
     use serde_json::Value;
@@ -947,7 +997,7 @@ mod tests {
 
     #[test]
     fn the_tools_are_the_nurb_server_and_nothing_else() {
-        let args = spawn_args("http://127.0.0.1:7373", "secret", "box", Some("lip"), Some("opus"), Some("high"), "sid", false);
+        let args = spawn_args("http://127.0.0.1:7373", "secret", "box", Some("lip"), Some("opus"), Some("high"), false, "sid", false);
         let joined = args.join(" ");
         assert!(joined.contains("--strict-mcp-config"));
         assert!(joined.contains("http://127.0.0.1:7373/mcp"));
@@ -958,9 +1008,39 @@ mod tests {
         assert!(joined.contains("the part \"lip\""));
         assert!(joined.contains("--session-id sid"));
         // The default alias is the CLI's own choice, so it is never passed.
-        let default = spawn_args("http://x", "t", "box", None, Some("default"), Some("default"), "sid", true);
+        let default = spawn_args("http://x", "t", "box", None, Some("default"), Some("default"), false, "sid", true);
         assert!(!default.join(" ").contains("--model"));
         assert!(default.join(" ").contains("--resume sid"));
+        assert!(!default.join(" ").contains("fastMode"));
+        // Print mode reads fast mode from flag settings only.
+        let fast = spawn_args("http://x", "t", "box", None, None, None, true, "sid", false);
+        assert!(fast.join(" ").contains(r#"--settings {"fastMode":true}"#));
+    }
+
+    /// Measured on 2.1.325: a success, and the next result's
+    /// `fast_mode_disabled_reason` moves off `sdk_opt_in_required`.
+    #[test]
+    fn a_fast_pick_is_flag_settings_on_the_running_child() {
+        let line = set_fast_line(true);
+        assert_eq!(line["request"]["subtype"], "apply_flag_settings");
+        assert_eq!(line["request"]["settings"]["fastMode"], true);
+        assert_eq!(set_fast_line(false)["request"]["settings"]["fastMode"], false);
+    }
+
+    /// Off reads `sdk_opt_in_required`, which is no news. Any other reason is
+    /// a fast pick the CLI did not honour.
+    #[test]
+    fn only_a_refused_fast_pick_is_reported() {
+        let blocked = |line: &str| match map_line(&serde_json::from_str(line).unwrap()).pop() {
+            Some(Signal::Result { fast_blocked, .. }) => fast_blocked,
+            _ => panic!("not a result"),
+        };
+        assert_eq!(blocked(r#"{"type":"result","fast_mode_state":"off","fast_mode_disabled_reason":"sdk_opt_in_required"}"#), None);
+        assert_eq!(
+            blocked(r#"{"type":"result","fast_mode_state":"off","fast_mode_disabled_reason":"extra_usage_disabled"}"#).as_deref(),
+            Some("extra_usage_disabled")
+        );
+        assert_eq!(blocked(r#"{"type":"result","fast_mode_state":"on"}"#), None);
     }
 
     /// What 2.1.318 prints for a session it has no transcript of, before it has
@@ -980,7 +1060,7 @@ mod tests {
         let launch = {
             let (bin, dir) = (bin.clone(), dir.to_path_buf());
             move |resume: bool| {
-                let args = spawn_args("http://x", "t", "box", None, None, None, "sid", resume);
+                let args = spawn_args("http://x", "t", "box", None, None, None, false, "sid", resume);
                 spawn(&bin, args, &dir, &dir)
             }
         };
@@ -1089,7 +1169,7 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let args = spawn_args("http://127.0.0.1:7373", "t", "box", None, None, None, "sid", false);
+        let args = spawn_args("http://127.0.0.1:7373", "t", "box", None, None, None, false, "sid", false);
         let mut child = spawn(&script, args, &dir, &dir).unwrap();
         let mut stdin = child.stdin.take().unwrap();
         stdin.write_all(b"{\"type\":\"user\"}\n").await.unwrap();

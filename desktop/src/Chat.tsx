@@ -60,12 +60,12 @@ const DRAFT_NAME = /^new_part(_\d+)?$/;
 
 type Permission = { id: number; title: string; options: PermissionOption[] };
 
-// Mirrors ConfigRow in src-tauri/src/prefs.rs: the model and effort selects,
+// Mirrors ConfigRow in src-tauri/src/prefs.rs: the model, effort and fast selects,
 // as the agent itself describes them.
 type ConfigChoice = { value: string; name: string; description?: string };
 type ConfigRow = {
   id: string;
-  // "model" or "thought_level": the key the app addresses a row by, since the
+  // "model", "thought_level" or "fast": the key the app addresses a row by, since the
   // agents name the options themselves differently.
   category: string;
   name: string;
@@ -84,16 +84,24 @@ export const AGENT_LABEL: Record<string, string> = {
 
 // The agents name these rows differently (Codex says "Reasoning effort"); the
 // menu says one thing for one idea.
-const SECTION_LABEL: Record<string, string> = { model: "Model", thought_level: "Thinking" };
+const SECTION_LABEL: Record<string, string> = {
+  model: "Model",
+  thought_level: "Thinking",
+  fast: "Fast mode",
+};
 
 const basename = (path: string) => path.split("/").pop() ?? path;
 
 // The button's own label: the selected names, not the model ids, since those
 // are the agent's wire values and mean nothing to someone printing a bracket.
+// Fast mode shows only when it is on, as the word "Fast", and first, because
+// the button truncates its tail. "Off" there would read as the agent being off.
 function summarize(config: ConfigRow[]): string {
-  return config
-    .map((row) => row.options.find((o) => o.value === row.value)?.name ?? row.value)
-    .join(" · ");
+  const fast = config.some((row) => row.category === "fast" && row.value === "on");
+  const rest = config
+    .filter((row) => row.category !== "fast")
+    .map((row) => row.options.find((o) => o.value === row.value)?.name ?? row.value);
+  return (fast ? ["Fast", ...rest] : rest).join(" · ");
 }
 
 // A plan entry reads by its state alone, so the three states stay separable

@@ -1,4 +1,4 @@
-//! What the chat column runs on: the model and effort the user picked, and the
+//! What the chat column runs on: the model, effort and speed the user picked, and the
 //! last lists the agent offered, both per agent.
 //!
 //! Nothing is stored until the user chooses something. That matters: Claude
@@ -26,9 +26,12 @@ use serde::{Deserialize, Serialize};
 /// `thought_level`. Grok does not advertise config options at all: it puts
 /// models on initialize `_meta.modelState` and effort under vendor session
 /// config as category `mode`, and the picker maps that onto `thought_level`.
+/// Fast mode rides last, under a category the app names itself: Codex tags it
+/// `model_config`, a bucket other switches could share, and Claude's driver
+/// has no ACP list at all. Grok offers no fast mode, so it never gets the row.
 /// Everything else an adapter offers (permission mode, Codex's collaboration
-/// mode, fast mode, a subagent picker) stays session-local.
-pub const SHOWN: [&str; 2] = ["model", "thought_level"];
+/// mode, a subagent picker) stays session-local.
+pub const SHOWN: [&str; 3] = ["model", "thought_level", "fast"];
 
 /// One select the picker draws, flattened out of ACP's `SessionConfigOption`
 /// so the cache and the webview share a shape. The category is the stable key
