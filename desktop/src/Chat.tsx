@@ -35,6 +35,7 @@ import {
   type Message,
 } from "@nurb/ui";
 import { addMessage, startPart } from "@nurb/workbench/api";
+import { joinSpots, splitSpots, spotPlace } from "@nurb/workbench/spot";
 import {
   activity,
   applyChatEvent,
@@ -201,6 +202,47 @@ function Attached({ names, thumbnails }: { names: string[]; thumbnails?: (string
   );
 }
 
+// A spot clicked on the part, attached to a message rather than written into it.
+function SpotChip({ sentence, onRemove }: { sentence: string; onRemove?: () => void }) {
+  return (
+    <span
+      title={sentence}
+      className="inline-flex h-6 items-center gap-1.5 self-start rounded-[4px] bg-accent-wash pr-1.5 pl-1.5 text-[12px] leading-none text-accent-ink"
+    >
+      <Icon name="pointer" className="size-3.5" />
+      <span className="font-medium">Spot</span>
+      <span className="tabular-nums opacity-75">{spotPlace(sentence)} mm</span>
+      {onRemove && (
+        <button
+          type="button"
+          className="ml-0.5 grid size-4 place-items-center rounded-[3px] opacity-60 hover:opacity-100"
+          aria-label="remove spot"
+          onClick={onRemove}
+        >
+          <Icon name="xmark" className="size-2.5" />
+        </button>
+      )}
+    </span>
+  );
+}
+
+// What the person sent: the spots as chips, then their words.
+function Said({ text }: { text: string }) {
+  const { spots, rest } = splitSpots(text);
+  return (
+    <>
+      {spots.length > 0 && (
+        <span className="mb-1.5 flex flex-wrap gap-1.5">
+          {spots.map((spot) => (
+            <SpotChip key={spot} sentence={spot} />
+          ))}
+        </span>
+      )}
+      {rest && <p className="text-chat whitespace-pre-wrap text-ink-soft">{rest}</p>}
+    </>
+  );
+}
+
 function Stored({ message, who, n }: { message: Message; who: string; n?: string }) {
   const payload = message.payload;
   return (
@@ -209,9 +251,7 @@ function Stored({ message, who, n }: { message: Message; who: string; n?: string
         <Turn who={message.role === "user" ? "You" : who} n={n} text={message.content ?? undefined}>
           {message.role === "user" ? (
             <>
-              {message.content && (
-                <p className="text-chat whitespace-pre-wrap text-ink-soft">{message.content}</p>
-              )}
+              {message.content && <Said text={message.content} />}
               {message.files?.length ? (
                 <Attached names={message.files} thumbnails={message.thumbnails} />
               ) : null}
@@ -320,6 +360,14 @@ function Chat({
   const [permissions, setPermissions] = useState<Permission[]>([]);
   // Absolute paths; the Rust side reads them at send time.
   const [attachments, setAttachments] = useState<string[]>([]);
+  // Spots clicked on the part, as their sentences: chips in the composer, text to the agent.
+  const [spots, setSpots] = useState<string[]>([]);
+  const spotsRef = useRef(spots);
+  spotsRef.current = spots;
+  const addSpots = useCallback(
+    (more: string[]) => setSpots((list) => [...new Set([...list, ...more])]),
+    [],
+  );
   const refusalRef = useRef<string | null>(null);
   // Stop can land before the prompt has gone out, while the files are checked or
   // the session starts. There is nothing to interrupt yet, so the send stands down.
@@ -486,16 +534,21 @@ function Chat({
   useEffect(() => {
     const box = inputRef.current;
     const draft = unstashDraft(keyRef.current);
-    if (box && draft.text) {
-      box.value = restoreDraftText(draft.text, box.value);
+    const { spots: stashedSpots, rest } = splitSpots(draft.text);
+    addSpots(stashedSpots);
+    if (box && rest) {
+      box.value = restoreDraftText(rest, box.value);
       grow();
     }
     attachmentDraft.restore(draft.files);
     return () => {
       if (discardRef.current) return;
-      stashDraft(keyRef.current, { text: box?.value ?? "", files: attachmentDraft.current });
+      stashDraft(keyRef.current, {
+        text: joinSpots(spotsRef.current, box?.value ?? ""),
+        files: attachmentDraft.current,
+      });
     };
-  }, [attachmentDraft]);
+  }, [attachmentDraft, addSpots]);
 
   useEffect(() => {
     // Dev-only test hook: the Rust side forwards loopback-socket text here so
@@ -527,7 +580,10 @@ function Chat({
     // than over it; the user's own words outrank a nudge's.
     if (hidden || !seed) return;
     const box = inputRef.current;
-    if (box) {
+    if (spotPlace(seed)) {
+      addSpots([seed]);
+      box?.focus();
+    } else if (box) {
       // Idempotent: StrictMode double-runs mount effects, and the clearing of
       // the seed above only lands after this commit.
       if (box.value !== seed && !box.value.endsWith(`\n${seed}`)) {
@@ -537,7 +593,7 @@ function Chat({
       box.focus();
     }
     onSeed?.();
-  }, [hidden, seed, onSeed]);
+  }, [hidden, seed, onSeed, addSpots]);
 
   useEffect(() => {
     // OS file drags arrive as Tauri window events with paths, not HTML5 drops.
@@ -762,8 +818,10 @@ function Chat({
         setItems((list) =>
           list.filter((item) => item.kind !== "user" || item.localId !== localId),
         );
+        const { spots: sentSpots, rest } = splitSpots(text);
+        addSpots(sentSpots);
         if (inputRef.current) {
-          inputRef.current.value = restoreDraftText(text, inputRef.current.value);
+          inputRef.current.value = restoreDraftText(rest, inputRef.current.value);
           grow();
         }
         attachmentDraft.restore(files);
@@ -843,13 +901,13 @@ function Chat({
         if (completed) cue(document.hasFocus() ? "ready" : "arrival");
       }
     },
-    [ensureSession, part, wholeProject, attachmentDraft, isClaude, projectId, thumbnailOf],
+    [ensureSession, part, wholeProject, attachmentDraft, addSpots, isClaude, projectId, thumbnailOf],
   );
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const box = inputRef.current;
-    const text = box?.value.trim() ?? "";
+    const text = joinSpots(spots, box?.value.trim() ?? "");
     // sendingRef, not busy: two Enters in one tick both read the stale state,
     // and a double send would spawn a second adapter. A photo alone is a
     // legitimate message ("model this"), so attachments count as content.
@@ -863,6 +921,7 @@ function Chat({
     // Reserve the turn before waiting: a second Enter must not queue another
     // send while a pasted image is still crossing the IPC boundary.
     sendingRef.current = true;
+    setSpots([]);
     if (box) {
       box.value = "";
       grow();
@@ -1205,8 +1264,15 @@ function Chat({
           )}
         >
           <DropHint active={dropping} />
-          {attachments.length > 0 && (
+          {attachments.length + spots.length > 0 && (
             <div className="flex flex-wrap items-start gap-1.5">
+              {spots.map((spot) => (
+                <SpotChip
+                  key={spot}
+                  sentence={spot}
+                  onRemove={() => setSpots((list) => list.filter((s) => s !== spot))}
+                />
+              ))}
               {attachments.map((path) =>
                 thumbnails[path] ? (
                   <span key={path} className="relative">
@@ -1335,7 +1401,7 @@ function Chat({
             case "user":
               return (
                 <Turn key={index} who="You" n={nextTurn()} text={item.text}>
-                  <p className="text-chat whitespace-pre-wrap text-ink-soft">{item.text}</p>
+                  <Said text={item.text} />
                   {item.files && <Attached names={item.files} thumbnails={item.thumbnails} />}
                 </Turn>
               );
