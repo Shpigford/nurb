@@ -1484,7 +1484,7 @@ async fn set_grok_choice(
     Ok(with_grok_choice(current.to_vec(), category, value, menus))
 }
 
-/// ACP's config options, narrowed to the two the picker draws and put in the
+/// ACP's config options, narrowed to the ones the picker draws and put in the
 /// order they are applied. Matched on category rather than option id, because
 /// the ids differ per agent (Claude's `effort` is Codex's `reasoning_effort`).
 /// Anything that is not a select is dropped rather than half-rendered.
@@ -1493,9 +1493,14 @@ fn rows(options: &[SessionConfigOption]) -> Vec<ConfigRow> {
         .iter()
         .filter_map(|category| {
             let option = options.iter().find(|o| {
-                o.category
-                    .as_ref()
-                    .is_some_and(|c| wire_string(c) == *category)
+                let tag = o.category.as_ref().map(wire_string);
+                if *category == "fast" {
+                    // Codex files it under `model_config` with id `fast-mode`.
+                    tag.as_deref() == Some("model_config")
+                        && wire_string(&o.id).starts_with("fast")
+                } else {
+                    tag.as_deref() == Some(*category)
+                }
             })?;
             let SessionConfigKind::Select(select) = &option.kind else {
                 return None;
@@ -1716,12 +1721,15 @@ pub async fn set_chat_config(
     let kind = AgentKind::parse(&agent)?;
     app.state::<PrefStore>()
         .remember(kind.id(), &category, &value);
-    // The driver passes both picks at spawn. The model also switches the
-    // running child, so the menu never names a model this chat is not on.
+    // The driver passes every pick at spawn. The model and fast mode also
+    // switch the running child, so the menu never names a state this chat is
+    // not in.
     if kind == AgentKind::Claude {
         let driver = session_id.and_then(|id| app.state::<crate::claude::Drivers>().get(&id));
-        if let (Some(driver), "model") = (driver, category.as_str()) {
-            driver.set_model(&value).await?;
+        match (driver, category.as_str()) {
+            (Some(driver), "model") => driver.set_model(&value).await?,
+            (Some(driver), "fast") => driver.set_fast(value == "on").await?,
+            _ => {}
         }
         return Ok(crate::claude::config_rows(&app.state::<PrefStore>()));
     }
@@ -2245,7 +2253,8 @@ mod tests {
     }
 
     /// What Claude actually answers session/new with, captured off the wire.
-    /// Mode, fast, and agent ride along and must not reach the picker.
+    /// Mode, fast, and agent ride along and must not reach the picker: this
+    /// fast is a boolean, and Claude runs on its own driver anyway.
     const CLAUDE: &str = r#"[
       {"id":"mode","name":"Mode","category":"mode","type":"select","currentValue":"default",
        "options":[{"value":"default","name":"Default"},{"value":"plan","name":"Plan"}]},
@@ -2301,13 +2310,14 @@ mod tests {
         let rows = rows(&options);
 
         let ids: Vec<&str> = rows.iter().map(|row| row.id.as_str()).collect();
-        assert_eq!(ids, ["model", "reasoning_effort"]);
+        assert_eq!(ids, ["model", "reasoning_effort", "fast-mode"]);
         let categories: Vec<&str> = rows.iter().map(|row| row.category.as_str()).collect();
-        assert_eq!(categories, ["model", "thought_level"]);
+        assert_eq!(categories, ["model", "thought_level", "fast"]);
         assert_eq!(rows[1].name, "Reasoning effort");
-        // Codex's fast mode is a select, not a boolean, so category is the only
-        // thing keeping it out.
-        assert!(!rows.iter().any(|row| row.id == "fast-mode"));
+        // Fast mode rides along under the app's own category, after effort.
+        assert_eq!(rows[2].id, "fast-mode");
+        assert_eq!(rows[2].category, "fast");
+        assert_eq!(rows[2].value, "off");
     }
 
     #[test]
