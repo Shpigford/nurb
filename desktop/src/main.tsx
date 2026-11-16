@@ -2,11 +2,13 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { readSoundPrefs, startTheme } from "@nurb/ui";
 import App from "./App";
+import { startCrashReports } from "./crashReports";
 import { syncWindowTheme } from "./windowTheme";
 import "./tailwind.css";
 
 // Reading the prefs is what pushes them into the sound layer, and Settings may
 // never open, so the first cue of the session has to find the saved volume here.
+void startCrashReports();
 readSoundPrefs();
 startTheme();
 syncWindowTheme();

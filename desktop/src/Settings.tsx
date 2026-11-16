@@ -32,6 +32,7 @@ import {
   type Workshop,
 } from "@nurb/workbench/api";
 import { connectCommands, maskToken } from "./connect";
+import { readCrashReports, setCrashReports } from "./crashReports";
 import { syncWindowTheme } from "./windowTheme";
 import About from "./About";
 import { AGENT_LABEL } from "./Chat";
@@ -115,6 +116,8 @@ export default function Settings({
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const [soundPrefs, setSoundPrefs] = useState(readSoundPrefs);
   const [theme, setTheme] = useState(readThemeChoice);
+  // Null until the shell answers, so the switch never flashes the wrong way.
+  const [crashReports, setCrashReportsShown] = useState<boolean | null>(null);
   // The rail's error line is on another screen, so a failed sign-in reports here.
   const [signInError, setSignInError] = useState<string | null>(null);
   // One key per copyable row, so only the row you pressed says so.
@@ -172,6 +175,15 @@ export default function Settings({
   );
 
   // Both controls preview a cue, so the choice is audible where it is made.
+  useEffect(() => {
+    readCrashReports().then(setCrashReportsShown, () => setCrashReportsShown(null));
+  }, []);
+
+  const toggleCrashReports = (on: boolean) => {
+    setCrashReportsShown(on);
+    setCrashReports(on).catch(() => setCrashReportsShown(!on));
+  };
+
   const toggleSound = (on: boolean) => {
     setSoundEnabled(on);
     setSoundPrefs((prefs) => ({ ...prefs, enabled: on }));
@@ -516,6 +528,28 @@ export default function Settings({
                           style={{ "--pct": soundPrefs.volume } as CSSProperties}
                           className="param-slider grow"
                         />
+                      </div>
+                    ) : null}
+                    {crashReports !== null ? (
+                      <div className="flex items-center justify-between gap-6 border-t border-line-soft pt-2.5">
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <span className="font-mono text-[11px] text-ink">Crash reports</span>
+                          <span className="text-[13.5px] leading-[18px] text-muted">
+                            When something breaks, send the error to the nurb developers so it gets fixed. Your parts and chats are never included.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={crashReports}
+                          aria-label="Send crash reports"
+                          onClick={() => toggleCrashReports(!crashReports)}
+                          className={`flex h-[18px] w-8 shrink-0 items-center rounded-full px-0.5 transition-colors ${
+                            crashReports ? "justify-end bg-accent" : "justify-start bg-line"
+                          }`}
+                        >
+                          <span className="size-3.5 shrink-0 rounded-full bg-white" />
+                        </button>
                       </div>
                     ) : null}
                   </div>

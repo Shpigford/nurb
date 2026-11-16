@@ -1,14 +1,17 @@
 //! The one serve the app talks to: a Starlette process with the database
 //! behind it, on loopback, shared by every project in the window.
 
-use std::io::{Read, Write};
+use std::collections::VecDeque;
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
-use std::process::{Child, ExitStatus, Stdio};
+use std::process::{Child, ChildStderr, ExitStatus, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use crate::crash;
 
 const DEFAULT_PORT: u16 = 7373;
 // The first request absorbs the cold OCCT import, which alone takes ~45 seconds
@@ -19,6 +22,8 @@ const READY_TIMEOUT: Duration = Duration::from_secs(300);
 // A health probe talks to a process on this machine, so anything slower than
 // this is a wedged or dead serve, not a slow one.
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
+/// How much of the engine's stderr a crash report carries.
+const TAIL_LINES: usize = 80;
 
 /// What the webview needs to reach the serve: it fetches and opens its
 /// websocket against this URL directly.
@@ -41,6 +46,9 @@ pub struct Supervisor {
     /// Set only for a debug test run, which gets its own home so it never
     /// touches the developer's ~/.config/nurb.
     home: Option<PathBuf>,
+    /// The last lines our serves wrote to stderr, across restarts, for a crash
+    /// report to say what the engine said before it died.
+    tail: Arc<Mutex<VecDeque<String>>>,
 }
 
 struct SupervisorState {
@@ -83,6 +91,7 @@ impl Supervisor {
             launcher,
             version,
             home: home_override(data),
+            tail: Arc::default(),
         }
     }
 
@@ -110,6 +119,11 @@ impl Supervisor {
                     };
                     drop(state);
                     if let Some(child) = dead.child {
+                        let title = match exited(&child) {
+                            Some(status) => format!("The engine exited unexpectedly ({status})"),
+                            None => "The engine stopped answering".to_string(),
+                        };
+                        crash::engine_error(&title, &self.tail_text());
                         kill_tree(&child);
                     }
                 }
@@ -140,6 +154,12 @@ impl Supervisor {
             }
             Err(error) => {
                 state.phase = Phase::Idle;
+                if !state.shutting_down {
+                    crash::engine_error(
+                        "The engine did not start",
+                        &format!("{error}\n\n{}", self.tail_text()),
+                    );
+                }
                 Err(error)
             }
         };
@@ -244,7 +264,7 @@ impl Supervisor {
             // The serve keeps its own <home>/serve.log; letting it share the
             // app's stderr means a `tauri dev` run sees it without tailing.
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             // Its own process group, so killing it takes the whole uv ->
             // python tree rather than orphaning the server.
             .process_group(0);
@@ -253,9 +273,12 @@ impl Supervisor {
                 .map_err(|e| format!("could not create {}: {e}", home.display()))?;
             command.env("NURB_HOME", home);
         }
-        let process = command
+        let mut process = command
             .spawn()
             .map_err(|e| format!("could not start the serve: {e}"))?;
+        if let Some(stderr) = process.stderr.take() {
+            watch_stderr(stderr, Arc::clone(&self.tail));
+        }
         Ok(Arc::new(ManagedChild {
             state: Mutex::new(ChildState {
                 process,
@@ -301,6 +324,11 @@ impl Supervisor {
         serde_json::from_str(&text).ok()
     }
 
+    fn tail_text(&self) -> String {
+        let tail = self.tail.lock().unwrap();
+        tail.iter().map(String::as_str).collect::<Vec<_>>().join("\n")
+    }
+
     pub fn home(&self) -> PathBuf {
         if let Some(home) = &self.home {
             return home.clone();
@@ -323,6 +351,64 @@ impl Supervisor {
         if let Some(child) = child {
             kill_tree(&child);
         }
+    }
+}
+
+/// Passes the serve's stderr through to ours, keeps its tail, and reports each
+/// traceback uvicorn logs for an exception the serve did not handle. Reads
+/// bytes rather than lines: a line that is not UTF-8 must not stop the reader,
+/// or the pipe fills and the serve blocks on its next write.
+fn watch_stderr(stderr: ChildStderr, tail: Arc<Mutex<VecDeque<String>>>) {
+    thread::spawn(move || {
+        let mut reader = BufReader::new(stderr);
+        let mut buf = Vec::new();
+        let mut traceback = Traceback::default();
+        loop {
+            buf.clear();
+            match reader.read_until(b'\n', &mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(_) => {}
+            }
+            let line = String::from_utf8_lossy(&buf).trim_end().to_string();
+            eprintln!("{line}");
+            {
+                let mut tail = tail.lock().unwrap();
+                if tail.len() == TAIL_LINES {
+                    tail.pop_front();
+                }
+                tail.push_back(line.clone());
+            }
+            if let Some((title, text)) = traceback.feed(&line) {
+                crash::engine_error(&title, &text);
+            }
+        }
+    });
+}
+
+/// Collects one unhandled-exception traceback out of uvicorn's log. The block
+/// ends at the first unindented line after the header, which is the
+/// `KeyError: 'x'` line that names the exception, and that line is the title.
+#[derive(Default)]
+struct Traceback {
+    lines: Option<Vec<String>>,
+}
+
+impl Traceback {
+    fn feed(&mut self, line: &str) -> Option<(String, String)> {
+        if line.contains("Exception in ASGI application") {
+            self.lines = Some(Vec::new());
+            return None;
+        }
+        let lines = self.lines.as_mut()?;
+        lines.push(line.to_string());
+        let last = !line.is_empty()
+            && !line.starts_with(char::is_whitespace)
+            && !line.starts_with("Traceback");
+        if !last && lines.len() < 200 {
+            return None;
+        }
+        let lines = self.lines.take()?;
+        Some((line.to_string(), lines.join("\n")))
     }
 }
 
@@ -508,6 +594,25 @@ mod tests {
             PathBuf::from("/test/data"),
             "1.2.0".into(),
         )
+    }
+
+    #[test]
+    fn a_logged_traceback_becomes_one_report_titled_by_its_exception() {
+        let mut traceback = super::Traceback::default();
+        let log = [
+            "  serving http://127.0.0.1:7373",
+            "ERROR:    Exception in ASGI application",
+            "Traceback (most recent call last):",
+            "  File \"serve.py\", line 10, in parts",
+            "    return rows[name]",
+            "KeyError: 'bracket'",
+            "INFO:     after the block",
+        ];
+        let reports: Vec<_> = log.iter().filter_map(|line| traceback.feed(line)).collect();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].0, "KeyError: 'bracket'");
+        assert!(reports[0].1.starts_with("Traceback"));
+        assert!(!reports[0].1.contains("serving"));
     }
 
     #[test]
