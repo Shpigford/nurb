@@ -175,6 +175,10 @@ export interface RevisionEntry {
   note: string | null
   current: boolean
   status: RevisionStatus
+  /** The chat message it was made for, when one was stored. */
+  prompt: string | null
+  /** The id of the oldest revision made for the same message: one message, one group. */
+  group: string
   thumbnail_url: string | null
 }
 

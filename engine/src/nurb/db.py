@@ -1118,12 +1118,14 @@ def list_revisions(conn, part_id):
         "SELECT r.id, r.note, r.created_at, r.id = p.current_revision_id AS current,"
         " ROW_NUMBER() OVER (ORDER BY r.created_at, r.rowid) AS ordinal,"
         f" ({_SHOWN_RUN.format(columns='id', revision='r.id')}) AS run_id,"
-        " EXISTS (SELECT 1 FROM build_runs WHERE revision_id = r.id) AS attempted"
+        " EXISTS (SELECT 1 FROM build_runs WHERE revision_id = r.id) AS attempted,"
+        " (SELECT m.id || ' ' || COALESCE(m.content, '') FROM messages m WHERE m.project_id = p.project_id"
+        "  AND m.role = 'user' AND m.created_at <= r.created_at ORDER BY m.sequence_number DESC LIMIT 1) AS turn"
         " FROM part_revisions r JOIN parts p ON p.id = r.part_id"
         " WHERE r.part_id = ? ORDER BY r.created_at DESC, r.rowid DESC",
         (part_id,),
     ).fetchall()
-    return [
+    entries = [
         {
             "id": row["id"],
             "note": row["note"],
@@ -1132,9 +1134,35 @@ def list_revisions(conn, part_id):
             "current": bool(row["current"]),
             "status": revision_status(row["run_id"], row["attempted"]),
             "run_id": row["run_id"],
+            "prompt": row["turn"].partition(" ")[2] or None if row["turn"] else None,
         }
         for row in rows
     ]
+    _group_by_turn(entries, [row["turn"] for row in rows])
+    return entries
+
+
+# What a person did by hand rather than asked for: each is one step of its own, never
+# folded into the agent's work on a message.
+_BY_HAND = re.compile(r"^(Applied .* from the sliders|Restored rev \d+|Renamed from .*|.* renamed to .*|Set .* from the project panel)$")
+# An agent outside the app stores no messages, so a long pause also ends a turn.
+_TURN_GAP = datetime.timedelta(minutes=30)
+
+
+def _group_by_turn(entries, turns):
+    """Give each revision `group`: the id of the oldest revision made for the same chat
+    message. One message usually takes the agent several edits and builds, and a person
+    thinks in what they asked for, not in each edit."""
+    group, last_turn, last_at = None, None, None
+    for entry, turn in zip(reversed(entries), reversed(turns)):
+        at = datetime.datetime.fromisoformat(entry["created_at"])
+        by_hand = bool(_BY_HAND.match(entry["note"] or ""))
+        if by_hand or group is None or turn != last_turn or at - last_at > _TURN_GAP:
+            group = entry["id"]
+        entry["group"] = group
+        if by_hand:
+            entry["prompt"] = None
+        last_turn, last_at = (object() if by_hand else turn), at
 
 
 def get_revision(conn, part_id, revision_id):

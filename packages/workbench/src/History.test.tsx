@@ -28,9 +28,9 @@ function withPart(over: Partial<Part>): Project {
 }
 
 const rows: RevisionEntry[] = [
-  { id: "r1", revision: 3, created_at: "2026-09-01T00:00:00Z", note: null, current: true, status: "ok", thumbnail_url: null },
-  { id: "r0", revision: 2, created_at: "2026-08-31T00:00:00Z", note: null, current: false, status: "unbuilt", thumbnail_url: null },
-  { id: "rA", revision: 1, created_at: "2026-08-30T00:00:00Z", note: "Applied wall from the sliders", current: false, status: "ok", thumbnail_url: null },
+  { id: "r1", revision: 3, created_at: "2026-09-01T00:00:00Z", note: null, current: true, status: "ok", prompt: null, group: "r1", thumbnail_url: null },
+  { id: "r0", revision: 2, created_at: "2026-08-31T00:00:00Z", note: null, current: false, status: "unbuilt", prompt: null, group: "r0", thumbnail_url: null },
+  { id: "rA", revision: 1, created_at: "2026-08-30T00:00:00Z", note: "Applied wall from the sliders", current: false, status: "ok", prompt: null, group: "rA", thumbnail_url: null },
 ]
 
 const rev1: RevisionView = {
@@ -105,6 +105,31 @@ afterEach(() => {
 })
 
 describe("history", { timeout: 15000 }, () => {
+  it("folds the edits made for one message into one row, opened at its newest build", async () => {
+    const asked = "add a lip at the front"
+    const grouped: RevisionEntry[] = [
+      { ...rows[1], revision: 3, prompt: asked, group: "rA" },
+      { ...rows[2], revision: 2, note: null, prompt: asked, group: "rA", current: false },
+      { ...rows[2], id: "rB", revision: 1, prompt: asked, group: "rA" },
+    ]
+    install({ ...history, "GET /api/parts/part-lid/revisions": () => ({ revisions: grouped }) })
+    render(<App />)
+    await userEvent.click(await screen.findByRole("button", { name: /history/i }))
+    const panel = await screen.findByRole("dialog", { name: "Part history" })
+    expect(await within(panel).findByText(asked)).toBeInTheDocument()
+    expect(within(panel).getByText(/3 edits/)).toBeInTheDocument()
+    expect(within(panel).queryByText("REV 01")).not.toBeInTheDocument()
+
+    await userEvent.click(within(panel).getByRole("button", { name: "Show each of the 3 edits" }))
+    expect(within(panel).getByText("Never built")).toBeInTheDocument()
+    expect(within(panel).getByText("REV 01")).toBeInTheDocument()
+
+    // The row itself opens rev 2, the newest edit that built, not rev 3 which never did.
+    await userEvent.click(within(panel).getByRole("button", { name: new RegExp(asked) }))
+    await waitFor(() => expect(stage()).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=old-run"))
+    expect(calls.some((c) => c.url.endsWith("/revisions/rA"))).toBe(true)
+  })
+
   it("puts an earlier revision's own geometry on stage, read-only, and comes back", async () => {
     install(history)
     render(<App />)
