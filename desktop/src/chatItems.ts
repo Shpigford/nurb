@@ -32,8 +32,9 @@ export type Item =
   // dispatcher writes for it arrives with a sequence number above `seq`.
   | { kind: "step"; toolKind?: string; tool?: string; seq?: number; step: ToolStep }
   | { kind: "plan"; entries: PlanEntry[] }
-  // An untilSend note asks the person to fix something and try again, so the
-  // next send clears it. If the trouble is still there, that send says so again.
+  // An untilSend note is about the last attempt (sign in, install, a refused
+  // file, a failed restore), so the next send clears it. If the trouble is still
+  // there, that send says so again.
   | { kind: "note"; text: string; untilSend?: true };
 
 // Tool titles arrive as developer-speak ("Edit parts/lid.py", "nurb check").
