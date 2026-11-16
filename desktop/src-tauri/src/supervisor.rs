@@ -22,6 +22,10 @@ const READY_TIMEOUT: Duration = Duration::from_secs(300);
 // A health probe talks to a process on this machine, so anything slower than
 // this is a wedged or dead serve, not a slow one.
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(500);
+// Except for a serve we started whose process is still running: a missed quick
+// probe there is far more often a loaded machine than a wedged serve, and
+// replacing it throws away whatever it was building (NURB-DESKTOP-3).
+const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 /// How much of the engine's stderr a crash report carries.
 const TAIL_LINES: usize = 80;
 
@@ -108,7 +112,7 @@ impl Supervisor {
                 return Err("app is shutting down".into());
             }
             match &state.phase {
-                Phase::Running(running) if alive(&running.info) => {
+                Phase::Running(running) if alive(&running.info) || busy(running) => {
                     return Ok(running.info.clone());
                 }
                 Phase::Running(_) => {
@@ -442,16 +446,22 @@ fn default_home() -> PathBuf {
 /// A killed serve leaves serve.json behind, and another home's serve can take
 /// the same port, so only a matching pid from /health proves this one is up.
 fn alive(info: &ServeInfo) -> bool {
-    health_pid(info.port) == Some(info.pid)
+    health_pid(info.port, HEALTH_TIMEOUT) == Some(info.pid)
 }
 
-fn health(port: u16) -> Option<serde_json::Value> {
-    let body = loopback_get(port, "/health").ok()?;
+/// Our own serve, still running and answering, only slowly.
+fn busy(running: &Running) -> bool {
+    running.child.as_deref().is_some_and(|child| exited(child).is_none())
+        && health_pid(running.info.port, BUSY_TIMEOUT) == Some(running.info.pid)
+}
+
+fn health(port: u16, timeout: Duration) -> Option<serde_json::Value> {
+    let body = loopback_get(port, "/health", timeout).ok()?;
     serde_json::from_str(&body).ok()
 }
 
-fn health_pid(port: u16) -> Option<u32> {
-    health(port)?.get("pid")?.as_u64().map(|pid| pid as u32)
+fn health_pid(port: u16, timeout: Duration) -> Option<u32> {
+    health(port, timeout)?.get("pid")?.as_u64().map(|pid| pid as u32)
 }
 
 /// A serve on another version with launchd as its parent, so no app or terminal
@@ -459,7 +469,7 @@ fn health_pid(port: u16) -> Option<u32> {
 /// mismatch alone is not enough: a serve with a living parent belongs to someone,
 /// such as a terminal or a dev build sharing this home.
 fn stale_orphan(info: &ServeInfo, version: &str) -> bool {
-    let reported = health(info.port);
+    let reported = health(info.port, HEALTH_TIMEOUT);
     let reported = reported
         .as_ref()
         .and_then(|health| health.get("version")?.as_str());
@@ -498,12 +508,12 @@ fn stop_serve(pid: u32) {
 
 /// A minimal loopback GET. The serve always answers with Content-Length and
 /// honours Connection: close, so read-to-end is the whole protocol.
-fn loopback_get(port: u16, path: &str) -> Result<String, String> {
+fn loopback_get(port: u16, path: &str, timeout: Duration) -> Result<String, String> {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = TcpStream::connect_timeout(&address, HEALTH_TIMEOUT)
+    let mut stream = TcpStream::connect_timeout(&address, timeout)
         .map_err(|e| format!("connect to the serve: {e}"))?;
-    stream.set_read_timeout(Some(HEALTH_TIMEOUT)).ok();
-    stream.set_write_timeout(Some(HEALTH_TIMEOUT)).ok();
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
     write!(
         stream,
         "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
@@ -719,7 +729,7 @@ server.serve_forever()
             assert!(Instant::now() < deadline, "the fake serve never listened");
             thread::sleep(Duration::from_millis(25));
         };
-        let pid = health_pid(port).unwrap();
+        let pid = health_pid(port, HEALTH_TIMEOUT).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
         (pid, port)
     }
@@ -777,6 +787,56 @@ server.serve_forever()
         let (stubborn, _) = fake_serve(None, true, true);
         stop_serve(stubborn);
         assert!(!running(stubborn));
+    }
+
+    #[test]
+    fn a_slow_answer_from_our_own_serve_does_not_get_it_killed() {
+        // A health server that takes a second to answer, longer than one probe
+        // allows, as a serve on a loaded machine does (NURB-DESKTOP-3).
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let process = Command::new("sh")
+            .args(["-c", "sleep 60"])
+            .stdin(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = process.id();
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = stream.unwrap();
+                let _ = stream.read(&mut [0; 1024]);
+                thread::sleep(Duration::from_secs(1));
+                let body = format!("{{\"ok\": true, \"pid\": {pid}}}");
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        let child = Arc::new(ManagedChild {
+            state: Mutex::new(ChildState {
+                process,
+                stopped: false,
+            }),
+        });
+        let home = std::env::temp_dir().join(format!("nurb-slow-serve-{}", std::process::id()));
+        let supervisor = Supervisor {
+            home: Some(home.clone()),
+            ..supervisor()
+        };
+        supervisor.state.lock().unwrap().phase = Phase::Running(Running {
+            info: info(pid, port),
+            child: Some(Arc::clone(&child)),
+        });
+
+        let answer = supervisor.ensure();
+
+        assert_eq!(answer.map(|info| info.pid), Ok(pid));
+        assert!(!child.state.lock().unwrap().stopped);
+        kill_tree(&child);
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
