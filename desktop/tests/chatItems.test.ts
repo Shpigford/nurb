@@ -4,6 +4,7 @@ import {
   activity,
   applyChatEvent,
   claudeNote,
+  clearUntilSend,
   pruneLanded,
   toolWords,
   withNote,
@@ -145,6 +146,16 @@ test("each Claude Code failure says what to do about it", () => {
   assert.match(String(claudeNote("claude_outdated: 2.1.100")), /you have 2\.1\.100/);
   assert.match(String(claudeNote("auth_required")), /^Sign in to Claude Code first/);
   assert.equal(claudeNote("something else broke"), null);
+});
+
+test("the next send clears the notes that asked for it, and only those", () => {
+  let items: Item[] = [{ kind: "user", text: "make a lid" }];
+  items = withNote(items, "The nurb tools did not connect.");
+  items = withNote(items, "Sign in to Claude Code first.", { untilSend: true });
+  assert.deepEqual(clearUntilSend(items), [
+    { kind: "user", text: "make a lid" },
+    { kind: "note", text: "The nurb tools did not connect." },
+  ]);
 });
 
 test("the same trouble reported twice in a turn leaves one note", () => {

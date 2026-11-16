@@ -32,7 +32,9 @@ export type Item =
   // dispatcher writes for it arrives with a sequence number above `seq`.
   | { kind: "step"; toolKind?: string; tool?: string; seq?: number; step: ToolStep }
   | { kind: "plan"; entries: PlanEntry[] }
-  | { kind: "note"; text: string };
+  // An untilSend note asks the person to fix something and try again, so the
+  // next send clears it. If the trouble is still there, that send says so again.
+  | { kind: "note"; text: string; untilSend?: true };
 
 // Tool titles arrive as developer-speak ("Edit parts/lid.py", "nurb check").
 // The app's audience is hobbyists, so rows and permission dialogs translate what
@@ -299,8 +301,13 @@ export function pruneLanded(
 }
 
 /** A note once, however many paths report the same trouble in one turn. */
-export function withNote(items: Item[], text: string): Item[] {
+export function withNote(items: Item[], text: string, { untilSend = false } = {}): Item[] {
   const last = items[items.length - 1];
   if (last && last.kind === "note" && last.text === text) return items;
-  return [...items, { kind: "note", text }];
+  return [...items, untilSend ? { kind: "note", text, untilSend } : { kind: "note", text }];
+}
+
+/** What a new send keeps: everything but the notes that asked for it. */
+export function clearUntilSend(items: Item[]): Item[] {
+  return items.filter((item) => item.kind !== "note" || !item.untilSend);
 }

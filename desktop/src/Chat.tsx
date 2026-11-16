@@ -40,6 +40,7 @@ import {
   activity,
   applyChatEvent,
   claudeNote,
+  clearUntilSend,
   describe,
   type ChatEvent,
   type Item,
@@ -660,7 +661,7 @@ function Chat({
           sessionRef.current = null;
           const trouble = isClaude ? claudeNote(event.message) : null;
           if (trouble) {
-            setItems((list) => withNote(list, trouble));
+            setItems((list) => withNote(list, trouble, { untilSend: true }));
             return;
           }
           break;
@@ -765,7 +766,7 @@ function Chat({
       if (message === "Error: chat closed") return;
       const trouble = isClaude ? claudeNote(message) : null;
       if (trouble) {
-        setItems((list) => withNote(list, trouble));
+        setItems((list) => withNote(list, trouble, { untilSend: true }));
       } else if (message.includes("auth_required")) {
         setAuthNeeded("resume");
       } else {
@@ -785,11 +786,12 @@ function Chat({
       stoppedRef.current = false;
       const pictures = await Promise.all(files.map(thumbnailOf));
       const sentThumbnails = pictures.some(Boolean) ? pictures : undefined;
-      // A refused file was about the draft this send replaces, and a failed restore
-      // has been said. Live notes sit below Claude's stored turns, so left alone
-      // either would trail every later reply.
+      // A refused file was about the draft this send replaces, a failed restore
+      // has been said, and an untilSend note asked for this retry. Live notes sit
+      // below Claude's stored turns, so left alone any of them would trail every
+      // later reply.
       setItems((list) =>
-        list.filter(
+        clearUntilSend(list).filter(
           (item) =>
             item.kind !== "note" ||
             (item.text !== refusalRef.current && !(isClaude && item.text === RESTORE_FAILED)),
@@ -888,7 +890,7 @@ function Chat({
         const trouble = isClaude ? claudeNote(message) : null;
         if (trouble || refused || message.includes("auth_required")) {
           if (!stored) restoreDraft();
-          if (trouble) setItems((list) => withNote(list, trouble));
+          if (trouble) setItems((list) => withNote(list, trouble, { untilSend: true }));
           else if (refused) {
             refusalRef.current = message;
             setItems((list) => withNote(list, message));
