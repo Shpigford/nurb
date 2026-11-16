@@ -113,6 +113,135 @@ export function useRevisionHistory(
   return { viewing, error, restoring, banner, open, back, restore }
 }
 
+interface Group {
+  /** Newest first, as the list comes. */
+  steps: RevisionEntry[]
+  /** The step the row stands for: where the message ended up, the newest one that built if any did. */
+  shown: RevisionEntry
+}
+
+/** Consecutive revisions that share a group, in list order. */
+export function groupsOf(rows: RevisionEntry[]): Group[] {
+  const groups: Group[] = []
+  for (const row of rows) {
+    const last = groups[groups.length - 1]
+    if (last && last.steps[0].group === row.group) last.steps.push(row)
+    else groups.push({ steps: [row], shown: row })
+  }
+  for (const group of groups) group.shown = group.steps.find((step) => step.status === "ok") ?? group.steps[0]
+  return groups
+}
+
+function Dot({ status }: { status: RevisionEntry["status"] }) {
+  return <span className={clsx("size-1.5 shrink-0 rounded-full", STATUS_DOT[status])} />
+}
+
+/** One message's worth of revisions: the message, where it ended up, and its steps behind a chevron. */
+function HistoryGroup({
+  group,
+  viewing,
+  dark,
+  expanded,
+  onToggle,
+  onView,
+}: {
+  group: Group
+  viewing: RevisionView | null
+  dark: boolean
+  expanded: boolean
+  onToggle: () => void
+  onView: (entry: RevisionEntry) => void
+}) {
+  const { steps, shown } = group
+  const isOn = (row: RevisionEntry) => (viewing ? viewing.id === row.id : row.current)
+  const on = steps.some(isOn)
+  const current = steps.some((step) => step.current)
+  const title = steps[0].prompt ?? null
+  const note = noteOf(shown)
+  const url = shown.thumbnail_url ? absolute(shown.thumbnail_url) : null
+  return (
+    <div className={clsx(on && !expanded ? "bg-accent-wash" : null)}>
+      <div className="flex items-center">
+        <button
+          type="button"
+          aria-current={on ? "true" : undefined}
+          onClick={() => onView(shown)}
+          className={clsx(
+            "flex min-w-0 flex-1 items-center gap-2.5 py-1.5 pl-2 text-left transition-colors focus-visible:bg-raised focus-visible:outline-none",
+            on && !expanded ? null : "hover:bg-raised"
+          )}
+        >
+          <span className="flex h-[36px] w-12 shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-raised">
+            {url ? <img src={dark ? `${url}&theme=dark` : url} alt="" loading="lazy" className="size-full object-contain p-0.5" /> : null}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="flex items-center gap-2">
+              {title ? (
+                <span className="truncate text-[13px] leading-[18px] font-medium text-ink" title={title}>
+                  {title}
+                </span>
+              ) : (
+                <span className="mono-label text-ink">{rev(shown.revision)}</span>
+              )}
+              <span className="mono-caption ml-auto shrink-0 text-muted">{relativeTime(shown.created_at)}</span>
+            </span>
+            <span className="flex items-center gap-1.5">
+              <Dot status={shown.status} />
+              {title || steps.length > 1 ? (
+                <span className="mono-caption truncate text-ink-soft">
+                  {title ? rev(shown.revision) : null}
+                  {title && steps.length > 1 ? " · " : null}
+                  {steps.length > 1 ? `${steps.length} edits` : null}
+                </span>
+              ) : (
+                <span className="truncate text-[12px] leading-4 text-ink-soft">{note ?? STATUS_WORD[shown.status]}</span>
+              )}
+              {current ? <span className="mono-caption text-accent-ink">CURRENT</span> : null}
+            </span>
+          </span>
+        </button>
+        {steps.length > 1 ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-label={expanded ? "Hide each edit" : `Show each of the ${steps.length} edits`}
+            onClick={onToggle}
+            className="flex h-[48px] w-[30px] shrink-0 items-center justify-center text-muted transition-colors hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+          >
+            <span className={clsx("transition-transform", expanded ? null : "-rotate-90")}>
+              <Icon name="chevron-down" />
+            </span>
+          </button>
+        ) : (
+          <span className="w-[30px] shrink-0" />
+        )}
+      </div>
+      {expanded ? (
+        <ul className="pr-[30px] pb-1 pl-[66px]">
+          {steps.map((step) => (
+            <li key={step.id} className="border-l border-line">
+              <button
+                type="button"
+                aria-current={isOn(step) ? "true" : undefined}
+                onClick={() => onView(step)}
+                className={clsx(
+                  "flex h-6 w-full items-center gap-1.5 pl-2.5 text-left transition-colors focus-visible:bg-raised focus-visible:outline-none",
+                  isOn(step) ? "bg-accent-wash" : "hover:bg-raised"
+                )}
+              >
+                <Dot status={step.status} />
+                <span className="mono-caption w-11 shrink-0 text-ink">{rev(step.revision)}</span>
+                <span className="truncate text-[12px] leading-4 text-ink-soft">{noteOf(step) ?? STATUS_WORD[step.status]}</span>
+                <span className="mono-caption ml-auto shrink-0 text-muted">{relativeTime(step.created_at)}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
 /**
  * The header cell that opens the part's history. The list is read fresh on every
  * open, because any build since the last one may have changed what each row says.
@@ -134,6 +263,7 @@ export function HistoryMenu({
   const [rows, setRows] = useState<RevisionEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [anchor, setAnchor] = useState<CSSProperties>()
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const dark = useIsDark()
@@ -154,6 +284,7 @@ export function HistoryMenu({
   useEffect(() => {
     setOpen(false)
     setRows(null)
+    setExpanded(new Set())
   }, [partId])
 
   useLayoutEffect(() => {
@@ -217,45 +348,28 @@ export function HistoryMenu({
               <div className="min-h-0 flex-1 overflow-y-auto py-1">
                 {error ? <p className="mono-caption px-3 py-2 text-fail">{error}</p> : null}
                 {!rows && !error ? <p className="mono-caption px-3 py-2 text-muted">Reading the history…</p> : null}
-                {rows?.map((row) => {
-                  const on = viewing ? viewing.id === row.id : row.current
-                  const note = noteOf(row)
-                  const url = row.thumbnail_url ? absolute(row.thumbnail_url) : null
-                  return (
-                    <button
-                      key={row.id}
-                      type="button"
-                      aria-current={on ? "true" : undefined}
-                      onClick={() => {
-                        setOpen(false)
-                        onView(row)
-                      }}
-                      className={clsx(
-                        "flex w-full items-center gap-2.5 px-2 py-1.5 text-left transition-colors focus-visible:bg-raised focus-visible:outline-none",
-                        on ? "bg-accent-wash" : "hover:bg-raised"
-                      )}
-                    >
-                      <span className="flex h-[36px] w-12 shrink-0 items-center justify-center overflow-hidden rounded-[3px] bg-raised">
-                        {url ? (
-                          <img src={dark ? `${url}&theme=dark` : url} alt="" loading="lazy" className="size-full object-contain p-0.5" />
-                        ) : null}
-                      </span>
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="flex items-center gap-2">
-                          <span className="mono-label text-ink">{rev(row.revision)}</span>
-                          {row.current ? <span className="mono-caption text-accent-ink">CURRENT</span> : null}
-                          <span className="mono-caption ml-auto shrink-0 text-muted">{relativeTime(row.created_at)}</span>
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className={clsx("size-1.5 shrink-0 rounded-full", STATUS_DOT[row.status])} />
-                          <span className="truncate text-[12px] leading-4 text-ink-soft">
-                            {note ?? STATUS_WORD[row.status]}
-                          </span>
-                        </span>
-                      </span>
-                    </button>
-                  )
-                })}
+                {rows
+                  ? groupsOf(rows).map((group) => (
+                      <HistoryGroup
+                        key={group.steps[group.steps.length - 1].id}
+                        group={group}
+                        viewing={viewing}
+                        dark={dark}
+                        expanded={expanded.has(group.shown.group)}
+                        onToggle={() =>
+                          setExpanded((was) => {
+                            const next = new Set(was)
+                            if (!next.delete(group.shown.group)) next.add(group.shown.group)
+                            return next
+                          })
+                        }
+                        onView={(entry) => {
+                          setOpen(false)
+                          onView(entry)
+                        }}
+                      />
+                    ))
+                  : null}
               </div>
             </div>,
             document.body

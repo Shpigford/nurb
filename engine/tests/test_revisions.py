@@ -302,3 +302,23 @@ def test_revisions_written_in_the_same_instant_get_their_own_numbers(conn, histo
     restored = payload(call(conn, "restore_revision", {"project_id": project_id, "part_name": "cube", "revision": 2}))
     assert restored["restored"] == 2
     assert "width=15.0" in db.parts_of(conn, project_id)[0]["source"]
+
+
+def test_the_history_groups_revisions_by_the_message_that_asked_for_them(conn, client):
+    project_id = db.create_project(conn, "cubes")
+    db.add_message(conn, project_id, "user", "a cube", {})
+    write(conn, project_id, cube(10.0))
+    write(conn, project_id, cube(11.0))
+    part_id = db.parts_of(conn, project_id)[0]["id"]
+    db.add_revision(conn, part_id, cube(12.0), note="Applied width from the sliders")
+    db.add_message(conn, project_id, "user", "make it bigger", {})
+    write(conn, project_id, cube(20.0))
+    write(conn, project_id, cube(30.0))
+
+    rows = client.get(f"/api/parts/{part_id}/revisions").json()["revisions"]
+    assert [r["prompt"] for r in rows] == ["make it bigger", "make it bigger", None, "a cube", "a cube"]
+    groups = [r["group"] for r in rows]
+    # Rev 4 and 5 answer one message, the slider stands alone, rev 1 and 2 answer the first.
+    assert groups[0] == groups[1] == rows[1]["id"]
+    assert groups[2] == rows[2]["id"]
+    assert groups[3] == groups[4] == rows[4]["id"]

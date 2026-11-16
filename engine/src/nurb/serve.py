@@ -672,6 +672,9 @@ def _revision_entry(project_id, part, row):
         "note": row["note"],
         "current": row["current"],
         "status": row["status"],
+        # The chat message it was made for, and the oldest revision made for the same one.
+        "prompt": row["prompt"][:200] if row["prompt"] else None,
+        "group": row["group"],
         "thumbnail_url": _thumbnail_url(project_id, part["name"], row["run_id"]) if row["run_id"] else None,
     }
 
