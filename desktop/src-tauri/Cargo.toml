@@ -38,4 +38,5 @@ tauri-plugin-clipboard-manager = "2"
 # The page saves exports through the dialog and fs plugins.
 tauri-plugin-fs = "2"
 tauri-plugin-window-state = "2"
+sentry = { version = "0.49.5", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
 

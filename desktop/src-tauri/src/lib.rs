@@ -1,6 +1,7 @@
 mod acp;
 mod agents;
 mod claude;
+mod crash;
 mod env;
 mod prefs;
 mod provision;
@@ -347,6 +348,7 @@ pub fn run() {
                 .map(PathBuf::from)
                 .unwrap_or(dir);
             std::fs::create_dir_all(&dir)?;
+            app.manage(crash::init(&dir, &app.package_info().version.to_string()));
             let launcher = env::Launcher::resolve(dir.clone());
             app.manage(Supervisor::new(
                 launcher.clone(),
@@ -371,6 +373,8 @@ pub fn run() {
             rename_part_chat,
             saved_chat,
             save_pasted_image,
+            crash::crash_reports,
+            crash::set_crash_reports,
             #[cfg(debug_assertions)]
             debug_log,
             acp::start_chat,
@@ -400,6 +404,7 @@ pub fn run() {
                 app.state::<claude::Drivers>().shutdown();
                 app.state::<agents::Logins>().shutdown();
                 app.state::<provision::Provisioner>().shutdown();
+                crash::flush();
             }
         });
 }

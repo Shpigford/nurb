@@ -10,7 +10,8 @@ set -euo pipefail
 #
 # Credentials come from desktop/.env (see .env.example): a Developer ID
 # certificate in the login keychain, an App Store Connect API key for
-# notarization, and the updater signing key from `tauri signer generate`.
+# notarization, the updater signing key from `tauri signer generate`, and the
+# Sentry DSN for crash reports.
 # GitHub access comes from `gh auth login`.
 #
 # What lands where: the vX.Y.Z release carries the DMGs and the updater
@@ -37,7 +38,9 @@ APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH:?Set APPLE_API_KEY_PATH in desktop/.env
 APPLE_API_KEY_PATH="${APPLE_API_KEY_PATH/#\~/$HOME}"
 TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY:?Set TAURI_SIGNING_PRIVATE_KEY (path to the updater key) in desktop/.env}"
 TAURI_SIGNING_PRIVATE_KEY="${TAURI_SIGNING_PRIVATE_KEY/#\~/$HOME}"
-export APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH TAURI_SIGNING_PRIVATE_KEY
+# Compiled into the shipped app for crash reports. Builds without it send nothing.
+NURB_SENTRY_DSN="${NURB_SENTRY_DSN:?Set NURB_SENTRY_DSN in desktop/.env}"
+export APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_PATH TAURI_SIGNING_PRIVATE_KEY NURB_SENTRY_DSN
 # A shipped app must carry Satoshi, so the build fails rather than falling back.
 export NURB_REQUIRE_FONTS=1
 
