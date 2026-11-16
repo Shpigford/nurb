@@ -614,6 +614,30 @@ def create_draft_part(conn, project_id, title=None):
     return part_id, name
 
 
+def title_draft(conn, project_id, part, title):
+    """A short name for a draft, from a quick model, in place of its prompt's opening
+    words. Only while it is still a draft: once the agent writes it, its own name wins.
+    `part` is the draft's name in a folder; None means the project's newest draft."""
+    title = (title or "").strip()[:NAME_LIMIT]
+    if not title:
+        return False
+    with transaction(conn):
+        row = (
+            conn.execute(
+                "SELECT * FROM parts WHERE project_id = ? AND name = ? AND kind = 'part'"
+                " AND current_revision_id IS NULL",
+                (project_id, part),
+            ).fetchone()
+            if part
+            else draft_of(conn, project_id)
+        )
+        if row is None or not DRAFT_NAMES.match(row["name"]):
+            return False
+        conn.execute("UPDATE parts SET title = ? WHERE id = ?", (title, row["id"]))
+    changed("part", row["id"], project_id)
+    return True
+
+
 def draft_of(conn, project_id):
     """The project's newest part with no source yet, or None. An older draft is one the
     person walked away from; the newest is the one being described now."""

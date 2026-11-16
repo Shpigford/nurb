@@ -34,7 +34,7 @@ import {
   type MenuItem,
   type Message,
 } from "@nurb/ui";
-import { addMessage, startPart } from "@nurb/workbench/api";
+import { addMessage, startPart, titleDraft } from "@nurb/workbench/api";
 import { joinSpots, splitSpots, spotPlace } from "@nurb/workbench/spot";
 import {
   activity,
@@ -847,6 +847,7 @@ function Chat({
         }
         const starting = (isNew || (isProject && !aboutProject)) && !startedRef.current;
         let started: string | null = null;
+        let drafted = false;
         if (isClaude) {
           const said = await addMessage(
             projectId,
@@ -858,12 +859,20 @@ function Chat({
             isNew && starting,
           );
           started = said.part ?? null;
+          drafted = said.drafted;
           stored = true;
         } else if (starting) {
           // This agent keeps its own transcript, so the part is started on its own.
-          started = (await startPart(projectId, text, isNew)).part;
+          ({ part: started, drafted } = await startPart(projectId, text, isNew));
         }
         if (starting) startedRef.current = true;
+        if (drafted && text) {
+          // A short name from the same agent, while the real turn thinks. Best effort:
+          // without one the card keeps the prompt's opening words.
+          void invoke<string | null>("name_part", { agent, text })
+            .then((title) => (title ? titleDraft(projectId, started, title) : null))
+            .catch(() => {});
+        }
         promptingRef.current = true;
         // A new part's chat moves to the row its first prompt made, a placeholder the
         // agent's first write replaces, so that move is no rename to announce.
@@ -909,7 +918,7 @@ function Chat({
         if (completed) cue(document.hasFocus() ? "ready" : "arrival");
       }
     },
-    [ensureSession, part, wholeProject, attachmentDraft, addSpots, isClaude, projectId, thumbnailOf],
+    [ensureSession, part, wholeProject, attachmentDraft, addSpots, isClaude, projectId, thumbnailOf, agent],
   );
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
