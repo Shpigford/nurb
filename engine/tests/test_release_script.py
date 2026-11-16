@@ -95,7 +95,7 @@ def release_fixture(
     (repo / "engine" / "pyproject.toml").write_text(f'version = "{PYVERSION}"\n', encoding="utf-8")
     (desktop / ".env").write_text(
         "APPLE_SIGNING_IDENTITY=test\nAPPLE_API_KEY=test\nAPPLE_API_ISSUER=test\n"
-        "APPLE_API_KEY_PATH=/tmp/test.p8\nTAURI_SIGNING_PRIVATE_KEY=/tmp/test.key\n",
+        "APPLE_API_KEY_PATH=/tmp/test.p8\nTAURI_SIGNING_PRIVATE_KEY=/tmp/test.key\nNURB_SENTRY_DSN=https://test@example.invalid/1\n",
         encoding="utf-8",
     )
 
