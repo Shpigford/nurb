@@ -281,6 +281,11 @@ function WorkspaceHeader({
           {tabs ? (
             <>
               <HeaderDivider />
+              <span className="flex h-[50px] items-center gap-2 px-3.5 text-muted">
+                <span className="mono-label">History</span>
+                <Icon name="chevron-down" />
+              </span>
+              <HeaderDivider />
               <Menu
                 label="Parts in Bench shelf"
                 triggerClassName="h-[50px] rounded-none"

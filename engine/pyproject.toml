@@ -1,6 +1,6 @@
 [project]
 name = "nurb"
-version = "1.7.1"
+version = "1.8.0"
 description = "Agentic CAD for 3D printing"
 authors = [
     { name = "Josh Pigford", email = "josh@joshpigford.com" }
