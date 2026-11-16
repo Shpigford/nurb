@@ -258,16 +258,16 @@ class _Bearer:
         await self.app(scope, receive, send)
 
 
-def _glb_url(project_id, name, run):
-    return f"/glb/{project_id}/{name}.glb?run={run['id']}"
+def _glb_url(project_id, name, run_id):
+    return f"/glb/{project_id}/{name}.glb?run={run_id}"
 
 
-def _render_url(project_id, name, run):
-    return f"/render/{project_id}/{name}.png?run={run['id']}"
+def _render_url(project_id, name, run_id):
+    return f"/render/{project_id}/{name}.png?run={run_id}"
 
 
-def _thumbnail_url(project_id, name, run):
-    return f"/thumbnail/{project_id}/{name}.png?run={run['id']}"
+def _thumbnail_url(project_id, name, run_id):
+    return f"/thumbnail/{project_id}/{name}.png?run={run_id}"
 
 
 # Run id to the library card's picture. A run's geometry never changes, so neither
@@ -294,20 +294,6 @@ def _elapsed(started, finished):
     return (datetime.datetime.fromisoformat(finished) - started).total_seconds()
 
 
-def _revision_ordinal(conn, revision_id):
-    """Which revision of its part this is, counting from one. There is no ordinal
-    column; the order is the order they were written."""
-    row = conn.execute(
-        "SELECT part_id, created_at FROM part_revisions WHERE id = ?", (revision_id,)
-    ).fetchone()
-    if row is None:
-        return None
-    return conn.execute(
-        "SELECT COUNT(*) FROM part_revisions WHERE part_id = ? AND created_at <= ?",
-        (row["part_id"], row["created_at"]),
-    ).fetchone()[0]
-
-
 def _build_stats(stats):
     named = {
         "size_mm": stats.get("bbox"),
@@ -330,7 +316,7 @@ def _build_event(conn, run, project_id, part_name, summary):
         "status": ("failed" if failed else "passed") if ok else "error",
         "started_at": run["started_at"],
         "elapsed_s": elapsed,
-        "revision": _revision_ordinal(conn, run["revision_id"]),
+        "revision": db.revision_ordinal(conn, run["revision_id"]),
         "steps": [
             {
                 "id": run["id"],
@@ -346,8 +332,8 @@ def _build_event(conn, run, project_id, part_name, summary):
         "findings": [{k: v for k, v in f.items() if k != "face"} for f in findings],
         "stats": _build_stats(json.loads(run["stats"])),
         "error": run["error"],
-        "glb_url": _glb_url(project_id, part_name, run) if ok else None,
-        "render_url": _render_url(project_id, part_name, run) if ok else None,
+        "glb_url": _glb_url(project_id, part_name, run["id"]) if ok else None,
+        "render_url": _render_url(project_id, part_name, run["id"]) if ok else None,
     }
 
 
@@ -668,12 +654,80 @@ def _part_build(conn, project_id, part, run):
         "slice": _result(run, "slice"),
         # A failed build keeps the last good geometry on screen, the way v1 dimmed the
         # mesh in place; the URLs point at that run while the status says why.
-        "glb_url": _glb_url(project_id, part["name"], shown) if shown else None,
-        "render_url": _render_url(project_id, part["name"], shown) if shown else None,
-        "thumbnail_url": _thumbnail_url(project_id, part["name"], shown) if shown else None,
-        "shown_revision": _revision_ordinal(conn, shown["revision_id"]) if shown else None,
+        "glb_url": _glb_url(project_id, part["name"], shown["id"]) if shown else None,
+        "render_url": _render_url(project_id, part["name"], shown["id"]) if shown else None,
+        "thumbnail_url": _thumbnail_url(project_id, part["name"], shown["id"]) if shown else None,
+        "shown_revision": db.revision_ordinal(conn, shown["revision_id"]) if shown else None,
         "stale": run["revision_id"] != part["current_revision_id"]
         or (shown is not None and shown["id"] != run["id"]),
+    }
+
+
+def _revision_entry(project_id, part, row):
+    """One row of the history list. Light: no source, no geometry, only what picks it."""
+    return {
+        "id": row["id"],
+        "revision": row["ordinal"],
+        "created_at": row["created_at"],
+        "note": row["note"],
+        "current": row["current"],
+        "status": row["status"],
+        "thumbnail_url": _thumbnail_url(project_id, part["name"], row["run_id"]) if row["run_id"] else None,
+    }
+
+
+def _revision_view(conn, project_id, part, revision):
+    """One earlier revision as the stage draws it: its own geometry, findings and the
+    values it was built at, and never a later revision's. A revision that did not build
+    says why; one that was never built says that, and shows nothing in its place.
+
+    `build` has the shape a part's own build has, so the page draws it with the same
+    code; it is the run that shows the revision, never stale and never sliced."""
+    run = db.revision_run(conn, revision["id"])
+    attempt = db.latest_run(conn, part["id"], revision["id"])
+    ordinal = db.revision_ordinal(conn, revision["id"])
+    build, params = None, []
+    if run is not None:
+        overrides = json.loads(run["overrides"])
+        findings = json.loads(run["findings"])
+        build = {
+            "id": run["id"],
+            "status": "ok",
+            "passed": not any(f.get("severity") == "fail" for f in findings),
+            "started_at": run["started_at"],
+            "finished_at": run["finished_at"],
+            "error": None,
+            "findings": findings,
+            "stats": json.loads(run["stats"]),
+            "slice": None,
+            "glb_url": _glb_url(project_id, part["name"], run["id"]),
+            "render_url": _render_url(project_id, part["name"], run["id"]),
+            "thumbnail_url": _thumbnail_url(project_id, part["name"], run["id"]),
+            "shown_revision": ordinal,
+            "stale": False,
+        }
+        # The values on that build, read-only: the signature's default unless a drag
+        # moved it, which the page then says.
+        params = [
+            {
+                "name": p.get("name"),
+                "kind": p.get("kind"),
+                "value": overrides.get(p.get("name"), p.get("default")),
+                "default": p.get("default"),
+            }
+            for p in json.loads(run["params"])
+        ]
+    return {
+        "id": revision["id"],
+        "revision": ordinal,
+        "created_at": revision["created_at"],
+        "note": revision["note"],
+        "current": revision["id"] == part["current_revision_id"],
+        "status": db.revision_status(run, attempt),
+        "error": _said(attempt, part["name"]) if run is None and attempt is not None else None,
+        "source": revision["source"],
+        "build": build,
+        "params": params,
     }
 
 
@@ -724,7 +778,7 @@ def _part_entry(conn, project_id, part, grouping=({}, {})):
         "title": part["title"],
         "kind": part["kind"],
         "revision_id": part["current_revision_id"],
-        "revision": _revision_ordinal(conn, part["current_revision_id"]),
+        "revision": db.revision_ordinal(conn, part["current_revision_id"]),
         "source": part["source"],
         "card_md": part["card_md"],
         # An assembly names the parts it places; a part inside one names the assembly.
@@ -889,15 +943,28 @@ def _system(conn, project_id):
     }
 
 
-def _composite(conn, project_id, name):
-    """The part's newest picture, rendered now if the run predates renders."""
-    row = conn.execute(
-        "SELECT id FROM parts WHERE project_id = ? AND name = ? AND kind = 'part'",
-        (project_id, name),
+def _owned_run(conn, project_id, name, run_id):
+    """One successful run with geometry, only if it is this part's. Anything else is
+    None, never the newest run instead: a URL that names a run means that run."""
+    return conn.execute(
+        "SELECT b.* FROM build_runs b"
+        " JOIN part_revisions r ON r.id = b.revision_id"
+        " JOIN parts p ON p.id = r.part_id"
+        " WHERE b.id = ? AND p.project_id = ? AND p.name = ? AND b.status = 'ok' AND b.glb IS NOT NULL",
+        (run_id, project_id, name),
     ).fetchone()
-    if row is None:
-        return None
-    run = db.latest_ok_run(conn, row["id"])
+
+
+def _composite(conn, project_id, name, run_id=None):
+    """The named run's picture, or the part's newest, rendered now if the run predates renders."""
+    if run_id:
+        run = _owned_run(conn, project_id, name, run_id)
+    else:
+        row = conn.execute(
+            "SELECT id FROM parts WHERE project_id = ? AND name = ? AND kind = 'part'",
+            (project_id, name),
+        ).fetchone()
+        run = db.latest_ok_run(conn, row["id"]) if row else None
     if run is None:
         return None
     try:
@@ -1374,7 +1441,7 @@ def _routes(conn, lock, server, token, pid):
                 run = db.latest_run(conn, part["id"])
                 return {
                     "revision_id": part["current_revision_id"],
-                    "revision": _revision_ordinal(conn, part["current_revision_id"]),
+                    "revision": db.revision_ordinal(conn, part["current_revision_id"]),
                     "written": [],
                     "skipped": skipped,
                     "build": _part_build(conn, part["project_id"], part, run),
@@ -1390,7 +1457,8 @@ def _routes(conn, lock, server, token, pid):
             run = _run_row(conn, run_id)
             part = _part_row(conn, part["id"])  # its current revision has moved
             build = _part_build(conn, part["project_id"], part, run)
-            # The transcript draws this as a build, the same as one a tool ran.
+            # The transcript draws this as a build, the same as one a tool ran, filed
+            # under the part so a folder's per-part conversation shows it.
             db.add_message(
                 conn,
                 part["project_id"],
@@ -1403,12 +1471,79 @@ def _routes(conn, lock, server, token, pid):
                     "run_id": run_id,
                     "part_name": part["name"],
                 },
+                part=part["name"],
             )
             return {
                 "revision_id": revision_id,
-                "revision": _revision_ordinal(conn, revision_id),
+                "revision": db.revision_ordinal(conn, revision_id),
                 "written": written,
                 "skipped": skipped,
+                "build": build,
+            }
+
+        return await acted(work)
+
+    async def part_revisions(request):
+        """The part's history, newest first."""
+
+        def work(conn):
+            part = _part_row(conn, request.path_params["part_id"])
+            rows = db.list_revisions(conn, part["id"])
+            return {"revisions": [_revision_entry(part["project_id"], part, row) for row in rows]}
+
+        return await acted(work)
+
+    async def part_revision(request):
+        """One earlier revision, to look at. Reading it builds nothing and changes nothing."""
+
+        def work(conn):
+            part = _part_row(conn, request.path_params["part_id"])
+            revision = db.get_revision(conn, part["id"], request.path_params["revision_id"])
+            if revision is None:
+                raise _Refused(404, f"{part['name']} has no such revision")
+            return _revision_view(conn, part["project_id"], part, revision)
+
+        return await acted(work)
+
+    async def part_restore(request):
+        """Bring an earlier revision back as a new one, and build it."""
+        sent = await body_of(request)
+
+        def work(conn):
+            part = _part_row(conn, request.path_params["part_id"])
+            expected = word(sent, "expected_revision_id", "expected_revision_id must be a revision id") or None
+            try:
+                revision_id = db.restore_revision(
+                    conn, part["id"], request.path_params["revision_id"], expected=expected
+                )
+            except LookupError as exc:
+                raise _Refused(404, str(exc)) from None
+            except db.RevisionMoved as exc:
+                raise _Refused(409, str(exc)) from None
+            except ValueError as exc:
+                raise _Refused(400, str(exc)) from None
+            run_id, _ = engine_run.run_build(conn, part["id"])
+            run = _run_row(conn, run_id)
+            part = _part_row(conn, part["id"])
+            build = _part_build(conn, part["project_id"], part, run)
+            note = db.get_revision(conn, part["id"], revision_id)["note"]
+            # Filed under the part, so a folder's per-part conversation shows it.
+            db.add_message(
+                conn,
+                part["project_id"],
+                "assistant",
+                f"{note} of {part['name']}.",
+                {
+                    "tool": "restore_revision",
+                    "summary": f"{part['name']} built: {run['status']}, {len(build['findings'])} findings",
+                    "run_id": run_id,
+                    "part_name": part["name"],
+                },
+                part=part["name"],
+            )
+            return {
+                "revision_id": revision_id,
+                "revision": db.revision_ordinal(conn, revision_id),
                 "build": build,
             }
 
@@ -1734,6 +1869,17 @@ def _routes(conn, lock, server, token, pid):
         name = request.path_params["part"]
         if not db.PART_NAME.match(name):
             return PlainTextResponse("no geometry", status_code=404)
+        run_id = request.query_params.get("run")
+        if run_id:
+            # The history names an older run, and that run's bytes never change.
+            run = await query(lambda conn: _owned_run(conn, request.path_params["project_id"], name, run_id))
+            if run is None:
+                return PlainTextResponse("no geometry", status_code=404)
+            return Response(
+                run["glb"],
+                media_type="model/gltf-binary",
+                headers={"Cache-Control": "max-age=31536000, immutable"},
+            )
         rows = await read(
             "SELECT b.glb FROM build_runs b"
             " JOIN part_revisions r ON r.id = b.revision_id"
@@ -1758,7 +1904,8 @@ def _routes(conn, lock, server, token, pid):
             return PlainTextResponse("no render", status_code=404)
         # Rendering an older run's picture takes a moment, so it goes to the thread
         # with every other read rather than blocking the loop.
-        png = await query(lambda conn: _composite(conn, request.path_params["project_id"], name))
+        run_id = request.query_params.get("run") or None
+        png = await query(lambda conn: _composite(conn, request.path_params["project_id"], name, run_id))
         if png is None:
             return PlainTextResponse("no render", status_code=404)
         return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
@@ -1905,6 +2052,9 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}/labels/{name:path}", endpoint=answering(part_label_delete), methods=["DELETE"]),
         Route("/api/parts/{part_id}/params", endpoint=answering(part_params), methods=["POST"]),
         Route("/api/parts/{part_id}/apply", endpoint=answering(part_apply), methods=["POST"]),
+        Route("/api/parts/{part_id}/revisions", endpoint=answering(part_revisions)),
+        Route("/api/parts/{part_id}/revisions/{revision_id}", endpoint=answering(part_revision)),
+        Route("/api/parts/{part_id}/revisions/{revision_id}/restore", endpoint=answering(part_restore), methods=["POST"]),
         Route("/api/parts/{part_id}/export", endpoint=answering(part_export), methods=["POST"]),
         Route("/api/parts/{part_id}/slice", endpoint=answering(part_slice), methods=["POST"]),
         Route("/glb/{project_id}/{part}.glb", endpoint=glb),

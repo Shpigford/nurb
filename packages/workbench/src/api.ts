@@ -163,6 +163,52 @@ export interface ApplyResult {
   build: PartBuild
 }
 
+/** What one saved revision came to: built, did not build, or never tried. */
+export type RevisionStatus = "ok" | "error" | "unbuilt"
+
+/** One row of a part's history. */
+export interface RevisionEntry {
+  id: string
+  revision: number
+  created_at: string
+  /** What changed, when the change said ("Applied width from the sliders"). */
+  note: string | null
+  current: boolean
+  status: RevisionStatus
+  thumbnail_url: string | null
+}
+
+/** One value an earlier build was made at. `value` differs from `default` when a drag moved it. */
+export interface RevisionParam {
+  name: string
+  kind: Param["kind"]
+  value: Param["default"]
+  default: Param["default"]
+}
+
+/** An earlier revision, as the stage shows it: its own geometry, never a later one's. */
+export interface RevisionView {
+  id: string
+  revision: number
+  created_at: string
+  note: string | null
+  current: boolean
+  status: RevisionStatus
+  /** Why it did not build, when it did not. */
+  error: string | null
+  source: string
+  /** The run that shows this revision, in the shape the part's own build has. Null when nothing built. */
+  build: PartBuild | null
+  /** The values that run was built at. */
+  params: RevisionParam[]
+}
+
+export interface RestoreResult {
+  revision_id: string
+  revision: number
+  build: PartBuild
+}
+
 let base = ""
 let resolver: (() => Promise<string>) | null = null
 
@@ -260,6 +306,24 @@ export function buildWithParams(
 
 export function applyParams(partId: string, values: Params): Promise<ApplyResult> {
   return post(partUrl(partId, "apply"), { values })
+}
+
+/** Every saved revision of the part, newest first. */
+export function fetchRevisions(partId: string): Promise<{ revisions: RevisionEntry[] }> {
+  return get(partUrl(partId, "revisions"))
+}
+
+/** One earlier revision, to look at. Reading it builds nothing. */
+export function fetchRevision(partId: string, revisionId: string): Promise<RevisionView> {
+  return get(partUrl(partId, `revisions/${encodeURIComponent(revisionId)}`))
+}
+
+/** Bring an earlier revision back as a new one. `expected` is the revision the page
+ * showed as current; if another edit landed since, the server refuses with a 409. */
+export function restoreRevision(partId: string, revisionId: string, expected: string | null): Promise<RestoreResult> {
+  return post(partUrl(partId, `revisions/${encodeURIComponent(revisionId)}/restore`), {
+    expected_revision_id: expected,
+  })
 }
 
 /** The file, and the server's one line about what is in it: how many parts went on the

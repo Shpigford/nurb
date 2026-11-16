@@ -790,6 +790,85 @@
   }
  },
  {
+  "name": "list_revisions",
+  "title": "List revisions",
+  "description": "List the part's saved revisions, newest first: each one's number (rev N, as the person sees it), when it was saved, the note saying what changed, whether it built, and which one is current. Every write and every Apply from the sliders is a revision, and none is ever lost. Pass revision to also get that one revision's full source. Use it when the person asks what changed, or to go back to how the part was.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    },
+    "revision": {
+     "type": "integer",
+     "minimum": 1,
+     "description": "A revision number from this list; the result then carries its source."
+    },
+    "limit": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 50,
+     "description": "Revisions to list; defaults to 20, maximum 50."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": true,
+   "destructiveHint": false
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
+  "name": "restore_revision",
+  "title": "Restore a revision",
+  "description": "Bring an earlier revision of the part back and build it. It is saved as a new revision on top, so nothing in between is lost and the restore can be undone the same way. Use it only when the person asks to go back. The result carries the build's status, findings, stats and picture, the same as run_build.",
+  "inputSchema": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "project_id",
+    "part_name",
+    "revision"
+   ],
+   "properties": {
+    "project_id": {
+     "type": "string",
+     "description": "From list_projects or create_project."
+    },
+    "part_name": {
+     "type": "string",
+     "pattern": "^[a-z][a-z0-9_]*$",
+     "description": "The part's name: a Python identifier, lowercase snake_case, no leading underscore."
+    },
+    "revision": {
+     "type": "integer",
+     "minimum": 1,
+     "description": "The revision number to bring back, from list_revisions."
+    }
+   }
+  },
+  "annotations": {
+   "readOnlyHint": false,
+   "destructiveHint": false
+  },
+  "_meta": {
+   "anthropic/maxResultSizeChars": 100000
+  }
+ },
+ {
   "name": "find_photos",
   "title": "Find reference photos",
   "description": "Look at the project's reference photos: up to three, downscaled. They are the photos the person attached in the chat. None is the ordinary case, not a problem: ask for one in the chat only when a photo would settle a shape. Use them to see an outline, where buttons, ports and cables sit, and which way is up. A photo is a shape, never a dimension.",

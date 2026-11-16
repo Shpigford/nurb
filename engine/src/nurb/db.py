@@ -748,6 +748,25 @@ def part_name_from(text):
     return re.sub(r"[^a-z0-9]+", "_", (text or "").strip().lower()).strip("_")
 
 
+def _rename_function(source, old, new):
+    """The source with the function called `old` renamed to `new`, its first definition only."""
+    return re.sub(rf"^def {re.escape(old)}\(", f"def {new}(", source, count=1, flags=re.M)
+
+
+def _rewire_uses(source, names):
+    """The source with every use("old") for an old name in `names` saying its new name.
+
+    One pass over the source, so a swap (a to b while b goes to a) cannot rewrite a
+    name it has just written. use() opens parts/{name}.py and accepts dashes for
+    underscores, so either spelling is matched.
+    """
+    if not names:
+        return source
+    spelled = "|".join(re.escape(old).replace("_", "[_-]") for old in names)
+    called = re.compile(rf"""\buse\(\s*(["'])({spelled})\1""")
+    return called.sub(lambda m: f"use({m[1]}{names[m[2].replace('-', '_')]}{m[1]}", source)
+
+
 def rename_part(conn, part_id, name, title=None):
     """Call a part something else. The title is what a person typed and is saved as is;
     the name is its file's name, so when it changes the transcript's turns follow it, and
@@ -780,18 +799,16 @@ def rename_part(conn, part_id, name, title=None):
             (part_id,),
         ).fetchone()
     source = current["source"] if current else None
-    renamed = re.sub(rf"^def {re.escape(old)}\(", f"def {name}(", source or "", count=1, flags=re.M)
+    renamed = _rename_function(source or "", old, name)
     if source and renamed != source:
         add_revision(conn, part_id, renamed, card_md=current["card_md"], note=f"Renamed from {old}")
     else:
         changed("part", part_id, part["project_id"])
-    # use() opens parts/{name}.py, so a caller still saying the old name would stop
-    # building. It also accepts dashes for underscores.
-    called = re.compile(rf"""\buse\(\s*(["']){re.escape(old).replace("_", "[_-]")}\1""")
+    # A caller still saying the old name would stop building.
     for row in parts_of(conn, part["project_id"]):
         if row["id"] == part_id or not row["source"]:
             continue
-        rewired = called.sub(lambda m: f"use({m[1]}{name}{m[1]}", row["source"])
+        rewired = _rewire_uses(row["source"], {old: name})
         if rewired != row["source"]:
             add_revision(conn, row["id"], rewired, card_md=row["card_md"], note=f"{old} renamed to {name}")
     return name
@@ -1026,3 +1043,138 @@ def latest_ok_run(conn, part_id):
         " ORDER BY b.started_at DESC LIMIT 1",
         (part_id,),
     ).fetchone()
+
+
+def revision_ordinal(conn, revision_id):
+    """Which revision of its part this is, counting from one. There is no ordinal
+    column; the order is the order they were written, and two written in the same
+    instant are told apart by insertion order, so no two revisions share a number."""
+    row = conn.execute(
+        "SELECT part_id, created_at, rowid FROM part_revisions WHERE id = ?", (revision_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    return conn.execute(
+        "SELECT COUNT(*) FROM part_revisions WHERE part_id = ?"
+        " AND (created_at < ? OR (created_at = ? AND rowid <= ?))",
+        (row["part_id"], row["created_at"], row["created_at"], row["rowid"]),
+    ).fetchone()[0]
+
+
+# Everything about a run but its bytes, for a reader that shows an older one.
+RUN_SUMMARY = "id, revision_id, status, error, findings, stats, params, overrides, started_at, finished_at"
+
+# The build that shows what a revision was: its newest one with geometry, at the
+# source's own defaults when there is one. A slider drag builds under the same
+# revision, and a revision is what its source said, not where a thumb was left. Never
+# another revision's run: looking back at rev 3 and seeing rev 5 would be a picture of
+# the wrong thing labelled as the right one.
+_SHOWN_RUN = (
+    "SELECT {columns} FROM build_runs WHERE revision_id = {revision} AND status = 'ok' AND glb IS NOT NULL"
+    " ORDER BY overrides != '{{}}', started_at DESC LIMIT 1"
+)
+
+
+def revision_run(conn, revision_id):
+    """The run that shows this revision, without its bytes, or None."""
+    return conn.execute(_SHOWN_RUN.format(columns=RUN_SUMMARY, revision="?"), (revision_id,)).fetchone()
+
+
+def revision_status(shown, attempted):
+    """What a revision came to: "ok" when a run shows it, "error" when it was tried and
+    nothing built, "unbuilt" when nothing ever tried."""
+    return "ok" if shown else "error" if attempted else "unbuilt"
+
+
+def list_revisions(conn, part_id):
+    """Every revision of the part, newest first: id, note, created_at, its ordinal, whether
+    it is the one in force, its status, and the id of the run that shows it."""
+    # The same order revision_ordinal counts in, so the two never disagree.
+    rows = conn.execute(
+        "SELECT r.id, r.note, r.created_at, r.id = p.current_revision_id AS current,"
+        " ROW_NUMBER() OVER (ORDER BY r.created_at, r.rowid) AS ordinal,"
+        f" ({_SHOWN_RUN.format(columns='id', revision='r.id')}) AS run_id,"
+        " EXISTS (SELECT 1 FROM build_runs WHERE revision_id = r.id) AS attempted"
+        " FROM part_revisions r JOIN parts p ON p.id = r.part_id"
+        " WHERE r.part_id = ? ORDER BY r.created_at DESC, r.rowid DESC",
+        (part_id,),
+    ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "note": row["note"],
+            "created_at": row["created_at"],
+            "ordinal": row["ordinal"],
+            "current": bool(row["current"]),
+            "status": revision_status(row["run_id"], row["attempted"]),
+            "run_id": row["run_id"],
+        }
+        for row in rows
+    ]
+
+
+def get_revision(conn, part_id, revision_id):
+    """One revision of this part, or None. Asking for another part's is the same as
+    asking for one that does not exist."""
+    return conn.execute(
+        "SELECT * FROM part_revisions WHERE id = ? AND part_id = ?", (revision_id, part_id)
+    ).fetchone()
+
+
+def _names_then(conn, project_id, since):
+    """Part id -> (its name at `since`, its name now), for each part renamed after `since`.
+
+    A rename writes "Renamed from <old>" on the part it renamed, the same record
+    renamed_to() reads, so a part's first such note after `since` names what it was
+    called then, however many renames followed.
+    """
+    rows = conn.execute(
+        "SELECT r.part_id, r.note, p.name FROM part_revisions r JOIN parts p ON p.id = r.part_id"
+        " WHERE p.project_id = ? AND r.note LIKE 'Renamed from %' AND r.created_at > ?"
+        " ORDER BY r.created_at, r.rowid",
+        (project_id, since),
+    ).fetchall()
+    names = {}
+    for row in rows:
+        names.setdefault(row["part_id"], (row["note"][len("Renamed from ") :], row["name"]))
+    return names
+
+
+def restore_revision(conn, part_id, revision_id, expected=None):
+    """Bring an earlier revision back as the newest one. Nothing is rewound: the old
+    source and card are written again on top, so the revisions in between stay in the
+    history and the restore can itself be undone the same way.
+
+    `expected` is the revision the person was looking at as current when they chose
+    to restore. If another edit has landed since, the restore would silently bury it,
+    so it is refused instead. Returns the new revision's id.
+    """
+    with transaction(conn):
+        part = conn.execute(
+            "SELECT project_id, name, current_revision_id FROM parts WHERE id = ? AND kind = 'part'", (part_id,)
+        ).fetchone()
+        if part is None:
+            raise LookupError("no such part")
+        old = get_revision(conn, part_id, revision_id)
+        if old is None:
+            raise LookupError("this part has no such revision")
+        ordinal = revision_ordinal(conn, revision_id)
+        if expected is not None and expected != part["current_revision_id"]:
+            raise RevisionMoved(
+                f"{part['name']} changed while you were looking. Open the history again and pick the revision to restore."
+            )
+        if revision_id == part["current_revision_id"]:
+            raise ValueError(f"rev {ordinal} is already the current revision")
+        # Renames since then rewrote the current sources, and the old one still says the
+        # names of its day: its own function, which must match the part file it is written
+        # to, and any sibling it opens with use(). The same two rewrites rename_part makes.
+        names = _names_then(conn, part["project_id"], old["created_at"])
+        then, now = names.pop(part_id, (part["name"], part["name"]))
+        source = _rename_function(old["source"], then, now) if then != now else old["source"]
+        source = _rewire_uses(source, {was: name for was, name in names.values() if was != name})
+        # Inside the same transaction, so no edit can land between the check and the write.
+        return add_revision(conn, part_id, source, card_md=old["card_md"], note=f"Restored rev {ordinal}")
+
+
+class RevisionMoved(Exception):
+    """The current revision is not the one the caller saw."""

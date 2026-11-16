@@ -684,6 +684,8 @@ def test_the_sliders_build_and_then_land_in_the_signature(home):
         last = after["messages"][-1]
         assert last["payload"]["type"] == "build"
         assert last["payload"]["build"]["id"] == applied["build"]["id"]
+        # Filed under the part, which is how a folder's per-part conversation finds it.
+        assert last["part"] == "slab"
         assert next(p for p in after["parts"] if p["name"] == "slab")["source"].count("width=116.0") == 1
 
         # Applying nothing new writes no revision.
