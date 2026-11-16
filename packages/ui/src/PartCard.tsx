@@ -42,6 +42,8 @@ export interface PartCardPart {
   folder?: string | null
   /** When the running build started, so a stalled one stops claiming to be alive. */
   buildingSince?: string | null
+  /** How many parts an assembly places; the card stands for all of them. */
+  pieces?: number
 }
 
 // Every part stays alive and parametric: the card opens it at the last build.
@@ -136,7 +138,9 @@ export default function PartCard({
         </div>
         {/* The name is the title above, so this line is the size alone. A space keeps the height when there is none. */}
         <p className="mono-caption truncate text-muted normal-case [letter-spacing:0.08em]">
-          {dims ? `${dims} mm` : "\u00a0"}
+          {[dims ? `${dims} mm` : null, part.pieces ? `${part.pieces} ${part.pieces === 1 ? "part" : "parts"}` : null]
+            .filter(Boolean)
+            .join(" · ") || "\u00a0"}
         </p>
       </div>
       <div className="mono-caption flex items-center justify-between border-t border-line-soft px-[13px] py-2 text-muted [letter-spacing:0.08em]">

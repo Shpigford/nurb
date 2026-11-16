@@ -11,6 +11,7 @@ public function the parts call.
 """
 
 import ast
+import functools
 import math
 import re
 
@@ -109,6 +110,53 @@ def uses(source, module, piece):
             if isinstance(node.value, ast.Name) and node.value.id == module:
                 return True
     return False
+
+
+@functools.lru_cache(maxsize=4096)
+def placed(source):
+    """The sibling parts an assembly places with `use("name")`, in source order. Read
+    from the source rather than a build, so the library knows the grouping before
+    anything has built, and a part that places nothing is simply a part."""
+    try:
+        tree = ast.parse(source or "")
+    except SyntaxError:
+        return ()
+    out = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "use"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            name = node.args[0].value.replace("-", "_")
+            if name not in out:
+                out.append(name)
+    return tuple(out)  # cached, so it must not be mutable
+
+
+def owners(part_sources):
+    """Each part an assembly places, mapped to the outermost assembly it ends up in.
+    Those parts are ingredients: the assembly is the thing being made, so the library
+    shows it and keeps them inside it. A part two assemblies place goes with the first."""
+    direct = {}
+    for name, source in part_sources.items():
+        for used in placed(source):
+            if used in part_sources and used != name:
+                direct.setdefault(used, name)
+    top = {}
+    for name in direct:
+        seen, at = {name}, direct[name]
+        while at in direct:
+            if at in seen:
+                break  # a use() loop, which cannot build: leave its parts showing
+            seen.add(at)
+            at = direct[at]
+        else:
+            top[name] = at
+    return top
 
 
 def repeats(part_sources, limit=5):

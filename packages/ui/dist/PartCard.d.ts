@@ -14,6 +14,8 @@ export interface PartCardPart {
     folder?: string | null;
     /** When the running build started, so a stalled one stops claiming to be alive. */
     buildingSince?: string | null;
+    /** How many parts an assembly places; the card stands for all of them. */
+    pieces?: number;
 }
 export default function PartCard({ part, onOpen, menu, renaming, onRename, }: {
     part: PartCardPart;

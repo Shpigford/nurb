@@ -24,6 +24,11 @@ describe("PartCard", () => {
     expect(seen).toEqual(["open"])
   })
 
+  it("says how many parts an assembly stands for", () => {
+    render(<PartCard part={{ ...built, pieces: 2 }} onOpen={() => {}} />)
+    expect(screen.getByText("80 × 40 × 20 mm · 2 parts")).toBeTruthy()
+  })
+
   it("names the project only when it differs from the part", () => {
     render(<PartCard part={{ ...built, folder: "Shelf bracket" }} onOpen={() => {}} />)
     expect(screen.getByText("REV 04")).toBeTruthy()

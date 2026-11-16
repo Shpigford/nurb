@@ -1904,3 +1904,34 @@ def test_a_3mf_downloads_when_the_slicer_lacks_the_printer(home):
         assert status == 200
         assert body[:2] == b"PK"
         assert headers["X-Nurb-Print-Settings"]
+
+
+def test_an_assembly_keeps_its_parts_inside_it(home):
+    from nurb import db
+
+    conn = db.connect()
+    towel = db.create_project(conn, "towel", folder=True)
+    db.create_part(conn, towel, "arm", SLAB.replace("slab", "arm"))
+    db.create_part(conn, towel, "roller", SLAB.replace("slab", "roller"))
+    db.create_part(conn, towel, "loose", SLAB.replace("slab", "loose"))
+    db.create_part(
+        conn,
+        towel,
+        "holder",
+        'from nurb import *\n\n@assembly\ndef holder():\n'
+        '    return use("arm"), Pos(0, 50, 0) * use("arm"), use("roller"), use("not_a_part")\n',
+    )
+    conn.close()
+    with serving(home, free_port()) as url:
+        library = {p["name"]: p for p in json.loads(get(f"{url}/api/parts")[2])["parts"]}
+        assert library["holder"]["uses"] == ["arm", "roller"]
+        assert library["holder"]["assembly"] is None
+        assert library["arm"]["assembly"] == "holder" and library["roller"]["assembly"] == "holder"
+        assert library["loose"]["assembly"] is None and library["loose"]["uses"] == []
+
+        # The rail counts what the grid shows: the holder and the loose part.
+        listed = {row["id"]: row for row in json.loads(get(f"{url}/api/projects")[2])["projects"]}
+        assert listed[towel]["parts"] == 2
+
+        page = {p["name"]: p for p in json.loads(get(f"{url}/api/projects/{towel}")[2])["parts"]}
+        assert page["arm"]["assembly"] == "holder" and page["holder"]["uses"] == ["arm", "roller"]

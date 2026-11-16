@@ -686,11 +686,35 @@ def _projects(conn):
         "  JOIN parts pa ON pa.id = r.part_id WHERE pa.project_id = p.id) AS last_built"
         " FROM projects p ORDER BY p.created_at"
     ).fetchall()
-    return [{**dict(row), "folder": bool(row["folder"])} for row in rows]
+    # The count is what the grid shows: an assembly's parts live inside its card.
+    return [
+        {**dict(row), "folder": bool(row["folder"]), "parts": row["parts"] - len(_grouping(conn, row["id"])[0])}
+        for row in rows
+    ]
 
 
-def _part_entry(conn, project_id, part):
+def _grouping(conn, project_id, rows=None):
+    """Which parts are inside an assembly, and what each assembly places directly."""
+    from . import shared
+
+    sources = {r["name"]: r["source"] for r in (rows or db.parts_of(conn, project_id)) if r["kind"] == "part"}
+    placed = {name: [n for n in shared.placed(src) if n in sources and n != name] for name, src in sources.items()}
+    return shared.owners(sources), placed
+
+
+def _rolled_up(names, owner):
+    """Part names as the library shows them: a part inside an assembly is the assembly."""
+    out = []
+    for name in names:
+        shown = owner.get(name, name)
+        if shown not in out:
+            out.append(shown)
+    return out
+
+
+def _part_entry(conn, project_id, part, grouping=({}, {})):
     """One part as a page draws it: its source, its sliders, and its last build."""
+    owner, placed = grouping
     # Without a revision_id: a crashed edit still shows the last picture, stale.
     run = db.latest_run(conn, part["id"])
     params = _params_of(conn, part)
@@ -703,6 +727,9 @@ def _part_entry(conn, project_id, part):
         "revision": _revision_ordinal(conn, part["current_revision_id"]),
         "source": part["source"],
         "card_md": part["card_md"],
+        # An assembly names the parts it places; a part inside one names the assembly.
+        "uses": placed.get(part["name"], []),
+        "assembly": owner.get(part["name"]),
         "params": [
             {
                 "name": p.get("name"),
@@ -722,12 +749,14 @@ def _all_parts(conn):
     """Every part in the store, which is what the library's one grid draws."""
     out = []
     for row in conn.execute("SELECT * FROM projects ORDER BY created_at").fetchall():
-        for part in db.parts_of(conn, row["id"]):
+        rows = db.parts_of(conn, row["id"])
+        grouping = _grouping(conn, row["id"], rows)
+        for part in rows:
             if part["kind"] != "part":
                 continue
             out.append(
                 {
-                    **_part_entry(conn, row["id"], part),
+                    **_part_entry(conn, row["id"], part, grouping),
                     "project_id": row["id"],
                     "project_name": row["name"],
                     "folder": bool(row["folder"]),
@@ -742,16 +771,18 @@ def _project(conn, project_id, part=None):
     row = db.get_project(conn, project_id)
     if row is None:
         return None
+    rows = db.parts_of(conn, project_id)
+    grouping = _grouping(conn, project_id, rows)
     parts = [
         {
-            **_part_entry(conn, project_id, entry),
+            **_part_entry(conn, project_id, entry, grouping),
             # Only the part page draws labels, so the library's read never measures them.
             # Against the geometry on screen, the same run the build's glb_url names.
             "labels": labels.placed(
                 db.labels_of(conn, entry["id"]), _shown(conn, entry, db.latest_run(conn, entry["id"]))
             ),
         }
-        for entry in db.parts_of(conn, project_id)
+        for entry in rows
         if entry["kind"] == "part"
     ]
     if part is None:
@@ -786,8 +817,11 @@ def _project(conn, project_id, part=None):
         # The family's shared files and which parts import each, so the page can say
         # that one edit moves the set.
         "shared": [
-            {"name": entry["name"], "used_by": [user["name"] for user in mcp_server.importers(conn, project_id, entry["id"])]}
-            for entry in db.parts_of(conn, project_id)
+            {
+                "name": entry["name"],
+                "used_by": _rolled_up([user["name"] for user in mcp_server.importers(conn, project_id, entry["id"])], grouping[0]),
+            }
+            for entry in rows
             if entry["kind"] == "module"
         ],
         "messages": [_message(conn, message) for message in messages],
@@ -815,6 +849,7 @@ def _system(conn, project_id):
 
     rows = list(db.parts_of(conn, project_id))
     parts = [row for row in rows if row["kind"] == "part"]
+    owner = _grouping(conn, project_id, rows)[0]
     files = []
     for row in rows:
         if row["kind"] != "module":
@@ -822,10 +857,13 @@ def _system(conn, project_id):
         files.append(
             {
                 "name": row["name"],
-                "used_by": [user["name"] for user in mcp_server.importers(conn, project_id, row["id"])],
+                "used_by": _rolled_up([user["name"] for user in mcp_server.importers(conn, project_id, row["id"])], owner),
                 "settings": shared.settings(row["source"]),
                 "pieces": [
-                    {"name": piece, "used_by": [p["name"] for p in parts if shared.uses(p["source"], row["name"], piece)]}
+                    {
+                        "name": piece,
+                        "used_by": _rolled_up([p["name"] for p in parts if shared.uses(p["source"], row["name"], piece)], owner),
+                    }
                     for piece in shared.pieces(row["source"])
                 ],
             }
@@ -842,7 +880,9 @@ def _system(conn, project_id):
                 "value_mm": float(m["value"]),
                 "how": m["how"],
                 "provisional": bool(m["provisional"]),
-                "used_by": [names[part_id] for part_id, used in reads.items() if part_id in names and m["name"] in used],
+                "used_by": _rolled_up(
+                    [names[part_id] for part_id, used in reads.items() if part_id in names and m["name"] in used], owner
+                ),
             }
             for m in db.measurements_of(conn, project_id)
         ],

@@ -99,7 +99,7 @@ type Props = {
 // The card wants the shape of the last build, not the build itself. The folder
 // name rides along when the part is in one, because the footer says that instead
 // of the revision.
-function toCard(part: Part, folder?: string | null, designing = false): PartCardPart {
+function toCard(part: Part, folder?: string | null, designing = false, pieces = 0): PartCardPart {
   const build = part.build;
   const status: PartCardPart["status"] = isDraft(part)
     ? "draft"
@@ -122,6 +122,7 @@ function toCard(part: Part, folder?: string | null, designing = false): PartCard
     thumbnailUrl: build?.thumbnail_url ? absolute(build.thumbnail_url) : null,
     folder: folder ?? null,
     designing,
+    pieces: pieces || undefined,
   };
 }
 
@@ -215,8 +216,20 @@ export default function Library({
     }
   };
 
+  // How many parts each assembly's card stands for, nested ones included.
+  const inside = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const p of allParts) {
+      if (!p.assembly) continue;
+      const key = `${p.project_id}/${p.assembly}`;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [allParts]);
+
   const shown = useMemo(() => {
-    const found = query.trim() ? parts.filter((p) => matchesSearch(p, query)) : parts;
+    // A part inside an assembly lives in the assembly's card, but a search still finds it.
+    const found = query.trim() ? parts.filter((p) => matchesSearch(p, query)) : parts.filter((p) => !p.assembly);
     return sortParts(found, sort);
   }, [parts, query, sort]);
 
@@ -378,7 +391,7 @@ export default function Library({
             <span className="mono-value min-w-0 flex-1 truncate text-left uppercase text-ink">
               All parts
             </span>
-            <span className="mono-caption shrink-0 text-muted">{allParts.length}</span>
+            <span className="mono-caption shrink-0 text-muted">{allParts.filter((p) => !p.assembly).length}</span>
           </button>
         </div>
         {/* Projects are rare, so the rail only names them once one exists. The empty list stays to hold the settings strip at the bottom. */}
@@ -580,7 +593,12 @@ export default function Library({
                         transition={{ duration: reduced ? 0 : duration.settle, ease: OUT }}
                       >
                         <PartCard
-                          part={toCard(part, part.folder ? part.project_name : null, designing.has(part.id))}
+                          part={toCard(
+                            part,
+                            part.folder ? part.project_name : null,
+                            designing.has(part.id),
+                            inside.get(`${part.project_id}/${part.name}`),
+                          )}
                           menu={partMenu(part)}
                           renaming={renamingPart === part.id}
                           onRename={(name) => endPartRename(part, name)}
