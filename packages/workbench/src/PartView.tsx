@@ -50,6 +50,7 @@ import {
   type Project,
   type SliceResult,
 } from "./api"
+import { HistoryMenu, RevisionBanner, RevisionParams, useRevisionHistory } from "./History"
 import { activity } from "./activity"
 import { loadCamera, saveCamera } from "./camera"
 import { LabelEditor, LabelTag } from "./Labels"
@@ -291,11 +292,35 @@ export default function PartView({
     (starting ? null : parts.find((p) => !p.assembly) ?? parts[0] ?? null)
   shownId.current = part?.id ?? null
   const build = part?.build ?? null
-  const verdict = verdictOf(build)
-  const glbUrl = build?.glb_url ?? null
   const runId = build?.id ?? null
-  const findings = build?.findings ?? []
-  const failedBuild = build?.status === "error"
+
+  // An earlier revision on stage in place of the current one. It is read-only: the
+  // sliders, labels, exports and slicing all act on the part as it is now.
+  const history = useRevisionHistory(part, {
+    enter: () => {
+      // A drag still settling would build the current part under the old one's picture,
+      // and the thumb it left would sit over geometry nobody built. The cancelled build
+      // is not one to celebrate.
+      cancelDrag()
+      wasBuilding.current = false
+      setBuilding(false)
+      setValues(part?.overrides ?? {})
+      resetStageTools()
+      setHighlight(null)
+    },
+    restored: (from, to) => {
+      setValues({})
+      setNote(`Restored ${rev(from).toLowerCase()} as ${rev(to).toLowerCase()}.`)
+    },
+    failed: setStageError,
+  })
+  const viewing = history.viewing
+  // The old revision's own run while looking back, or the part's; never one for the other.
+  const shownBuild = viewing ? viewing.build : build
+  const verdict = verdictOf(shownBuild)
+  const glbUrl = shownBuild?.glb_url ?? null
+  const findings = shownBuild?.findings ?? []
+  const failedBuild = !viewing && build?.status === "error"
   // Described and not written yet: the person's words are all there is.
   const noDesign = part != null && part.source == null
 
@@ -345,10 +370,7 @@ export default function PartView({
   // A part carries the overrides its newest run was built at, so the sliders open
   // where they were left rather than back at the declared defaults.
   useEffect(() => {
-    paramsSeq.current += 1
-    paramsAbort.current?.abort()
-    if (paramsTimer.current) clearTimeout(paramsTimer.current)
-    paramsPending.current = false
+    cancelDrag()
     setValues(part?.overrides ?? {})
     setNote(null)
     setBuildError(null)
@@ -372,6 +394,14 @@ export default function PartView({
       if (paramsTimer.current) clearTimeout(paramsTimer.current)
       paramsAbort.current?.abort()
     }
+  }, [])
+
+  // A drag the server has not answered, or one still settling, is called off.
+  const cancelDrag = useCallback(() => {
+    paramsSeq.current += 1
+    paramsAbort.current?.abort()
+    if (paramsTimer.current) clearTimeout(paramsTimer.current)
+    paramsPending.current = false
   }, [])
 
   const sendParams = useCallback(async (partId: string, next: Params) => {
@@ -464,12 +494,13 @@ export default function PartView({
   const [draft, setDraft] = useState<{ point: [number, number, number]; was?: string } | null>(null)
   // A label waiting for its new spot: label mode, but the click moves it instead of naming one.
   const [moving, setMoving] = useState<string | null>(null)
-  useEffect(() => {
+  const resetStageTools = useCallback(() => {
     setPointing(false)
     setLabelling(false)
     setDraft(null)
     setMoving(null)
-  }, [part?.id])
+  }, [])
+  useEffect(resetStageTools, [part?.id])
   const toggleLabelling = () => {
     setPointing(false)
     setDraft(null)
@@ -491,7 +522,8 @@ export default function PartView({
   keys.current = (event) => {
     // The shell keeps this screen mounted under the library and lays settings
     // over it; a stage whose tools are hidden or covered takes no keys.
-    if (event.defaultPrevented || event.isComposing || !stageOnTop(tools.current)) return
+    // A revision that never built has no stage tools, so the banner stands in for them.
+    if (event.defaultPrevented || event.isComposing || !stageOnTop(viewing ? history.banner.current : tools.current)) return
     const target = event.target
     if (target instanceof Element && target.closest("input, textarea, select, [contenteditable=''], [contenteditable='true'], [role='dialog']")) return
     const mod = event.metaKey || event.ctrlKey
@@ -499,6 +531,10 @@ export default function PartView({
       setChatHidden(!chatHidden)
     } else if (mod || event.altKey) {
       return
+    } else if (viewing) {
+      // Labels and pointing are about the part as it is now, not the one on stage.
+      if (event.key !== "Escape") return
+      history.back()
     } else if (event.key === "l" || event.key === "L") {
       toggleLabelling()
     } else if ((event.key === "p" || event.key === "P") && onPointAt) {
@@ -535,7 +571,8 @@ export default function PartView({
   )
   const partId = part?.id
   const anchors = useMemo<ViewerAnchor[]>(() => {
-    if (!partId) return []
+    // A label marks the current surface; on an older shape it would mark nothing.
+    if (!partId || viewing) return []
     const shown: ViewerAnchor[] = (labelsHidden ? [] : part?.labels ?? [])
       .filter((label) => label.name !== draft?.was)
       .map((label) => ({
@@ -582,7 +619,7 @@ export default function PartView({
       />
     )
     return [...shown, { key: "label-draft", point: draft.point, node: editor }]
-  }, [partId, part?.labels, draft, labelsHidden])
+  }, [partId, part?.labels, draft, labelsHidden, viewing])
 
   // The slicer this part's printer opens in, as the app name macOS opens files with.
   // It follows the printer, so a Prusa opens in PrusaSlicer when it is here. One that
@@ -631,10 +668,10 @@ export default function PartView({
 
   // The build records its bounding box; the panel's footer reads a size.
   const stats = useMemo<BuildStats | null>(() => {
-    const raw = build?.stats
+    const raw = shownBuild?.stats
     if (!raw) return null
     return { ...raw, size_mm: (raw.size_mm as BuildStats["size_mm"]) ?? raw.bbox }
-  }, [build?.stats])
+  }, [shownBuild?.stats])
 
   // A dimension the spec fixed and the part named is not the user's to drag, so the
   // rail shows it locked instead of as a slider.
@@ -669,7 +706,10 @@ export default function PartView({
   const detail = [noDesign ? null : rev(part?.revision ?? 0), seconds == null ? null : elapsedLabel(seconds)]
     .filter(Boolean)
     .join(" · ")
-  const tone: HeaderTone = building ? "building" : verdict
+  // The header is about the part as it is now, even while an older one is on stage.
+  const liveVerdict = verdictOf(build)
+  const busy = building || history.restoring
+  const tone: HeaderTone = busy ? "building" : liveVerdict
 
   const headerEl = (
     <FloatingHeader
@@ -724,12 +764,15 @@ export default function PartView({
             </>
           ) : null}
           {opening ? null : (
-            <HeaderStatus tone={tone} label={building ? "BUILDING" : STATUS_LABEL[verdict]} detail={detail} />
+            <HeaderStatus tone={tone} label={busy ? "BUILDING" : STATUS_LABEL[liveVerdict]} detail={detail} />
           )}
         </>
       }
       end={
         <>
+          {part && part.revision_id && !noDesign ? (
+            <HistoryMenu partId={part.id} revision={part.revision ?? 0} viewing={viewing} onView={(entry) => void history.open(entry)} />
+          ) : null}
           {/* One cell names the project and opens its parts, because a row of tabs
            * runs off the header once a project holds a dozen. */}
           {project && (project.folder || parts.length > 1) ? (
@@ -819,7 +862,11 @@ export default function PartView({
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
             <EmptyProject
               title={
-                noDesign
+                viewing
+                  ? viewing.status === "error"
+                    ? `${rev(viewing.revision)} did not build`
+                    : `${rev(viewing.revision)} was never built`
+                  : noDesign
                   ? designer
                     ? `${designer} is designing this part`
                     : "No design yet"
@@ -832,7 +879,11 @@ export default function PartView({
                     : "No part yet"
               }
               caption={
-                noDesign
+                viewing
+                  ? viewing.error
+                    ? `${lastLine(viewing.error)} Restore it to try again, or go back.`
+                    : "Nothing was built from it, so there is no shape to show. Restore it to build it."
+                  : noDesign
                   ? designer
                     ? "It appears here, live, as soon as the first version builds."
                     : "Describe the part in the chat and it appears here."
@@ -845,7 +896,7 @@ export default function PartView({
                     : "Build it once and it appears here. Dragging a parameter rebuilds it from then on."
               }
             />
-            {part && !build && !noDesign ? (
+            {part && !build && !noDesign && !viewing ? (
               <>
                 <Button
                   variant="accent"
@@ -881,6 +932,7 @@ export default function PartView({
                 { label: "Check markers", checkbox: true, checked: !markersHidden, keepOpen: true, onSelect: () => setMarkersHidden((v) => !v) },
               ]}
             />
+            {viewing ? null : (
             <Button
               variant={labelling ? "accent" : "outline"}
               size="md"
@@ -890,7 +942,8 @@ export default function PartView({
             >
               {!labelling ? "Label a spot" : moving ? `Click the new spot for ${moving}` : "Click a spot to name it"}
             </Button>
-            {onPointAt ? (
+            )}
+            {onPointAt && !viewing ? (
               <Button
                 variant={pointing ? "accent" : "outline"}
                 size="md"
@@ -904,7 +957,18 @@ export default function PartView({
           </div>
         ) : null}
         {onSelectPart ? <AssemblyStrip group={assemblyOf(part, parts)} selected={part} onSelect={onSelectPart} /> : null}
-        <StageBuilding open={building && !!glbUrl} expected={seconds} />
+        <StageBuilding open={building && !!glbUrl && !viewing} expected={seconds} />
+        {viewing && part ? (
+          <RevisionBanner
+            ref={history.banner}
+            view={viewing}
+            current={part.revision ?? 0}
+            restoring={history.restoring}
+            error={history.error}
+            onBack={history.back}
+            onRestore={() => void history.restore()}
+          />
+        ) : null}
         {stageError ? <StageNotice>{stageError}</StageNotice> : null}
         {failedBuild ? (
           <StageNotice>
@@ -919,9 +983,12 @@ export default function PartView({
        * part with no design yet, which has nothing to adjust. */}
       {part && !noDesign ? (
         <ParamRail
-          count={part?.params?.length ?? 0}
-          pinned={pinned}
+          count={viewing ? viewing.params.length : (part?.params?.length ?? 0)}
+          pinned={viewing ? undefined : pinned}
           params={
+            viewing ? (
+              <RevisionParams view={viewing} current={part.revision ?? 0} />
+            ) : (
             <>
               <BuildFailedBanner
                 open={failedBuild}
@@ -943,10 +1010,12 @@ export default function PartView({
                 note={note}
               />
             </>
+            )
           }
           readouts={{
-            grams: sliceStatus?.state === "succeeded" ? (sliceStatus.grams ?? null) : null,
-            seconds: sliceStatus?.state === "succeeded" ? (sliceStatus.seconds ?? null) : null,
+            // A price is the current part's; the older shape was never sliced.
+            grams: !viewing && sliceStatus?.state === "succeeded" ? (sliceStatus.grams ?? null) : null,
+            seconds: !viewing && sliceStatus?.state === "succeeded" ? (sliceStatus.seconds ?? null) : null,
             heightMm,
           }}
           warnCount={counts.warn}
@@ -971,6 +1040,9 @@ export default function PartView({
                 />
               </RailDisclosure>
 
+              {/* Hidden, not unmounted: the row prices the current run when it mounts,
+               * and coming back from an old revision is not a reason to slice again. */}
+              <div hidden={!!viewing} className={viewing ? undefined : "contents"}>
               <RailDisclosure
                 label="SLICE"
                 summary={(project?.printers ?? []).length === 0 ? "NO PRINTER" : undefined}
@@ -997,11 +1069,16 @@ export default function PartView({
                   )}
                 </div>
               </RailDisclosure>
+              </div>
             </>
           }
           actions={
             <div className="flex w-full gap-2">
-              {part ? (
+              {viewing ? (
+                <Button variant="accent" size="md" className="flex-1" disabled={history.restoring} onClick={() => void history.restore()}>
+                  {history.restoring ? "Restoring…" : `Restore ${rev(viewing.revision).toLowerCase()}`}
+                </Button>
+              ) : part ? (
                 <ExportMenu
                   key={`export-${part.id}`}
                   partId={part.id}

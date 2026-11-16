@@ -59,7 +59,7 @@ SOURCE_PAGE_CHARS = 100000
 # The engine gets the time actually left after materialization, not a fresh 240 seconds.
 TOOL_TIMEOUT_SECONDS = 240
 TOOL_SAFETY_SECONDS = 15
-BUILD_TOOLS = {"write_part_source", "edit_part_source", "write_shared_source", "edit_shared_source", "run_build"}
+BUILD_TOOLS = {"write_part_source", "edit_part_source", "write_shared_source", "edit_shared_source", "run_build", "restore_revision"}
 
 DEFAULT_FINDINGS = 5
 MAX_FINDINGS = 20
@@ -1294,6 +1294,70 @@ def find_photos(conn, args, base_url):
     )
 
 
+# The history's three outcomes, as an agent reads them.
+REVISION_STATUS = {"ok": "built", "error": "did not build", "unbuilt": "never built"}
+
+
+def _revision_by_number(rows, number, name):
+    for row in rows:
+        if row["ordinal"] == number:
+            return row
+    newest = rows[0]["ordinal"] if rows else 0
+    raise Refused(f"{name} has no rev {number}; its revisions run from 1 to {newest}. Call list_revisions")
+
+
+def list_revisions(conn, args, base_url):
+    project = _project(conn, args["project_id"])
+    row = _part(conn, project["id"], args["part_name"])
+    if row is None:
+        raise Refused(f"no part called {args['part_name']} in this project; call write_part_source first")
+    rows = db.list_revisions(conn, row["id"])
+    limit = min(int(args.get("limit") or 20), 50)
+    payload = {
+        "revisions": [
+            {
+                "revision": r["ordinal"],
+                "saved_at": r["created_at"],
+                "note": r["note"],
+                "status": REVISION_STATUS[r["status"]],
+                "current": r["current"],
+            }
+            for r in rows[:limit]
+        ],
+        "total": len(rows),
+    }
+    if args.get("revision") is not None:
+        chosen = _revision_by_number(rows, args["revision"], row["name"])
+        payload["source"] = db.get_revision(conn, row["id"], chosen["id"])["source"]
+        payload["source_of"] = chosen["ordinal"]
+    return _ok(payload)
+
+
+def restore_revision(conn, args, base_url, deadline=None):
+    if deadline is None:
+        deadline = time.monotonic() + TOOL_TIMEOUT_SECONDS - TOOL_SAFETY_SECONDS
+    project = _project(conn, args["project_id"])
+    row = _part(conn, project["id"], args["part_name"])
+    if row is None:
+        raise Refused(f"no part called {args['part_name']} in this project; call write_part_source first")
+    chosen = _revision_by_number(db.list_revisions(conn, row["id"]), args["revision"], row["name"])
+    try:
+        db.restore_revision(conn, row["id"], chosen["id"])
+    except (LookupError, ValueError) as exc:
+        raise Refused(str(exc)) from None
+    row = _part(conn, project["id"], row["name"])
+    return _build_result(
+        conn,
+        project["id"],
+        row,
+        base_url,
+        "restore_revision",
+        f"Restored rev {chosen['ordinal']} of {row['name']}.",
+        deadline,
+        extra={"restored": chosen["ordinal"], "revision": db.revision_ordinal(conn, row["current_revision_id"])},
+    )
+
+
 HANDLERS = {
     "list_projects": list_projects,
     "get_project": get_project,
@@ -1311,6 +1375,8 @@ HANDLERS = {
     "run_build": run_build,
     "read_findings": read_findings,
     "look": look,
+    "list_revisions": list_revisions,
+    "restore_revision": restore_revision,
     "set_label": set_label,
     "delete_label": delete_label,
 }
