@@ -40,6 +40,7 @@ import {
   activity,
   applyChatEvent,
   claudeNote,
+  clearUntilSend,
   describe,
   type ChatEvent,
   type Item,
@@ -376,7 +377,6 @@ function Chat({
     (more: string[]) => setSpots((list) => [...new Set([...list, ...more])]),
     [],
   );
-  const refusalRef = useRef<string | null>(null);
   // Stop can land before the prompt has gone out, while the files are checked or
   // the session starts. There is nothing to interrupt yet, so the send stands down.
   const stoppedRef = useRef(false);
@@ -660,11 +660,19 @@ function Chat({
           sessionRef.current = null;
           const trouble = isClaude ? claudeNote(event.message) : null;
           if (trouble) {
-            setItems((list) => withNote(list, trouble));
+            setItems((list) => withNote(list, trouble, { untilSend: true }));
             return;
           }
           break;
         }
+        case "note":
+          // A failed restore has been said once it is read; for Claude it would
+          // otherwise sit below the stored turns for good.
+          if (isClaude && event.text === RESTORE_FAILED) {
+            setItems((list) => withNote(list, RESTORE_FAILED, { untilSend: true }));
+            return;
+          }
+          break;
       }
       setItems((list) => applyChatEvent(list, event, Date.now(), seqRef.current));
     },
@@ -765,7 +773,7 @@ function Chat({
       if (message === "Error: chat closed") return;
       const trouble = isClaude ? claudeNote(message) : null;
       if (trouble) {
-        setItems((list) => withNote(list, trouble));
+        setItems((list) => withNote(list, trouble, { untilSend: true }));
       } else if (message.includes("auth_required")) {
         setAuthNeeded("resume");
       } else {
@@ -785,16 +793,9 @@ function Chat({
       stoppedRef.current = false;
       const pictures = await Promise.all(files.map(thumbnailOf));
       const sentThumbnails = pictures.some(Boolean) ? pictures : undefined;
-      // A refused file was about the draft this send replaces, and a failed restore
-      // has been said. Live notes sit below Claude's stored turns, so left alone
-      // either would trail every later reply.
-      setItems((list) =>
-        list.filter(
-          (item) =>
-            item.kind !== "note" ||
-            (item.text !== refusalRef.current && !(isClaude && item.text === RESTORE_FAILED)),
-        ),
-      );
+      // Live notes sit below Claude's stored turns, so a note about the last
+      // attempt would trail every later reply unless this send clears it.
+      setItems(clearUntilSend);
       const localId = nextLocalIdRef.current++;
       // Claude's turn is stored, not replayed, so the line comes back from the
       // project instead of living here for the session.
@@ -897,11 +898,9 @@ function Chat({
         const trouble = isClaude ? claudeNote(message) : null;
         if (trouble || refused || message.includes("auth_required")) {
           if (!stored) restoreDraft();
-          if (trouble) setItems((list) => withNote(list, trouble));
-          else if (refused) {
-            refusalRef.current = message;
-            setItems((list) => withNote(list, message));
-          } else setAuthNeeded("resend");
+          if (trouble) setItems((list) => withNote(list, trouble, { untilSend: true }));
+          else if (refused) setItems((list) => withNote(list, message, { untilSend: true }));
+          else setAuthNeeded("resend");
         } else {
           setItems((list) => withNote(list, message));
         }
@@ -1193,10 +1192,9 @@ function Chat({
       if (needsRestore) await restoreSession();
       // Only a refused message needs sending again; a proactive sign-in has nothing to repeat.
       if (needsResend) {
-        setItems((list) => [
-          ...list,
-          { kind: "note", text: "Signed in. Send your message again." },
-        ]);
+        setItems((list) =>
+          withNote(list, "Signed in. Send your message again.", { untilSend: true }),
+        );
       }
     } catch (e) {
       setItems((list) => [...list, { kind: "note", text: String(e) }]);
