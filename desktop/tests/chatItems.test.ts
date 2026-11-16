@@ -143,7 +143,7 @@ test("prose only drops the block it replaces", () => {
 test("each Claude Code failure says what to do about it", () => {
   assert.match(String(claudeNote("claude_missing")), /^Install Claude Code first/);
   assert.match(String(claudeNote("claude_outdated: 2.1.100")), /you have 2\.1\.100/);
-  assert.match(String(claudeNote("auth_required")), /^Sign in to Claude Code first/);
+  assert.match(String(claudeNote("auth_required")), /claude auth login/);
   assert.equal(claudeNote("something else broke"), null);
 });
 

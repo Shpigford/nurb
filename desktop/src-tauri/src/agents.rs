@@ -386,7 +386,7 @@ pub async fn agent_login(
     // The driver never touches credentials: the CLI owns its own sign-in, and
     // it is already installed on this Mac.
     if kind == AgentKind::Claude {
-        return Err("Sign in from a terminal: run claude, then come back.".into());
+        return Err("Sign in from a terminal: run claude auth login, then come back.".into());
     }
     if kind == AgentKind::Gemini {
         let key = api_key

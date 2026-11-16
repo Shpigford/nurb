@@ -39,6 +39,7 @@ import { joinSpots, splitSpots, spotPlace } from "@nurb/workbench/spot";
 import {
   activity,
   applyChatEvent,
+  CLAUDE_SIGN_IN,
   claudeNote,
   describe,
   type ChatEvent,
@@ -147,9 +148,6 @@ function readPrimed(): boolean {
 const PINNED_SLACK_PX = 24;
 // The viewer resnaps its grid on this, so a held key cannot make it stutter.
 const GRIDFINITY_GAP_MS = 10_000;
-
-const CLAUDE_SIGN_IN =
-  "Sign in to Claude Code first: open a terminal, run claude, and follow the prompts. Then come back here.";
 
 /** A turn: who spoke and its number over the prose itself. */
 // A right-click on a turn copies the whole of it, which a drag across a long

@@ -811,9 +811,12 @@ fn fast_note(reason: &str) -> String {
     }
 }
 
+// "failed to authenticate" is the CLI's wording for a token revoked or
+// expired server-side, which local `claude auth status` cannot see (#390).
 fn looks_signed_out(text: &str) -> bool {
     let text = text.to_ascii_lowercase();
     text.contains("invalid api key")
+        || text.contains("failed to authenticate")
         || text.contains("/login")
         || text.contains("authentication method")
 }
@@ -1128,6 +1131,31 @@ mod tests {
         assert!(!seen.lock().unwrap().iter().any(|event| event["type"] == "session_error"), "{seen:?}");
         session.signal(libc::SIGTERM);
         task.await.unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Issue #390: a token revoked on claude.ai still passes `claude auth
+    /// status`, so the first sign of it is a failed turn. It has to reach the
+    /// column as signed out, or the person gets the raw error and no way on.
+    #[tokio::test]
+    async fn a_revoked_token_ends_the_session_as_signed_out() {
+        let dir = std::env::temp_dir().join(format!("nurb-claude-revoked-{}", std::process::id()));
+        let script = "#!/bin/sh\necho '{\"type\":\"result\",\"is_error\":true,\"result\":\"Failed to authenticate. API Error: 401 OAuth token revoked. Please log in again or contact your administrator.\"}'\ncat > /dev/null\n";
+        let (session, seen, task) = fake_session(&dir, script, false).await;
+        tokio::time::timeout(std::time::Duration::from_secs(20), task)
+            .await
+            .expect("the session never ended")
+            .unwrap();
+        let errors: Vec<_> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| event["type"] == "session_error")
+            .map(|event| event["message"].clone())
+            .collect();
+        assert_eq!(errors, vec![Value::String("auth_required".into())]);
+        assert!(notes(&seen).is_empty(), "{:?}", notes(&seen));
+        drop(session);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
