@@ -1332,6 +1332,7 @@ def test_the_first_prompt_puts_a_new_part_in_the_library(home):
         said = json.loads(post(route, {"role": "user", "content": "I want to create a door stopper for the back door, wedge shaped"})[2])
         # A part's own container keeps its one conversation unnamed.
         assert said["part"] is None
+        assert said["drafted"] is True
         post(route, {"role": "assistant", "content": "on it"})
         post(route, {"role": "user", "content": "make it 30 tall"})
 
@@ -1356,13 +1357,22 @@ def test_a_new_part_in_a_folder_is_asked_for_and_files_its_turns(home):
         assert json.loads(post(route, {"role": "user", "content": "about the whole set"})[2])["part"] is None
         said = json.loads(post(route, {"role": "user", "content": "a bin, 40 wide", "new_part": True})[2])
         assert said["part"] == "new_part_2"
+        assert said["drafted"] is True
         parts = {p["name"]: p for p in json.loads(get(f"{url}/api/projects/{shelves}")[2])["parts"]}
         assert parts["new_part_2"]["title"] == "a bin, 40 wide"
         assert parts["new_part_2"]["source"] is None
         # An agent whose turns the app does not store starts its part the same way.
         draft = f"{url}/api/projects/{shelves}/draft"
-        assert json.loads(post(draft, {"content": "a lid", "new_part": True})[2]) == {"part": "new_part_3"}
-        assert json.loads(post(draft, {"content": "more about the set"})[2]) == {"part": None}
+        assert json.loads(post(draft, {"content": "a lid", "new_part": True})[2]) == {"part": "new_part_3", "drafted": True}
+        assert json.loads(post(draft, {"content": "more about the set"})[2]) == {"part": None, "drafted": False}
+
+        # A quick model's short name replaces the prompt's opening words, but only on a draft.
+        titled = f"{url}/api/projects/{shelves}/draft/title"
+        assert json.loads(post(titled, {"part": "new_part_2", "title": "Storage Bin"})[2]) == {"named": True}
+        assert json.loads(post(titled, {"part": "new_part", "title": "Not A Draft"})[2]) == {"named": False}
+        parts = {p["name"]: p for p in json.loads(get(f"{url}/api/projects/{shelves}")[2])["parts"]}
+        assert parts["new_part_2"]["title"] == "Storage Bin"
+        assert parts["new_part"]["title"] is None
 
 
 def test_a_photo_from_the_chat_is_what_find_photos_sees(home):

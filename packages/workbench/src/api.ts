@@ -309,7 +309,8 @@ export function setPrinter(projectId: string, profile: string): Promise<{ printe
  * Put one line of the conversation in the transcript. Naming a part files the
  * line under that part; without one it belongs to the folder's own conversation.
  * `newPart` says the line starts a new part in a folder, which the engine creates
- * then and there, so the reply carries the part it was filed under.
+ * then and there, so the reply carries the part it was filed under. `drafted` says
+ * this line started a part, in a folder or as a new part of its own.
  */
 export function addMessage(
   projectId: string,
@@ -319,7 +320,7 @@ export function addMessage(
   files?: string[],
   thumbnails?: (string | null)[],
   newPart?: boolean
-): Promise<Message> {
+): Promise<Message & { drafted: boolean }> {
   return post(`/api/projects/${encodeURIComponent(projectId)}/messages`, {
     role,
     content,
@@ -335,8 +336,21 @@ export function addMessage(
  * the app does not store. Same rule as a stored first prompt: a folder starts one
  * when asked, a part's own container when it has none.
  */
-export function startPart(projectId: string, content: string, newPart: boolean): Promise<{ part: string | null }> {
+export function startPart(
+  projectId: string,
+  content: string,
+  newPart: boolean
+): Promise<{ part: string | null; drafted: boolean }> {
   return post(`/api/projects/${encodeURIComponent(projectId)}/draft`, { content, new_part: newPart })
+}
+
+/**
+ * A short name for the draft a first prompt started, in place of the prompt's
+ * opening words. `part` is the draft's name in a folder, null for a part's own
+ * container. The engine ignores it once the agent has written the part.
+ */
+export function titleDraft(projectId: string, part: string | null, title: string): Promise<{ named: boolean }> {
+  return post(`/api/projects/${encodeURIComponent(projectId)}/draft/title`, { part, title })
 }
 
 /** A folder is a project the person named; without one the project holds a single part. */

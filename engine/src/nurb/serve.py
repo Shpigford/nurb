@@ -422,17 +422,17 @@ def _start_part(conn, project, content, asked):
     """A part is in the library from the first thing said about it, not from the
     agent's first write, which can be many minutes later or never. A folder's new
     part is asked for; a part's own container starts one when it has none. Returns
-    the name to file the turn under: a container's turns carry no part name, so
-    only a folder's new part has one."""
+    whether it started one, and the name to file the turn under: a container's
+    turns carry no part name, so only a folder's new part has one."""
     if project["folder"]:
         if not asked:
-            return None
+            return False, None
     elif conn.execute(
         "SELECT 1 FROM parts WHERE project_id = ? AND kind = 'part'", (project["id"],)
     ).fetchone():
-        return None
+        return False, None
     _, name = db.create_draft_part(conn, project["id"], db.draft_title(content))
-    return name if project["folder"] else None
+    return True, name if project["folder"] else None
 
 
 def _message(conn, row):
@@ -1058,12 +1058,14 @@ def _routes(conn, lock, server, token, pid):
             payload = {"files": files} if files else {}
             if any(thumbnails):
                 payload["thumbnails"] = thumbnails
+            drafted = False
             with db.transaction(conn):
                 if role == "user" and part is None:
-                    part = _start_part(conn, project, content, sent.get("new_part") is True)
+                    drafted, part = _start_part(conn, project, content, sent.get("new_part") is True)
                 message_id = db.add_message(conn, project_id, role, content, payload, part=part)
             row = conn.execute("SELECT * FROM messages WHERE id = ?", (message_id,)).fetchone()
-            return JSONResponse(_message(conn, row), status_code=201)
+            # drafted: this turn started a part, which the app then gives a short name.
+            return JSONResponse({**_message(conn, row), "drafted": drafted}, status_code=201)
 
         return await acted(work)
 
@@ -1077,7 +1079,22 @@ def _routes(conn, lock, server, token, pid):
             if project is None:
                 raise _Refused(404, "no project")
             content = word(sent, "content", "content must be what was said")
-            return {"part": _start_part(conn, project, content, sent.get("new_part") is True)}
+            drafted, part = _start_part(conn, project, content, sent.get("new_part") is True)
+            return {"part": part, "drafted": drafted}
+
+        return await acted(work)
+
+    async def project_draft_title(request):
+        """A short name for the part a first prompt started, while it is still a draft."""
+        sent = await body_of(request)
+
+        def work(conn):
+            project_id = request.path_params["project_id"]
+            if db.get_project(conn, project_id) is None:
+                raise _Refused(404, "no project")
+            title = word(sent, "title", "title must be what to call the part", db.NAME_LIMIT)
+            part = word(sent, "part", "part must be the draft's name") or None
+            return {"named": db.title_draft(conn, project_id, part, title)}
 
         return await acted(work)
 
@@ -1888,6 +1905,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
         Route("/api/projects/{project_id}/draft", endpoint=answering(project_draft), methods=["POST"]),
+        Route("/api/projects/{project_id}/draft/title", endpoint=answering(project_draft_title), methods=["POST"]),
         Route("/api/projects/{project_id}/attachments", endpoint=answering(project_attachment), methods=["POST"]),
         Route("/api/mesh", endpoint=answering(mesh_describe), methods=["POST"]),
         Route("/api/projects/{project_id}/printer", endpoint=answering(project_printer), methods=["POST"]),

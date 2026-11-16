@@ -3,6 +3,7 @@ mod agents;
 mod claude;
 mod crash;
 mod env;
+mod naming;
 mod prefs;
 mod provision;
 mod sessions;
@@ -390,6 +391,7 @@ pub fn run() {
             acp::close_chat,
             agents::agent_statuses,
             agents::agent_login,
+            naming::name_part,
             provision::provision_status,
             provision::parts_import_ok,
             provision::provision,
