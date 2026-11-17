@@ -144,9 +144,10 @@ function App() {
   // moved to the part, and must not vanish for the round trip.
   const [promoted, setPromoted] = useState<string | null>(null);
   // The engine makes a part's container a folder when the agent writes a second part
-  // into it. The conversation that built them is then the folder's own, so it stays
-  // on screen, running turn and all, until the person picks a part or leaves.
-  const [heldChat, setHeldChat] = useState<string | null>(null);
+  // into it, and files the conversation so far under the first part. The chat moves
+  // there too, and stays on screen, running turn and all, until the person picks a
+  // part or leaves.
+  const [heldChat, setHeldChat] = useState<{ id: string; part: string } | null>(null);
   const seenFolder = useRef<{ id: string; folder: boolean } | null>(null);
   const [busyChats, setBusyChats] = useState<Record<string, boolean>>({});
   const busyRef = useRef(busyChats);
@@ -307,9 +308,17 @@ function App() {
   useEffect(() => {
     if (!project) return;
     const seen = seenFolder.current;
-    if (seen?.id === project.id && !seen.folder && project.folder && promoted !== project.id) setHeldChat(project.id);
     seenFolder.current = { id: project.id, folder: project.folder };
-  }, [project, promoted]);
+    if (seen?.id !== project.id || seen.folder || !project.folder || promoted === project.id) return;
+    const first = project.messages.find((m) => m.part)?.part;
+    if (!first) return;
+    invoke("rename_part_chat", { projectId: project.id, was: PROJECT_CHAT, name: first }).catch((e) =>
+      setError(String(e)),
+    );
+    const dir = dirs[project.id];
+    if (dir) moveChat(dir, PROJECT_CHAT, first);
+    setHeldChat({ id: project.id, part: first });
+  }, [project, promoted, dirs, moveChat]);
   useEffect(() => setHeldChat(null), [projectId, partName]);
 
   // The part page speaks to the window through one event, so a panel deep in the
@@ -397,7 +406,9 @@ function App() {
   const isFolder = project?.folder || promoted === projectId;
   const chatPart = drafting
     ? NEW_PART
-    : isFolder && heldChat !== projectId
+    : heldChat?.id === projectId
+    ? heldChat.part
+    : isFolder
     ? partName ?? PROJECT_CHAT
     : PROJECT_CHAT;
 

@@ -552,8 +552,9 @@ def folder_name(names):
 def _fold_container(conn, project_id):
     """A hidden container holds one part. When a second lands in it, the agent is
     building a set, so the container becomes a folder the library shows, named for
-    the set rather than by its placeholder. Its conversation stays unnamed, which in a
-    folder makes it the folder's own: it was about the whole set."""
+    the set rather than by its placeholder. Its conversation was opened from the first
+    part and is reopened from there, so its turns take that part's name: left unnamed,
+    they would become the folder's own chat, which the person never opened."""
     if conn.execute("SELECT folder FROM projects WHERE id = ?", (project_id,)).fetchone()[0]:
         return
     names = [
@@ -566,6 +567,9 @@ def _fold_container(conn, project_id):
     if len(names) > 1:
         conn.execute(
             "UPDATE projects SET folder = 1, name = ? WHERE id = ?", (folder_name(names), project_id)
+        )
+        conn.execute(
+            "UPDATE messages SET part = ? WHERE project_id = ? AND part IS NULL", (names[0], project_id)
         )
         changed("project", project_id, project_id)
 
