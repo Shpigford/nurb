@@ -80,9 +80,31 @@ pub fn engine_error(title: &str, log: &str) {
         |scope| {
             scope.set_tag("source", "engine");
             scope.set_extra("engine_log", log.into());
+            // An engine killed with no last words was killed from outside, and a
+            // low number here says macOS ran out of memory (NURB-DESKTOP-6).
+            if let Some(free) = memory_free_percent() {
+                scope.set_extra("memory_free_percent", free.into());
+            }
         },
         || sentry::capture_message(title, sentry::Level::Error),
     );
+}
+
+/// How much memory macOS considers free, 0 to 100: the level its
+/// memory-pressure killer acts on.
+fn memory_free_percent() -> Option<u32> {
+    let mut level: u32 = 0;
+    let mut size = std::mem::size_of::<u32>();
+    let ok = unsafe {
+        libc::sysctlbyname(
+            c"kern.memorystatus_level".as_ptr(),
+            (&mut level as *mut u32).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    } == 0;
+    ok.then_some(level)
 }
 
 #[derive(serde::Serialize)]
@@ -120,7 +142,13 @@ pub fn set_crash_reports(reports: State<CrashReports>, enabled: bool) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use super::scrub_text;
+    use super::{memory_free_percent, scrub_text};
+
+    #[test]
+    fn an_engine_report_can_say_how_much_memory_was_free() {
+        let free = memory_free_percent().expect("kern.memorystatus_level");
+        assert!(free <= 100, "{free}");
+    }
 
     #[test]
     fn the_home_folder_never_leaves_the_machine() {
