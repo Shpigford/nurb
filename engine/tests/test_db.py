@@ -416,8 +416,8 @@ def test_a_second_part_turns_its_container_into_a_folder_named_for_the_set(tmp_p
         db.create_part(conn, project_id, "vise_jaw", "from nurb import *\n")
         row = db.get_project(conn, project_id)
         assert (row["folder"], row["name"]) == (1, "Vise")
-        # The chat that built the set is the folder's own, not one part's.
-        assert [r["part"] for r in conn.execute("SELECT part FROM messages")] == [None]
+        # The chat stays with the part it was opened from, where the person will look for it.
+        assert [r["part"] for r in conn.execute("SELECT part FROM messages")] == ["vise_body"]
 
         # A folder keeps its name, the person's or this one, as more parts land.
         db.rename_project(conn, project_id, "Bench vise")
