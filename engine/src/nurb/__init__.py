@@ -10,6 +10,7 @@ A part file needs one import:
 """
 
 import importlib.metadata as _metadata
+from typing import Literal  # noqa: F401  -- a choice parameter: style: Literal["a", "b"] = "a"
 
 import build123d as _b3d
 from build123d import *  # noqa: F401,F403  -- geometry vocabulary
@@ -23,7 +24,16 @@ from .mesh import import_stl  # noqa: E402  -- must win, see below
 from .orient import stand  # noqa: E402
 from .polish import chamfer, polish  # noqa: E402  -- must win, see below
 from .registry import part, reject  # noqa: E402  -- must win over any build123d name
+from .text import add_text  # noqa: E402
 
+# `add_text` is here because text on a part is the most common thing people print with
+# words on it, and build123d's Text quietly draws in Arial when the font it was asked
+# for is missing, which builds different geometry on a different machine. This one
+# only draws with the fonts nurb ships, fits the text to the face, and keeps raised
+# and flush letters as their own body so they show and export in a second colour.
+# `Literal` is here because a parameter with named options (a font, a style) is
+# declared as `style: Literal["raised", "flush"] = "raised"`, and the viewer shows it
+# as a picker. The keyword default is still the one declaration.
 # `polish` is here because the doctrine prescribes the algorithm and every project
 # would otherwise write it: chamfer is all or nothing, so one edge that cannot land
 # takes the pass down and the set gets narrowed by hand until it builds.
@@ -75,6 +85,8 @@ __all__ = [
     "use",
     "hinge",
     "obstacle",
+    "add_text",
+    "Literal",
 ]
 # The version lives in pyproject.toml and nowhere else; a second copy here would drift.
 try:

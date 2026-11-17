@@ -13,6 +13,7 @@ export declare function rangeFor(param: Param, int: boolean): {
 export declare function decimals(value: number): number;
 export declare function tidy(value: number, step: number): number;
 export declare function adjustable(param: Param): boolean;
+export declare const TEXT_MAX = 200;
 export declare function dirtyValues(params: Param[], values: Params): Params;
 export interface Measurement {
     value_mm: number;

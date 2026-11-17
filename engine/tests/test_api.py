@@ -46,6 +46,8 @@ def test_the_documented_vocabulary_is_the_exported_one():
         "use",
         "hinge",
         "obstacle",
+        "add_text",
+        "Literal",
     }
 
 
@@ -84,7 +86,8 @@ def test_every_entry_carries_a_signature_and_a_sentence():
     own, shadowed, borrowed = api.entries()
     assert own and shadowed and borrowed
     for sig, summary in own + shadowed + borrowed:
-        assert "(" in sig, sig
+        # A call has its argument order; `Literal` is subscripted, and shows its options.
+        assert "(" in sig or sig.startswith("Literal["), sig
         assert summary, sig
 
 

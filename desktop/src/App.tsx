@@ -794,17 +794,27 @@ function App() {
         if (found) openPart(found.project_id, found.name);
       }),
       listen<string>("test-param", (event) => {
-        // The range input's own events, through React's native setter, so the
-        // page sees exactly what a drag produces.
-        const [name, value] = event.payload.split("=");
-        const input = document.querySelector<HTMLInputElement>(
-          `input[type="range"][aria-label="${name.replace(/_/g, " ")}"]`,
-        );
-        if (!input) return;
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-        setter?.call(input, value);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        input.dispatchEvent(new Event("change", { bubbles: true }));
+        // The control's own events, through React's native setter, so the page sees
+        // exactly what a drag, a keystroke or a pick produces. Split on the first "="
+        // only, because typed text can hold one.
+        const at = event.payload.indexOf("=");
+        const shown = event.payload.slice(0, at).replace(/_/g, " ");
+        const value = event.payload.slice(at + 1);
+        const label = Array.from(document.querySelectorAll("label")).find((l) => l.textContent === shown);
+        const target =
+          document.querySelector<HTMLElement>(`input[type="range"][aria-label="${shown}"]`) ??
+          (label?.htmlFor ? document.getElementById(label.htmlFor) : null);
+        if (!target) return;
+        if (target.getAttribute("role") === "radiogroup") {
+          Array.from(target.querySelectorAll<HTMLButtonElement>('[role="radio"]'))
+            .find((b) => b.textContent === value)
+            ?.click();
+          return;
+        }
+        const proto = target instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(target, value);
+        target.dispatchEvent(new Event("input", { bubbles: true }));
+        target.dispatchEvent(new Event("change", { bubbles: true }));
       }),
     ];
     return () => {

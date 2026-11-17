@@ -543,9 +543,8 @@ def _params_of(conn, part):
     return json.loads(row["params"]) if row is not None else []
 
 
-def _kinds(conn, part):
-    """Parameter name -> kind, from the part's newest build."""
-    return {p["name"]: p.get("kind") for p in _params_of(conn, part)}
+# Text on a part is a name, a label, a line or two. A paragraph is not a print.
+TEXT_MAX = 200
 
 
 def _values(conn, part, values):
@@ -554,14 +553,33 @@ def _values(conn, part, values):
         return {}
     if not isinstance(values, dict):
         raise _Refused(400, "values must be an object of parameter names to numbers")
-    kinds = _kinds(conn, part)
-    if not kinds:
+    rows = {p["name"]: p for p in _params_of(conn, part)}
+    if not rows:
         raise _Refused(400, f"build {part['name']} once before changing its parameters")
     typed = {}
     for name, value in values.items():
-        kind = kinds.get(name)
+        kind = rows[name].get("kind") if name in rows else None
         if kind is None:
             raise _Refused(400, f"{part['name']} has no parameter named {name}")
+        if kind == "choice":
+            options = rows[name].get("options") or []
+            if value not in options:
+                raise _Refused(400, f"{name} is one of {', '.join(options)}, not {value!r}")
+            typed[name] = value
+            continue
+        if kind == "str":
+            if not isinstance(value, str):
+                raise _Refused(400, f"{name} takes text, not {value!r}")
+            if len(value) > TEXT_MAX:
+                raise _Refused(400, f"{name} is longer than {TEXT_MAX} characters")
+            # A line break is a second line of text; any other control character is
+            # nothing a font can draw and nothing a person meant to type.
+            # A lone surrogate is valid JSON from a broken paste, and no font, file or
+            # source can hold it.
+            if any(ord(c) < 32 and c != "\n" or 0xD800 <= ord(c) <= 0xDFFF for c in value):
+                raise _Refused(400, f"{name} has a character that cannot be printed")
+            typed[name] = value
+            continue
         if kind == "bool":
             # bool("false") is True, so a string here would build the wrong part and
             # say nothing about it.
@@ -570,7 +588,7 @@ def _values(conn, part, values):
             typed[name] = value
             continue
         if kind not in ("int", "float"):
-            raise _Refused(400, f"{name} is not a number, so the sliders cannot set it")
+            raise _Refused(400, f"{name} cannot be changed from the panel")
         wants = "a whole number" if kind == "int" else "a number"
         try:
             number = int(value) if kind == "int" else float(value)
@@ -793,6 +811,7 @@ def _part_entry(conn, project_id, part, grouping=({}, {})):
                 "kind": p.get("kind"),
                 "default": p.get("default"),
                 "description": p.get("doc"),
+                **({"options": p["options"]} if p.get("options") else {}),
             }
             for p in params
         ],

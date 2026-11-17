@@ -10,6 +10,7 @@ No card here: v2 has no variants, so there is nothing of a card to edit.
 """
 
 import ast
+import json
 
 
 class EditError(Exception):
@@ -55,14 +56,19 @@ def _number(node):
 
 
 def _literal(node):
-    """A default the sliders can write: a number, or a switch written as True or False."""
-    if isinstance(node, ast.Constant) and type(node.value) is bool:
+    """A default the panel can write: a number, a switch, or text."""
+    if isinstance(node, ast.Constant) and type(node.value) in (bool, str):
         return node.value
     return _number(node)
 
 
-def _format(old, new):
-    """Written the way it was written: an int stays an int, a float stays a float."""
+def _format(old, new, written=""):
+    """Written the way it was written: an int stays an int, a float stays a float, and
+    text keeps the quotes it was written with."""
+    if isinstance(old, str):
+        if written.startswith('"'):
+            return json.dumps(str(new), ensure_ascii=False)
+        return repr(str(new))
     if isinstance(old, bool):
         return str(bool(new))
     if isinstance(old, int) and float(new).is_integer():
@@ -106,12 +112,12 @@ def apply_to_source(source, values):
             if isinstance(node, ast.Constant):
                 # A literal has no source to change, so "change it itself" would be
                 # advice about nothing. Say what it is instead.
-                skipped.append((name, f"defaults to {written}, which is not a number or a switch."))
+                skipped.append((name, f"defaults to {written}, which is not a number, a switch or text."))
             else:
                 skipped.append((name, f"defaults to {written}. Change {written} itself."))
             continue
         if old != new:
-            edits.append((name, node, _format(old, new)))
+            edits.append((name, node, _format(old, new, ast.get_source_segment(source, node) or "")))
     if not edits:
         return source, [], skipped
 

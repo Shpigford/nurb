@@ -129,9 +129,25 @@ def test_a_switch_is_written_as_true_or_false():
     assert written == ["closed"] and back == source.replace("wall=2.0", "wall=3.0")
 
 
-def test_a_default_that_is_a_literal_but_not_a_number_says_what_it_is():
-    """"Change 'flat' itself" is advice about nothing: a literal has no source to edit."""
-    source = "from nurb import *\n\n\n@part\ndef thing(style='flat'):\n    return 1\n"
-    out, written, skipped = edit.apply_to_source(source, {"style": "round"})
+def test_text_is_written_with_the_quotes_it_had():
+    """Typing a name into the panel and keeping it writes the string back as source."""
+    source = (
+        "from nurb import *\n\n\n@part\n"
+        "def tag(text=\"Hello\", style='flat', n=None):\n    return 1\n"
+    )
+    out, written, skipped = edit.apply_to_source(
+        source, {"text": 'Josh\'s "bin"\nline 2', "style": "round"}
+    )
+    assert written == ["style", "text"] and skipped == []
+    assert "style='round'" in out
+    ns = {}
+    exec(out.replace("from nurb import *", "part = lambda f: f"), ns)
+    assert ns["tag"].__defaults__[:2] == ('Josh\'s "bin"\nline 2', "round")
+
+
+def test_a_default_that_is_a_literal_but_not_writable_says_what_it_is():
+    """"Change None itself" is advice about nothing: a literal has no source to edit."""
+    source = "from nurb import *\n\n\n@part\ndef thing(style=None):\n    return 1\n"
+    out, written, skipped = edit.apply_to_source(source, {"style": 2})
     assert out == source and written == []
-    assert skipped == [("style", "defaults to 'flat', which is not a number or a switch.")]
+    assert skipped == [("style", "defaults to None, which is not a number, a switch or text.")]

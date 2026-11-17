@@ -75,13 +75,22 @@ def shadowed_names():
     )
 
 
+# typing's own docstring describes type theory, not what a part file does with it.
+SAID = {
+    "Literal": (
+        'Literal["raised", "flush"]',
+        'Annotate a parameter with its options, `style: Literal["raised", "flush"] = "raised"`, and the viewer shows a picker.',
+    ),
+}
+
+
 def entries():
     """(signature, summary) rows for each of the three groups a part file should know."""
     import build123d
 
     import nurb
 
-    own = [(_signature(o), _summary(o)) for o in (getattr(nurb, n) for n in own_names())]
+    own = [SAID.get(n) or (_signature(getattr(nurb, n)), _summary(getattr(nurb, n))) for n in own_names()]
     shadowed = [
         (_signature(o), _summary(o)) for o in (getattr(nurb, n) for n in shadowed_names())
     ]

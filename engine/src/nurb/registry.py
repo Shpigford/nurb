@@ -2,7 +2,8 @@
 
 import inspect
 import re
-from dataclasses import dataclass
+import typing
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -12,6 +13,7 @@ class PartDef:
     params: dict
     accepts_draft: bool
     docs: dict
+    choices: dict = field(default_factory=dict)
 
 
 def declared(fn):
@@ -29,6 +31,29 @@ def declared(fn):
             continue
         params[name] = None if p.default is inspect.Parameter.empty else p.default
     return params, accepts_draft
+
+
+def choices(fn, params):
+    """Parameter name -> its options, for a parameter annotated `Literal[...]` of strings.
+
+    The annotation sits on the same keyword default, so a font or a style picker is
+    still one declaration: `style: Literal["raised", "flush"] = "raised"`. A default
+    outside its own options would show a picker with nothing selected, so that one
+    stays an ordinary parameter rather than a choice that lies.
+    """
+    try:
+        hints = typing.get_type_hints(fn)
+    except Exception:  # an annotation naming something the file never imported
+        hints = getattr(fn, "__annotations__", {})
+    out = {}
+    for name in params:
+        hint = hints.get(name)
+        if typing.get_origin(hint) is not typing.Literal:
+            continue
+        options = list(typing.get_args(hint))
+        if options and all(isinstance(o, str) for o in options) and params[name] in options:
+            out[name] = options
+    return out
 
 
 def param_docs(fn, params):
@@ -94,5 +119,6 @@ def part(fn):
         params=params,
         accepts_draft=accepts_draft,
         docs=param_docs(fn, params),
+        choices=choices(fn, params),
     )
     return fn

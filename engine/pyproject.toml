@@ -39,6 +39,7 @@ build-backend = "uv_build"
 module-name = "nurb"
 source-include = [
     "src/nurb/doctrine.md",
+    "src/nurb/fonts/*",
     "src/nurb/printers.toml",
     "src/nurb/tools.json",
     "src/nurb/workbench/**/*",

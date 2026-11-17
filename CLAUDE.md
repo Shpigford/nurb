@@ -82,6 +82,7 @@ engine/src/nurb/threemf.py       the 3MF reader, standard library only, Bambu mu
 engine/src/nurb/measurements.py  measured(), and the refusal to guess
 engine/src/nurb/edit.py          the keyword-default rewrite behind Apply
 engine/src/nurb/labels.py        a person's names for spots on a part, snapped to the surface and checked against each build
+engine/src/nurb/text.py          add_text(), lettering in the bundled fonts in engine/src/nurb/fonts/, carried as its own body for colour
 engine/src/nurb/render.py        headless PNG through the numpy rasterizer in raster.py
 engine/src/nurb/raster.py        GLB in, flat-shaded PNG out: the four views, the composite, and the PNG encoder
 engine/src/nurb/slicing.py       the handoff to an installed slicer, and the two numbers back

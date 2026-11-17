@@ -1,8 +1,7 @@
 # fit_coupon
 
 <!-- AUTO: regenerated on every build. Do not hand-edit. -->
-Size: 6.50 x 25.16 x 30.00 mm, 2600.6 mm3, 1 solid, 88 faces
-Slivers: 65 under 1.0mm2, smallest 0.181mm2, 65 accepted
+Size: 6.50 x 25.16 x 30.00 mm, 2609.5 mm3, 1 solid, 326 faces
 Checks: clean
 <!-- /AUTO -->
 
@@ -31,32 +30,17 @@ keep the one that feels right, then set the constant in `system.py`. Each is abo
 - 30mm slab matches the light-part default, so the coupon engages a bracket the same
   way a hook does.
 
+## Text
+
+The caption goes on with `add_text`, in the bundled font, so it builds the same on every machine and the card's numbers are the part's rather than one machine's. The checks judge the slab without the caption: a glyph's flanks are small faces and its 0.5mm relief is not a wall, and before the caption was text that `min_wall` had to be switched off here and 65 glyph slivers accepted. The text rule judges the caption on its own, which is why it is 7.5mm: at the old 6mm the bundled sans draws 0.82mm strokes, under the 1.0mm this library prints reliably.
+
 ## Accepted
 
-The raised label is lettering, and lettering is made of small faces. All 65 are in
-the glyphs; the coupon itself has no chamfers and so no corner triangles. The number
-tracks whatever the label says, so a coupon built at a different clearance or bracket
-count will not match it. That is tolerable here in a way it would not be on a real
-part: this is a gauge, and the only surface that has to come out right is the channel.
-
-**`min_wall` is switched off here, and that is a statement about the rule rather than
-about the part.** The ray cast finds the label before it finds anything structural: it
-cannot tell a relief from a wall, so it returns the lettering's 0.5mm stand-off, and on
-a machine with a different system font it returns that font's stroke instead. Measured
-0.500 on one build and 0.480 on another, of the same part, at different places in the
-same word. No threshold can be both meaningful and stable against that.
-
-The walls that matter here are not in doubt and are not the ones being measured: the web
-in front of the channel is 1.8mm, and the section behind the detent dimple is 1.0mm, the
-same as every 6mm slab in this library. Both are fixed by the fit geometry rather than
-chosen, and neither depends on a font.
+Nothing. The slab has no chamfers, so no corner triangles, and the caption's faces are the text rule's to judge.
 
 ```toml
-[part]
-min_wall = 0.0
-
 [accepted]
-sliver = 65
+sliver = 0
 ```
 
 ## Don't
@@ -74,6 +58,7 @@ sliver = 65
 
 ## Changelog
 
+- 2026-11-17: caption drawn with `add_text` in the bundled font, and 7.5mm instead of 6mm so its strokes clear the 1.0mm wall. The card now holds on every machine, and `min_wall` is back on.
 - 2026-07-26: **0.25 settled.** 0.20 printed too tight to seat, 0.30 slid on loosely,
   so the usable window is about 0.1mm wide and 0.25 is the middle of it. That width is
   the same order as FDM extrusion variation, which is the real reason to stop here:

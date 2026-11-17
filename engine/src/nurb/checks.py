@@ -41,6 +41,7 @@ LABELS = {
     "stability": "tips over",
     "projection_ratio": "long reach",
     "build_volume": "too big",
+    "text": "small text",
 }
 
 
@@ -123,6 +124,20 @@ def rule(name):
     return register
 
 
+# The rules that read the part with its text on; every other rule reads `judged`.
+WHOLE = ("solids", "mesh", "text", "build_volume")
+
+
+def judged(shape, *, cosmetic=False):
+    """What the geometry rules read: the part without added lettering, but with cuts."""
+    from .text import lettering
+
+    lettered = lettering(shape)
+    if lettered is None:
+        return shape
+    return lettered.blank if cosmetic else lettered.structure
+
+
 def run(shape, ctx=None, only=None, stop=None):
     # An assembly's compound carries its recorded joints, and motion is the only
     # thing worth judging about it: overhang and min_wall on an assembled scene
@@ -133,11 +148,16 @@ def run(shape, ctx=None, only=None, stop=None):
 
         return sweep(scene, stop)
     ctx = ctx or Context()
+    # Added lettering has its own rule; engraving still changes structural geometry.
+    # Piece count, mesh integrity and printer fit all need the finished part.
+    blank = judged(shape)
+    cosmetic = judged(shape, cosmetic=True)
     found = []
     for name, fn in RULES.items():
         if only and name not in only:
             continue
-        found.extend(fn(shape, ctx))
+        geometry = shape if name in WHOLE else cosmetic if name in ("sliver", "concave_cosmetic") else blank
+        found.extend(fn(geometry, ctx, probe_shape=cosmetic) if name == "min_wall" else fn(geometry, ctx))
     # A part in pieces gets judged on whichever piece the kernel listed first, so the
     # rest of the report is true of a fragment and misleading about the part. The
     # `solids` docstring has the whole argument; this is where it takes effect.
@@ -247,6 +267,35 @@ def solids(shape, ctx):
             "Whatever should join them is touching at a point, or missing",
             value=len(bodies),
             where=tuple(round(v, 2) for v in stray.center()),
+        )
+    ]
+
+
+@rule("text")
+def text(shape, ctx):
+    """Letters too small to print.
+
+    A letter fails at its narrowest stroke, which is a fixed fraction of the font size,
+    so the size is the whole answer: the stroke has to be at least what this printer
+    lays down reliably, `min_wall`, or the slicer drops it or prints it as one line
+    that does not hold. The fix is a size, so the finding says which.
+    """
+    from .text import STROKE, lettering
+
+    lettered = lettering(shape)
+    if lettered is None or lettered.stroke >= ctx.min_wall:
+        return []
+
+    need = ctx.min_wall / STROKE[lettered.font]
+    return [
+        Finding(
+            "text",
+            WARN,
+            f"{lettered.font} at {lettered.smallest:.1f}mm draws {lettered.stroke:.2f}mm strokes, under the "
+            f"{ctx.min_wall:.2f}mm this printer lays down reliably; size {need:.1f}mm or more",
+            plain=f"the letters are too small to print cleanly. Make them at least {need:.1f}mm, "
+            "or shorten the text so it has room to grow",
+            value=round(lettered.smallest, 2),
         )
     ]
 
@@ -1740,7 +1789,7 @@ def _sphere_at(shape, point, outward, chord):
 
 
 @rule("min_wall")
-def min_wall(shape, ctx):
+def min_wall(shape, ctx, probe_shape=None):
     """The thinnest section in the solid: a ray cast, corrected by an inscribed sphere
     wherever the correction could change the verdict.
 
@@ -1761,15 +1810,16 @@ def min_wall(shape, ctx):
       short, sphere and chord alike. The gridfinity shelves' sockets measure 0.84mm
       where their 45 degree walls meet, and their cards allow 0.7 next to the sentence
       saying why.
-    - A relief reads as a wall. The calibration coupon's raised label is 0.5mm proud,
-      and that is what gets measured, so its card sets `min_wall = 0`.
+    - A relief reads as a wall. Lettered parts use the original surfaces as probe
+      origins and the engraved structure for intersections, so glyph flanks do not
+      hide a thin floor or read as walls themselves.
 
     Probes sample faces, so a pinch nothing lands near is still missed. Treat a clean
     result as "no thin walls found", not as "no thin walls".
     """
     thinnest, spot = None, None
     floor = ctx.min_wall * 0.01
-    for face in shape.faces():
+    for face in (probe_shape if probe_shape is not None else shape).faces():
         if face.area < ctx.sliver_area:
             continue  # a face this small has no wall to speak of
         for point, normal in _probes(face):

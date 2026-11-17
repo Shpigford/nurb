@@ -17,7 +17,7 @@ def fit_coupon(
     bracket_count=1,
     item_height=30.0,
     item_depth=6.0,
-    label_size=6.0,
+    label_size=7.5,
     label_relief=0.5,
     draft=False,
 ):
@@ -48,10 +48,5 @@ def fit_coupon(
     caption = f"{side_clearance:.2f}" if bracket_count == 1 else (
         f"{bracket_count}x {side_clearance:.2f}"
     )
-    front = Plane(
-        origin=(-item_depth, span(bracket_count), -item_height / 2),
-        x_dir=(0, -1, 0),
-        z_dir=(-1, 0, 0),
-    )
-    label = front * Text(caption, label_size)
-    return body + extrude(label, label_relief)
+    front = body.faces().filter_by(Axis.X).sort_by(Axis.X)[0]
+    return add_text(body, caption, front, size=label_size, depth=label_relief)

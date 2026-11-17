@@ -1,5 +1,6 @@
 """Load a part file, build it, turn it into something a browser can show."""
 
+import copy
 import importlib.util
 import pathlib
 import sys
@@ -92,6 +93,8 @@ def _kind(value):
         return "int"
     if isinstance(value, float):
         return "float"
+    if isinstance(value, str):
+        return "str"
     return "other"
 
 
@@ -110,16 +113,20 @@ def describe(defn, values):
     """One row per parameter: what the file declares, what a build uses, what control it
     can carry. The keyword defaults are the parameters, so this is derived, never
     declared, and it needs no build: a part the kernel crashed on still gets its sliders."""
-    return [
-        {
+    rows = []
+    for name, default in defn.params.items():
+        row = {
             "name": name,
             "default": _safe(default),
             "value": _safe(values[name]),
             "kind": _kind(default),
             "doc": defn.docs.get(name),
         }
-        for name, default in defn.params.items()
-    ]
+        if name in defn.choices:
+            row["kind"] = "choice"
+            row["options"] = defn.choices[name]
+        rows.append(row)
+    return rows
 
 
 def build(path, overrides=None, draft=False):
@@ -312,7 +319,8 @@ def to_mesh(shape, tolerance=0.1, up=(0, 0, 1)):
 
 
 def to_glb(shape, tolerance=0.1, up=(0, 0, 1)):
-    """One GLB. A part is one blob; an assembly keeps its movers as named nodes.
+    """One GLB. A part is one blob, or a `part` and a `text` node when it carries text;
+    an assembly keeps its movers as named nodes.
 
     The scene rides on the compound the same way checks.run reads it: an attribute,
     not an import, so this file stays ignorant of how assemblies work. The node
@@ -322,7 +330,17 @@ def to_glb(shape, tolerance=0.1, up=(0, 0, 1)):
     """
     scene = getattr(shape, "_nurb_scene", None)
     if scene is None:
-        return trimesh.Scene([to_mesh(shape, tolerance, up)]).export(file_type="glb")
+        from .text import lettering
+
+        lettered = lettering(shape)
+        if lettered is None or lettered.letters is None:
+            return trimesh.Scene([to_mesh(shape, tolerance, up)]).export(file_type="glb")
+        # Text is its own node, so the viewer paints it as the second filament. The
+        # two meshes together are the part: the base with its pockets, and the letters.
+        out = trimesh.Scene()
+        for name, body in (("part", lettered.base), ("text", lettered.letters)):
+            out.add_geometry(to_mesh(body, tolerance, up), node_name=name, geom_name=name)
+        return out.export(file_type="glb")
     from .assembly import NODE
 
     out = trimesh.Scene()
@@ -379,12 +397,39 @@ def print_set(shape, bed=(256.0, 256.0, 256.0), gap=5.0):
         x += box.size.X + gap
         row = max(row, box.size.Y)
     depth = y + row
+    from .text import moved as carried
+
     placed = []
     for path, (dx, dy, dz), solid in out:
-        moved = Pos(dx - width / 2, dy - depth / 2, dz) * solid
+        moved = carried(solid, Pos(dx - width / 2, dy - depth / 2, dz))
         moved.label = pathlib.Path(path).stem
         placed.append(moved)
     return placed
+
+
+# The colour a part's text prints in, as the second filament of a project 3MF.
+TEXT_COLOUR = "#FFFFFF"
+
+
+def by_filament(plate):
+    """The plate with each part that carries text split into [base, letters].
+
+    A 3MF object made of two parts is how Bambu Studio and OrcaSlicer put the letters
+    on a second filament and still keep them on the part: written as two objects, the
+    slicer's arrange moves the letters about 25mm off the plate.
+    """
+    from .text import lettering
+
+    out = []
+    for shape in plate:
+        lettered = lettering(shape)
+        if lettered is not None and lettered.letters is not None:
+            base = copy.copy(lettered.base)
+            base.label = shape.label  # the object's name in the slicer
+            out.append([base, lettered.letters])
+        else:
+            out.append(shape)
+    return out
 
 
 def write_3mf(shape, target):
@@ -400,7 +445,13 @@ def write_3mf(shape, target):
     STL has always carried the same holes and every slicer repairs them on load, so
     a 3MF that matches the STL is the honest file to write. Verified by slicing one:
     Bambu Studio takes the cracked mesh and prices it exactly as it does the STL.
+
+    A plate entry that is a list is one object whose i-th body prints on filament
+    i+1 (see `by_filament`). Bambu Studio and OrcaSlicer read a part's filament only
+    from `Metadata/model_settings.config`; both ignore standard 3MF colours for it.
     """
+    from xml.sax.saxutils import quoteattr
+
     import lib3mf
     from build123d import Mesher
 
@@ -408,29 +459,66 @@ def write_3mf(shape, target):
     # A list is a plate of separate parts (see print_set), and each one stays its own
     # object: welded into one mesh, two parts that touch become one body that a
     # slicer's "split to objects" can no longer pull apart.
-    shapes = shape if isinstance(shape, list) else [shape]
-    meshes = [(getattr(s, "label", "") or "", _welded(s)) for s in shapes]
-    meshes = [(name, m) for name, m in meshes if len(m.faces)]
+    entries = shape if isinstance(shape, list) else [shape]
+    plate = []
+    for entry in entries:
+        bodies = entry if isinstance(entry, list) else [entry]
+        name = getattr(bodies[0], "label", "") or ""
+        meshes = [(slot, _welded(b)) for slot, b in enumerate(bodies, start=1)]
+        meshes = [(slot, m) for slot, m in meshes if len(m.faces)]
+        if meshes:
+            plate.append((name, meshes))
     # lib3mf will happily write an empty model, and a downloaded file that opens to an
     # empty plate is worse than a refusal: it looks like it worked. A part that
     # tessellates to nothing is what the `solids` rule is for, so say that.
-    if not meshes:
+    if not plate:
         target.unlink(missing_ok=True)
         raise BuildError(f"{target.stem} has no geometry to export; the build's findings say why")
     # Mesher is still what owns the lib3mf handle, the millimetre unit and the write,
     # so the platform's library layout stays build123d's problem. Only its meshing and
     # its validity gate are skipped.
     mesher = Mesher()
-    for name, welded in meshes:
-        obj = mesher.model.AddMeshObject()
-        obj.SetGeometry(
-            [lib3mf.Position(Coordinates=(x, y, z)) for x, y, z in welded.vertices.tolist()],
-            [lib3mf.Triangle(Indices=(a, b, c)) for a, b, c in welded.faces.tolist()],
-        )
-        obj.SetType(lib3mf.ObjectType.Model)
+    model, identity = mesher.model, mesher.wrapper.GetIdentityTransform()
+    config = []
+    for name, meshes in plate:
+        objects = []
+        for slot, welded in meshes:
+            obj = model.AddMeshObject()
+            obj.SetGeometry(
+                [lib3mf.Position(Coordinates=(x, y, z)) for x, y, z in welded.vertices.tolist()],
+                [lib3mf.Triangle(Indices=(a, b, c)) for a, b, c in welded.faces.tolist()],
+            )
+            obj.SetType(lib3mf.ObjectType.Model)
+            if len(meshes) > 1:
+                obj.SetName("text" if slot > 1 else name or "part")
+            elif name:
+                obj.SetName(name)
+            objects.append((slot, obj))
+        if len(objects) == 1 and objects[0][0] == 1:
+            model.AddBuildItem(objects[0][1], identity)
+            continue
+        group = model.AddComponentsObject()
         if name:
-            obj.SetName(name)
-        mesher.model.AddBuildItem(obj, mesher.wrapper.GetIdentityTransform())
+            group.SetName(name)
+        for _, obj in objects:
+            group.AddComponent(obj, identity)
+        model.AddBuildItem(group, identity)
+        config.append(
+            f'  <object id="{group.GetResourceID()}">\n    <metadata key="extruder" value="1"/>\n'
+            + "".join(
+                f'    <part id="{obj.GetResourceID()}" subtype="normal_part">\n'
+                f'      <metadata key="name" value={quoteattr(obj.GetName())}/>\n'
+                f'      <metadata key="extruder" value="{slot}"/>\n    </part>\n'
+                for slot, obj in objects
+            )
+            + "  </object>\n"
+        )
+    if config:
+        xml = '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n' + "".join(config) + "</config>\n"
+        attachment = model.AddAttachment(
+            "/Metadata/model_settings.config", "http://schemas.bambulab.com/package/2021/settings"
+        )
+        attachment.ReadFromBuffer(list(xml.encode()))
     mesher.write(str(target))
 
 

@@ -28,9 +28,11 @@ The chat inside the app runs the agent you already have: Claude Code, Codex, Gem
 
 **A live view of every change.** Every edit updates the viewer without moving your camera. Orbit it and watch it evolve as you talk, and a build that fails leaves the last good version on screen.
 
-**Sliders for every dimension.** Each parameter of the part gets a slider. Drag until it looks right, click `Apply`, and the change is saved where the AI sees it too.
+**Sliders for every dimension.** Each parameter of the part gets a slider, words on the part get a text box, and choices like a font get a picker. Drag or type until it looks right, click `Save as default`, and the change is saved where the AI sees it too.
 
-**Print problems caught before the printer.** Thirteen printability rules run against the exact solid, not an approximation: overhangs, thin walls, floating islands, warp-prone first layers, parts that tip over. Findings pin themselves to the exact faces they fired on, so a "wall too thin" warning points at the exact spot on the model.
+**Text on parts.** Name tags, bin labels, filament swatches, a part number on an enclosure. Change the words by typing, and the part rebuilds as you type. Letters can stand up, be engraved, or sit flush in a second colour, and the 3MF puts them on their own filament so your slicer opens it two-colour. Text is drawn in fonts nurb ships, so a part builds the same on every computer, and a check warns when letters are too small for your nozzle.
+
+**Print problems caught before the printer.** Fifteen printability rules run against the exact solid, not an approximation: overhangs, thin walls, floating islands, warp-prone first layers, parts that tip over. Findings pin themselves to the exact faces they fired on, so a "wall too thin" warning points at the exact spot on the model.
 
 **Print time and filament cost up front.** The viewer's print time row drives the slicer you already have (OrcaSlicer or Bambu Studio) and answers with minutes and grams, so a design change that doubles the print time is caught while the design can still move.
 
@@ -46,6 +48,7 @@ The AI cannot see, so the checks are its eyes. Rules run against the exact solid
 
 ```
 solids            more than one body, or none: a part that came apart
+text              letters too small for their strokes to print
 mesh              a valid solid whose triangles do not close, as the slicer would see it
 overhang          downward faces past 45 degrees, bridges told from cantilevers
 floating          a region whose first layer would be laid on air
@@ -114,5 +117,7 @@ Copyright 2026 Ordinary Systems LLC.
 nurb uses **Open CASCADE Technology** (OCCT) for all B-rep geometry, reached through [build123d](https://github.com/gumyr/build123d) (Apache-2.0) and the `OCP` bindings (Apache-2.0). OCCT is licensed under [LGPL-2.1 with an additional exception](https://dev.opencascade.org/resources/licensing). nurb does not redistribute OCCT; it is installed as a dependency and dynamically linked. Bundling nurb into a single-file distribution that embeds OCCT would require shipping the OCCT license and keeping the library replaceable, per LGPL.
 
 nurb **does** redistribute [three.js](https://threejs.org) (MIT), bundled into the workbench page so it works with no network. Same for the workbench's fonts, [JetBrains Mono](https://www.jetbrains.com/lp/mono/) and [Instrument Sans](https://github.com/Instrument/instrument-sans), both SIL OFL 1.1.
+
+nurb also redistributes the fonts it draws text on parts with, each with its license beside it in `engine/src/nurb/fonts/`: [Liberation Sans](https://github.com/liberationfonts/liberation-fonts) Bold, [Archivo Black](https://github.com/Omnibus-Type/ArchivoBlack) and [Stardos Stencil](https://fonts.google.com/specimen/Stardos+Stencil) Bold, all SIL OFL 1.1.
 
 Other dependencies: trimesh (MIT), websockets (BSD-3-Clause), numpy (BSD-3-Clause), and the official MCP SDK `mcp` (MIT), which brings starlette, uvicorn, httpx2, pydantic and jsonschema with it: 27 packages and about 27 MB in a bare venv, measured on mcp 2.2.0. Pillow (MIT-CMU) downscales reference photos before a model reads them.
