@@ -41,7 +41,8 @@ LABELS = {
     "stability": "tips over",
     "projection_ratio": "long reach",
     "build_volume": "too big",
-    "text": "small text",
+    # Covers both states of the rule: letters too small, and raised letters on the bed face.
+    "text": "lettering",
 }
 
 
@@ -283,11 +284,29 @@ def text(shape, ctx):
     from .text import STROKE, lettering
 
     lettered = lettering(shape)
-    if lettered is None or lettered.stroke >= ctx.min_wall:
+    if lettered is None:
         return []
+    found = []
+    # Raised letters below the rest of the part are on the face that prints against the
+    # bed, so the part would stand on its letters. The style stays on offer as a choice;
+    # this is how picking it says the part has to turn over first.
+    up = Vector(*ctx.up).normalized()
+    if lettered.letters is not None and _span(lettered.letters, up)[0] < _span(lettered.blank, up)[0] - 1e-3:
+        found.append(
+            Finding(
+                "text",
+                FAIL,
+                "raised letters are on the bed face, so the part stands on them; "
+                "turn the part so the text faces up, or use flush or engraved",
+                plain="raised letters are on the side that sits on the bed, so the part would stand on them. "
+                "Pick Flush or Engraved, or ask for the part to be turned over so the text faces up",
+            )
+        )
+    if lettered.stroke >= ctx.min_wall:
+        return found
 
     need = ctx.min_wall / STROKE[lettered.font]
-    return [
+    return found + [
         Finding(
             "text",
             WARN,

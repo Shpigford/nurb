@@ -90,6 +90,15 @@ def test_the_checks_judge_the_part_without_its_text_and_the_text_on_its_own():
     assert "size 7.3mm or more" in small[0].message
 
 
+def test_raised_text_on_the_bed_face_fails_and_flush_there_does_not():
+    bottom = plate().faces().sort_by(Axis.Z)[0]
+    found = checks.run(add_text(plate(), "PLA Silk", bottom), only=["text"])
+    assert [(f.rule, f.severity) for f in found] == [("text", checks.FAIL)]
+    assert "turned over" in found[0].said
+    assert checks.run(add_text(plate(), "PLA Silk", bottom, style="flush"), only=["text"]) == []
+    assert checks.run(add_text(plate(), "PLA Silk"), only=["text"]) == []
+
+
 @pytest.mark.parametrize("later", [None, "raised", "flush"])
 def test_engraving_keeps_the_thin_floor_visible_to_structural_checks(later):
     shape, _, _ = builder.build(
