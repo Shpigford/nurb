@@ -175,18 +175,20 @@ fn stamp_matches(res: &Resources, stamp: &Stamp) -> bool {
 /// and the wheel installs last, so finding it means the install finished. It
 /// stops short of importing nurb, which loads OCCT and takes seconds warm and
 /// far longer after a reboot (issue #338). `parts_import` catches the rest.
+/// A spec with no origin is a folder of leftovers that Python reads as a
+/// namespace package, which finds `nurb` but never `nurb.serve` (NURB-DESKTOP-5).
 fn parts_ok(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
     stamp_matches(res, stamp)
         && venv_runs(
             paths,
-            "import importlib.util, sys; sys.exit(importlib.util.find_spec('nurb') is None)",
+            "import importlib.util, sys; s = importlib.util.find_spec('nurb'); sys.exit(s is None or s.origin is None)",
         )
 }
 
 /// The slow proof, for when the engine has already failed or setup is deciding
 /// what to redo: damage inside the venv only shows up as a failed import.
 fn parts_import(paths: &Paths, res: &Resources, stamp: &Stamp) -> bool {
-    stamp_matches(res, stamp) && venv_runs(paths, "import nurb")
+    stamp_matches(res, stamp) && venv_runs(paths, "import nurb.serve")
 }
 
 /// Whether the environment holds what this app wants apart from nurb itself.
@@ -583,7 +585,16 @@ fn install_nurb(
 ) -> Result<(), String> {
     let mut wheel = uv(paths)?;
     wheel
-        .args(["pip", "install", "--no-deps", "--python"])
+        // Without the reinstall, uv skips a version it finds already there,
+        // even when that install's files are gone (NURB-DESKTOP-5).
+        .args([
+            "pip",
+            "install",
+            "--no-deps",
+            "--reinstall-package",
+            "nurb",
+            "--python",
+        ])
         .arg(paths.venv_python())
         .arg(&res.wheel);
     run_step(provisioner, channel, wheel, "the nurb install")?;
@@ -592,7 +603,8 @@ fn install_nurb(
     let mut warmup = Command::new(paths.venv_python());
     // The first OCCT import is the slow one; do it here, never on the first
     // project open.
-    warmup.args(["-c", "import build123d, nurb"]);
+    // `nurb.serve` is what the engine runs, so it is what this proves.
+    warmup.args(["-c", "import build123d, nurb.serve"]);
     run_step(provisioner, channel, warmup, "the CAD engine warmup")?;
     // Same tradeoff as the npm cache below: ~480 MB that only speeds up a
     // reinstall, on a machine that just proved it can download the wheels.
@@ -901,6 +913,14 @@ mod tests {
         };
         assert!(!parts_ok(&paths, &res, &stale));
 
+        // Files gone but the folder left behind (NURB-DESKTOP-5): Python reads it
+        // as a namespace package, so `import nurb` passes and `nurb.serve` fails.
+        std::fs::remove_file(site.join("nurb/__init__.py")).unwrap();
+        std::fs::remove_file(site.join("nurb/serve.py")).unwrap();
+        std::fs::create_dir_all(site.join("nurb/__pycache__")).unwrap();
+        assert!(!parts_ok(&paths, &res, &stamp));
+        assert!(!parts_import(&paths, &res, &stamp));
+
         // The wheel installs last, so an interrupted install has no nurb at all.
         std::fs::remove_dir_all(site.join("nurb")).unwrap();
         assert!(!parts_ok(&paths, &res, &stamp));
@@ -920,6 +940,7 @@ mod tests {
         ));
         std::fs::create_dir_all(site.join("nurb")).unwrap();
         std::fs::write(site.join("nurb/__init__.py"), init).unwrap();
+        std::fs::write(site.join("nurb/serve.py"), "").unwrap();
         site
     }
 
@@ -943,6 +964,7 @@ import sys, zipfile
 info = "{name}-{version}.dist-info"
 with zipfile.ZipFile(sys.argv[1], "w") as z:
     z.writestr("{name}/__init__.py", {body:?})
+    z.writestr("{name}/serve.py", "")
     z.writestr(info + "/METADATA", "Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n")
     z.writestr(info + "/WHEEL", "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
     z.writestr(info + "/RECORD", "")
@@ -1018,6 +1040,17 @@ with zipfile.ZipFile(sys.argv[1], "w") as z:
             .unwrap()
             .set_modified(built)
             .unwrap();
+        install_nurb(&provisioner, &paths, &res, &channel).unwrap();
+        assert_eq!(venv_output(&paths, print), "rebuilt");
+
+        // The same wheel over an install whose files are gone (NURB-DESKTOP-5).
+        // uv sees the version already there and skips it unless told to redo it.
+        let package = venv_output(
+            &paths,
+            "import nurb, os; print(os.path.dirname(nurb.__file__))",
+        );
+        std::fs::remove_file(format!("{package}/__init__.py")).unwrap();
+        std::fs::remove_file(format!("{package}/serve.py")).unwrap();
         install_nurb(&provisioner, &paths, &res, &channel).unwrap();
         assert_eq!(venv_output(&paths, print), "rebuilt");
 
