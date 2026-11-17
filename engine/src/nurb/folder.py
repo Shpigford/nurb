@@ -102,6 +102,14 @@ def _read_into(conn, project_id, root, parts_dir):
 
     if book.is_file():
         for name, entry in tomllib.loads(book.read_text(encoding="utf-8")).items():
+            if not isinstance(entry, dict) or not isinstance(entry.get("value"), (int, float)):
+                raise ValueError(
+                    f"{book.name}: {name} has no value, so add the number you measured and import again"
+                )
+            if "how" not in entry:
+                raise ValueError(
+                    f"{book.name}: {name} does not say how it was measured, so add a how line and import again"
+                )
             db.set_measurement(
                 conn,
                 project_id,

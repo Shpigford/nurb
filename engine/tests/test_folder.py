@@ -456,3 +456,23 @@ def test_an_import_announces_its_parts_once_they_are_visible(conn, tmp_path):
 
     assert seen, "the import announced nothing, so nothing wakes the builder"
     assert max(seen) >= count
+
+
+@pytest.mark.parametrize(
+    "book, said",
+    [
+        ('[width]\nunit = "mm"\nhow = "ruler"\n', "width has no value"),
+        ("[width]\nvalue = 2.0\n", "width does not say how it was measured"),
+        ("width = 2.0\n", "width has no value"),
+        ('[width]\nvalue = "wide"\nhow = "ruler"\n', "width has no value"),
+    ],
+)
+def test_incomplete_measurement_refuses_the_import_with_its_name(conn, tmp_path, book, said):
+    # Sentry NURB-DESKTOP-7: a measurement without a value was a KeyError and a 500.
+    project = tmp_path / "v1"
+    (project / "parts").mkdir(parents=True)
+    (project / "parts" / "shelf.py").write_text("from nurb import *\n")
+    (project / "measurements.toml").write_text(book)
+    with pytest.raises(ValueError, match=f"measurements.toml: {said}"):
+        folder.import_folder(conn, project)
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
