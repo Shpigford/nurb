@@ -229,6 +229,7 @@ def _export_in_process(
     from build123d import Compound, export_step
 
     from . import slicing
+    from .text import lettering
 
     root, shape, ctx = _solid(
         scratch_root, part_name, overrides, profile, database_path, project_id
@@ -240,14 +241,25 @@ def _export_in_process(
     with tempfile.TemporaryDirectory() as scratch:
         target = pathlib.Path(scratch) / f"{part_name}.{fmt}"
         if fmt == "3mf":
-            builder.write_3mf(plate, target)
+            plate_by_filament = builder.by_filament(plate)
+            # Text prints on a second filament, so the project loads one.
+            colours = [None, builder.TEXT_COLOUR] if any(isinstance(e, list) for e in plate_by_filament) else None
+            builder.write_3mf(plate_by_filament, target)
+            lettered = lettering(shape)
+            text_note = None
+            if colours:
+                text_note = "letters on filament 2"
+                if lettered is not None and lettered.swap_mm is not None:
+                    # One filament and no AMS still makes two colours: pause where the
+                    # letters start and load the second one.
+                    text_note += f" (with one filament, pause at {lettered.swap_mm:g}mm and swap)"
             kit, why = slicing.kit(root)
             if kit:
                 machine, process, filament, exe = kit
                 settings, notes = slicing.tuned(plate, ctx)
                 try:
                     slicing.write_project(
-                        target, target, machine, process, filament, exe, settings=settings
+                        target, target, machine, process, filament, exe, settings=settings, colours=colours
                     )
                     note = ", ".join(notes)
                 except slicing.Unavailable as exc:
@@ -257,7 +269,7 @@ def _export_in_process(
                     # The CLI's reason names a file; here the picker is on the page.
                     why = "choose a printer to embed tuned settings"
                 note = f"geometry only: {why}"
-            note = ", ".join(n for n in (laid_out, note) if n)
+            note = ", ".join(n for n in (laid_out, text_note, note) if n)
         elif fmt == "stl":
             builder.write_stl(plate[0] if len(plate) == 1 else Compound(children=plate), target)
         elif fmt == "step":

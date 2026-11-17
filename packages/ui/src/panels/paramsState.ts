@@ -59,9 +59,14 @@ export function tidy(value: number, step: number): number {
   return +value.toFixed(places)
 }
 
+const ADJUSTABLE = new Set(["bool", "int", "float", "str", "choice"])
+
 export function adjustable(param: Param): boolean {
-  return param.kind === "bool" || param.kind === "int" || param.kind === "float"
+  return ADJUSTABLE.has(param.kind)
 }
+
+// Longest text the engine takes for one parameter (serve.TEXT_MAX).
+export const TEXT_MAX = 200
 
 // The values that differ from the part's declared defaults: exactly what Apply
 // writes back. Sending only the diff means an untouched panel sends {}.

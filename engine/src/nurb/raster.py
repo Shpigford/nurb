@@ -53,6 +53,9 @@ FRONT = (0xF0, 0x42, 0x1F)
 SIDE = (0xC4, 0x2D, 0x12)
 UNDER = (0x9E, 0x24, 0x10)
 EDGE = (0xA3, 0x24, 0x09)
+# Text in its own colour, the second filament: the same five tones, light, so letters
+# read against the part the way white on orange prints.
+TEXT_TONES = ((0xE4, 0xE6, 0xEA), (0xC9, 0xCC, 0xD3), (0xFA, 0xFA, 0xFB), (0xEE, 0xEF, 0xF2), (0xA9, 0xAE, 0xB8))
 SHADOW = (0xEE, 0xF2, 0xF8)
 # The same pool of shade for a picture that sits on the dark theme's ground, which a
 # light ellipse would light up instead of setting the part down on.
@@ -213,7 +216,9 @@ def _frame(mesh, cap_normal, ghost, width, height, view, shadow=SHADOW):
 
     pts, depth = project(verts)
     visible = (normals @ view) > 1e-6
-    colors = _colors(normals)
+    text = mesh.metadata.get("text_faces")
+    # A section view re-cuts the faces, and a mask for the uncut mesh describes none of them.
+    colors = _colors(normals, text if text is not None and len(text) == len(faces) else None)
     strokes = _stroked_edges(mesh, faces, normals, visible)
 
     depth_px, face_px = _rasterize(pts, depth, faces, visible, w, h)
@@ -439,14 +444,18 @@ def _mesh(glb_bytes):
 def _split(glb_bytes):
     """(the part, the `context` scenery or None), each welded for edge finding."""
     loaded = trimesh.load(io.BytesIO(glb_bytes), file_type="glb", process=False)
-    parts, context = [], []
+    parts, context, text = [], [], []
     if isinstance(loaded, trimesh.Scene):
         for node in loaded.graph.nodes_geometry:
             transform, geom_name = loaded.graph[node]
             geom = loaded.geometry.get(geom_name)
             if not isinstance(geom, trimesh.Trimesh) or not len(geom.faces):
                 continue
-            (context if geom_name == "context" else parts).append(geom.copy().apply_transform(transform))
+            if geom_name == "context":
+                context.append(geom.copy().apply_transform(transform))
+                continue
+            parts.append(geom.copy().apply_transform(transform))
+            text.append(np.full(len(geom.faces), geom_name == "text"))
     elif isinstance(loaded, trimesh.Trimesh):
         parts.append(loaded)
     if not parts:
@@ -458,13 +467,15 @@ def _split(glb_bytes):
     # The exporter splits vertices at face boundaries (crisp normals in the
     # viewer); creases and silhouettes are only findable once they are welded.
     mesh.merge_vertices()
+    if any(t.any() for t in text):
+        mesh.metadata["text_faces"] = np.concatenate(text)
     if ghost is not None:
         ghost.merge_vertices()
     return mesh, ghost
 
 
-def _colors(normals):
-    """One palette tone per face, chosen by where the face points."""
+def _colors(normals, text=None):
+    """One palette tone per face, chosen by where the face points, light where it is text."""
     nz = normals[:, 2]
     front = -normals[:, 1]
     side = normals[:, 0]
@@ -473,6 +484,9 @@ def _colors(normals):
     tones = np.where(nz > 0.85, 2, tones)
     tones = np.where((nz <= 0.85) & (nz > 0.3), 3, tones)
     tones = np.where(nz < -0.3, 4, tones)
+    if text is not None:
+        lut = np.vstack([lut, np.array(TEXT_TONES, dtype=np.uint8)])
+        tones = np.where(text, tones + 5, tones)
     return [tuple(int(c) for c in lut[t]) for t in tones]
 
 

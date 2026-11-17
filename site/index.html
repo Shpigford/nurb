@@ -65,6 +65,41 @@
   .composer div { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 44px; padding: 0 6px 0 14px; border: 1px solid var(--line); border-radius: 4px; color: var(--faint); font-size: 15px; }
   .composer i { font: 600 10px/30px var(--mono); letter-spacing: .14em; font-style: normal; color: #fff; background: var(--ink); border-radius: 3px; padding: 0 10px; }
 
+  /* ---- text on parts ---- */
+  /* The tag's letters are Liberation Sans Bold, the face the app prints them in. */
+  @font-face {
+    font-family: "Liberation Sans";
+    src: url(vendor/fonts/LiberationSans-Bold-latin.ttf) format("truetype");
+    font-weight: 700;
+    font-display: swap;
+  }
+  .lettering .wrap { display: flex; gap: 96px; align-items: center; padding-top: 32px; padding-bottom: 128px; }
+  .lettering .copy { display: flex; flex-direction: column; gap: 20px; width: 520px; flex: none; }
+  .tag-stage { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 40px; padding: 72px 48px; border-radius: 10px; }
+  .tag {
+    position: relative; display: flex; align-items: center; width: 440px; max-width: 100%; aspect-ratio: 440 / 146;
+    border-radius: 8.2% / 24.6%; background: #ff7050;
+    box-shadow: 0 10px 0 #f0421f, 0 24px 40px rgba(24, 42, 74, .18);
+  }
+  .tag .ring { position: absolute; left: 12%; top: 50%; width: 8%; aspect-ratio: 1; border-radius: 50%; transform: translateY(-50%); background: var(--stage); box-shadow: inset 0 4px 0 #c42d12; }
+  .tag .letters {
+    flex: 1; min-width: 0; padding: 0 9% 0 26%; overflow: hidden; white-space: nowrap; text-align: center;
+    font: 700 66px/1 "Liberation Sans", Arial, Helvetica, sans-serif; letter-spacing: -.01em; color: #f4f6f9;
+  }
+  /* Raised letters show their sides; engraved ones are shade cut into the orange. */
+  .tag[data-style="raised"] .letters { text-shadow: 0 3px 0 #c9ccd3; }
+  .tag[data-style="engraved"] .letters { color: #e2482a; text-shadow: 0 -2px 0 #c42d12, 0 1px 0 #ff9a80; }
+  .tag-controls { display: flex; flex-direction: column; gap: 8px; width: 440px; max-width: 100%; padding: 18px; border-radius: 6px; }
+  .tag-controls .cap { font: 500 10px/12px var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .tag-controls .cap + * { margin-bottom: 6px; }
+  .tag-controls input { height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 4px; font: 16px var(--sans); color: var(--ink); background: #fff; outline: none; }
+  .tag-controls input:focus { border-color: var(--accent); }
+  .seg { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .seg button { height: 34px; border: 0; background: #fff; font: 13px var(--sans); color: var(--muted); cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-checked="true"] { background: var(--raised); color: var(--ink); font-weight: 600; }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
   /* ---- checks ---- */
   .checks { background: var(--ink); color: #fff; }
   .checks .wrap { display: flex; flex-direction: column; gap: 64px; padding-top: 120px; padding-bottom: 120px; }
@@ -125,6 +160,10 @@
     .grid8 > div:nth-child(n+7) { border-bottom: 0; }
   }
   @media (max-width: 900px) {
+    .lettering .wrap { flex-direction: column-reverse; align-items: stretch; gap: 28px; padding-top: 0; padding-bottom: 72px; }
+    .lettering .copy { width: auto; gap: 16px; }
+    .tag-stage { padding: 40px 20px; gap: 28px; }
+    .tag .letters { font-size: 44px; }
     .hero .copy { flex-direction: column; align-items: stretch; gap: 20px; padding: 48px 0 40px; }
     .hero .side { width: auto; gap: 20px; }
     .hero .side .lede { font-size: 17px; }
@@ -211,9 +250,9 @@
       <p class="lede">Look at the part and say what's wrong with it. No sketches, no constraints, no toolbar with forty tools. CAD software never opens.</p>
       <div class="facts">
         <div><b>It asks, never guesses</b><span>It asks for the real dimension instead of inventing one.</span></div>
-        <div><b>Millimeters, not menus</b><span>Every dimension becomes a slider you can drag.</span></div>
+        <div><b>Millimeters, not menus</b><span>Every dimension becomes a slider you can drag. Words on the part are a box you type in.</span></div>
         <div><b>Your tweaks stick</b><span>Drag a slider and your AI keeps designing from your numbers.</span></div>
-        <div><b>Files that just work</b><span>3MF or STL for your slicer. STEP if a machine shop asks.</span></div>
+        <div><b>Files that just work</b><span>3MF or STL for your slicer, with lettering on its own filament. STEP if a machine shop asks.</span></div>
       </div>
     </div>
     <div class="chat-stage stage">
@@ -232,6 +271,37 @@
           </div>
         </div>
         <div class="composer"><div><span>Ask a follow-up…</span><i>SEND</i></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="lettering" id="text">
+  <div class="wrap">
+    <div class="tag-stage stage">
+      <div class="tag" data-style="flush" aria-hidden="true">
+        <span class="ring"></span>
+        <span class="letters">Biscuit</span>
+      </div>
+      <div class="panel tag-controls">
+        <label class="cap" for="tag-text">Text</label>
+        <input id="tag-text" value="Biscuit" maxlength="24" spellcheck="false" autocomplete="off">
+        <span class="cap" id="tag-style">Style</span>
+        <div class="seg" role="radiogroup" aria-labelledby="tag-style">
+          <button type="button" role="radio" aria-checked="false" data-style="raised">Raised</button>
+          <button type="button" role="radio" aria-checked="false" data-style="engraved">Engraved</button>
+          <button type="button" role="radio" aria-checked="true" data-style="flush">Flush</button>
+        </div>
+      </div>
+    </div>
+    <div class="copy">
+      <span class="label">Text on parts</span>
+      <h2>Put words on it.<br>Type to change them.</h2>
+      <p class="lede">Name tags, bin labels, filament swatches, a part number on a lid. Type in the box and the part rebuilds with the new words as you type.</p>
+      <div class="facts">
+        <div><b>Two colors, one file</b><span>The 3MF puts the letters on their own filament, already sitting on the part.</span></div>
+        <div><b>No AMS needed</b><span>Raised letters start on a fresh layer, so one pause swaps the color.</span></div>
+        <div><b>Small text, checked</b><span>It warns you when letters are too thin for your nozzle to draw.</span></div>
       </div>
     </div>
   </div>
@@ -326,6 +396,27 @@
     hdr.classList.remove('open');
     menuBtn.setAttribute('aria-expanded', 'false');
   });
+  // The tag on the text section: the words follow the box, shrinking to fit the way
+  // the app fits them, and the style switch swaps how the letters sit.
+  const tag = document.querySelector('.tag');
+  const letters = tag.querySelector('.letters');
+  const fit = () => {
+    letters.style.fontSize = '';
+    const room = letters.clientWidth - parseFloat(getComputedStyle(letters).paddingLeft) - parseFloat(getComputedStyle(letters).paddingRight);
+    const size = parseFloat(getComputedStyle(letters).fontSize);
+    const wide = letters.scrollWidth - (letters.clientWidth - room);
+    if (wide > room) letters.style.fontSize = `${Math.max(12, size * room / wide)}px`;
+  };
+  document.getElementById('tag-text').addEventListener('input', (e) => {
+    letters.textContent = e.target.value;
+    fit();
+  });
+  document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('.seg button').forEach((o) => o.setAttribute('aria-checked', String(o === b)));
+    tag.dataset.style = b.dataset.style;
+  }));
+  addEventListener('resize', fit);
+  document.fonts.ready.then(fit);
 </script>
 </body>
 </html>

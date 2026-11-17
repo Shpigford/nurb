@@ -17,7 +17,7 @@ import { duration, ease } from "../motion/tokens"
 import { DetentMarks, useSliderDetents } from "../motion/useSliderDetents"
 import { cue } from "../sound"
 import type { BuildStats, Param, Params } from "../types"
-import { adjustable, decimals, detentsFor, dirtyValues, rangeFor, tidy, type Measurement } from "./paramsState"
+import { adjustable, decimals, detentsFor, dirtyValues, rangeFor, TEXT_MAX, tidy, type Measurement } from "./paramsState"
 
 // motion wants a tuple; ease.out is a plain number[].
 const OUT = ease.out as [number, number, number, number]
@@ -411,6 +411,140 @@ function BoolRow({
   )
 }
 
+// Text the part prints. The box is the whole interface: every keystroke goes to the
+// host, which already waits for a pause before it rebuilds, so the part follows the
+// typing without a build per letter.
+function TextRow({
+  id,
+  param,
+  value,
+  dirty,
+  onValue,
+}: {
+  id: string
+  param: Param
+  value: string
+  dirty: boolean
+  onValue: (value: string) => void
+}) {
+  const before = useRef(value)
+  return (
+    <div className="flex flex-col gap-1.5 px-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <label
+            htmlFor={id}
+            title={param.description}
+            className={clsx("mono-caption min-w-0 truncate", dirty ? "font-medium text-ink" : "text-muted")}
+          >
+            {label(param.name)}
+          </label>
+          {dirty ? <ResetDot param={param} onReset={() => onValue(param.default as string)} /> : null}
+        </div>
+        {value.length > TEXT_MAX * 0.8 ? (
+          <span className="mono-caption shrink-0 text-faint tabular-nums">
+            {value.length} / {TEXT_MAX}
+          </span>
+        ) : null}
+      </div>
+      <input
+        id={id}
+        type="text"
+        value={value}
+        maxLength={TEXT_MAX}
+        spellCheck={false}
+        autoComplete="off"
+        onFocus={() => {
+          before.current = value
+        }}
+        onChange={(e) => onValue(e.target.value)}
+        onKeyDown={(e) => {
+          // Back to what the box held when it was clicked into, not to the default:
+          // Escape undoes this edit, and the reset dot is the way to the default.
+          if (e.key === "Escape") onValue(before.current)
+        }}
+        className={clsx(
+          "w-full rounded-control border bg-raised px-2.5 py-1.5 text-sm text-ink outline-none transition-colors focus:border-accent",
+          dirty ? "border-accent/60" : "border-line"
+        )}
+      />
+    </div>
+  )
+}
+
+// A short list of named options: a segmented control when they fit on one line, a
+// menu when they do not.
+function ChoiceRow({
+  id,
+  param,
+  value,
+  dirty,
+  onValue,
+}: {
+  id: string
+  param: Param
+  value: string
+  dirty: boolean
+  onValue: (value: string) => void
+}) {
+  const options = param.options ?? []
+  const segmented = options.length <= 3 && options.every((o) => o.length <= 10)
+  return (
+    <div className="flex flex-col gap-1.5 px-4">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <label
+          htmlFor={id}
+          id={`${id}-label`}
+          title={param.description}
+          className={clsx("mono-caption min-w-0 truncate", dirty ? "font-medium text-ink" : "text-muted")}
+        >
+          {label(param.name)}
+        </label>
+        {dirty ? <ResetDot param={param} onReset={() => onValue(param.default as string)} /> : null}
+      </div>
+      {segmented ? (
+        <div
+          id={id}
+          role="radiogroup"
+          aria-labelledby={`${id}-label`}
+          className="grid overflow-hidden rounded-control border border-line"
+          style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}
+        >
+          {options.map((option, i) => (
+            <button
+              key={option}
+              type="button"
+              role="radio"
+              aria-checked={option === value}
+              onClick={() => onValue(option)}
+              className={clsx(
+                "truncate px-2 py-1.5 text-xs capitalize transition-colors focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent",
+                i > 0 && "border-l border-line",
+                option === value ? "bg-raised font-medium text-ink" : "text-muted hover:text-ink"
+              )}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <select
+          id={id}
+          value={value}
+          onChange={(e) => onValue(e.target.value)}
+          className="w-full rounded-control border border-line bg-raised px-2 py-1.5 text-sm text-ink outline-none focus:border-accent"
+        >
+          {options.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  )
+}
+
 // Live parameter controls. Every change hands the host the whole value map, so
 // the host owns the rebuild; Apply hands it only the values that moved, which
 // is what gets written into the part's keyword defaults.
@@ -430,13 +564,16 @@ export default function ParamsPanel({
   const rows = useMemo(() => params.filter(adjustable), [params])
   const pinned = useMemo(() => params.filter((p) => !adjustable(p)), [params])
   const bools = rows.filter((p) => p.kind === "bool")
-  const numbers = rows.filter((p) => p.kind !== "bool")
+  const numbers = rows.filter((p) => p.kind === "int" || p.kind === "float")
+  // Text first, then the choices that shape it: on a part with words on it, the words
+  // are the value people change most.
+  const settable = [...rows.filter((p) => p.kind === "str"), ...rows.filter((p) => p.kind === "choice")]
   const dirty = useMemo(() => dirtyValues(params, values), [params, values])
   const dirtyCount = Object.keys(dirty).length
   // Two panels on one page (a compare view) must not share control ids.
   const prefix = useId()
 
-  const setValue = (name: string, value: number | boolean) => {
+  const setValue = (name: string, value: number | boolean | string) => {
     onChange({ ...values, [name]: value })
   }
 
@@ -474,7 +611,28 @@ export default function ParamsPanel({
           </>
         ) : null}
 
-        <SectionRule>Yours to drag</SectionRule>
+        {settable.length > 0 ? (
+          <>
+            <SectionRule>Yours to set</SectionRule>
+            <div className="flex flex-col gap-3 pb-2">
+              {settable.map((param) => {
+                const Row = param.kind === "str" ? TextRow : ChoiceRow
+                return (
+                  <Row
+                    key={param.name}
+                    id={`${prefix}${param.name}`}
+                    param={param}
+                    value={String(values[param.name] ?? param.default)}
+                    dirty={param.name in dirty}
+                    onValue={(v) => setValue(param.name, v)}
+                  />
+                )
+              })}
+            </div>
+          </>
+        ) : null}
+
+        {bools.length + numbers.length > 0 ? <SectionRule>Yours to drag</SectionRule> : null}
         <div className="flex flex-col gap-3">
           {bools.map((param) => (
             <BoolRow

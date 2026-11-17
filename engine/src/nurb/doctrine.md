@@ -37,6 +37,8 @@ in sync, because the type is already there in the signature.
 true, skip the polish pass. It is worth about 20% on a real part, not the 18x a cube
 suggests.
 
+**A parameter with named options is a choice.** Annotate it with `Literal` and the viewer shows a picker instead of a locked value: `font: Literal["Standard", "Heavy", "Stencil"] = "Standard"`. A string with no annotation is text the person types, in a box.
+
 Return one solid. A function that returns two loose bodies still reports a plausible
 bounding box and still exports, so nothing downstream catches it.
 
@@ -233,13 +235,7 @@ The polish pass runs last, after structure is finished.
    accepted set each time, never the result of the last attempt: an edge belongs to the
    shape it was selected from, and applying batches in sequence quietly re-chamfers the
    first body and returns it.
-6. **No text labels on parts.** File naming carries catalog identity. There is a second
-   reason beyond taste: a glyph's outline comes from a system font, so a part with text
-   on it builds to different geometry on a different machine. The calibration coupon,
-   which needs a label because four of them come off one plate looking identical, comes
-   out at 2600.6mm3 with 88 faces on one machine and 2601.0 with 83 on another. Nothing
-   about its fit moves, but its card cannot be asserted anywhere but where it was
-   written.
+6. **Text goes on with `add_text`, never with `Text` directly.** A part that has words on it (a name tag, a bin label, a filament swatch, a part number) takes the words as a parameter, `text="PLA Silk"`, so the person changes them by typing in the panel. `add_text(body, text, face, style=..., font=...)` draws only with the fonts nurb ships, because build123d's `Text` quietly falls back to a system font and the part then builds differently on another machine. It fits the text to the face unless you pass `size`, handles a stray piece like the dot on an "i" itself, and keeps raised and flush letters as their own body, which the viewer shows in a second colour and the 3MF puts on a second filament. Call it last, after the polish pass: anything done to its result rebuilds the shape and the letters lose their colour. Raised is the default and the right choice for small text, since a thin recess closes up; flush is for two-colour prints where the face must stay flat; engraved is for one colour. Cut-through text uses `font="Stencil"`, or the middles of O and A fall out. Offer the style and font as choices on the part: `style: Literal["raised", "engraved", "flush"] = "raised"`. Text 0.6mm proud is three 0.2mm layers, which is where a one-filament printer pauses for the colour swap.
 7. **Consistency is the polish.** One chamfer size across a family is what makes it read
    as a designed system rather than a pile of prints.
 

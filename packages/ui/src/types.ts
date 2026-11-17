@@ -15,7 +15,7 @@ export interface Finding {
   where?: [number, number, number] | null
 }
 
-export type ParamKind = "float" | "int" | "bool" | "str"
+export type ParamKind = "float" | "int" | "bool" | "str" | "choice"
 
 export interface Param {
   name: string
@@ -25,6 +25,8 @@ export interface Param {
   max?: number
   step?: number
   description?: string
+  /** A choice's options, in the order the part declared them. */
+  options?: string[]
 }
 
 /** Current slider values keyed by parameter name. */

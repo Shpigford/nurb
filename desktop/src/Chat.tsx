@@ -133,6 +133,7 @@ const FIRST_RUN_PLACEHOLDERS = [
   "a bracket for the 25 mm rail above my bench",
   "a knob to replace the one I snapped off",
   "a bin that fits the drawer, not the other way round",
+  "a keychain tag with my dog's name on it",
 ];
 
 // A locked-down webview throws on plain access, so an unreadable store counts as

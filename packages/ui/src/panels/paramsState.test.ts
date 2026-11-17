@@ -46,9 +46,11 @@ describe("paramsState", () => {
     expect(decimals(1e-7)).toBe(0)
   })
 
-  it("gives controls to bool, int, and float only", () => {
+  it("gives controls to everything but a default the engine cannot carry", () => {
     expect(adjustable(width) && adjustable(count) && adjustable(flag)).toBe(true)
-    expect(adjustable(name)).toBe(false)
+    expect(adjustable(name)).toBe(true)
+    expect(adjustable({ name: "pick", kind: "choice", default: "a", options: ["a"] })).toBe(true)
+    expect(adjustable({ name: "tuple", kind: "other" as Param["kind"], default: "(1, 2)" })).toBe(false)
   })
 
   it("keeps only what differs from the declared default", () => {

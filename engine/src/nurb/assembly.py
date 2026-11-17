@@ -39,7 +39,7 @@ import pathlib
 import sys
 from dataclasses import dataclass, field
 
-from .registry import PartDef, declared, param_docs
+from .registry import PartDef, choices, declared, param_docs
 
 # Findings come from checks.py's vocabulary so an assembly's report reads exactly like
 # a part's: same severities, same line format, same sorting.
@@ -348,6 +348,7 @@ def assembly(fn):
         params=params,
         accepts_draft=True,
         docs=param_docs(fn, params),
+        choices=choices(fn, params),
     )
     return wrapped
 

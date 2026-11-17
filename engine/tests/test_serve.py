@@ -794,7 +794,14 @@ SWITCHED = """from nurb import *
 
 
 @part
-def switched(width=100.0, count=2, wall_thickness=2.0, solid=True, label="plate"):
+def switched(
+    width=100.0,
+    count=2,
+    wall_thickness=2.0,
+    solid=True,
+    label="plate",
+    finish: Literal["matte", "gloss"] = "matte",
+):
     return Box(width, 20.0 + wall_thickness, 5.0 * count)
 """
 
@@ -836,8 +843,15 @@ def test_a_value_that_is_not_the_kind_it_names_is_refused(home):
         assert refused(params, {"values": {"solid": "false"}})[1] == (
             "solid is on or off, not 'false'"
         )
-        assert refused(params, {"values": {"label": "wide"}})[1] == (
-            "label is not a number, so the sliders cannot set it"
+        assert refused(params, {"values": {"label": 3}})[1] == "label takes text, not 3"
+        assert refused(params, {"values": {"label": "a\tb"}})[1] == (
+            "label has a character that cannot be printed"
+        )
+        assert refused(params, {"values": {"label": "x" * 201}})[0] == 400
+        assert refused(params, {"values": {"label": "a\ud800"}})[0] == 400
+
+        assert refused(params, {"values": {"finish": "satin"}})[1] == (
+            "finish is one of matte, gloss, not 'satin'"
         )
 
         # A switch the page did send as a switch still lands.
@@ -850,6 +864,35 @@ def test_a_value_that_is_not_the_kind_it_names_is_refused(home):
             "solid": False,
             "count": 3,
         }
+
+
+def test_typed_text_and_a_picked_choice_build_and_save(home):
+    """The text box and the picker reach the part like a slider does, and Save as
+    default writes them into the signature."""
+    from nurb import db
+
+    project_id, part_id = a_switched()
+    with serving(home, free_port()) as url:
+        values = {"label": "Biscuit's tag", "finish": "gloss"}
+        answer = json.loads(post(f"{url}/api/parts/{part_id}/params", {"values": values})[2])
+        assert answer["build"]["status"] == "ok"
+        detail = json.loads(get(f"{url}/api/projects/{project_id}")[2])
+        shown = next(p for p in detail["parts"] if p["name"] == "switched")
+        assert shown["overrides"] == values
+        rows = {p["name"]: p for p in shown["params"]}
+        assert rows["finish"]["kind"] == "choice" and rows["finish"]["options"] == ["matte", "gloss"]
+        assert rows["label"]["kind"] == "str"
+
+        applied = json.loads(post(f"{url}/api/parts/{part_id}/apply", {"values": values})[2])
+        assert applied["written"] == ["finish", "label"]
+        conn = db.connect()
+        try:
+            source = conn.execute(
+                "SELECT source FROM part_revisions WHERE id = ?", (applied["revision_id"],)
+            ).fetchone()["source"]
+        finally:
+            conn.close()
+        assert 'label="Biscuit\'s tag"' in source and '= "gloss"' in source
 
 
 def test_a_failed_build_keeps_the_sliders(home):

@@ -10,6 +10,10 @@ const params: Param[] = [
   { name: "bracket_count", kind: "int", default: 4 },
   { name: "draft", kind: "bool", default: false },
   { name: "finish", kind: "str", default: "matte" },
+  { name: "style", kind: "choice", default: "raised", options: ["raised", "engraved", "flush"] },
+  { name: "font", kind: "choice", default: "Atkinson Bold", options: ["Atkinson Bold", "Stencil", "Open Sans Bold"] },
+  // A default the engine cannot offer a control for, like a tuple.
+  { name: "profile", kind: "other" as Param["kind"], default: "(1, 2)" },
 ]
 
 // jsdom has no PointerEvent, so a fired one carries no clientX. A MouseEvent of
@@ -59,7 +63,31 @@ describe("ParamsPanel", () => {
     expect(screen.getByLabelText("bracket_count value")).toHaveValue("4")
     expect(screen.getByRole("switch", { name: "draft" })).toHaveAttribute("aria-checked", "false")
     expect(screen.getByText("Set by the plan")).toBeInTheDocument()
-    expect(screen.queryByLabelText("finish value")).toBeNull()
+    expect(screen.getByText("(1, 2)")).toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "finish" })).toHaveValue("matte")
+    expect(screen.getByRole("radio", { name: "raised" })).toHaveAttribute("aria-checked", "true")
+    // Long option names do not fit a segmented control, so they get a menu.
+    expect(screen.getByRole("combobox", { name: "font" })).toHaveValue("Atkinson Bold")
+  })
+
+  it("sends every keystroke of a text parameter, and Escape undoes the edit", async () => {
+    const onApply = vi.fn()
+    render(<Host onApply={onApply} />)
+    const box = screen.getByRole("textbox", { name: "finish" })
+    await userEvent.clear(box)
+    await userEvent.type(box, "PLA Silk")
+    expect(box).toHaveValue("PLA Silk")
+    await userEvent.click(screen.getByRole("radio", { name: "flush" }))
+    await userEvent.click(screen.getByRole("button", { name: /Save as default/ }))
+    expect(onApply).toHaveBeenCalledWith({ finish: "PLA Silk", style: "flush" })
+    await userEvent.type(box, " 2{Escape}")
+    expect(box).toHaveValue("PLA Silk")
+  })
+
+  it("shows the panel for a part whose only parameter is text", () => {
+    render(<ParamsPanel params={[params[3]]} values={{}} onChange={vi.fn()} onApply={vi.fn()} />)
+    expect(screen.getByRole("textbox", { name: "finish" })).toBeInTheDocument()
+    expect(screen.queryByText("Yours to drag")).toBeNull()
   })
 
   it("calls onApply with the edited values when Save as default is clicked", async () => {
@@ -301,7 +329,7 @@ describe("ParamsPanel", () => {
 
   it("renders nothing when no param is adjustable", () => {
     const { container } = render(
-      <ParamsPanel params={[params[3]]} values={{}} onChange={vi.fn()} onApply={vi.fn()} />
+      <ParamsPanel params={[params[6]]} values={{}} onChange={vi.fn()} onApply={vi.fn()} />
     )
     expect(container).toBeEmptyDOMElement()
   })

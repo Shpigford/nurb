@@ -42,6 +42,10 @@ export const palette = {
   // Scenery stays neutral, and its albedo is pre-darkened because the key is bright enough
   // to clip the part's red: 0x78818d lit from above reads as the grey-blue token, 0xaab6c6.
   context: 0x78818d,
+  // Text is the second filament. Off-white, pre-darkened like the rest so the key does
+  // not clip it to paper, with a grey outline because the red one reads as a smudge.
+  text: 0xd9dde4,
+  textEdge: 0x8b95a6,
   edge: 0xa32409,
   gridMinor: 0xcfe0f1,
   gridMajor: 0xbcd2e8,
@@ -222,9 +226,15 @@ export function buildPartGroup(gltfScene: Object3D, plane: Plane, pal: Palette):
       material.transparent = true
       material.opacity = 0.3
     } else {
+      if (mesh.name === "text") material.color.setHex(pal.text)
       const outline = new LineSegments(
         new EdgesGeometry(geometry, EDGE_ANGLE),
-        new LineBasicMaterial({ color: pal.edge, transparent: true, opacity: 0.35, clippingPlanes: [plane] })
+        new LineBasicMaterial({
+          color: mesh.name === "text" ? pal.textEdge : pal.edge,
+          transparent: true,
+          opacity: 0.35,
+          clippingPlanes: [plane],
+        })
       )
       mesh.add(outline)
     }

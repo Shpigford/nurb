@@ -5,6 +5,8 @@ export declare const palette: {
     readonly stage: 15069435;
     readonly part: 16732720;
     readonly context: 7897485;
+    readonly text: 14278116;
+    readonly textEdge: 9147814;
     readonly edge: 10691593;
     readonly gridMinor: 13623537;
     readonly gridMajor: 12374760;

@@ -47,7 +47,9 @@ def facts(shape, ctx=None, findings=None, variants=None):
     )
     lines = [size]
 
-    small = [f for f in shape.faces() if f.area < ctx.sliver_area]
+    # Counted on what the sliver rule reads, so a card never reports glyph faces the
+    # checks deliberately leave to the text rule.
+    small = [f for f in checks.judged(shape, cosmetic=True).faces() if f.area < ctx.sliver_area]
     if small:
         lines.append(
             f"Slivers: {len(small)} under {ctx.sliver_area}mm2, "
@@ -71,7 +73,7 @@ def facts(shape, ctx=None, findings=None, variants=None):
     for name, built, its_ctx, its_findings in variants or []:
         box = built.bounding_box()
         solids = len(built.solids())
-        small = [f for f in built.faces() if f.area < its_ctx.sliver_area]
+        small = [f for f in checks.judged(built, cosmetic=True).faces() if f.area < its_ctx.sliver_area]
         lines.append(
             f"Variant {name}: {box.size.X:.2f} x {box.size.Y:.2f} x {box.size.Z:.2f} mm, "
             f"{built.volume:.1f} mm3, {solids} solid{'s' if solids != 1 else ''}, "
