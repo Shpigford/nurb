@@ -68,6 +68,7 @@ A release is a version bump merged to main: `uv version X.Y.Z` in `engine/`, plu
 ```
 engine/src/nurb/registry.py      @part, signature introspection
 engine/src/nurb/builder.py       load, build, tessellate, GLB
+engine/src/nurb/sandbox.py       the macOS walls around the build worker: no network, no programs, writes only to scratch
 engine/src/nurb/checks.py        printability rules, convexity, Finding/Context, variants
 engine/src/nurb/compare.py       deviation from a target mesh, the ghost's numbers
 engine/src/nurb/polish.py        the bisecting polish pass, and chamfer with real errors
