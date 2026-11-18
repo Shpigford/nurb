@@ -11,6 +11,7 @@ export const FILES = {
   "part.stl": "model/stl",
   "part.3mf": "model/3mf",
   "part.png": "image/png",
+  "og.png": "image/png",
 };
 const MOST = 40 * 1024 * 1024;
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
@@ -88,7 +89,9 @@ export async function readUpload(request) {
   // The bytes have to be what the name says, so the bucket only ever holds parts.
   if (!starts(files["part.glb"], 0x67, 0x6c, 0x54, 0x46)) return { error: "part.glb is not a GLB" };
   if (!starts(files["part.3mf"], 0x50, 0x4b)) return { error: "part.3mf is not a 3MF" };
-  if (!starts(files["part.png"], 0x89, 0x50, 0x4e, 0x47)) return { error: "part.png is not a PNG" };
+  for (const name of ["part.png", "og.png"]) {
+    if (!starts(files[name], 0x89, 0x50, 0x4e, 0x47)) return { error: `${name} is not a PNG` };
+  }
   return { files, meta };
 }
 

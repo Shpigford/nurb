@@ -2083,7 +2083,7 @@ def test_a_shared_part_is_a_link_that_updates_opens_elsewhere_and_comes_down(hom
             files = shares[link]["files"]
             assert sorted(files) == sorted(share.FILES)
             assert files["part.glb"][:4] == b"glTF" and files["part.3mf"][:2] == b"PK"
-            assert files["part.png"][:4] == b"\x89PNG"
+            assert files["part.png"][:4] == files["og.png"][:4] == b"\x89PNG"
             meta = json.loads(files["part.json"])
             # The copy someone opens is the part they saw, not the sharer's starting point.
             assert "count=3" in meta["source"]

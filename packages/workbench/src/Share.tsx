@@ -1,7 +1,7 @@
 import clsx from "clsx"
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react"
 import { createPortal } from "react-dom"
-import { Button, relativeTime, type Params } from "@nurb/ui"
+import { Button, Icon, relativeTime, type Params } from "@nurb/ui"
 import { sharePart, unsharePart, type PartShare } from "./api"
 
 /**
@@ -104,7 +104,7 @@ export function ShareMenu({
           open ? "bg-raised text-ink" : "text-muted hover:text-ink"
         )}
       >
-        {share ? <span aria-hidden="true" className="size-1.5 rounded-full bg-accent" /> : null}
+        <Icon name="share" className={share ? "text-accent" : undefined} />
         <span className="mono-label">{share ? "Shared" : "Share"}</span>
       </button>
       {open

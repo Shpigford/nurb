@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 
-from . import __version__, db, edit, engine_run, labels, materialize, mcp_server, share, spec
+from . import __version__, db, edit, engine_run, labels, materialize, mcp_server, og, share, spec
 
 STATE = "serve.json"
 LOCK = "serve.lock"
@@ -1706,6 +1706,7 @@ def _routes(conn, lock, server, token, pid):
                     "part.stl": stl,
                     "part.3mf": printable,
                     "part.png": share.picture(run["glb"]),
+                    "og.png": og.card(run["glb"], shared["title"] or shared["name"].replace("_", " ").capitalize(), shared["size_mm"]),
                 },
                 existing,
             )

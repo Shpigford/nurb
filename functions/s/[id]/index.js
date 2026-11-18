@@ -150,7 +150,7 @@ function page(id, meta, sharedAt, origin) {
   // A build's bounding box is x, y, z: across, front to back, and up off the bed.
   const size = Array.isArray(meta.size_mm) && meta.size_mm.length === 3 ? meta.size_mm.map((n) => Math.round(n)) : null;
   const when = sharedAt ? new Date(sharedAt).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }).toUpperCase() : "";
-  return `${head(title, description, `${origin}${files}/part.png`, url)}
+  return `${head(title, description, `${origin}${files}/og.png`, url)}
 <body><div class="page share">${BAR}
 <main class="hero">
   <div class="stage" id="stage">

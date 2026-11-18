@@ -23,7 +23,7 @@ from .shared import placed as places
 HOST = os.environ.get("NURB_SHARE_HOST", "https://nurb.app").rstrip("/")
 FORMAT = 1
 # The files a share carries, and nothing else: the site refuses any other name.
-FILES = ("part.json", "part.glb", "part.stl", "part.3mf", "part.png")
+FILES = ("part.json", "part.glb", "part.stl", "part.3mf", "part.png", "og.png")
 # A link as a person pastes it, the app's own scheme, or the bare id.
 LINK = re.compile(r"^(?:(?:https?://[^/\s]+)?/s/|nurb://open/)?([A-Za-z0-9]{10})/?$")
 TIMEOUT = 60
