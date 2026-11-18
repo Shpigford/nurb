@@ -183,7 +183,7 @@ export function ShareMenu({
                 ) : (
                   <>
                     <p className="text-[13px] leading-[19px] text-ink-soft">
-                      Anyone with the link can download this part or open a copy in nurb.
+                      Anyone with the link can download this part or open a copy in nurb. The link includes its source and the project's supporting files.
                     </p>
                     <Button
                       variant="accent"

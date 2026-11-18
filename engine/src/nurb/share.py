@@ -7,10 +7,12 @@ sits on either end; the token handed back at upload is the only thing that can r
 or delete the link, and it stays in the sharer's database.
 """
 
+import base64
 import io
 import json
 import math
 import os
+import pathlib
 import re
 import urllib.error
 import urllib.request
@@ -53,7 +55,7 @@ def bundle(conn, part, run, values):
 
     source = part["source"]
     if values:
-        source, _, _ = edit.apply_to_source(source, values)
+        source, _, _ = edit.apply_to_source(source, values, freeze=True)
     params = [
         {
             "name": p.get("name"),
@@ -80,7 +82,9 @@ def bundle(conn, part, run, values):
         for n in placed
     ]
     # A shared module reads measurements too (notch's system.py reads the bracket pitch).
-    texts = [source, *(m["source"] for m in modules), *(p["source"] for p in parts)]
+    files = db.project_files_of(conn, part["project_id"])
+    texts = [part["source"], source, *(m["source"] for m in modules), *(p["source"] for p in parts)]
+    texts.extend(row["content"].decode("utf-8", errors="replace") for row in files if row["path"].endswith(".py"))
     reads = set().union(*(db.measurement_names(text) for text in texts))
     return {
         "format": FORMAT,
@@ -96,8 +100,12 @@ def bundle(conn, part, run, values):
         "card_md": part["card_md"],
         "modules": modules,
         "parts": parts,
+        "files": [
+            {"path": row["path"], "content": base64.b64encode(row["content"]).decode(), "executable": bool(row["executable"])}
+            for row in files
+        ],
         "measurements": [
-            {"name": row["name"], "value": row["value"], "unit": row["unit"], "how": row["how"]}
+            {"name": row["name"], "value": row["value"], "unit": row["unit"], "how": row["how"], "provisional": bool(row["provisional"])}
             for row in db.measurements_of(conn, part["project_id"])
             if row["name"] in reads
         ],
@@ -188,8 +196,6 @@ def fetch(link):
 def peek(link):
     """What the app shows before opening a link: the part's name, its picture, and how
     many numbers come with it. Nothing is copied or built yet."""
-    import base64
-
     shared = fetch(link)
     png = _request("GET", f"{HOST}/s/{share_id(link)}/part.png", raw=True)
     return {
@@ -234,6 +240,22 @@ def land(conn, shared):
     names += [p["name"] for p in parts]
     if len(set(names)) != len(names) or name in names:
         raise strange
+    files = []
+    paths = set()
+    for entry in shared.get("files") or []:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str) or not isinstance(entry.get("content"), str):
+            raise strange
+        path = pathlib.PurePosixPath(entry["path"])
+        if path.is_absolute() or not path.parts or ".." in path.parts or path.as_posix() != entry["path"] or path in paths:
+            raise strange
+        try:
+            content = base64.b64decode(entry["content"], validate=True)
+        except ValueError:
+            raise strange from None
+        paths.add(path)
+        files.append((path.as_posix(), content, bool(entry.get("executable"))))
+    if any(parent in paths for path in paths for parent in path.parents):
+        raise strange
     rows = shared.get("measurements") or []
     for row in rows:
         if (
@@ -246,6 +268,8 @@ def land(conn, shared):
             raise ShareError("this shared part carries a measurement nurb cannot read, so it was not opened.")
     with db.transaction(conn):
         project_id = db.create_project(conn, name)
+        for path, content, executable in files:
+            db.add_project_file(conn, project_id, path, content, executable=executable)
         for module in modules:
             db.create_part(conn, project_id, module["name"], module["source"], kind=module["kind"])
         for row in rows:
@@ -256,6 +280,7 @@ def land(conn, shared):
                 float(row["value"]),
                 str(row.get("how") or "from a shared part"),
                 unit=str(row.get("unit") or "mm"),
+                provisional=bool(row.get("provisional", False)),
             )
         for placed in parts:
             _add_part(conn, project_id, placed)

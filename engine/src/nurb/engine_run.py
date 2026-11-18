@@ -424,7 +424,8 @@ def part_identity(conn, part_id):
 
 
 def export_geometry(
-    identity, fmt, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS, deadline=None
+    identity, fmt, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS, deadline=None,
+    *, scratch_root=None,
 ):
     """One part as a downloadable file: (bytes, filename, note).
 
@@ -447,8 +448,8 @@ def export_geometry(
     else:
         request = {
             "op": "export",
-            "scratch_root": None,
-            "database_path": database_path,
+            "scratch_root": str(scratch_root) if scratch_root is not None else None,
+            "database_path": database_path if scratch_root is None else None,
             "project_id": project_id,
             "part_name": part_name,
             "overrides": overrides,

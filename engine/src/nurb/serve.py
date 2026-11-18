@@ -1042,6 +1042,16 @@ def _routes(conn, lock, server, token, pid):
         return await anyio.to_thread.run_sync(go)
 
     one_slicer = threading.Lock()
+    share_changes = anyio.Lock()
+
+    def changing_shares(handler):
+        async def route(request):
+            # Keep the removal token attached until an upload and its record finish.
+            # Reads and ordinary edits remain free while sharing is on the network.
+            async with share_changes:
+                return await handler(request)
+
+        return route
 
     async def read(sql, args):
         return await query(lambda conn: conn.execute(sql, args).fetchall())
@@ -1677,28 +1687,35 @@ def _routes(conn, lock, server, token, pid):
         """Put the part on nurb.app as a link, at the values the page is holding. A part
         already shared keeps its link, now showing this build."""
         sent = await body_of(request)
+        snapshot = tempfile.TemporaryDirectory(prefix="nurb-share-")
 
         def prepare(conn):
             part = _part_row(conn, request.path_params["part_id"])
             values = _values(conn, part, sent.get("values"))
-            run = _run_for(conn, part, values)
+            run_id, _ = engine_run.run_build(conn, part["id"], overrides=values or None)
+            run = _run_row(conn, run_id)
             if run["status"] != "ok" or run["glb"] is None:
                 raise _Refused(409, _said(run, part["name"]))
             row = next(r for r in db.parts_of(conn, part["project_id"]) if r["id"] == part["id"])
             try:
                 shared = share.bundle(conn, row, run, values)
                 identity = engine_run.part_identity(conn, part["id"])
+                materialize.materialize(conn, part["project_id"], into=snapshot.name)
             except (ValueError, edit.EditError) as exc:
                 raise _Refused(409, str(exc)) from None
             existing = conn.execute("SELECT * FROM shares WHERE part_id = ?", (part["id"],)).fetchone()
             return part, run, shared, identity, values or None, existing
 
-        part, run, shared, identity, overrides, existing = await query(prepare)
+        try:
+            part, run, shared, identity, overrides, existing = await query(prepare)
+        except BaseException:
+            snapshot.cleanup()
+            raise
 
         def make():
             # Off the lock: two exports and an upload are seconds, and the page reads on.
-            stl = engine_run.export_geometry(identity, "stl", overrides=overrides)[0]
-            printable = engine_run.export_geometry(identity, "3mf", overrides=overrides)[0]
+            stl = engine_run.export_geometry(identity, "stl", overrides=overrides, scratch_root=snapshot.name)[0]
+            printable = engine_run.export_geometry(identity, "3mf", overrides=overrides, scratch_root=snapshot.name)[0]
             return share.upload(
                 {
                     "part.json": json.dumps(shared).encode(),
@@ -1715,6 +1732,8 @@ def _routes(conn, lock, server, token, pid):
             answer = await anyio.to_thread.run_sync(make)
         except (ValueError, share.ShareError) as exc:
             raise _Refused(502, str(exc)) from None
+        finally:
+            snapshot.cleanup()
 
         def record(conn):
             with db.transaction(conn):
@@ -2218,11 +2237,11 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/import", endpoint=answering(project_import), methods=["POST"]),
         Route("/api/projects/{project_id}", endpoint=project),
         Route("/api/projects/{project_id}", endpoint=answering(project_rename), methods=["PATCH"]),
-        Route("/api/projects/{project_id}", endpoint=answering(project_delete), methods=["DELETE"]),
+        Route("/api/projects/{project_id}", endpoint=answering(changing_shares(project_delete)), methods=["DELETE"]),
         Route("/api/projects/{project_id}/folder", endpoint=answering(project_folder), methods=["POST"]),
         Route("/api/parts", endpoint=parts),
         Route("/api/parts/{part_id}/project", endpoint=answering(part_move), methods=["POST"]),
-        Route("/api/parts/{part_id}", endpoint=answering(part_delete), methods=["DELETE"]),
+        Route("/api/parts/{part_id}", endpoint=answering(changing_shares(part_delete)), methods=["DELETE"]),
         Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
         Route("/api/projects/{project_id}/draft", endpoint=answering(project_draft), methods=["POST"]),
@@ -2249,8 +2268,8 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}/revisions/{revision_id}/restore", endpoint=answering(part_restore), methods=["POST"]),
         Route("/api/parts/{part_id}/export", endpoint=answering(part_export), methods=["POST"]),
         Route("/api/parts/{part_id}/slice", endpoint=answering(part_slice), methods=["POST"]),
-        Route("/api/parts/{part_id}/share", endpoint=answering(part_share), methods=["POST"]),
-        Route("/api/parts/{part_id}/share", endpoint=answering(part_unshare), methods=["DELETE"]),
+        Route("/api/parts/{part_id}/share", endpoint=answering(changing_shares(part_share)), methods=["POST"]),
+        Route("/api/parts/{part_id}/share", endpoint=answering(changing_shares(part_unshare)), methods=["DELETE"]),
         Route("/api/shares/peek", endpoint=answering(share_peek), methods=["POST"]),
         Route("/api/shares/open", endpoint=answering(share_open), methods=["POST"]),
         Route("/glb/{project_id}/{part}.glb", endpoint=glb),
