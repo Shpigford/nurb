@@ -24,3 +24,6 @@ packages/ui/fonts/Satoshi-Variable.ttf
 
 # Vite build cache
 packages/workbench/tmp/
+
+# Local state of `wrangler pages dev` for the share functions.
+.wrangler/

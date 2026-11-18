@@ -44,6 +44,7 @@ engine/     the Python engine and the local serve process (uv project; run every
 packages/   @nurb/ui (tokens, viewer, panels, cards) and @nurb/workbench (the part page the engine serves and the app embeds)
 desktop/    the Tauri app: Rust core, React shell, bundles the engine wheel
 site/       nurb.app marketing pages
+functions/  nurb.app's Pages Functions: shared-part links at /s/<id>, stored in the R2 bucket bound as SHARES
 ```
 
 ## Running it
@@ -86,6 +87,7 @@ engine/src/nurb/text.py          add_text(), lettering in the bundled fonts in e
 engine/src/nurb/render.py        headless PNG through the numpy rasterizer in raster.py
 engine/src/nurb/raster.py        GLB in, flat-shaded PNG out: the four views, the composite, and the PNG encoder
 engine/src/nurb/slicing.py       the handoff to an installed slicer, and the two numbers back
+engine/src/nurb/share.py         a part as a public link on nurb.app (NURB_SHARE_HOST overrides it), and a shared link back into the library
 engine/src/nurb/doctrine.md      the doctrine itself, shipped in the package
 engine/src/nurb/serve.py         HTTP, websocket and MCP on one port, the one process that owns the database
 engine/src/nurb/mcp_server.py    the tool dispatcher: tools.json is the contract, this is its only implementation

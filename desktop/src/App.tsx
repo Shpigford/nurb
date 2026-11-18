@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { ask, message, open as pickFolder } from "@tauri-apps/plugin-dialog";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -14,9 +16,12 @@ import {
   importFolder,
   listParts,
   movePart,
+  openSharedPart,
+  peekSharedPart,
   promoteToFolder,
   type LibraryPart,
   type ProjectSummary,
+  type SharedPeek,
 } from "@nurb/workbench/api";
 import { reconnect, useLive } from "@nurb/workbench/live";
 import { useProject } from "@nurb/workbench/useProject";
@@ -39,6 +44,7 @@ import ProjectPanel from "./ProjectPanel";
 import { openInSlicer, saveToDownloads } from "./downloads";
 import { isDraft, messagesForPart, moveTargets, titleCase } from "./parts";
 import ProjectPicker from "./ProjectPicker";
+import SharedPartDialog from "./SharedPartDialog";
 import Setup from "./Setup";
 import Settings, { type AboutInfo, type SettingsSection } from "./Settings";
 import { broughtOver, importV1Folders, notBroughtOver } from "./v1Import";
@@ -744,6 +750,51 @@ function App() {
     if (typeof picked === "string") await runImport(picked);
   }, [runImport]);
 
+  // "Open in nurb" on a share page arrives as nurb://open/<id>. Rust holds the link
+  // until the engine is up; the dialog shows the part before anything is copied.
+  const [shared, setShared] = useState<{ link: string; peek: SharedPeek | null; error: string | null; busy: boolean } | null>(null);
+  const sharedQueue = useRef<string[]>([]);
+
+  const showNextShared = useCallback(() => {
+    const link = sharedQueue.current.shift();
+    if (!link) return setShared(null);
+    setShared({ link, peek: null, error: null, busy: false });
+    peekSharedPart(link).then(
+      (peek) => setShared((now) => (now?.link === link ? { ...now, peek } : now)),
+      (e: unknown) => setShared((now) => (now?.link === link ? { ...now, error: e instanceof Error ? e.message : String(e) } : now)),
+    );
+  }, []);
+
+  const sharedOpen = useRef(false);
+  sharedOpen.current = shared !== null;
+  const takeSharedLinks = useCallback(async () => {
+    sharedQueue.current.push(...(await invoke<string[]>("take_open_links")));
+    if (!sharedOpen.current) showNextShared();
+  }, [showNextShared]);
+
+  const openShared = useCallback(async () => {
+    if (!shared?.peek) return;
+    const { link } = shared;
+    setShared({ ...shared, busy: true });
+    try {
+      const opened = await openSharedPart(link);
+      await loadProjects();
+      openPart(opened.project_id, opened.part);
+      showNextShared();
+    } catch (e) {
+      setShared((now) => (now?.link === link ? { ...now, busy: false, error: e instanceof Error ? e.message : String(e) } : now));
+    }
+  }, [shared, loadProjects, openPart, showNextShared]);
+
+  useEffect(() => {
+    if (!served) return;
+    void takeSharedLinks();
+    const off = listen("open-links", () => void takeSharedLinks());
+    return () => {
+      off.then((fn) => fn()).catch(() => {});
+    };
+  }, [served, takeSharedLinks]);
+
   // Patched once for the life of the page. Inside the listener effect below
   // these would stack: one more wrapper and one more listener per refetch.
   useEffect(() => {
@@ -991,6 +1042,8 @@ function App() {
           onManagePrinters={() => setSettingsSection("printers")}
           onSaveFile={saveToDownloads}
           onOpenInSlicer={openInSlicer}
+          onCopyText={writeText}
+          onOpenLink={(url) => void openUrl(url).catch(() => {})}
           dragRegion
           header={{
             before: (
@@ -1157,6 +1210,17 @@ function App() {
             onClose={() => setSettingsSection(null)}
           />
         </div>
+      ) : null}
+
+      {shared ? (
+        <SharedPartDialog
+          key={shared.link}
+          peek={shared.peek}
+          error={shared.error}
+          busy={shared.busy}
+          onOpen={() => void openShared()}
+          onCancel={showNextShared}
+        />
       ) : null}
 
       {picking ? (

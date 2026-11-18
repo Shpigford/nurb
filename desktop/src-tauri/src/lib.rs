@@ -19,6 +19,31 @@ use tauri::{AppHandle, Manager, RunEvent, State};
 /// a directory on disk read it from here rather than resolving it again.
 struct AppData(PathBuf);
 
+/// Share links (`nurb://open/<id>`) macOS handed the app, until the page takes them.
+/// A link that launches the app arrives before the page or the engine is up, so it
+/// waits here rather than riding an event nobody is listening for yet.
+#[derive(Default)]
+struct OpenedLinks(std::sync::Mutex<Vec<String>>);
+
+#[tauri::command]
+fn take_open_links(links: State<OpenedLinks>) -> Vec<String> {
+    std::mem::take(&mut *links.0.lock().unwrap())
+}
+
+fn opened_links(app: &AppHandle, links: Vec<String>) {
+    use tauri::Emitter;
+    let links: Vec<String> = links.into_iter().filter(|link| link.starts_with("nurb://")).collect();
+    if links.is_empty() {
+        return;
+    }
+    app.state::<OpenedLinks>().0.lock().unwrap().extend(links);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    let _ = app.emit("open-links", ());
+}
+
 /// The serve every project in this window talks to. Blocking, because a cold
 /// start pays for the OCCT import before it answers.
 #[tauri::command]
@@ -198,6 +223,10 @@ fn test_hook(app: AppHandle) {
                     app.emit("test-open", name.to_string())
                 } else if let Some(path) = text.strip_prefix("import:") {
                     app.emit("test-import", path.to_string())
+                } else if let Some(link) = text.strip_prefix("link:") {
+                    // The path a click on "Open in nurb" takes, minus LaunchServices.
+                    opened_links(&app, vec![link.to_string()]);
+                    Ok(())
                 } else if let Some(name) = text.strip_prefix("part:") {
                     app.emit("test-part", name.to_string())
                 } else if let Some(js) = text.strip_prefix("eval:") {
@@ -333,6 +362,7 @@ pub fn run() {
         .manage(claude::Drivers::new())
         .manage(agents::Logins::new())
         .manage(provision::Provisioner::new())
+        .manage(OpenedLinks::default())
         .setup(|app| {
             // The login shell can take a second; ask it before the rail's
             // first agent check needs the answer.
@@ -370,6 +400,7 @@ pub fn run() {
             serve_log,
             project_dir,
             take_v1_folders,
+            take_open_links,
             select_part_chat,
             rename_part_chat,
             saved_chat,
@@ -400,6 +431,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let RunEvent::Opened { urls } = &event {
+                opened_links(app, urls.iter().map(|url| url.to_string()).collect());
+            }
             if let RunEvent::Exit = event {
                 app.state::<Supervisor>().shutdown();
                 app.state::<acp::Chats>().shutdown();
