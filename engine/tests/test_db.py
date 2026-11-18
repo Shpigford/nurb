@@ -443,7 +443,9 @@ def test_the_upgrade_folds_a_container_that_already_holds_a_set(tmp_path):
         db.create_part(conn, alone, "hook", "from nurb import *\n")
         # As a nurb before the fold left it.
         conn.execute("UPDATE projects SET folder = 0, name = 'Peppy Calibration Cube'")
-        conn.execute(f"PRAGMA user_version = {len(db.MIGRATIONS) - 1}")
+        # Just before the fold, which is the one migration written as code.
+        fold = next(i for i, step in enumerate(db.MIGRATIONS) if callable(step))
+        conn.execute(f"PRAGMA user_version = {fold}")
         db.migrate(conn)
 
         row = db.get_project(conn, project_id)

@@ -571,7 +571,7 @@ def kit(root):
     return (machine_path, process, filament, exe), None
 
 
-def write_project(model, target, machine_path, process, filament, exe=None, settings=None, plate=PLATE, colours=None):
+def write_project(model, target, machine_path, process, filament, exe=None, settings=None, plate=PLATE, colours=None, timeout=None):
     """Rewrite a bare 3MF as a project 3MF that carries its print settings.
 
     A bare 3MF is geometry and a unit; the settings a slicer honors on open live in
@@ -606,11 +606,14 @@ def write_project(model, target, machine_path, process, filament, exe=None, sett
             ],
             capture_output=True,
             text=True,
+            timeout=timeout,
         )
         written = out_dir / "project.3mf"
         if done.returncode != 0 or not written.is_file():
             raise Unavailable(f"the slicer refused this model: {_why(done, out_dir)}")
         os.replace(written, target)
+    except subprocess.TimeoutExpired:
+        raise Unavailable(f"the slicer took longer than {timeout:g} seconds") from None
     finally:
         shutil.rmtree(out_dir, ignore_errors=True)
     return target

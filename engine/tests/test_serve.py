@@ -1990,3 +1990,220 @@ def test_an_assembly_keeps_its_parts_inside_it(home):
 
         page = {p["name"]: p for p in json.loads(get(f"{url}/api/projects/{towel}")[2])["parts"]}
         assert page["arm"]["assembly"] == "holder" and page["holder"]["uses"] == ["arm", "roller"]
+
+
+@contextlib.contextmanager
+def fake_nurb_app():
+    """nurb.app's share API, enough of it to hold shares in memory: what the site's
+    functions/ does, minus R2."""
+    import email.parser
+    import http.server
+    import secrets
+    import threading
+
+    shares = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def answer(self, status, body):
+            data = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def files(self):
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+            head = f"Content-Type: {self.headers['Content-Type']}\r\n\r\n".encode()
+            message = email.parser.BytesParser().parsebytes(head + body)
+            return {part.get_param("name", header="content-disposition"): part.get_payload(decode=True) for part in message.get_payload()}
+
+        def owned(self, share):
+            return share in shares and self.headers.get("Authorization") == f"Bearer {shares[share]['token']}"
+
+        def do_POST(self):
+            share = secrets.token_hex(5)
+            shares[share] = {"token": "t-" + share, "files": self.files()}
+            self.answer(201, {"id": share, "token": "t-" + share, "url": f"/s/{share}"})
+
+        def do_PUT(self):
+            share = self.path.rsplit("/", 1)[-1]
+            if not self.owned(share):
+                return self.answer(403, {"error": "only the copy of nurb that shared this part can change it"})
+            shares[share]["files"] = self.files()
+            self.answer(200, {"id": share})
+
+        def do_DELETE(self):
+            share = self.path.rsplit("/", 1)[-1]
+            if share not in shares:
+                return self.answer(404, {"error": "no shared part at that link"})
+            if not self.owned(share):
+                return self.answer(403, {"error": "only the copy of nurb that shared this part can change it"})
+            del shares[share]
+            self.answer(200, {"deleted": share})
+
+        def do_GET(self):
+            share = self.path.split("/")[2]
+            if share not in shares:
+                return self.answer(404, {"error": "no shared part at that link"})
+            name = self.path.split("/")[3]
+            if name != "part.json":
+                data = shares[share]["files"][name]
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                return self.wfile.write(data)
+            self.answer(200, json.loads(shares[share]["files"]["part.json"]))
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}", shares
+    finally:
+        server.shutdown()
+
+
+def test_a_shared_part_is_a_link_that_updates_opens_elsewhere_and_comes_down(home, monkeypatch):
+    """Share at the slider values, see the link fall behind a newer build, bring it up
+    to date under the same link, open it as someone else's copy, and take it down."""
+    from nurb import share
+
+    project_id, part_id = a_slab()
+    with fake_nurb_app() as (host, shares):
+        monkeypatch.setenv("NURB_SHARE_HOST", host)
+        with serving(home, free_port()) as url:
+            _, _, body = post(f"{url}/api/parts/{part_id}/share", {"values": {"count": 3}})
+            shared = json.loads(body)["share"]
+            assert shared["current"] is True
+            (link,) = shares
+            assert shared["url"] == f"{host}/s/{link}"
+            files = shares[link]["files"]
+            assert sorted(files) == sorted(share.FILES)
+            assert files["part.glb"][:4] == b"glTF" and files["part.3mf"][:2] == b"PK"
+            assert files["part.png"][:4] == files["og.png"][:4] == b"\x89PNG"
+            meta = json.loads(files["part.json"])
+            # The copy someone opens is the part they saw, not the sharer's starting point.
+            assert "count=3" in meta["source"]
+            assert {"name": "count", "kind": "int", "value": 3} in meta["params"]
+            assert meta["size_mm"] == [100.0, 20.0, 15.0]
+
+            post(f"{url}/api/parts/{part_id}/params", {"values": {"count": 4}})
+            part = json.loads(get(f"{url}/api/projects/{project_id}")[2])["parts"][0]
+            assert part["share"]["current"] is False
+
+            _, _, body = post(f"{url}/api/parts/{part_id}/share", {"values": {"count": 4}})
+            assert json.loads(body)["share"]["current"] is True
+            assert list(shares) == [link]
+            assert "count=4" in json.loads(shares[link]["files"]["part.json"])["source"]
+
+            # What the app shows before anything is copied.
+            _, _, body = post(f"{url}/api/shares/peek", {"link": f"nurb://open/{link}"})
+            peeked = json.loads(body)
+            assert peeked["name"] == "slab" and peeked["params"] == 3
+            assert peeked["picture"].startswith("data:image/png;base64,")
+
+            _, _, body = post(f"{url}/api/shares/open", {"link": f"nurb://open/{link}"})
+            opened = json.loads(body)
+            assert opened["project_id"] != project_id and opened["part"] == "slab"
+            copy = json.loads(get(f"{url}/api/projects/{opened['project_id']}")[2])["parts"][0]
+            assert "count=4" in copy["source"]
+            assert copy["share"] is None
+
+            delete(f"{url}/api/parts/{part_id}/share")
+            assert shares == {}
+            part = json.loads(get(f"{url}/api/projects/{project_id}")[2])["parts"][0]
+            assert part["share"] is None
+
+            with pytest.raises(urllib.error.HTTPError) as gone:
+                post(f"{url}/api/shares/open", {"link": f"{host}/s/{link}"})
+            assert gone.value.code == 400
+            assert "taken down" in json.loads(gone.value.read())["error"]
+
+
+def test_a_shared_assembly_brings_the_parts_it_places(home, monkeypatch):
+    """An assembly builds its siblings, so a copy without them fails every build."""
+    from nurb import db, engine_run
+
+    conn = db.connect()
+    towel = db.create_project(conn, "towel")
+    db.create_part(conn, towel, "arm", SLAB.replace("slab", "arm"))
+    db.create_part(conn, towel, "roller", 'from nurb import *\n\n@assembly\ndef roller():\n    return use("arm")\n')
+    db.create_part(conn, towel, "loose", SLAB.replace("slab", "loose"))
+    holder = db.create_part(
+        conn, towel, "holder", 'from nurb import *\n\n@assembly\ndef holder():\n    return use("roller"), Pos(0, 50, 0) * use("arm")\n'
+    )
+    run_id, _ = engine_run.run_build(conn, holder)
+    assert conn.execute("SELECT status FROM build_runs WHERE id = ?", (run_id,)).fetchone()[0] == "ok"
+    conn.close()
+    with fake_nurb_app() as (host, shares):
+        monkeypatch.setenv("NURB_SHARE_HOST", host)
+        with serving(home, free_port()) as url:
+            post(f"{url}/api/parts/{holder}/share", {"values": {}})
+            (link,) = shares
+            meta = json.loads(shares[link]["files"]["part.json"])
+            # Placed through another assembly too, and nothing the holder does not place.
+            assert [p["name"] for p in meta["parts"]] == ["roller", "arm"]
+
+            opened = json.loads(post(f"{url}/api/shares/open", {"link": link})[2])
+    conn = db.connect()
+    copy = {row["name"]: row for row in db.parts_of(conn, opened["project_id"])}
+    assert sorted(copy) == ["arm", "holder", "roller"]
+    run_id, _ = engine_run.run_build(conn, copy["holder"]["id"])
+    assert conn.execute("SELECT status FROM build_runs WHERE id = ?", (run_id,)).fetchone()[0] == "ok"
+    conn.close()
+
+
+def test_deleting_a_shared_part_takes_its_link_down(home, monkeypatch):
+    """The token dies with the row, so the link has to go first or it stays up forever."""
+    project_id, part_id = a_slab()
+    with fake_nurb_app() as (host, shares):
+        monkeypatch.setenv("NURB_SHARE_HOST", host)
+        with serving(home, free_port()) as url:
+            post(f"{url}/api/parts/{part_id}/share", {"values": {}})
+            assert len(shares) == 1
+            delete(f"{url}/api/parts/{part_id}")
+            assert shares == {}
+
+            project_id, part_id = a_slab()
+            post(f"{url}/api/parts/{part_id}/share", {"values": {}})
+            assert len(shares) == 1
+            delete(f"{url}/api/projects/{project_id}")
+            assert shares == {}
+
+
+def test_a_share_link_is_read_in_every_form_a_person_has_it():
+    from nurb import share
+
+    for text in ("https://nurb.app/s/SckGVebnAF", "nurb.app/s/SckGVebnAF".join(["https://", ""]), "nurb://open/SckGVebnAF", " SckGVebnAF/ "):
+        assert share.share_id(text) == "SckGVebnAF", text
+    for text in ("", "https://nurb.app/", "SckGVebnA", "https://nurb.app/s/SckGVebnAF/part.json", "javascript:alert(1)"):
+        assert share.share_id(text) is None, text
+
+
+def test_a_shared_part_from_a_newer_nurb_or_with_a_strange_file_is_refused(home):
+    from nurb import db, share
+
+    conn = db.connect()
+    with pytest.raises(share.ShareError, match="newer nurb"):
+        share.land(conn, {"format": 2, "name": "slab", "source": SLAB})
+    with pytest.raises(share.ShareError, match="does not recognise"):
+        share.land(conn, {"format": 1, "name": "slab", "source": SLAB, "modules": [{"name": "../evil", "kind": "module", "source": ""}]})
+    hostile = [
+        {"modules": [{"name": "system", "kind": "parts_module", "source": ""}]},
+        {"modules": [{"name": "system", "kind": "module", "source": ""}] * 2},
+        {"modules": [{"name": "system", "kind": "module", "source": 5}]},
+        {"measurements": [{"name": "pitch", "value": float("inf"), "how": "x"}]},
+        {"measurements": [{"name": "pitch", "value": "12", "how": "x"}]},
+        {"parts": [{"name": "../arm", "source": SLAB}]},
+        {"parts": [{"name": "slab", "source": SLAB}]},
+        {"parts": [{"name": "arm", "source": None}]},
+    ]
+    for extra in hostile:
+        with pytest.raises(share.ShareError):
+            share.land(conn, {"format": 1, "name": "slab", "source": SLAB, **extra})
+    # A refusal leaves nothing half made in the library.
+    assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
+    conn.close()

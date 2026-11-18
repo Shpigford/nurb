@@ -64,6 +64,15 @@ export interface Part {
   uses?: string[]
   /** The assembly this part is inside, which the library shows in its place. */
   assembly?: string | null
+  /** The part's public link on nurb.app, or null when it is not shared. */
+  share?: PartShare | null
+}
+
+/** A part's public link. `current` is false once the part has built again since. */
+export interface PartShare {
+  url: string
+  shared_at: string
+  current: boolean
 }
 
 /** A person's name for a spot on the part, in the part's own mm. */
@@ -502,6 +511,35 @@ export async function exportProject(id: string, directory: string): Promise<{ di
 
 /** Call a part something else. The engine turns what was typed into a part name
  * ("Shelf Bracket" is shelf_bracket) and says what it was before. */
+/** Put the part on nurb.app at these slider values, or bring its link up to date. */
+export function sharePart(id: string, values: Params): Promise<{ share: PartShare }> {
+  return post(partUrl(id, "share"), { values })
+}
+
+/** Take the part's link down. */
+export async function unsharePart(id: string): Promise<void> {
+  const url = partUrl(id, "share")
+  const res = await fetch(base + url, { method: "DELETE" })
+  if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
+}
+
+/** What a shared link holds, before anything is copied: name, picture, how many numbers. */
+export interface SharedPeek {
+  name: string
+  title: string | null
+  params: number
+  picture: string
+}
+
+export function peekSharedPart(link: string): Promise<SharedPeek> {
+  return post("/api/shares/peek", { link })
+}
+
+/** Copy a part someone shared into this library. */
+export function openSharedPart(link: string): Promise<{ project_id: string; part: string }> {
+  return post("/api/shares/open", { link })
+}
+
 export async function renamePart(
   id: string,
   name: string,

@@ -18,11 +18,11 @@ class EditError(Exception):
 
 
 def _is_part(node):
-    """@part, @nurb.part, and the call forms."""
+    """@part, @assembly, their qualified names, and the call forms."""
     if isinstance(node, ast.Call):
         node = node.func
     name = node.attr if isinstance(node, ast.Attribute) else getattr(node, "id", None)
-    return name == "part"
+    return name in ("part", "assembly")
 
 
 def _part_function(tree, what):
@@ -87,13 +87,15 @@ def _splice(source, node, text):
     return "".join(lines)
 
 
-def apply_to_source(source, values):
+def apply_to_source(source, values, *, freeze=False):
     """Write `values` into the part's keyword defaults.
 
     Returns (new_source, written, skipped), where `written` is the sorted names that
     changed and `skipped` is a list of (name, why). Values already equal to the source's
     default are skipped silently, so applying an untouched exploration changes nothing.
     """
+    # A shared copy freezes the selected values, including expression defaults.
+    # Apply keeps expressions tied to their original shared settings instead.
     fn = _part_function(ast.parse(source), "the part")
     defaults = _defaults(fn)
 
@@ -103,7 +105,7 @@ def apply_to_source(source, values):
         if node is None:
             raise EditError(f"this part has no parameter named {name}")
         old = _literal(node)
-        if old is None:
+        if old is None and not freeze:
             # A default written as a name or a call is a value with a source. Replacing
             # it with a literal keeps the number and throws away the only record of
             # where the number came from, so this one is left alone and said out loud.
@@ -117,7 +119,8 @@ def apply_to_source(source, values):
                 skipped.append((name, f"defaults to {written}. Change {written} itself."))
             continue
         if old != new:
-            edits.append((name, node, _format(old, new, ast.get_source_segment(source, node) or "")))
+            text = repr(new) if freeze else _format(old, new, ast.get_source_segment(source, node) or "")
+            edits.append((name, node, text))
     if not edits:
         return source, [], skipped
 

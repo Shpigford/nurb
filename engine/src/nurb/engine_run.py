@@ -14,7 +14,7 @@ import time
 import traceback
 from dataclasses import replace
 
-from . import builder, checks, db, materialize, probe, raster, registry
+from . import builder, checks, db, materialize, probe, raster, registry, sandbox
 
 BUILD_TIMEOUT_SECONDS = 240
 
@@ -234,7 +234,7 @@ def _export_in_process(
     root, shape, ctx = _solid(
         scratch_root, part_name, overrides, profile, database_path, project_id
     )
-    note = None
+    note = finish = None
     # STEP is for CAD and keeps an assembly assembled; the print formats get the parts.
     plate = builder.print_set(shape, ctx.bed) if fmt in ("3mf", "stl") else [shape]
     laid_out = f"{len(plate)} parts laid out to print" if len(plate) > 1 else None
@@ -255,15 +255,10 @@ def _export_in_process(
                     text_note += f" (with one filament, pause at {lettered.swap_mm:g}mm and swap)"
             kit, why = slicing.kit(root)
             if kit:
-                machine, process, filament, exe = kit
+                # The slicer runs outside the walls, on the file rather than the part's
+                # code, so this hands over what it needs and `export_geometry` runs it.
                 settings, notes = slicing.tuned(plate, ctx)
-                try:
-                    slicing.write_project(
-                        target, target, machine, process, filament, exe, settings=settings, colours=colours
-                    )
-                    note = ", ".join(notes)
-                except slicing.Unavailable as exc:
-                    note = f"geometry only: {exc}"
+                finish = {"kit": kit, "settings": settings, "colours": colours, "notes": notes}
             else:
                 if "printer.toml" in why:
                     # The CLI's reason names a file; here the picker is on the page.
@@ -276,14 +271,24 @@ def _export_in_process(
             export_step(shape, str(target))
         else:
             raise ValueError(f"nurb does not export {fmt!r}")
-        return {"bytes": target.read_bytes(), "filename": target.name, "note": note}
+        return {"bytes": target.read_bytes(), "filename": target.name, "note": note, "finish": finish}
 
 
 OPS = {"build": _build_in_process, "export": _export_in_process}
 
 
-def _worker_main(connection):
-    """Keep OCCT warm while containing user exits, hangs and kernel crashes."""
+def _worker_main(connection, walls=None):
+    """Keep OCCT warm while containing user exits, hangs and kernel crashes.
+
+    Walled in before the first part runs: a part can come from anyone's share link.
+    """
+    refused = None
+    if walls is not None:
+        try:
+            sandbox.use_temp(walls[0])
+            sandbox.confine(walls)
+        except OSError as exc:
+            refused = str(exc)
     while True:
         try:
             request = connection.recv()
@@ -291,6 +296,9 @@ def _worker_main(connection):
             return
         op = request.pop("op", "build")
         try:
+            if refused:
+                # Fail closed: a worker that could not be walled in runs no part at all.
+                raise RuntimeError(refused)
             result = OPS[op](**request)
         except BaseException as exc:
             # A ValueError here is already a sentence for whoever asked; everything
@@ -314,7 +322,8 @@ class _EngineWorker:
     def _start(self):
         context = multiprocessing.get_context("spawn")
         parent, child = context.Pipe()
-        process = context.Process(target=_worker_main, args=(child,), daemon=True)
+        walls = sandbox.walls(db.home() / "scratch")
+        process = context.Process(target=_worker_main, args=(child, walls), daemon=True)
         process.start()
         child.close()
         self.connection = parent
@@ -335,6 +344,13 @@ class _EngineWorker:
         process.join()
 
     def run(self, request, timeout):
+        # The worker never opens the library: written out here, the project is all it
+        # can see, and nothing a part does inside the walls reaches the database.
+        if request.get("database_path") is not None:
+            try:
+                request["scratch_root"] = str(_root_for(None, request.pop("database_path"), request["project_id"]))
+            except Exception as exc:
+                return _empty_result(str(exc) if isinstance(exc, ValueError) else f"{type(exc).__name__}: {exc}")
         if self.process is None or not self.process.is_alive():
             self._stop()
             self._start()
@@ -424,7 +440,8 @@ def part_identity(conn, part_id):
 
 
 def export_geometry(
-    identity, fmt, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS, deadline=None
+    identity, fmt, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS, deadline=None,
+    *, scratch_root=None,
 ):
     """One part as a downloadable file: (bytes, filename, note).
 
@@ -447,8 +464,8 @@ def export_geometry(
     else:
         request = {
             "op": "export",
-            "scratch_root": None,
-            "database_path": database_path,
+            "scratch_root": str(scratch_root) if scratch_root is not None else None,
+            "database_path": database_path if scratch_root is None else None,
             "project_id": project_id,
             "part_name": part_name,
             "overrides": overrides,
@@ -460,7 +477,34 @@ def export_geometry(
             result = _WORKER.run(request, remaining)
     if result.get("error") or not result.get("bytes"):
         raise ValueError(result.get("error") or "the export came back empty")
-    return result["bytes"], result["filename"], result["note"]
+    data, note = result["bytes"], result["note"]
+    if result.get("finish"):
+        left = (deadline - time.monotonic()) if deadline is not None else timeout
+        data, said = _with_settings(data, result["filename"], result["finish"], max(left, 1))
+        note = ", ".join(n for n in (note, said) if n)
+    return data, result["filename"], note
+
+
+def _with_settings(data, filename, finish, timeout):
+    """A bare 3MF rewritten by the slicer to carry its print settings, and the note to
+    show. Here rather than in the worker: the slicer cannot start inside the walls,
+    and it only ever reads the file, never the part's code."""
+    import tempfile
+
+    from . import slicing
+
+    machine, process, filament, exe = finish["kit"]
+    with tempfile.TemporaryDirectory() as scratch:
+        target = pathlib.Path(scratch) / filename
+        target.write_bytes(data)
+        try:
+            slicing.write_project(
+                target, target, machine, process, filament, exe,
+                settings=finish["settings"], colours=finish["colours"], timeout=timeout,
+            )
+        except slicing.Unavailable as exc:
+            return data, f"geometry only: {exc}"
+        return target.read_bytes(), ", ".join(finish["notes"])
 
 
 def export_part(conn, part_id, fmt, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS, deadline=None):

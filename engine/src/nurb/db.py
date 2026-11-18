@@ -217,6 +217,18 @@ MIGRATIONS = [
         _fold_container(conn, row[0])
         for row in conn.execute("SELECT id FROM projects WHERE folder = 0").fetchall()
     ],
+    """
+    -- A part shared as a link on nurb.app. The token is the only key that replaces or
+    -- takes down the link, so it lives here and nowhere else. run_id is the build the
+    -- link shows, which is how the page knows the part has moved on since.
+    CREATE TABLE IF NOT EXISTS shares (
+        part_id TEXT PRIMARY KEY REFERENCES parts(id) ON DELETE CASCADE,
+        share_id TEXT NOT NULL,
+        token TEXT NOT NULL,
+        run_id TEXT,
+        shared_at TEXT NOT NULL
+    );
+    """,
 ]
 
 # What a run can carry besides its geometry: it is measured from one build, so it

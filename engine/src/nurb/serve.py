@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 
-from . import __version__, db, edit, engine_run, labels, materialize, mcp_server, spec
+from . import __version__, db, edit, engine_run, labels, materialize, mcp_server, og, share, spec
 
 STATE = "serve.json"
 LOCK = "serve.lock"
@@ -818,6 +818,20 @@ def _part_entry(conn, project_id, part, grouping=({}, {})):
         # What the sliders are standing on: the values that last build used.
         "overrides": json.loads(run["overrides"]) if run is not None else {},
         "build": _part_build(conn, project_id, part, run),
+        "share": _share_of(conn, part["id"], run),
+    }
+
+
+def _share_of(conn, part_id, run):
+    """The part's public link, if it has one. `current` is false once the part has
+    built again since, so the page can offer to bring the link up to date."""
+    row = conn.execute("SELECT * FROM shares WHERE part_id = ?", (part_id,)).fetchone()
+    if row is None:
+        return None
+    return {
+        "url": share.url_of(row["share_id"]),
+        "shared_at": row["shared_at"],
+        "current": run is not None and run["id"] == row["run_id"],
     }
 
 
@@ -1028,6 +1042,16 @@ def _routes(conn, lock, server, token, pid):
         return await anyio.to_thread.run_sync(go)
 
     one_slicer = threading.Lock()
+    share_changes = anyio.Lock()
+
+    def changing_shares(handler):
+        async def route(request):
+            # Keep the removal token attached until an upload and its record finish.
+            # Reads and ordinary edits remain free while sharing is on the network.
+            async with share_changes:
+                return await handler(request)
+
+        return route
 
     async def read(sql, args):
         return await query(lambda conn: conn.execute(sql, args).fetchall())
@@ -1424,26 +1448,51 @@ def _routes(conn, lock, server, token, pid):
 
         return await acted(work)
 
+    async def take_down(links):
+        """A deleted part's links come down with it: its token goes with the row, so
+        nothing could take them down later. Best effort, because a delete offline
+        still deletes."""
+        for row in links:
+            try:
+                await anyio.to_thread.run_sync(lambda row=row: share.remove(row))
+            except share.ShareError as exc:
+                print(f"could not take down {share.url_of(row['share_id'])}: {exc}", flush=True)
+
     async def part_delete(request):
+        links = []
+
         def work(conn):
             part_id = request.path_params["part_id"]
+            links.extend(conn.execute("SELECT * FROM shares WHERE part_id = ?", (part_id,)).fetchall())
             try:
                 project_id, whole = db.delete_part(conn, part_id)
             except ValueError:
                 raise _Refused(404, "no such part") from None
             return {"deleted": part_id, "project_id": project_id, "project_deleted": whole}
 
-        return await acted(work)
+        response = await acted(work)
+        await take_down(links)
+        return response
 
     async def project_delete(request):
+        links = []
+
         def work(conn):
             project_id = request.path_params["project_id"]
             if db.get_project(conn, project_id) is None:
                 raise _Refused(404, "no project")
+            links.extend(
+                conn.execute(
+                    "SELECT shares.* FROM shares JOIN parts ON parts.id = shares.part_id WHERE parts.project_id = ?",
+                    (project_id,),
+                ).fetchall()
+            )
             db.delete_project(conn, project_id)
             return {"deleted": project_id}
 
-        return await acted(work)
+        response = await acted(work)
+        await take_down(links)
+        return response
 
     async def part_params(request):
         """Build at the values on the sliders, without touching the source."""
@@ -1633,6 +1682,128 @@ def _routes(conn, lock, server, token, pid):
             # A header is one line, and a slicer's reason can run to several.
             headers["X-Nurb-Print-Settings"] = " ".join(note.split())
         return Response(body, media_type=EXPORTS[fmt], headers=headers)
+
+    async def part_share(request):
+        """Put the part on nurb.app as a link, at the values the page is holding. A part
+        already shared keeps its link, now showing this build."""
+        sent = await body_of(request)
+        snapshot = tempfile.TemporaryDirectory(prefix="nurb-share-")
+
+        def prepare(conn):
+            part = _part_row(conn, request.path_params["part_id"])
+            values = _values(conn, part, sent.get("values"))
+            run_id, _ = engine_run.run_build(conn, part["id"], overrides=values or None)
+            run = _run_row(conn, run_id)
+            if run["status"] != "ok" or run["glb"] is None:
+                raise _Refused(409, _said(run, part["name"]))
+            row = next(r for r in db.parts_of(conn, part["project_id"]) if r["id"] == part["id"])
+            try:
+                shared = share.bundle(conn, row, run, values)
+                identity = engine_run.part_identity(conn, part["id"])
+                materialize.materialize(conn, part["project_id"], into=snapshot.name)
+            except (ValueError, edit.EditError) as exc:
+                raise _Refused(409, str(exc)) from None
+            existing = conn.execute("SELECT * FROM shares WHERE part_id = ?", (part["id"],)).fetchone()
+            return part, run, shared, identity, values or None, existing
+
+        try:
+            part, run, shared, identity, overrides, existing = await query(prepare)
+        except BaseException:
+            snapshot.cleanup()
+            raise
+
+        def make():
+            # Off the lock: two exports and an upload are seconds, and the page reads on.
+            stl = engine_run.export_geometry(identity, "stl", overrides=overrides, scratch_root=snapshot.name)[0]
+            printable = engine_run.export_geometry(identity, "3mf", overrides=overrides, scratch_root=snapshot.name)[0]
+            return share.upload(
+                {
+                    "part.json": json.dumps(shared).encode(),
+                    "part.glb": run["glb"],
+                    "part.stl": stl,
+                    "part.3mf": printable,
+                    "part.png": share.picture(run["glb"]),
+                    "og.png": og.card(run["glb"], shared["title"] or shared["name"].replace("_", " ").capitalize(), shared["size_mm"]),
+                },
+                existing,
+            )
+
+        try:
+            answer = await anyio.to_thread.run_sync(make)
+        except (ValueError, share.ShareError) as exc:
+            raise _Refused(502, str(exc)) from None
+        finally:
+            snapshot.cleanup()
+
+        def record(conn):
+            with db.transaction(conn):
+                conn.execute(
+                    "INSERT OR REPLACE INTO shares (part_id, share_id, token, run_id, shared_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (
+                        part["id"],
+                        answer["id"],
+                        answer.get("token") or existing["token"],
+                        run["id"],
+                        db.now(),
+                    ),
+                )
+            db.changed("part", part["id"], part["project_id"])
+            return {"share": _share_of(conn, part["id"], db.latest_run(conn, part["id"]))}
+
+        return await acted(record)
+
+    async def part_unshare(request):
+        """Take the part's link down. The page that was at it says it is gone."""
+
+        def prepare(conn):
+            part = _part_row(conn, request.path_params["part_id"])
+            existing = conn.execute("SELECT * FROM shares WHERE part_id = ?", (part["id"],)).fetchone()
+            if existing is None:
+                raise _Refused(404, f"{part['name']} is not shared")
+            return part, existing
+
+        part, existing = await query(prepare)
+        try:
+            await anyio.to_thread.run_sync(lambda: share.remove(existing))
+        except share.ShareError as exc:
+            raise _Refused(502, str(exc)) from None
+
+        def forget(conn):
+            with db.transaction(conn):
+                conn.execute("DELETE FROM shares WHERE part_id = ?", (part["id"],))
+            db.changed("part", part["id"], part["project_id"])
+            return {"share": None}
+
+        return await acted(forget)
+
+    async def share_peek(request):
+        """The part behind a link, to show before the person decides to open it."""
+        sent = await body_of(request)
+        link = word(sent, "link", "link must be the share link")
+        try:
+            return JSONResponse(await anyio.to_thread.run_sync(lambda: share.peek(link)))
+        except share.ShareError as exc:
+            raise _Refused(400, str(exc)) from None
+
+    async def share_open(request):
+        """Copy a part someone shared into this library, as a new part of its own."""
+        sent = await body_of(request)
+        link = word(sent, "link", "link must be the share link")
+        try:
+            shared = await anyio.to_thread.run_sync(lambda: share.fetch(link))
+        except share.ShareError as exc:
+            raise _Refused(400, str(exc)) from None
+
+        def work(conn):
+            try:
+                project_id, name = share.land(conn, shared)
+            except (share.ShareError, ValueError, KeyError, TypeError) as exc:
+                said = str(exc) if isinstance(exc, share.ShareError) else "this shared part could not be read"
+                raise _Refused(400, said) from None
+            return {"project_id": project_id, "part": name}
+
+        return await acted(work)
 
     async def part_slice(request):
         """What this print costs: the two numbers only a slicer knows.
@@ -2066,11 +2237,11 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/import", endpoint=answering(project_import), methods=["POST"]),
         Route("/api/projects/{project_id}", endpoint=project),
         Route("/api/projects/{project_id}", endpoint=answering(project_rename), methods=["PATCH"]),
-        Route("/api/projects/{project_id}", endpoint=answering(project_delete), methods=["DELETE"]),
+        Route("/api/projects/{project_id}", endpoint=answering(changing_shares(project_delete)), methods=["DELETE"]),
         Route("/api/projects/{project_id}/folder", endpoint=answering(project_folder), methods=["POST"]),
         Route("/api/parts", endpoint=parts),
         Route("/api/parts/{part_id}/project", endpoint=answering(part_move), methods=["POST"]),
-        Route("/api/parts/{part_id}", endpoint=answering(part_delete), methods=["DELETE"]),
+        Route("/api/parts/{part_id}", endpoint=answering(changing_shares(part_delete)), methods=["DELETE"]),
         Route("/api/parts/{part_id}", endpoint=answering(part_rename), methods=["PATCH"]),
         Route("/api/projects/{project_id}/messages", endpoint=answering(project_message), methods=["POST"]),
         Route("/api/projects/{project_id}/draft", endpoint=answering(project_draft), methods=["POST"]),
@@ -2097,6 +2268,10 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}/revisions/{revision_id}/restore", endpoint=answering(part_restore), methods=["POST"]),
         Route("/api/parts/{part_id}/export", endpoint=answering(part_export), methods=["POST"]),
         Route("/api/parts/{part_id}/slice", endpoint=answering(part_slice), methods=["POST"]),
+        Route("/api/parts/{part_id}/share", endpoint=answering(changing_shares(part_share)), methods=["POST"]),
+        Route("/api/parts/{part_id}/share", endpoint=answering(changing_shares(part_unshare)), methods=["DELETE"]),
+        Route("/api/shares/peek", endpoint=answering(share_peek), methods=["POST"]),
+        Route("/api/shares/open", endpoint=answering(share_open), methods=["POST"]),
         Route("/glb/{project_id}/{part}.glb", endpoint=glb),
         Route("/render/{project_id}/{part}.png", endpoint=render),
         Route("/thumbnail/{project_id}/{part}.png", endpoint=thumbnail),

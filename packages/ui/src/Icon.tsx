@@ -9,7 +9,7 @@ import type { ReactNode, SVGProps } from "react"
 // 11810 download · 11809 expand · 12597 eye · 61037 link · 2020 chevron-up
 // 1903 minus · 11742 arrow-up · 61842 media-stop (glyph) · 62372 loader
 // 11984 chat-bubble · 12594 dots · 1897 trash · 12065 ruler · 12602 gear
-// 12383 user · 60577 rect-logout · 1942 box · 12591 copy · 1976 folder · 2012 tag · 1955 pointer.
+// 12383 user · 60577 rect-logout · 1942 box · 12591 copy · 1976 folder · 2012 tag · 1955 pointer · 11854 upload-3 (share).
 
 export type IconName =
   | "chevron-left"
@@ -43,8 +43,16 @@ export type IconName =
   | "folder"
   | "tag"
   | "pointer"
+  | "share"
 
 const PATHS: Record<IconName, ReactNode> = {
+  share: (
+    <>
+      <path d="M6 1V8.75" />
+      <path d="M8.25 3L6 0.75L3.75 3" />
+      <path d="M3 5.25H2.75C1.645 5.25 0.75 6.145 0.75 7.25V9.25C0.75 10.355 1.645 11.25 2.75 11.25H9.25C10.355 11.25 11.25 10.355 11.25 9.25V7.25C11.25 6.145 10.355 5.25 9.25 5.25H9" />
+    </>
+  ),
   "chevron-left": <polyline points="7.75 1.75 3.5 6 7.75 10.25" />,
   "chevron-down": <polyline points="1.75 4.25 6 8.5 10.25 4.25" />,
   "chevron-up": <polyline points="10.25 7.75 6 3.5 1.75 7.75" />,

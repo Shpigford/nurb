@@ -51,6 +51,7 @@ import {
   type SliceResult,
 } from "./api"
 import { HistoryMenu, RevisionBanner, RevisionParams, useRevisionHistory } from "./History"
+import { ShareMenu } from "./Share"
 import { activity } from "./activity"
 import { loadCamera, saveCamera } from "./camera"
 import { LabelEditor, LabelTag } from "./Labels"
@@ -191,6 +192,8 @@ export default function PartView({
   onSaveFile,
   onPointAt,
   onOpenInSlicer,
+  onCopyText,
+  onOpenLink,
 }: {
   project: Project | null
   /** A project is chosen and its read has not landed, which a running build can hold up. */
@@ -239,6 +242,9 @@ export default function PartView({
   onPointAt?: (text: string) => void
   /** Saves a file and opens it in the named slicer app. Only the desktop can. */
   onOpenInSlicer?: (filename: string, blob: Blob, app: string) => Promise<void>
+  /** The desktop's clipboard and browser; a page in a browser uses its own. */
+  onCopyText?: (text: string) => Promise<void>
+  onOpenLink?: (url: string) => void
 }) {
   const projectId = project?.id ?? null
   const [localChatHidden, setLocalChatHidden] = useState(conversationHidden)
@@ -770,6 +776,15 @@ export default function PartView({
       }
       end={
         <>
+          {part && build?.glb_url && !viewing ? (
+            <ShareMenu
+              partId={part.id}
+              share={part.share ?? null}
+              values={values}
+              onCopy={onCopyText}
+              onOpenLink={onOpenLink}
+            />
+          ) : null}
           {part && part.revision_id && !noDesign ? (
             <HistoryMenu partId={part.id} revision={part.revision ?? 0} viewing={viewing} onView={(entry) => void history.open(entry)} />
           ) : null}
