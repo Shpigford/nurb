@@ -45,51 +45,62 @@ a { color: inherit; text-decoration: none; }
 .btn.ink:hover { background: var(--ink); color: #fff; }
 .btn.ink:hover svg path { stroke: #fff; }
 .bar .btn { height: 32px; padding: 0 15px; }
-.hero { display: flex; gap: 34px; padding: 20px 24px 8px; align-items: center; }
-.stage { position: relative; flex: 1 1 700px; min-width: 0; height: 560px; }
+.page.share { height: 100vh; min-height: 640px; }
+.hero { flex: 1; min-height: 0; display: flex; gap: 16px; }
+.stage { position: relative; flex: 1; min-width: 0; }
 .stage canvas, .stage .poster { position: absolute; inset: 0; width: 100%; height: 100%; }
 .stage .poster { object-fit: contain; transition: opacity .3s; }
 .stage.live .poster { opacity: 0; pointer-events: none; }
 .stage canvas { cursor: grab; touch-action: none; -webkit-mask-image: radial-gradient(closest-side, #000 70%, transparent); mask-image: radial-gradient(closest-side, #000 70%, transparent); }
 .stage canvas:active { cursor: grabbing; }
-.stage .foot { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 20px 18px; pointer-events: none; }
+.stage .foot { position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 8px 4px; pointer-events: none; }
 .stage .foot .mono { font-size: 10px; line-height: 12px; letter-spacing: .11em; color: var(--muted); }
 .stage .foot button { pointer-events: auto; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 1px solid var(--line); border-radius: 3px; background: var(--ground); color: var(--muted); font: 10px/12px var(--mono); letter-spacing: .11em; cursor: pointer; }
 .stage .foot button[aria-pressed="true"] { color: var(--ink); border-color: var(--panel-edge); }
-.side { flex: 0 1 560px; min-width: 0; padding-top: 22px; }
-.kicker { display: flex; align-items: center; gap: 9px; }
-.kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
-.kicker b { font: 500 11px/14px var(--mono); letter-spacing: .13em; }
-.kicker span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-h1 { margin-top: 18px; font: 600 40px/45px var(--sans); letter-spacing: -.032em; text-wrap: balance; overflow-wrap: anywhere; }
-.lede { margin-top: 16px; font-size: 16px; line-height: 25px; color: var(--muted); max-width: 480px; }
-.size { margin-top: 10px; font: 500 15px/20px var(--mono); color: var(--ink-soft); }
-.size small { margin-left: 4px; font-size: 12px; color: var(--muted); }
-.actions { margin-top: 32px; display: flex; flex-direction: column; gap: 10px; max-width: 480px; }
-.actions .btn.accent { height: 52px; font-size: 12.5px; line-height: 16px; }
+.panel { flex: 0 0 400px; display: flex; flex-direction: column; overflow: hidden; }
+.panel .head { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 16px; border-bottom: 1px solid var(--line-soft); flex: none; }
+.panel .head nav { display: flex; gap: 14px; }
+.panel .head a:hover { color: var(--ink); }
+.titled { padding: 28px 24px 24px; display: flex; flex-direction: column; gap: 10px; }
+h1 { font: 600 34px/38px var(--sans); letter-spacing: -.032em; text-wrap: balance; overflow-wrap: anywhere; }
+.lede { font-size: 15px; line-height: 23px; color: var(--muted); text-wrap: pretty; }
+.size { display: flex; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.size div { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 14px 0 14px 20px; }
+.size div:first-child { padding-left: 24px; }
+.size div + div { border-left: 1px solid var(--line-soft); }
+.size b { font: 500 20px/24px var(--mono); }
+.size small { font: 12px/16px var(--mono); color: var(--muted); }
+.can { display: flex; flex-direction: column; gap: 18px; padding: 24px; }
+.can li { display: flex; gap: 14px; list-style: none; }
+.can ul { padding: 0; display: flex; flex-direction: column; gap: 18px; }
+.can i { width: 28px; height: 28px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 4px; background: #ffede8; }
+.can li b { display: block; font-weight: 600; font-size: 15px; line-height: 20px; }
+.can li span { display: block; font-size: 14px; line-height: 20px; color: var(--muted); }
+.actions { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 20px 24px 24px; border-top: 1px solid var(--line-soft); }
+.actions .btn.accent { height: 48px; font-size: 12px; line-height: 16px; }
 .actions .row { display: flex; gap: 10px; }
-.actions .row .btn { flex: 1; height: 38px; }
+.actions .row .btn { flex: 1; height: 36px; }
 .missing { display: none; padding: 12px 14px; border-radius: 3px; background: var(--raised); font-size: 14px; line-height: 21px; color: var(--ink-soft); }
 .missing.shown { display: block; }
 .missing a { color: var(--ink); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: auto; padding: 6px 16px 10px; }
-footer .mono { font-size: 10.5px; letter-spacing: .12em; color: var(--muted); }
-footer nav { display: flex; gap: 22px; }
-footer nav a:hover, footer nav a.home { color: var(--ink); }
 .gone { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 64px 16px; }
 .gone h1 { margin: 0; font-size: 32px; line-height: 38px; }
 .gone p { color: var(--muted); max-width: 420px; }
 .gone .btn { height: 42px; padding: 0 18px; margin-top: 8px; }
 @media (max-width: 1023px) {
-  .hero { flex-direction: column; padding: 8px 0 0; gap: 8px; }
-  .stage { flex: none; width: 100%; height: 62vw; min-height: 300px; max-height: 520px; }
-  .side { flex: none; width: 100%; padding-top: 0; }
+  .page.share { height: auto; min-height: 0; }
+  .hero { flex-direction: column; }
+  .stage { flex: none; height: 62vw; min-height: 300px; max-height: 520px; }
+  .panel { flex: none; }
 }
 @media (max-width: 600px) {
   .page { padding: 12px 16px; }
   .bar nav a.quiet { display: none; }
   h1 { font-size: 30px; line-height: 35px; }
-  footer { flex-direction: column; align-items: flex-start; }
+  .titled, .can { padding-left: 18px; padding-right: 18px; }
+  .size div:first-child { padding-left: 18px; }
+  .size div { padding-left: 14px; }
+  .actions { padding: 18px; }
 }
 `;
 
@@ -136,10 +147,11 @@ function page(id, meta, sharedAt, origin) {
   const url = `${origin}/s/${id}`;
   const files = `/s/${id}`;
   const description = "A 3D-printable part made with nurb. Print it as is, or open it in nurb and adjust it to fit.";
-  const size = Array.isArray(meta.size_mm) ? meta.size_mm.map((n) => Math.round(n)).join(" × ") : null;
+  // A build's bounding box is x, y, z: across, front to back, and up off the bed.
+  const size = Array.isArray(meta.size_mm) && meta.size_mm.length === 3 ? meta.size_mm.map((n) => Math.round(n)) : null;
   const when = sharedAt ? new Date(sharedAt).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }).toUpperCase() : "";
   return `${head(title, description, `${origin}${files}/part.png`, url)}
-<body><div class="page">${BAR}
+<body><div class="page share">${BAR}
 <main class="hero">
   <div class="stage" id="stage">
     <img class="poster" src="${files}/part.png" alt="${esc(title)}">
@@ -151,14 +163,31 @@ function page(id, meta, sharedAt, origin) {
       </button>
     </div>
   </div>
-  <div class="side">
-    <div class="kicker"><i></i><b>SHARED PART</b><span class="mono">${esc(meta.name)}</span></div>
-    <h1>${esc(title)}</h1>
-    ${size ? `<div class="size">${esc(size)}<small>mm</small></div>` : ""}
-    <p class="lede">Print it as is, or open it in nurb and adjust it to fit.</p>
+  <section class="card panel">
+    <div class="head cap">
+      <span>SHARED PART</span>
+      <nav><span>${esc(when)}</span><a href="https://github.com/Shpigford/nurb/issues/new?title=${encodeURIComponent(`Report shared part ${id}`)}">REPORT</a></nav>
+    </div>
+    <div class="titled">
+      <h1>${esc(title)}</h1>
+      <p class="lede">Print it as is, or open it in nurb and adjust it to fit.</p>
+    </div>
+    ${size ? `<div class="size">
+      <div><span class="cap">WIDE</span><b>${size[0]}<small> mm</small></b></div>
+      <div><span class="cap">DEEP</span><b>${size[1]}<small> mm</small></b></div>
+      <div><span class="cap">TALL</span><b>${size[2]}<small> mm</small></b></div>
+    </div>` : ""}
+    <div class="can">
+      <span class="cap">IN NURB YOU CAN</span>
+      <ul>
+        <li><i><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#d6380e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4H12M2 10H12"/><circle cx="5" cy="4" r="1.6" fill="#ffede8"/><circle cx="9" cy="10" r="1.6" fill="#ffede8"/></svg></i><div><b>Resize it</b><span>Drag a slider and it rebuilds in a second.</span></div></li>
+        <li><i><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#d6380e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5H11.5V9.5H6L3.5 11.5V9.5H2.5Z"/></svg></i><div><b>Ask for changes</b><span>Say what to change, and nurb redraws it.</span></div></li>
+        <li><i><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#d6380e" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6V2.5H11V6M3 10.5H2V6H12V10.5H11M4 9H10V12H4Z"/></svg></i><div><b>Send it to your printer</b><span>It opens in your slicer, ready to print.</span></div></li>
+      </ul>
+    </div>
     <div class="actions">
       <a class="btn accent" id="open" href="nurb://open/${id}">
-        <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 2.5H12.5V6.5M12.5 2.5L7 8M11 9V12H3V4H6"/></svg>
+        <svg width="14" height="14" viewBox="0 0 15 15" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 2.5H12.5V6.5M12.5 2.5L7 8M11 9V12H3V4H6"/></svg>
         OPEN IN NURB
       </a>
       <p class="missing" id="missing" role="status">Nothing happened? <a href="${DMG}">Get nurb for Mac</a>, then try again.</p>
@@ -167,15 +196,8 @@ function page(id, meta, sharedAt, origin) {
         <a class="btn line" href="${files}/part.stl" download>DOWNLOAD STL</a>
       </div>
     </div>
-  </div>
+  </section>
 </main>
-<footer class="mono">
-  <span>SHARED ${esc(when)}</span>
-  <nav>
-    <a href="https://github.com/Shpigford/nurb/issues/new?title=${encodeURIComponent(`Report shared part ${id}`)}">REPORT</a>
-    <a class="home" href="/">MADE WITH NURB</a>
-  </nav>
-</footer>
 </div>
 <script>
   // The app answers nurb:// links. When it is not installed the click does nothing, so
