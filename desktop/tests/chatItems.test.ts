@@ -181,5 +181,7 @@ test("with no call running the line says the agent is thinking, and for how long
   assert.equal(activity([]), "thinking");
   assert.equal(activity([], 29_000), "thinking");
   assert.equal(activity([], 45_000), "thinking (45 s)");
-  assert.equal(activity([], 19.5 * 60_000), "thinking (19 min)");
+  assert.equal(activity([], 75_000), "measuring twice (1 min)");
+  assert.equal(activity([], 4 * 60_000), "doodling in the margins (4 min)");
+  assert.match(activity([], 19.5 * 60_000), / \(19 min\)$/);
 });

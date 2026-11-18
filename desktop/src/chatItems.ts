@@ -98,10 +98,22 @@ const ACTIVITY: [RegExp, string][] = [
 // twenty minutes with nothing to show, and a line that never changes reads as a hang.
 export const QUIET_MS = 30_000;
 
+// What a long silence is called, one after another, so the line keeps moving. Every
+// agent plans in silence before its first call, so none of these depend on which one.
+const QUIET_VERBS = [
+  "thinking",
+  "measuring twice",
+  "sketching on graph paper",
+  "counting millimetres",
+  "weighing the options",
+  "doodling in the margins",
+];
+const VERB_MS = 40_000;
+
 /**
  * "building the part" while that is the newest running call. With no call running
  * the agent is thinking, and once it has been quiet a while the line says for how
- * long: "thinking (4 min)".
+ * long, under a verb that changes now and then: "measuring twice (4 min)".
  */
 export function activity(items: Item[], quietMs = 0): string {
   for (let i = items.length - 1; i >= 0; i--) {
@@ -112,7 +124,8 @@ export function activity(items: Item[], quietMs = 0): string {
   }
   if (quietMs < QUIET_MS) return "thinking";
   const seconds = Math.floor(quietMs / 1000);
-  return `thinking (${seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min`})`;
+  const verb = QUIET_VERBS[Math.floor((quietMs - QUIET_MS) / VERB_MS) % QUIET_VERBS.length];
+  return `${verb} (${seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min`})`;
 }
 
 const STEP_STATUS: Record<string, StepStatus> = {

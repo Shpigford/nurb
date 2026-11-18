@@ -95,6 +95,10 @@ pub(crate) const PROJECT_CHAT: &str = "//project";
 pub(crate) const NEW_PART: &str = "//new";
 pub(crate) const NEW_PART_CONTEXT: &str = " The user is starting a new part in this project and is about to describe it. Make it as a new part alongside the others, and reuse the project's shared settings where they fit.";
 
+/// Every agent plans a new design in silence for minutes, so the first words of
+/// the turn are the only sign of life the person gets before the first build.
+pub(crate) const FIRST_WORD: &str = " When the part has no design yet, planning it takes minutes and the user sees nothing until you write, so before you plan, send one short sentence saying what you are about to make.";
+
 /// The project id an agent working directory belongs to; the app hands agents
 /// <appdata>/projects/<id> as their cwd, so the last segment is the id.
 pub(crate) fn project_key(project: &Path) -> String {
@@ -690,7 +694,7 @@ pub async fn send_prompt(
         in your replies, talk about the part, its features, and its dimensions in plain language, and \
         never mention file names, paths, line numbers, code, or Python. The viewer is built into this \
         app and already shows the part, so never mention server addresses, ports, or URLs, and never \
-        tell the user to open one."
+        tell the user to open one.{FIRST_WORD}"
     );
     // User text first: the agent's session store titles a conversation from
     // its first user text, and that should be the user's words, not the

@@ -507,7 +507,8 @@ pub(crate) fn spawn_args(
         "You are inside the nurb desktop app, working on nurb project_id \"{project_id}\".{selected} \
          Everything goes through the nurb tools; there are no files to edit. \
          Call read_guide once before writing a part. \
-         The user is a hobbyist with a 3D printer: plain words, no code and no file names unless asked."
+         The user is a hobbyist with a 3D printer: plain words, no code and no file names unless asked.{}",
+        crate::acp::FIRST_WORD
     ));
     args
 }
