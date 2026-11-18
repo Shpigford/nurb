@@ -137,14 +137,17 @@ function buildSeconds(build: PartBuild | null): number | null {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : null
 }
 
+// What "Suggest colors" puts in the chat. The person sends it, so it reads as theirs.
+// It sends the agent back to the guide first: a conversation that began before an
+// update still holds the old guide, and one from before colors told the agent that
+// only text could have a color of its own.
+const SUGGEST_COLORS =
+  "Suggest colors for a multi-color print of this part. First re-read the nurb guide's rule on color, then split the part into regions that each print in their own filament, give each a color I can change, and tell me how many filaments it needs."
+const SUGGEST_OTHER_COLORS = "Suggest three other color schemes for this part, set the one you like best, and list the others."
+
 // The footer's g/hr readouts and the SLICE row are the same two numbers, so the
 // cached price on the part seeds both. Without this the row read them off the part
 // payload and the readouts above it reverted to dashes on every load.
-// What "Suggest colors" puts in the chat. The person sends it, so it reads as theirs.
-const SUGGEST_COLORS =
-  "Suggest colors for a multi-color print of this part. Pick the regions that should print in their own filament, give each a color I can change, and tell me how many filaments it needs."
-const SUGGEST_OTHER_COLORS = "Suggest three other color schemes for this part, set the one you like best, and list the others."
-
 function seedStatus(slice: SliceResult | null | undefined): ExportStatus | null {
   if (slice?.kind !== "slice") return null
   return { state: "succeeded", grams: slice.grams, seconds: slice.seconds }

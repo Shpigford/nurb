@@ -200,6 +200,21 @@ const TEXT_LIMIT: usize = 100 * 1024;
 /// What one turn says: the user's words, then each file as a block the model
 /// reads itself. Every built-in tool is off, so a link to a path would be a
 /// file the CLI has no way to open.
+/// `content` with a text block after the user's own words. The transcript shows
+/// what the user typed, so a note here reaches the agent and nobody else.
+pub(crate) fn with_note(content: Value, note: &str) -> Value {
+    let note = serde_json::json!({ "type": "text", "text": note });
+    match content {
+        Value::String(text) if text.trim().is_empty() => Value::Array(vec![note]),
+        Value::String(text) => Value::Array(vec![serde_json::json!({ "type": "text", "text": text }), note]),
+        Value::Array(mut blocks) => {
+            blocks.push(note);
+            Value::Array(blocks)
+        }
+        other => other,
+    }
+}
+
 pub(crate) fn user_content(
     text: String,
     attachments: &[String],
@@ -871,9 +886,21 @@ pub(crate) fn config_rows(prefs: &PrefStore) -> Vec<ConfigRow> {
 mod tests {
     use super::{
         is_current, map_line, read_stream, set_fast_line, set_model_line, spawn, spawn_args,
-        user_content, Pipe, Session, Signal,
+        user_content, with_note, Pipe, Session, Signal,
     };
     use crate::acp::Meshes;
+
+    #[test]
+    fn a_note_follows_the_users_words_and_never_replaces_them() {
+        let note = "nurb was updated";
+        assert_eq!(
+            with_note(Value::String("make it red".into()), note),
+            serde_json::json!([{ "type": "text", "text": "make it red" }, { "type": "text", "text": note }])
+        );
+        assert_eq!(with_note(Value::String(" ".into()), note), serde_json::json!([{ "type": "text", "text": note }]));
+        let blocks = with_note(serde_json::json!([{ "type": "image" }]), note);
+        assert_eq!(blocks.as_array().unwrap().last().unwrap()["text"], note);
+    }
     use serde_json::Value;
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;

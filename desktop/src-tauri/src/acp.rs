@@ -631,6 +631,16 @@ async fn agent_sessions(
 
 const COPY_LIMIT: u64 = 500 * 1024 * 1024;
 
+/// Told to an agent whose conversation began on an older nurb: it read the guide
+/// then, and that guide does not know what this version added (a 1.10 guide said
+/// only text could have a color of its own).
+fn updated_note(engine: &str) -> String {
+    format!(
+        "nurb was updated to {engine} since this conversation began, so the guide you read \
+        earlier may be out of date: call read_guide again before you answer or change anything."
+    )
+}
+
 #[tauri::command]
 pub async fn send_prompt(
     app: tauri::AppHandle,
@@ -640,6 +650,11 @@ pub async fn send_prompt(
     attachments: Vec<String>,
 ) -> Result<String, String> {
     use tauri::Manager;
+    let engine = app.package_info().version.to_string();
+    let updated = app
+        .state::<crate::sessions::SessionStore>()
+        .engine_changed(&session_id, &engine)
+        .then(|| updated_note(&engine));
     if let Some(driver) = app.state::<crate::claude::Drivers>().get(&session_id) {
         app.state::<crate::sessions::SessionStore>().record(
             &session_id,
@@ -650,7 +665,10 @@ pub async fn send_prompt(
         // The part and the audience live in the CLI's system prompt, set when
         // the session started, so the turn carries the user's words and files.
         let meshes = describe_meshes(&app, &attachments).await?;
-        let content = crate::claude::user_content(text, &attachments, &meshes)?;
+        let mut content = crate::claude::user_content(text, &attachments, &meshes)?;
+        if let Some(note) = updated {
+            content = crate::claude::with_note(content, &note);
+        }
         remember_photos(&app, &project_key(&driver.project), &attachments).await;
         return driver.prompt(content).await;
     }
@@ -694,7 +712,8 @@ pub async fn send_prompt(
         in your replies, talk about the part, its features, and its dimensions in plain language, and \
         never mention file names, paths, line numbers, code, or Python. The viewer is built into this \
         app and already shows the part, so never mention server addresses, ports, or URLs, and never \
-        tell the user to open one.{FIRST_WORD}"
+        tell the user to open one.{FIRST_WORD}{}",
+        updated.map(|note| format!(" {note}")).unwrap_or_default()
     );
     // User text first: the agent's session store titles a conversation from
     // its first user text, and that should be the user's words, not the

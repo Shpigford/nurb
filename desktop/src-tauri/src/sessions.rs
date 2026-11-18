@@ -22,6 +22,9 @@ pub struct SessionMeta {
     pub agent: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part: Option<String>,
+    /// The nurb version the session last took a prompt on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
 }
 
 /// The conversation currently attached to a part. `None` is a durable
@@ -70,6 +73,23 @@ impl SessionStore {
         if let Some(part) = part {
             self.select_part_chat(project, &part, Some(session_id.to_string()));
         }
+    }
+
+    /// Whether nurb changed since this session last took a prompt, recording
+    /// `engine` as the version it is on now. An agent reads nurb's guide once, at
+    /// the start of a conversation, so a resumed one still holds the guide of the
+    /// version it began on. A session seen for the first time is new and current;
+    /// one recorded before versions were kept began on an older nurb.
+    pub fn engine_changed(&self, session_id: &str, engine: &str) -> bool {
+        let mut sessions = self.sessions.lock().unwrap();
+        let known = sessions.contains_key(session_id);
+        let meta = sessions.entry(session_id.to_string()).or_default();
+        if meta.engine.as_deref() == Some(engine) {
+            return false;
+        }
+        meta.engine = Some(engine.to_string());
+        self.save_sessions(&sessions);
+        known
     }
 
     pub fn part_of(&self, session_id: &str, project: &str) -> Option<String> {
@@ -207,6 +227,28 @@ mod tests {
         reloaded.record("s2", "codex", project, Some("bracket".into()));
         assert_eq!(reloaded.part_of("s2", project).as_deref(), Some("bracket"));
         assert_eq!(reloaded.part_of("s1", project), None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn an_update_between_prompts_is_reported_once() {
+        let dir = std::env::temp_dir().join(format!("nurb-engine-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let store = SessionStore::load(&dir);
+        // A new conversation reads the current guide on its own.
+        assert!(!store.engine_changed("s1", "1.11.0"));
+        store.record("s1", "claude", "p1", Some("bracket".into()));
+        assert!(!store.engine_changed("s1", "1.11.0"));
+        // Resumed after an update, and across a reload of the store.
+        let reloaded = SessionStore::load(&dir);
+        assert!(reloaded.engine_changed("s1", "1.12.0"));
+        assert!(!reloaded.engine_changed("s1", "1.12.0"));
+        // A session saved before versions were kept began on an older nurb.
+        reloaded.record("old", "claude", "p1", Some("bracket".into()));
+        let mut sessions = reloaded.sessions.lock().unwrap();
+        sessions.get_mut("old").unwrap().engine = None;
+        drop(sessions);
+        assert!(reloaded.engine_changed("old", "1.12.0"));
         fs::remove_dir_all(dir).unwrap();
     }
 
