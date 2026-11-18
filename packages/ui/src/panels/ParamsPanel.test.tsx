@@ -333,4 +333,31 @@ describe("ParamsPanel", () => {
     )
     expect(container).toBeEmptyDOMElement()
   })
+
+  it("shows a color as filament swatches plus a picker, and asks for colors", async () => {
+    const user = userEvent.setup()
+    const onChange = vi.fn()
+    const onSuggest = vi.fn()
+    const colored: Param[] = [{ name: "screen_color", kind: "color", default: "#1a1a1a" }]
+    render(
+      <ParamsPanel params={colored} values={{}} onChange={onChange} onApply={vi.fn()} onSuggestColors={onSuggest} />
+    )
+    expect(screen.getByRole("radio", { name: "Black" })).toHaveAttribute("aria-checked", "true")
+    await user.click(screen.getByRole("radio", { name: "Blue" }))
+    expect(onChange).toHaveBeenCalledWith({ screen_color: "#2a5bb8" })
+    fireEvent.change(screen.getByLabelText("screen color, any other color"), { target: { value: "#123456" } })
+    expect(onChange).toHaveBeenCalledWith({ screen_color: "#123456" })
+    await user.click(screen.getByRole("button", { name: "Suggest other colors" }))
+    expect(onSuggest).toHaveBeenCalledWith(true)
+  })
+
+  it("offers colors on a one-color part only where there is a chat to ask", () => {
+    const { rerender } = render(<ParamsPanel params={params} values={{}} onChange={vi.fn()} onApply={vi.fn()} />)
+    expect(screen.queryByText("Colors")).toBeNull()
+    rerender(<ParamsPanel params={params} values={{}} onChange={vi.fn()} onApply={vi.fn()} onSuggestColors={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Suggest colors" })).toBeInTheDocument()
+    // A part with no parameters at all still gets the way to color it.
+    rerender(<ParamsPanel params={[]} values={{}} onChange={vi.fn()} onApply={vi.fn()} onSuggestColors={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Suggest colors" })).toBeInTheDocument()
+  })
 })

@@ -139,6 +139,11 @@ function buildSeconds(build: PartBuild | null): number | null {
 // The footer's g/hr readouts and the SLICE row are the same two numbers, so the
 // cached price on the part seeds both. Without this the row read them off the part
 // payload and the readouts above it reverted to dashes on every load.
+// What "Suggest colors" puts in the chat. The person sends it, so it reads as theirs.
+const SUGGEST_COLORS =
+  "Suggest colors for a multi-color print of this part. Pick the regions that should print in their own filament, give each a color I can change, and tell me how many filaments it needs."
+const SUGGEST_OTHER_COLORS = "Suggest three other color schemes for this part, set the one you like best, and list the others."
+
 function seedStatus(slice: SliceResult | null | undefined): ExportStatus | null {
   if (slice?.kind !== "slice") return null
   return { state: "succeeded", grams: slice.grams, seconds: slice.seconds }
@@ -1023,6 +1028,14 @@ export default function PartView({
                 // While the banner is open it carries the reason; this is for a rebuild that never answered.
                 error={failedBuild ? null : buildError}
                 note={note}
+                onSuggestColors={
+                  onPointAt
+                    ? (hasColors) => {
+                        setChatHidden(false)
+                        onPointAt(hasColors ? SUGGEST_OTHER_COLORS : SUGGEST_COLORS)
+                      }
+                    : undefined
+                }
               />
             </>
             )

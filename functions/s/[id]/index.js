@@ -246,14 +246,19 @@ function page(id, meta, sharedAt, origin) {
     gltf.scene.traverse((node) => {
       if (!node.isMesh) return;
       if (!node.geometry.attributes.normal) node.geometry.computeVertexNormals();
-      const context = node.name === "context";
+      const name = node.name || (node.parent && node.parent.name) || "";
+      const context = name === "context";
+      // A body in a color the part chose is a color-<rrggbb>-<i> node, toned down the
+      // way the workbench does so the bright key does not clip it to white.
+      const chosen = /^color-([0-9a-f]{6})-/.exec(name);
       node.material = new THREE.MeshStandardMaterial({
-        color: context ? 0x78818d : node.name === "text" ? 0xd9dde4 : 0xff5230,
+        color: context ? 0x78818d : name === "text" ? 0xd9dde4 : 0xff5230,
         metalness: 0, roughness: 0.85, transparent: context, opacity: context ? 0.3 : 1,
         polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1,
       });
+      if (chosen) node.material.color.setHex(parseInt(chosen[1], 16)).multiplyScalar(0.4);
       if (!context) node.add(new THREE.LineSegments(new THREE.EdgesGeometry(node.geometry, 25),
-        new THREE.LineBasicMaterial({ color: 0xa32409, transparent: true, opacity: 0.35 })));
+        new THREE.LineBasicMaterial({ color: chosen ? 0x000000 : 0xa32409, transparent: true, opacity: chosen ? 0.25 : 0.35 })));
     });
     // Plated the way a slicer plates it: centred, standing on z = 0.
     const raw = new THREE.Box3().setFromObject(gltf.scene);

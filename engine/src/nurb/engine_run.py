@@ -217,12 +217,13 @@ def _export_in_process(
     tolerance=0.1,
     database_path=None,
     project_id=None,
+    for_slice=False,
 ):
     """One downloadable file, as (bytes, filename, note).
 
     `note` is the sentence about what a 3MF carries besides geometry: what was
     embedded, or what a bare file is missing, because a download that quietly lost its
-    print settings teaches nobody.
+    print settings teaches nobody. A slice gets raw geometry and any filament presets.
     """
     import tempfile
 
@@ -234,23 +235,36 @@ def _export_in_process(
     root, shape, ctx = _solid(
         scratch_root, part_name, overrides, profile, database_path, project_id
     )
-    note = finish = None
+    note = finish = colors = None
     # STEP is for CAD and keeps an assembly assembled; the print formats get the parts.
     plate = builder.print_set(shape, ctx.bed) if fmt in ("3mf", "stl") else [shape]
     laid_out = f"{len(plate)} parts laid out to print" if len(plate) > 1 else None
+    if fmt == "3mf" or for_slice:
+        plate_by_filament, colors = builder.by_filament(plate)
+    # One filament slices from the STL. PrusaSlicer is only ever handed the STL, so a
+    # colored part there still gets an estimate, one that leaves out the purge.
+    if for_slice and len(colors or []) <= 1:
+        fmt = "stl"
     with tempfile.TemporaryDirectory() as scratch:
         target = pathlib.Path(scratch) / f"{part_name}.{fmt}"
         if fmt == "3mf":
-            plate_by_filament = builder.by_filament(plate)
-            # Text prints on a second filament, so the project loads one.
-            colours = [None, builder.TEXT_COLOUR] if any(isinstance(e, list) for e in plate_by_filament) else None
-            builder.write_3mf(plate_by_filament, target)
+            builder.write_3mf(plate_by_filament, target, colors)
+            if for_slice:
+                return {"bytes": target.read_bytes(), "filename": target.name, "colors": colors}
             lettered = lettering(shape)
             text_note = None
-            if colours:
-                text_note = "letters on filament 2"
-                if lettered is not None and lettered.swap_mm is not None:
-                    # One filament and no AMS still makes two colours: pause where the
+            if colors and len(colors) > 1:
+                assignments = [
+                    (slot, i > 0 and name == "text")
+                    for entry in plate_by_filament if isinstance(entry, list)
+                    for i, (slot, _, name) in enumerate(entry)
+                ]
+                only_text = len(colors) == 2 and (2, True) in assignments and all(
+                    is_text == (slot == 2) for slot, is_text in assignments
+                )
+                text_note = "letters on filament 2" if only_text else f"{len(colors)} colors, one filament each"
+                if only_text and lettered is not None and lettered.swap_mm is not None:
+                    # One filament and no AMS still makes two colors: pause where the
                     # letters start and load the second one.
                     text_note += f" (with one filament, pause at {lettered.swap_mm:g}mm and swap)"
             kit, why = slicing.kit(root)
@@ -258,12 +272,12 @@ def _export_in_process(
                 # The slicer runs outside the walls, on the file rather than the part's
                 # code, so this hands over what it needs and `export_geometry` runs it.
                 settings, notes = slicing.tuned(plate, ctx)
-                finish = {"kit": kit, "settings": settings, "colours": colours, "notes": notes}
+                finish = {"kit": kit, "settings": settings, "colors": colors, "notes": notes}
             else:
                 if "printer.toml" in why:
                     # The CLI's reason names a file; here the picker is on the page.
                     why = "choose a printer to embed tuned settings"
-                note = f"geometry only: {why}"
+                note = _fallback_note(why, colors)
             note = ", ".join(n for n in (laid_out, text_note, note) if n)
         elif fmt == "stl":
             builder.write_stl(plate[0] if len(plate) == 1 else Compound(children=plate), target)
@@ -271,7 +285,7 @@ def _export_in_process(
             export_step(shape, str(target))
         else:
             raise ValueError(f"nurb does not export {fmt!r}")
-        return {"bytes": target.read_bytes(), "filename": target.name, "note": note, "finish": finish}
+        return {"bytes": target.read_bytes(), "filename": target.name, "note": note, "finish": finish, "colors": None}
 
 
 OPS = {"build": _build_in_process, "export": _export_in_process}
@@ -455,6 +469,31 @@ def export_geometry(
     """
     if fmt not in ("3mf", "stl", "step"):
         raise ValueError(f"nurb does not export {fmt!r}. Have: 3mf, stl, step.")
+    result = _geometry_result(
+        identity, fmt, overrides=overrides, profile=profile, timeout=timeout,
+        deadline=deadline, scratch_root=scratch_root,
+    )
+    data, note = result["bytes"], result["note"]
+    if result["finish"]:
+        left = (deadline - time.monotonic()) if deadline is not None else timeout
+        data, said = _with_settings(data, result["filename"], result["finish"], max(left, 1))
+        note = ", ".join(n for n in (note, said) if n)
+    return data, result["filename"], note
+
+
+def slice_geometry(identity, *, overrides=None, profile=None, multicolor=True):
+    """The model and filament colors to load together for this estimate."""
+    result = _geometry_result(
+        identity, "3mf" if multicolor else "stl",
+        overrides=overrides, profile=profile, for_slice=True,
+    )
+    return result["bytes"], result["filename"], result["colors"]
+
+
+def _geometry_result(
+    identity, fmt, *, overrides=None, profile=None, timeout=BUILD_TIMEOUT_SECONDS,
+    deadline=None, scratch_root=None, for_slice=False,
+):
     database_path, project_id, part_name = identity
     remaining = (deadline - time.monotonic()) if deadline is not None else timeout
     if remaining <= 0:
@@ -472,17 +511,20 @@ def export_geometry(
             "profile": profile,
             "tolerance": 0.1,
             "fmt": fmt,
+            "for_slice": for_slice,
         }
         with _WORKER_LOCK:
             result = _WORKER.run(request, remaining)
     if result.get("error") or not result.get("bytes"):
         raise ValueError(result.get("error") or "the export came back empty")
-    data, note = result["bytes"], result["note"]
-    if result.get("finish"):
-        left = (deadline - time.monotonic()) if deadline is not None else timeout
-        data, said = _with_settings(data, result["filename"], result["finish"], max(left, 1))
-        note = ", ".join(n for n in (note, said) if n)
-    return data, result["filename"], note
+    return result
+
+
+def _fallback_note(reason, colors):
+    note = f"geometry only: {reason}"
+    if colors:
+        note += ", set the filament colors in your slicer"
+    return note
 
 
 def _with_settings(data, filename, finish, timeout):
@@ -500,10 +542,10 @@ def _with_settings(data, filename, finish, timeout):
         try:
             slicing.write_project(
                 target, target, machine, process, filament, exe,
-                settings=finish["settings"], colours=finish["colours"], timeout=timeout,
+                settings=finish["settings"], colors=finish["colors"], timeout=timeout,
             )
         except slicing.Unavailable as exc:
-            return data, f"geometry only: {exc}"
+            return data, _fallback_note(exc, finish["colors"])
         return target.read_bytes(), ", ".join(finish["notes"])
 
 

@@ -63,7 +63,7 @@ def bundle(conn, part, run, values):
             "value": values.get(p.get("name"), p.get("default")),
         }
         for p in json.loads(run["params"])
-        if p.get("kind") in ("int", "float", "bool", "choice", "str")
+        if p.get("kind") in ("int", "float", "bool", "choice", "str", "color")
     ]
     findings = json.loads(run["findings"])
     stats = json.loads(run["stats"])
@@ -113,7 +113,7 @@ def bundle(conn, part, run, values):
 
 
 def picture(glb):
-    """The link preview: the part on the stage colour, wide like every link card."""
+    """The link preview: the part on the stage color, wide like every link card."""
     from PIL import Image
 
     from . import raster

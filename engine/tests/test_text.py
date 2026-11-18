@@ -129,12 +129,12 @@ def test_the_viewer_gets_the_letters_as_their_own_node():
 def test_the_3mf_puts_the_letters_on_filament_two_in_one_object(tmp_path):
     shape = add_text(plate(), "AB")
     target = tmp_path / "tag.3mf"
-    builder.write_3mf(builder.by_filament([shape]), target)
+    builder.write_3mf(builder.by_filament([shape])[0], target)
     config = zipfile.ZipFile(target).read("Metadata/model_settings.config").decode()
     assert config.count("<part ") == 2
     assert '<metadata key="name" value="text"/>\n      <metadata key="extruder" value="2"/>' in config
     # A part without text is written exactly as before, with no settings file.
-    builder.write_3mf(builder.by_filament([plate()]), target)
+    builder.write_3mf(builder.by_filament([plate()])[0], target)
     assert "Metadata/model_settings.config" not in zipfile.ZipFile(target).namelist()
 
 
@@ -204,7 +204,7 @@ def test_in_place_placement_drops_stale_viewer_and_filament_geometry(placement):
     box = shape.bounding_box()
     assert scene.bounds[0] == pytest.approx(tuple(box.min), abs=1e-5)
     assert scene.bounds[1] == pytest.approx(tuple(box.max), abs=1e-5)
-    assert builder.by_filament([shape]) == [shape]
+    assert builder.by_filament([shape]) == ([shape], None)
 
 
 def test_copying_or_leaving_placement_unchanged_preserves_lettering():
@@ -227,10 +227,11 @@ def test_a_plate_of_lettered_parts_keeps_each_ones_letters_where_it_was_laid():
     tag = add_text(plate(), "AB")
     tag.label = "tag"
     a, b = moved(tag, Pos(-60, 0, 0)), moved(tag, Pos(60, 0, 0))
-    entries = builder.by_filament([a, b])
-    assert [e[0].label for e in entries] == ["tag", "tag"]
+    entries, colors = builder.by_filament([a, b])
+    assert colors == [None, "#ffffff"]
+    assert [e[0][2] for e in entries] == ["tag", "tag"]
     for entry, x in zip(entries, (-60, 60)):
-        base, letters = entry
+        (_, base, _), (_, letters, _) = entry
         assert base.bounding_box().center().X == pytest.approx(x, abs=1e-6)
         assert letters.bounding_box().center().X == pytest.approx(x, abs=2)
 

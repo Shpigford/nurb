@@ -464,14 +464,14 @@ def profiles_for(machine_path, layer="0.20", filament="PLA"):
     return process, stock
 
 
-def _preset_args(out_dir, machine_path, process, filament, settings=None, colours=None):
+def _preset_args(out_dir, machine_path, process, filament, settings=None, colors=None):
     """The `--load-*` arguments, with the presets flattened into `out_dir` first.
 
     `settings` lays over the flattened process profile, which is how `tuned` reaches
     both the G-code and the project 3MF through one seam: the slicer only ever sees a
     complete profile that already says gyroid.
 
-    `colours` loads one filament per entry, the same preset in each, recoloured where
+    `colors` loads one filament per entry, the same preset in each, recolored where
     the entry is not None. A part on extruder 2 with one filament loaded prints on
     filament 1 without a word, so a part with text always gets its second filament.
     """
@@ -485,10 +485,10 @@ def _preset_args(out_dir, machine_path, process, filament, settings=None, colour
         flattened.append(full)
     machine_full, process_full = flattened
     filaments = []
-    for i, colour in enumerate(colours or [None]):
+    for i, color in enumerate(colors or [None]):
         data = _flatten(filament)
-        if colour:
-            data["filament_colour"] = [colour]
+        if color:
+            data["filament_colour"] = [color]
         full = out_dir / ("filament.json" if i == 0 else f"filament{i + 1}.json")
         full.write_text(json.dumps(data), encoding="utf-8")
         filaments.append(str(full))
@@ -498,7 +498,7 @@ def _preset_args(out_dir, machine_path, process, filament, settings=None, colour
     ]
 
 
-def run(model, target, machine_path, process, filament, exe=None, plate=PLATE, settings=None, timeout=None):
+def run(model, target, machine_path, process, filament, exe=None, plate=PLATE, settings=None, timeout=None, *, colors=None):
     """Slice one model to `target`, and return what the slicer predicted.
 
     Returns ((seconds, grams), path). Either number can be None: a slicer that changes
@@ -523,7 +523,7 @@ def run(model, target, machine_path, process, filament, exe=None, plate=PLATE, s
             [
                 *command,
                 "--curr-bed-type", plate,
-                *_preset_args(out_dir, machine_path, process, filament, settings),
+                *_preset_args(out_dir, machine_path, process, filament, settings, colors),
                 "--slice", "0",
                 "--outputdir", str(out_dir),
                 str(model),
@@ -571,7 +571,7 @@ def kit(root):
     return (machine_path, process, filament, exe), None
 
 
-def write_project(model, target, machine_path, process, filament, exe=None, settings=None, plate=PLATE, colours=None, timeout=None):
+def write_project(model, target, machine_path, process, filament, exe=None, settings=None, plate=PLATE, colors=None, timeout=None):
     """Rewrite a bare 3MF as a project 3MF that carries its print settings.
 
     A bare 3MF is geometry and a unit; the settings a slicer honors on open live in
@@ -598,7 +598,7 @@ def write_project(model, target, machine_path, process, filament, exe=None, sett
             [
                 *command,
                 "--curr-bed-type", plate,
-                *_preset_args(out_dir, machine_path, process, filament, settings, colours),
+                *_preset_args(out_dir, machine_path, process, filament, settings, colors),
                 "--arrange", "1",
                 "--export-3mf", "project.3mf",
                 "--outputdir", str(out_dir),

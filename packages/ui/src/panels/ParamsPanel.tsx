@@ -54,6 +54,8 @@ export interface ParamsPanelProps {
   error?: string | null
   /** What Apply said, once it landed. */
   note?: string | null
+  /** Asks the agent for colors. Given only where there is a chat to ask in. */
+  onSuggestColors?: (hasColors: boolean) => void
 }
 
 function formatValue(value: number, int: boolean, step: number): string {
@@ -545,6 +547,93 @@ function ChoiceRow({
   )
 }
 
+// Filament colors most people have on the shelf. The last swatch opens a picker for
+// anything else, so a preset row never limits what a part can be.
+export const FILAMENTS: { name: string; hex: string }[] = [
+  { name: "Black", hex: "#1a1a1a" },
+  { name: "White", hex: "#f2f2ef" },
+  { name: "Gray", hex: "#8e9094" },
+  { name: "Red", hex: "#c8312a" },
+  { name: "Orange", hex: "#f2752e" },
+  { name: "Yellow", hex: "#f4c430" },
+  { name: "Green", hex: "#3a9a4a" },
+  { name: "Blue", hex: "#2a5bb8" },
+]
+
+// A color the part prints in. A row of filament swatches, and a picker for the rest.
+function ColorRow({
+  id,
+  param,
+  value,
+  dirty,
+  onValue,
+}: {
+  id: string
+  param: Param
+  value: string
+  dirty: boolean
+  onValue: (value: string) => void
+}) {
+  const current = value.toLowerCase()
+  const preset = FILAMENTS.some((f) => f.hex === current)
+  return (
+    <div className="flex flex-col gap-1.5 px-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span
+            id={`${id}-label`}
+            title={param.description}
+            className={clsx("mono-caption min-w-0 truncate", dirty ? "font-medium text-ink" : "text-muted")}
+          >
+            {label(param.name)}
+          </span>
+          {dirty ? <ResetDot param={param} onReset={() => onValue(param.default as string)} /> : null}
+        </div>
+        <span className={clsx("mono-value shrink-0 uppercase", dirty ? "text-accent-ink" : "text-ink")}>{current}</span>
+      </div>
+      <div role="radiogroup" aria-labelledby={`${id}-label`} className="flex items-center gap-1.5">
+        {FILAMENTS.map((f) => (
+          <button
+            key={f.hex}
+            type="button"
+            role="radio"
+            aria-checked={f.hex === current}
+            aria-label={f.name}
+            title={f.name}
+            onClick={() => onValue(f.hex)}
+            className={clsx(
+              "size-5 shrink-0 rounded-control border border-line transition-shadow focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+              f.hex === current && "ring-2 ring-ink ring-offset-2 ring-offset-ground"
+            )}
+            style={{ background: f.hex }}
+          />
+        ))}
+        <label
+          title="Any other color"
+          className={clsx(
+            "relative size-5 shrink-0 cursor-pointer overflow-hidden rounded-control border border-line focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent",
+            !preset && "ring-2 ring-ink ring-offset-2 ring-offset-ground"
+          )}
+          style={{
+            background: preset
+              ? "conic-gradient(#e53935, #fdd835, #43a047, #1e88e5, #8e24aa, #e53935)"
+              : current,
+          }}
+        >
+          <input
+            id={id}
+            type="color"
+            value={current}
+            onChange={(e) => onValue(e.target.value)}
+            aria-label={`${label(param.name)}, any other color`}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          />
+        </label>
+      </div>
+    </div>
+  )
+}
+
 // Live parameter controls. Every change hands the host the whole value map, so
 // the host owns the rebuild; Apply hands it only the values that moved, which
 // is what gets written into the part's keyword defaults.
@@ -560,6 +649,7 @@ export default function ParamsPanel({
   stats,
   error,
   note,
+  onSuggestColors,
 }: ParamsPanelProps) {
   const rows = useMemo(() => params.filter(adjustable), [params])
   const pinned = useMemo(() => params.filter((p) => !adjustable(p)), [params])
@@ -568,6 +658,7 @@ export default function ParamsPanel({
   // Text first, then the choices that shape it: on a part with words on it, the words
   // are the value people change most.
   const settable = [...rows.filter((p) => p.kind === "str"), ...rows.filter((p) => p.kind === "choice")]
+  const colors = rows.filter((p) => p.kind === "color")
   const dirty = useMemo(() => dirtyValues(params, values), [params, values])
   const dirtyCount = Object.keys(dirty).length
   // Two panels on one page (a compare view) must not share control ids.
@@ -577,7 +668,7 @@ export default function ParamsPanel({
     onChange({ ...values, [name]: value })
   }
 
-  if (rows.length === 0) return null
+  if (rows.length === 0 && !onSuggestColors) return null
 
   return (
     <div className="flex min-h-0 flex-1 flex-col" role="group" aria-label="Part parameters">
@@ -628,6 +719,37 @@ export default function ParamsPanel({
                   />
                 )
               })}
+            </div>
+          </>
+        ) : null}
+
+        {colors.length > 0 || onSuggestColors ? (
+          <>
+            <SectionRule>Colors</SectionRule>
+            <div className="flex flex-col gap-3 pb-2">
+              {colors.map((param) => (
+                <ColorRow
+                  key={param.name}
+                  id={`${prefix}${param.name}`}
+                  param={param}
+                  value={String(values[param.name] ?? param.default)}
+                  dirty={param.name in dirty}
+                  onValue={(v) => setValue(param.name, v)}
+                />
+              ))}
+              {onSuggestColors ? (
+                <div className="flex flex-col gap-1 px-4">
+                  <button
+                    type="button"
+                    title="Writes the request in the chat for you to send"
+                    onClick={() => onSuggestColors(colors.length > 0)}
+                    className="mono-label flex h-7 items-center justify-center gap-1.5 rounded-control border border-line text-ink-soft transition-colors hover:border-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+                  >
+                    <Icon name="chat" />
+                    {colors.length > 0 ? "Suggest other colors" : "Suggest colors"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           </>
         ) : null}

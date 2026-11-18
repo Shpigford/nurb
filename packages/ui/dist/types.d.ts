@@ -9,7 +9,7 @@ export interface Finding {
     /** A point on the guilty geometry, for the pin. */
     where?: [number, number, number] | null;
 }
-export type ParamKind = "float" | "int" | "bool" | "str" | "choice";
+export type ParamKind = "float" | "int" | "bool" | "str" | "choice" | "color";
 export interface Param {
     name: string;
     kind: ParamKind;

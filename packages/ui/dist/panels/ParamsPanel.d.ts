@@ -21,6 +21,8 @@ export interface ParamsPanelProps {
     error?: string | null;
     /** What Apply said, once it landed. */
     note?: string | null;
+    /** Asks the agent for colors. Given only where there is a chat to ask in. */
+    onSuggestColors?: (hasColors: boolean) => void;
 }
 export declare function NumberRow({ id, param, value, dirty, measurements, nozzle, restLabel, onValue, }: {
     id: string;
@@ -33,4 +35,8 @@ export declare function NumberRow({ id, param, value, dirty, measurements, nozzl
     restLabel?: string;
     onValue: (value: number) => void;
 }): import("react").JSX.Element;
-export default function ParamsPanel({ params, measurements, nozzle, values, onChange, onApply, building, applying, stats, error, note, }: ParamsPanelProps): import("react").JSX.Element | null;
+export declare const FILAMENTS: {
+    name: string;
+    hex: string;
+}[];
+export default function ParamsPanel({ params, measurements, nozzle, values, onChange, onApply, building, applying, stats, error, note, onSuggestColors, }: ParamsPanelProps): import("react").JSX.Element | null;

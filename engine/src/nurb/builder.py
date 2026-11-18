@@ -125,6 +125,8 @@ def describe(defn, values):
         if name in defn.choices:
             row["kind"] = "choice"
             row["options"] = defn.choices[name]
+        elif name in defn.colors:
+            row["kind"] = "color"
         rows.append(row)
     return rows
 
@@ -319,26 +321,28 @@ def to_mesh(shape, tolerance=0.1, up=(0, 0, 1)):
 
 
 def to_glb(shape, tolerance=0.1, up=(0, 0, 1)):
-    """One GLB. A part is one blob, or a `part` and a `text` node when it carries text;
-    an assembly keeps its movers as named nodes.
+    """One GLB. A part is one blob, or one node per filament when it carries text or
+    color; an assembly keeps its movers as named nodes.
 
     The scene rides on the compound the same way checks.run reads it: an attribute,
     not an import, so this file stays ignorant of how assemblies work. The node
     names are the contract with the viewer -- `joint<i>` for each hinged solid in
-    declaration order, `fixed` for everything static, `context` for obstacles --
+    declaration order, `fixed` for everything static, `context` for obstacles, and for
+    a part `part`, `text`, and `color-<rrggbb>-<i>` for a body in its own color --
     which is what lets a slider pose a joint client-side without a rebuild.
     """
     scene = getattr(shape, "_nurb_scene", None)
     if scene is None:
-        from .text import lettering
+        from .color import bodies
 
-        lettered = lettering(shape)
-        if lettered is None or lettered.letters is None:
+        split = bodies(shape)
+        if split is None:
             return trimesh.Scene([to_mesh(shape, tolerance, up)]).export(file_type="glb")
-        # Text is its own node, so the viewer paints it as the second filament. The
-        # two meshes together are the part: the base with its pockets, and the letters.
+        # Each filament is its own node, so the viewer paints it. The meshes together
+        # are the part: the base with its pockets, and what fills or stands on them.
         out = trimesh.Scene()
-        for name, body in (("part", lettered.base), ("text", lettered.letters)):
+        for i, (color, body) in enumerate(split):
+            name = node_name(color, i)
             out.add_geometry(to_mesh(body, tolerance, up), node_name=name, geom_name=name)
         return out.export(file_type="glb")
     from .assembly import NODE
@@ -352,6 +356,16 @@ def to_glb(shape, tolerance=0.1, up=(0, 0, 1)):
             merged = trimesh.util.concatenate([to_mesh(s, tolerance, up) for s in group])
             out.add_geometry(merged, node_name=name, geom_name=name)
     return out.export(file_type="glb")
+
+
+def node_name(color, i):
+    """The GLB node for one filament's body: see `to_glb`."""
+    # Only the base can be uncolored, so "part" is never repeated.
+    if color is None:
+        return "part"
+    if color == "text":
+        return "text"
+    return f"color-{color[1:]}-{i}"
 
 
 def write_stl(shape, target):
@@ -397,7 +411,7 @@ def print_set(shape, bed=(256.0, 256.0, 256.0), gap=5.0):
         x += box.size.X + gap
         row = max(row, box.size.Y)
     depth = y + row
-    from .text import moved as carried
+    from .color import moved as carried
 
     placed = []
     for path, (dx, dy, dz), solid in out:
@@ -407,32 +421,43 @@ def print_set(shape, bed=(256.0, 256.0, 256.0), gap=5.0):
     return placed
 
 
-# The colour a part's text prints in, as the second filament of a project 3MF.
-TEXT_COLOUR = "#FFFFFF"
-
-
 def by_filament(plate):
-    """The plate with each part that carries text split into [base, letters].
+    """The plate split by filament, and the color each filament slot holds.
 
-    A 3MF object made of two parts is how Bambu Studio and OrcaSlicer put the letters
-    on a second filament and still keep them on the part: written as two objects, the
-    slicer's arrange moves the letters about 25mm off the plate.
+    Returns (entries, colors). An entry is a part in one color, or a list of
+    (slot, body, name) for a part with text or colored regions: a 3MF object made of
+    several parts is how Bambu Studio and OrcaSlicer put a region on its own filament
+    and still keep it on the part. Written as separate objects, the slicer's arrange
+    moves them about 25mm off the plate. `colors[i]` is slot i+1's "#rrggbb", or None
+    for the slicer's own first filament; it is None when everything prints in one.
     """
+    from .color import TEXT_COLOR, bodies, slots
     from .text import lettering
 
+    split = [bodies(shape) for shape in plate]
+    found = [c for s in split if s for c, _ in s]
+    # A part in one color prints on the slicer's own first filament, so it keeps slot 1.
+    if any(s is None for s in split):
+        found.insert(0, None)
+    colors = slots(found)
     out = []
-    for shape in plate:
-        lettered = lettering(shape)
-        if lettered is not None and lettered.letters is not None:
-            base = copy.copy(lettered.base)
-            base.label = shape.label  # the object's name in the slicer
-            out.append([base, lettered.letters])
-        else:
+    for shape, parts in zip(plate, split):
+        if parts is None:
             out.append(shape)
-    return out
+            continue
+        entry = []
+        lettered = lettering(shape)
+        letters = lettered.letters if lettered is not None else None
+        for i, (color, body) in enumerate(parts):
+            slot = colors.index(TEXT_COLOR if color == "text" else color) + 1
+            name = (getattr(shape, "label", "") or "part") if i == 0 else ("text" if body is letters else f"color {slot}")
+            body = copy.copy(body)
+            entry.append((slot, body, name))
+        out.append(entry)
+    return out, (colors if len(colors) > 1 or (colors and colors[0]) else None)
 
 
-def write_3mf(shape, target):
+def write_3mf(shape, target, colors=None):
     """Write a 3MF from the same tessellation the viewer and the STL already use.
 
     Unlike STL the file names its unit, so a slicer never has to guess the scale.
@@ -446,9 +471,10 @@ def write_3mf(shape, target):
     a 3MF that matches the STL is the honest file to write. Verified by slicing one:
     Bambu Studio takes the cracked mesh and prices it exactly as it does the STL.
 
-    A plate entry that is a list is one object whose i-th body prints on filament
-    i+1 (see `by_filament`). Bambu Studio and OrcaSlicer read a part's filament only
-    from `Metadata/model_settings.config`; both ignore standard 3MF colours for it.
+    A plate entry that is a list of (slot, body, name) is one object whose bodies print
+    on those filaments (see `by_filament`). Bambu Studio and OrcaSlicer use
+    `Metadata/model_settings.config` for slot assignments. Base materials carry
+    the chosen colors even when the file has no slicer project settings.
     """
     from xml.sax.saxutils import quoteattr
 
@@ -462,10 +488,10 @@ def write_3mf(shape, target):
     entries = shape if isinstance(shape, list) else [shape]
     plate = []
     for entry in entries:
-        bodies = entry if isinstance(entry, list) else [entry]
-        name = getattr(bodies[0], "label", "") or ""
-        meshes = [(slot, _welded(b)) for slot, b in enumerate(bodies, start=1)]
-        meshes = [(slot, m) for slot, m in meshes if len(m.faces)]
+        bodies = entry if isinstance(entry, list) else [(1, entry, getattr(entry, "label", "") or "")]
+        name = bodies[0][2]
+        meshes = [(slot, _welded(b), n) for slot, b, n in bodies]
+        meshes = [(slot, m, n) for slot, m, n in meshes if len(m.faces)]
         if meshes:
             plate.append((name, meshes))
     # lib3mf will happily write an empty model, and a downloaded file that opens to an
@@ -479,20 +505,28 @@ def write_3mf(shape, target):
     # its validity gate are skipped.
     mesher = Mesher()
     model, identity = mesher.model, mesher.wrapper.GetIdentityTransform()
+    palette = {}
+    if colors:
+        materials = model.AddBaseMaterialGroup()
+        material_id = materials.GetResourceID()
+        for slot, color in enumerate(colors, start=1):
+            if color is not None:
+                rgba = mesher.wrapper.RGBAToColor(*bytes.fromhex(color[1:]), 255)
+                palette[slot] = materials.AddMaterial(color, rgba)
     config = []
     for name, meshes in plate:
         objects = []
-        for slot, welded in meshes:
+        for slot, welded, part_name in meshes:
             obj = model.AddMeshObject()
             obj.SetGeometry(
                 [lib3mf.Position(Coordinates=(x, y, z)) for x, y, z in welded.vertices.tolist()],
                 [lib3mf.Triangle(Indices=(a, b, c)) for a, b, c in welded.faces.tolist()],
             )
             obj.SetType(lib3mf.ObjectType.Model)
-            if len(meshes) > 1:
-                obj.SetName("text" if slot > 1 else name or "part")
-            elif name:
-                obj.SetName(name)
+            if slot in palette:
+                obj.SetObjectLevelProperty(material_id, palette[slot])
+            if part_name:
+                obj.SetName(part_name)
             objects.append((slot, obj))
         if len(objects) == 1 and objects[0][0] == 1:
             model.AddBuildItem(objects[0][1], identity)

@@ -23,6 +23,7 @@ import time
 import urllib.parse
 
 from . import __version__, db, edit, engine_run, labels, materialize, mcp_server, og, share, spec
+from .color import HEX
 
 STATE = "serve.json"
 LOCK = "serve.lock"
@@ -565,6 +566,11 @@ def _values(conn, part, values):
             options = rows[name].get("options") or []
             if value not in options:
                 raise _Refused(400, f"{name} is one of {', '.join(options)}, not {value!r}")
+            typed[name] = value
+            continue
+        if kind == "color":
+            if not isinstance(value, str) or not HEX.fullmatch(value):
+                raise _Refused(400, f'{name} is a color like "#e8704a", not {value!r}')
             typed[name] = value
             continue
         if kind == "str":
@@ -1847,8 +1853,8 @@ def _routes(conn, lock, server, token, pid):
                 if prusa:
                     presets = slicing.prusa_presets(prusa, preset, LAYER, MATERIAL)
 
-                    def job(stl, gcode):
-                        return slicing.prusa_run(stl, gcode, prusa, presets)
+                    def job(model, gcode, _colors):
+                        return slicing.prusa_run(model, gcode, prusa, presets)
 
                     settings = f"{profile} / {presets[1][0]} / {presets[2][0]}"
                 else:
@@ -1868,8 +1874,8 @@ def _routes(conn, lock, server, token, pid):
                     machine = slicing.machine(bundle, wanted)
                     process, filament = slicing.profiles_for(machine, LAYER, MATERIAL)
 
-                    def job(stl, gcode):
-                        return slicing.run(stl, gcode, machine, process, filament, exe)
+                    def job(model, gcode, colors):
+                        return slicing.run(model, gcode, machine, process, filament, exe, colors=colors)
 
                     settings = f"{profile} / {process.stem} / {filament.stem} / {slicing.PLATE}"
             except slicing.Unavailable as exc:
@@ -1889,12 +1895,12 @@ def _routes(conn, lock, server, token, pid):
                 identity = engine_run.part_identity(conn, part["id"])
             except ValueError as exc:
                 return {"kind": "build", "error": str(exc)}
-            return part["name"], run["id"], identity, overrides, job, settings, profile
+            return run["id"], identity, overrides, job, settings, profile, prusa is None
 
         prepared = await query(work)
         if isinstance(prepared, dict):
             return JSONResponse(prepared)
-        name, run_id, identity, overrides, job, settings, profile = prepared
+        run_id, identity, overrides, job, settings, profile, multicolor = prepared
 
         def sliced():
             from . import slicing
@@ -1903,15 +1909,28 @@ def _routes(conn, lock, server, token, pid):
             # starts one; one at a time, because two would fight over the same cores.
             with one_slicer, tempfile.TemporaryDirectory() as scratch:
                 try:
-                    model, _, _ = engine_run.export_geometry(
-                        identity, "stl", overrides=overrides
+                    data, filename, colors = engine_run.slice_geometry(
+                        identity, overrides=overrides, profile=profile, multicolor=multicolor,
                     )
                 except ValueError as exc:
                     return {"kind": "build", "error": str(exc)}
-                stl = pathlib.Path(scratch) / f"{name}.stl"
-                stl.write_bytes(model)
+                model = pathlib.Path(scratch) / filename
+                model.write_bytes(data)
                 try:
-                    (seconds, grams), _ = job(stl, pathlib.Path(scratch) / f"{name}.gcode")
+                    try:
+                        (seconds, grams), _ = job(model, model.with_suffix(".gcode"), colors)
+                    except slicing.Unavailable:
+                        if not colors:
+                            raise
+                        # Bambu Studio refuses some multi-filament slices from the command
+                        # line, every one on a two-nozzle H2C. One filament still prices
+                        # the part, without the purge, which beats no estimate at all.
+                        data, filename, colors = engine_run.slice_geometry(
+                            identity, overrides=overrides, profile=profile, multicolor=False,
+                        )
+                        model = pathlib.Path(scratch) / filename
+                        model.write_bytes(data)
+                        (seconds, grams), _ = job(model, model.with_suffix(".gcode"), colors)
                 except slicing.Unavailable as exc:
                     return {"kind": "build", "error": str(exc)}
                 except Exception as exc:

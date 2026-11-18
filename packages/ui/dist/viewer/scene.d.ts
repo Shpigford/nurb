@@ -56,6 +56,8 @@ export declare function frameCamera(camera: PerspectiveCamera, controls: OrbitCo
 export declare function saneCamera(position: Vector3, target: Vector3, box: Box3): boolean;
 /** sane() is a distance argument, not a visibility one, so the part must also be in frame (v1:1765-1770). */
 export declare function cameraSeesBox(camera: PerspectiveCamera, box: Box3): boolean;
+/** The color a node's name carries, or null for the part's own and the text's. */
+export declare function chosenColor(name: string): number | null;
 /** One Mesh per isMesh node, each with its own material, the clip plane and an edge overlay (v1:1908-1928). */
 export declare function buildPartGroup(gltfScene: Object3D, plane: Plane, pal: Palette): Group;
 /**

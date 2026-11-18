@@ -53,9 +53,14 @@ FRONT = (0xF0, 0x42, 0x1F)
 SIDE = (0xC4, 0x2D, 0x12)
 UNDER = (0x9E, 0x24, 0x10)
 EDGE = (0xA3, 0x24, 0x09)
-# Text in its own colour, the second filament: the same five tones, light, so letters
+# Text in its own color, the second filament: the same five tones, light, so letters
 # read against the part the way white on orange prints.
 TEXT_TONES = ((0xE4, 0xE6, 0xEA), (0xC9, 0xCC, 0xD3), (0xFA, 0xFA, 0xFB), (0xEE, 0xEF, 0xF2), (0xA9, 0xAE, 0xB8))
+# A body in a color the part chose (a `color-<rrggbb>` node): that color, shaded by the
+# same five faces in the same order as the lut, front, side, top, chamfer, under.
+SHADES = (0.88, 0.74, 1.0, 0.94, 0.62)
+# What `paint` holds for a face in the part's own tones and for one in the text's.
+OWN, TEXT = -1, -2
 SHADOW = (0xEE, 0xF2, 0xF8)
 # The same pool of shade for a picture that sits on the dark theme's ground, which a
 # light ellipse would light up instead of setting the part down on.
@@ -216,9 +221,9 @@ def _frame(mesh, cap_normal, ghost, width, height, view, shadow=SHADOW):
 
     pts, depth = project(verts)
     visible = (normals @ view) > 1e-6
-    text = mesh.metadata.get("text_faces")
-    # A section view re-cuts the faces, and a mask for the uncut mesh describes none of them.
-    colors = _colors(normals, text if text is not None and len(text) == len(faces) else None)
+    paint = mesh.metadata.get("paint")
+    # A section view re-cuts the faces, and paint for the uncut mesh describes none of them.
+    colors = _colors(normals, paint if paint is not None and len(paint) == len(faces) else None)
     strokes = _stroked_edges(mesh, faces, normals, visible)
 
     depth_px, face_px = _rasterize(pts, depth, faces, visible, w, h)
@@ -290,7 +295,7 @@ def _over(src, dst):
 def _halve(image):
     """2x2 box mean over premultiplied alpha, which is the anti-aliasing.
 
-    Averaging straight alpha would drag the transparent background's colour into
+    Averaging straight alpha would drag the transparent background's color into
     every silhouette pixel and fringe the part with black.
     """
     h, w = image.shape[0] // 2, image.shape[1] // 2
@@ -444,7 +449,7 @@ def _mesh(glb_bytes):
 def _split(glb_bytes):
     """(the part, the `context` scenery or None), each welded for edge finding."""
     loaded = trimesh.load(io.BytesIO(glb_bytes), file_type="glb", process=False)
-    parts, context, text = [], [], []
+    parts, context, paint = [], [], []
     if isinstance(loaded, trimesh.Scene):
         for node in loaded.graph.nodes_geometry:
             transform, geom_name = loaded.graph[node]
@@ -455,7 +460,7 @@ def _split(glb_bytes):
                 context.append(geom.copy().apply_transform(transform))
                 continue
             parts.append(geom.copy().apply_transform(transform))
-            text.append(np.full(len(geom.faces), geom_name == "text"))
+            paint.append(np.tile(_paint_of(geom_name), (len(geom.faces), 1)))
     elif isinstance(loaded, trimesh.Trimesh):
         parts.append(loaded)
     if not parts:
@@ -467,15 +472,25 @@ def _split(glb_bytes):
     # The exporter splits vertices at face boundaries (crisp normals in the
     # viewer); creases and silhouettes are only findable once they are welded.
     mesh.merge_vertices()
-    if any(t.any() for t in text):
-        mesh.metadata["text_faces"] = np.concatenate(text)
+    if paint and any((p != OWN).any() for p in paint):
+        mesh.metadata["paint"] = np.concatenate(paint)
     if ghost is not None:
         ghost.merge_vertices()
     return mesh, ghost
 
 
-def _colors(normals, text=None):
-    """One palette tone per face, chosen by where the face points, light where it is text."""
+def _paint_of(node):
+    """A node's paint as an RGB row: the part's own tones, the text's, or a color."""
+    if node == "text":
+        return np.array([TEXT, TEXT, TEXT])
+    if node.startswith("color-"):
+        hex_ = node.split("-")[1]
+        return np.array([int(hex_[i : i + 2], 16) for i in (0, 2, 4)])
+    return np.array([OWN, OWN, OWN])
+
+
+def _colors(normals, paint=None):
+    """One tone per face, chosen by where the face points, in the color of its body."""
     nz = normals[:, 2]
     front = -normals[:, 1]
     side = normals[:, 0]
@@ -484,10 +499,13 @@ def _colors(normals, text=None):
     tones = np.where(nz > 0.85, 2, tones)
     tones = np.where((nz <= 0.85) & (nz > 0.3), 3, tones)
     tones = np.where(nz < -0.3, 4, tones)
-    if text is not None:
-        lut = np.vstack([lut, np.array(TEXT_TONES, dtype=np.uint8)])
-        tones = np.where(text, tones + 5, tones)
-    return [tuple(int(c) for c in lut[t]) for t in tones]
+    out = lut[tones].astype(np.float64)
+    if paint is not None:
+        text = paint[:, 0] == TEXT
+        out[text] = np.array(TEXT_TONES, dtype=np.float64)[tones[text]]
+        own = paint[:, 0] >= 0
+        out[own] = paint[own] * np.array(SHADES)[tones[own]][:, None]
+    return [tuple(int(c) for c in row) for row in np.clip(np.round(out), 0, 255)]
 
 
 def _stroked_edges(mesh, faces, normals, visible):

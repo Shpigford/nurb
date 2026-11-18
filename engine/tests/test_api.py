@@ -38,6 +38,8 @@ def test_the_documented_vocabulary_is_the_exported_one():
         "polish",
         "crown",
         "is_convex",
+        "add_color",
+        "FilamentColor",
         "concave_edges",
         "measured",
         "stand",
@@ -86,8 +88,7 @@ def test_every_entry_carries_a_signature_and_a_sentence():
     own, shadowed, borrowed = api.entries()
     assert own and shadowed and borrowed
     for sig, summary in own + shadowed + borrowed:
-        # A call has its argument order; `Literal` is subscripted, and shows its options.
-        assert "(" in sig or sig.startswith("Literal["), sig
+        assert "(" in sig or sig.startswith("Literal[") or sig == "FilamentColor", sig
         assert summary, sig
 
 
