@@ -23,7 +23,7 @@ REAL = pathlib.Path(__file__).parents[1] / "examples" / "notch"
 PART = REAL / "parts" / "fit_coupon.py"  # the smallest of the three
 SIZE = (400, 300)
 # An empty frame of the same size, encoded the same way. Flat shading compresses hard
-# (the top view of a flat coupon is one silhouette in one colour), so the bar for
+# (the top view of a flat coupon is one silhouette in one color), so the bar for
 # "something was drawn" is measured against nothing rather than fixed at a byte count.
 BLANK = len(raster.encode_png(numpy.zeros((SIZE[1], SIZE[0], 4), "uint8")))
 

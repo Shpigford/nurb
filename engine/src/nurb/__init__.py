@@ -17,6 +17,7 @@ from build123d import *  # noqa: F401,F403  -- geometry vocabulary
 
 from .assembly import assembly, hinge, obstacle, use  # noqa: E402
 from .checks import concave_edges, is_convex  # noqa: E402
+from .color import FilamentColor, add_color  # noqa: E402
 from .crown import crown  # noqa: E402
 from .holes import counterbore  # noqa: E402
 from .measurements import measured  # noqa: E402
@@ -30,7 +31,11 @@ from .text import add_text  # noqa: E402
 # words on it, and build123d's Text quietly draws in Arial when the font it was asked
 # for is missing, which builds different geometry on a different machine. This one
 # only draws with the fonts nurb ships, fits the text to the face, and keeps raised
-# and flush letters as their own body so they show and export in a second colour.
+# and flush letters as their own body so they show and export in a second color.
+# `add_color` is here because a multi-color print puts a filament on a body, and a part
+# that paints a region by hand ends up with one fused solid the slicer cannot split.
+# It keeps each region as its own body, so it shows in its color and exports on its own
+# filament, the same way text does.
 # `Literal` is here because a parameter with named options (a font, a style) is
 # declared as `style: Literal["raised", "flush"] = "raised"`, and the viewer shows it
 # as a picker. The keyword default is still the one declaration.
@@ -86,6 +91,8 @@ __all__ = [
     "hinge",
     "obstacle",
     "add_text",
+    "add_color",
+    "FilamentColor",
     "Literal",
 ]
 # The version lives in pyproject.toml and nowhere else; a second copy here would drift.

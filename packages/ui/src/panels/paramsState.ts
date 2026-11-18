@@ -59,7 +59,7 @@ export function tidy(value: number, step: number): number {
   return +value.toFixed(places)
 }
 
-const ADJUSTABLE = new Set(["bool", "int", "float", "str", "choice"])
+const ADJUSTABLE = new Set(["bool", "int", "float", "str", "choice", "color"])
 
 export function adjustable(param: Param): boolean {
   return ADJUSTABLE.has(param.kind)

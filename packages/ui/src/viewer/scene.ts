@@ -193,6 +193,28 @@ export function cameraSeesBox(camera: PerspectiveCamera, box: Box3): boolean {
   return frustum.intersectsBox(box)
 }
 
+// A body the part gave its own color is a `color-<rrggbb>-<i>` node (builder.to_glb).
+const COLOR_NODE = /^color-([0-9a-f]{6})-/
+
+/** The color a node's name carries, or null for the part's own and the text's. */
+export function chosenColor(name: string): number | null {
+  const found = COLOR_NODE.exec(name)
+  return found ? parseInt(found[1], 16) : null
+}
+
+// The key is bright enough to clip a chosen color's top face to white, which is what the
+// accent wants and a picked filament does not: scaled down, the lit faces land near the
+// swatch the person picked.
+const CHOSEN_EXPOSURE = 0.4
+
+// The outline in the body's own color, darker, the way the part's red edge is.
+const edgeOf = (hex: number) => {
+  const r = (hex >> 16) & 255
+  const g = (hex >> 8) & 255
+  const b = hex & 255
+  return (Math.round(r * 0.5) << 16) | (Math.round(g * 0.5) << 8) | Math.round(b * 0.5)
+}
+
 /** One Mesh per isMesh node, each with its own material, the clip plane and an edge overlay (v1:1908-1928). */
 export function buildPartGroup(gltfScene: Object3D, plane: Plane, pal: Palette): Group {
   const found: Mesh[] = []
@@ -226,11 +248,13 @@ export function buildPartGroup(gltfScene: Object3D, plane: Plane, pal: Palette):
       material.transparent = true
       material.opacity = 0.3
     } else {
+      const own = chosenColor(mesh.name)
       if (mesh.name === "text") material.color.setHex(pal.text)
+      if (own !== null) material.color.setHex(own).multiplyScalar(CHOSEN_EXPOSURE)
       const outline = new LineSegments(
         new EdgesGeometry(geometry, EDGE_ANGLE),
         new LineBasicMaterial({
-          color: mesh.name === "text" ? pal.textEdge : pal.edge,
+          color: own !== null ? edgeOf(own) : mesh.name === "text" ? pal.textEdge : pal.edge,
           transparent: true,
           opacity: 0.35,
           clippingPlanes: [plane],

@@ -7,7 +7,7 @@ So `add_text` only ever draws with the fonts in `fonts/`, and refuses a name it 
 not ship rather than letting build123d fall back to Arial without a word.
 
 Raised and flush text keep the letters as their own body, so the viewer can show them
-in a second colour and the 3MF can hand them to a second filament. The part itself is
+in a second color and the 3MF can hand them to a second filament. The part itself is
 still one solid, the base and letters fused: that is what prints, so it is what every
 check judges.
 """
@@ -55,7 +55,7 @@ SHORTEST = 0.01
 
 @dataclass
 class Lettering:
-    """What `add_text` leaves on the part it returns, for colour and for the checks.
+    """What `add_text` leaves on the part it returns, for color and for the checks.
 
     `base` and `letters` together are the part: the base is everything that is not
     text, the letters are the text bodies. `blank` is the part before text, for cosmetic
@@ -75,6 +75,8 @@ class Lettering:
     stroke: float
     font: str
     swap_mm: float | None = None
+    # "#rrggbb", or None for nurb's light text color.
+    color: str | None = None
     # The exact shape this describes. build123d copies attributes onto a moved or
     # rotated shape, so without this a part stood up after `add_text` would carry the
     # letters, the blank and the checks of the part lying down.
@@ -198,7 +200,7 @@ def _plane(face):
     return Plane(origin=face.center(), x_dir=x_dir, z_dir=normal)
 
 
-def add_text(body, text, face=None, *, size=None, depth=0.6, style="raised", font="Standard", margin=None, rotation=0.0):
+def add_text(body, text, face=None, *, size=None, depth=0.6, style="raised", font="Standard", margin=None, rotation=0.0, color=None):
     """Put text on a flat face of a part, and return the part with it.
 
     text: what to write. A line break starts a second line.
@@ -211,7 +213,7 @@ def add_text(body, text, face=None, *, size=None, depth=0.6, style="raised", fon
         Defaults to 20% of the face's shorter side, at least 1.5mm, so the letters have
         room to breathe on a 20mm tag and on a 200mm sign alike.
     depth: how far the letters stand up, or sink in. 0.6 is three 0.2mm layers, which is
-        where a filament swap lands cleanly for two-colour raised text.
+        where a filament swap lands cleanly for two-color raised text.
     style: "raised" letters stand on the face, "engraved" letters are cut into it, and
         "flush" letters are cut in and filled, level with the face, as a second body for a
         second filament.
@@ -221,15 +223,21 @@ def add_text(body, text, face=None, *, size=None, depth=0.6, style="raised", fon
         Stencil is the one for text cut all the way through, because its "O" and "A"
         keep their middles.
     rotation: degrees, counter-clockwise as you look at the face.
+    color: "#rrggbb" for raised and flush letters. Declare a `FilamentColor` parameter
+        to make it adjustable. Leave it out for light letters.
 
     Call it last. Raised and flush text are carried on the returned part so they show,
-    and export, in their own colour; a later boolean or move builds a new shape and the
-    text becomes the part's colour. Empty text returns the part unchanged.
+    and export, in their own color; a later boolean or move builds a new shape and the
+    text becomes the part's color. Empty text returns the part unchanged.
     """
     from build123d import Pos, Text, extrude
 
+    from .color import carry, checked
+
     if style not in STYLES:
         raise ValueError(f"style is one of {', '.join(STYLES)}, not {style!r}")
+    if style != "engraved" and color is not None:
+        color = checked(color)
     if depth <= 0:
         raise ValueError(f"depth must be more than 0mm, not {depth}")
     path = font_file(font)
@@ -270,6 +278,11 @@ def add_text(body, text, face=None, *, size=None, depth=0.6, style="raised", fon
     structure = before.structure if before else body
     base = before.base if before else body
     letters = before.letters if before else None
+    if style == "engraved":
+        color = before.color if before else None
+    elif letters is not None and color != before.color:
+        raise ValueError("all the text on a part prints in one color; give every add_text the same color")
+    cut = None
     if style == "raised":
         new = extrude(sketch, amount=depth, dir=normal)
         whole = body + new
@@ -305,7 +318,9 @@ def add_text(body, text, face=None, *, size=None, depth=0.6, style="raised", fon
         swap_mm=swap,
         owner=whole.wrapped,
         location=whole.location,
+        color=color,
     )
+    carry(body, whole, cut)
     return whole
 
 
@@ -322,7 +337,7 @@ def moved(shape, location):
     """`location * shape`, with its text moved along with it.
 
     For laying parts out on a plate, where the move is nurb's own and the letters
-    should keep their colour through it.
+    should keep their color through it.
     """
     out = location * shape
     found = lettering(shape)

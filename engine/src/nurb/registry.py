@@ -5,6 +5,8 @@ import re
 import typing
 from dataclasses import dataclass, field
 
+from .color import FilamentColor, HEX
+
 
 @dataclass
 class PartDef:
@@ -14,6 +16,7 @@ class PartDef:
     accepts_draft: bool
     docs: dict
     choices: dict = field(default_factory=dict)
+    colors: set = field(default_factory=set)
 
 
 def declared(fn):
@@ -33,27 +36,33 @@ def declared(fn):
     return params, accepts_draft
 
 
-def choices(fn, params):
-    """Parameter name -> its options, for a parameter annotated `Literal[...]` of strings.
+def parameter_controls(fn, params):
+    """Choice options and color controls declared by the signature.
 
     The annotation sits on the same keyword default, so a font or a style picker is
     still one declaration: `style: Literal["raised", "flush"] = "raised"`. A default
     outside its own options would show a picker with nothing selected, so that one
-    stays an ordinary parameter rather than a choice that lies.
+    stays an ordinary parameter rather than a choice that lies. A hex string needs
+    the color annotation, since the same string can also be the words on a label.
     """
     try:
-        hints = typing.get_type_hints(fn)
+        hints = typing.get_type_hints(fn, include_extras=True)
     except Exception:  # an annotation naming something the file never imported
         hints = getattr(fn, "__annotations__", {})
-    out = {}
-    for name in params:
+    choices = {}
+    colors = set()
+    for name, default in params.items():
         hint = hints.get(name)
-        if typing.get_origin(hint) is not typing.Literal:
+        if hint is FilamentColor and isinstance(default, str) and HEX.fullmatch(default):
+            colors.add(name)
             continue
-        options = list(typing.get_args(hint))
-        if options and all(isinstance(o, str) for o in options) and params[name] in options:
-            out[name] = options
-    return out
+        if typing.get_origin(hint) is typing.Annotated:
+            hint = typing.get_args(hint)[0]
+        if typing.get_origin(hint) is typing.Literal:
+            options = list(typing.get_args(hint))
+            if options and all(isinstance(o, str) for o in options) and default in options:
+                choices[name] = options
+    return choices, colors
 
 
 def param_docs(fn, params):
@@ -113,12 +122,14 @@ def part(fn):
     live rebuild stays fast.
     """
     params, accepts_draft = declared(fn)
+    choices, colors = parameter_controls(fn, params)
     fn._nurb = PartDef(
         fn=fn,
         name=fn.__name__,
         params=params,
         accepts_draft=accepts_draft,
         docs=param_docs(fn, params),
-        choices=choices(fn, params),
+        choices=choices,
+        colors=colors,
     )
     return fn

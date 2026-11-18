@@ -77,6 +77,10 @@ def shadowed_names():
 
 # typing's own docstring describes type theory, not what a part file does with it.
 SAID = {
+    "FilamentColor": (
+        "FilamentColor",
+        'Annotate a filament parameter, `body_color: FilamentColor = "#e8704a"`, to show swatches in the viewer.',
+    ),
     "Literal": (
         'Literal["raised", "flush"]',
         'Annotate a parameter with its options, `style: Literal["raised", "flush"] = "raised"`, and the viewer shows a picker.',

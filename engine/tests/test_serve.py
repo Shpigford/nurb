@@ -970,6 +970,94 @@ def test_a_slice_in_flight_leaves_the_server_free(home):
         assert sliced["kind"] == "slice" and sliced["seconds"] == 3600
 
 
+def test_slice_loads_the_current_filament_assignments(home):
+    from nurb import db, engine_run
+
+    source = """
+from nurb import *
+
+@part
+def tile(inlay: FilamentColor = "#fedcba"):
+    body = add_color(Box(25, 25, 4), "#123456")
+    return add_color(body, inlay, Pos(10, 0, 0) * Box(5, 10, 4))
+"""
+    conn = db.connect()
+    project_id = db.create_project(conn, "tiles")
+    part_id = db.create_part(conn, project_id, "tile", source)
+    engine_run.run_build(conn, part_id)
+    conn.close()
+    script = SLOW_SLICER[2].replace(
+        "    time.sleep(5)",
+        """
+    import zipfile
+    assert model.suffix == ".3mf"
+    assert kwargs["colors"] == ["#123456", "#aabbcc"]
+    with zipfile.ZipFile(model) as bundle:
+        assignments = bundle.read("Metadata/model_settings.config")
+    assert b'<metadata key="extruder" value="2"/>' in assignments
+""",
+    )
+    with serving(home, free_port(), command=[*SLOW_SLICER[:2], script]) as url:
+        post(f"{url}/api/projects/{project_id}/printer", {"profile": "bambu_x1c"})
+        post(f"{url}/api/parts/{part_id}/params", {"values": {"inlay": "#aabbcc"}})
+        sliced = json.loads(post(f"{url}/api/parts/{part_id}/slice", {})[2])
+        assert sliced["kind"] == "slice", sliced
+        assert sliced["seconds"] == 3600
+
+
+def test_a_refused_multi_filament_slice_falls_back_to_one_filament(home):
+    """Bambu Studio refuses multi-filament slices on a two-nozzle H2C. The panel still
+    gets a number, from the STL, rather than an error."""
+    from nurb import db, engine_run
+
+    source = """
+from nurb import *
+
+@part
+def tile():
+    return add_color(add_color(Box(25, 25, 4), "#123456"), "#fedcba", Pos(10, 0, 0) * Box(5, 10, 4))
+"""
+    conn = db.connect()
+    project_id = db.create_project(conn, "tiles")
+    part_id = db.create_part(conn, project_id, "tile", source)
+    engine_run.run_build(conn, part_id)
+    conn.close()
+    script = SLOW_SLICER[2].replace(
+        "    time.sleep(5)",
+        """
+    if model.suffix == ".3mf":
+        raise slicing.Unavailable("the slicer refused this model: Found G-code in unprintable area")
+    assert kwargs["colors"] is None
+""",
+    )
+    with serving(home, free_port(), command=[*SLOW_SLICER[:2], script]) as url:
+        post(f"{url}/api/projects/{project_id}/printer", {"profile": "bambu_x1c"})
+        sliced = json.loads(post(f"{url}/api/parts/{part_id}/slice", {})[2])
+        assert sliced["kind"] == "slice", sliced
+        assert sliced["seconds"] == 3600
+
+
+def test_a_colored_part_still_gets_a_single_filament_estimate_where_only_an_stl_slices(home):
+    """PrusaSlicer is only handed an STL, and a colored part must not dead-end there."""
+    from nurb import db, engine_run
+
+    source = """
+from nurb import *
+
+@part
+def tile():
+    return add_color(add_color(Box(25, 25, 4), "#123456"), "#fedcba", Pos(10, 0, 0) * Box(5, 10, 4))
+"""
+    conn = db.connect()
+    project_id = db.create_project(conn, "tiles")
+    part_id = db.create_part(conn, project_id, "tile", source)
+    engine_run.run_build(conn, part_id)
+    identity = engine_run.part_identity(conn, part_id)
+    conn.close()
+    data, filename, colors = engine_run.slice_geometry(identity, multicolor=False)
+    assert filename.endswith(".stl") and colors is None and data
+
+
 # A serve whose export is slow and whose slicer is instant, which is a cold build
 # worker: a fresh one imports the CAD kernel before it can hand back an STL.
 SLOW_EXPORT = [
@@ -978,11 +1066,13 @@ SLOW_EXPORT = [
     """
 import pathlib, runpy, sys, time
 from nurb import engine_run, slicing
-real = engine_run.export_geometry
-def export(*args, **kwargs):
-    time.sleep(5)
-    return real(*args, **kwargs)
-engine_run.export_geometry = export
+def slow(real):
+    def run(*args, **kwargs):
+        time.sleep(5)
+        return real(*args, **kwargs)
+    return run
+engine_run.export_geometry = slow(engine_run.export_geometry)
+engine_run.slice_geometry = slow(engine_run.slice_geometry)
 def run(model, target, *args, **kwargs):
     return (3600, 12.0), pathlib.Path(target)
 slicing.app = lambda search=None, printer=None: pathlib.Path("/slow/OrcaSlicer")
