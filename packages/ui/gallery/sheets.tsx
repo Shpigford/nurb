@@ -278,6 +278,11 @@ function WorkspaceHeader({
       }
       end={
         <>
+          <HeaderDivider />
+          <span className="flex h-[50px] items-center gap-2 px-3.5 text-muted">
+            <Icon name="share" />
+            <span className="mono-label">Share</span>
+          </span>
           {tabs ? (
             <>
               <HeaderDivider />
