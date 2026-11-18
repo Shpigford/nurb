@@ -34,6 +34,7 @@ import {
   type PinnedParam,
   type ViewerAnchor,
 } from "@nurb/ui"
+import DesignWait from "./DesignWait"
 import {
   absolute,
   applyParams,
@@ -873,6 +874,8 @@ export default function PartView({
             // The model on screen is the one before the change until the new one lands.
             className={`min-h-0 flex-1 transition-opacity duration-300 ${building ? "opacity-45" : ""}`}
           />
+        ) : noDesign && designer && !viewing ? (
+          <DesignWait designer={designer} spec={project?.spec} measurements={project?.measurements} />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4">
             <EmptyProject
@@ -882,9 +885,7 @@ export default function PartView({
                     ? `${rev(viewing.revision)} did not build`
                     : `${rev(viewing.revision)} was never built`
                   : noDesign
-                  ? designer
-                    ? `${designer} is designing this part`
-                    : "No design yet"
+                  ? "No design yet"
                   : part
                   ? failedBuild
                     ? `${part.name} did not build`
@@ -899,9 +900,7 @@ export default function PartView({
                     ? `${lastLine(viewing.error)} Restore it to try again, or go back.`
                     : "Nothing was built from it, so there is no shape to show. Restore it to build it."
                   : noDesign
-                  ? designer
-                    ? "It appears here, live, as soon as the first version builds."
-                    : "Describe the part in the chat and it appears here."
+                  ? "Describe the part in the chat and it appears here."
                   : !part
                   ? opening
                     ? "This can take a moment while another part is building."
