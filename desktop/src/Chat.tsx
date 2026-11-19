@@ -2,6 +2,7 @@ import {
   ClipboardEvent,
   DragEvent,
   FormEvent,
+  Fragment,
   KeyboardEvent,
   type ReactNode,
   useCallback,
@@ -31,10 +32,11 @@ import {
   NewItemsPill,
   SpecCard,
   cue,
+  useIsDark,
   type MenuItem,
   type Message,
 } from "@nurb/ui";
-import { addMessage, startPart, titleDraft } from "@nurb/workbench/api";
+import { addMessage, addPartLink, startPart, titleDraft } from "@nurb/workbench/api";
 import { joinSpots, splitSpots, spotPlace } from "@nurb/workbench/spot";
 import {
   activity,
@@ -43,14 +45,18 @@ import {
   claudeNote,
   clearUntilSend,
   describe,
+  finishedPartWrite,
+  mentionedParts,
   type ChatEvent,
   type Item,
   type PermissionOption,
+  type PartWrite,
   pruneLanded,
   withNote,
 } from "./chatItems";
 import { AttachmentDraft, restoreDraftText, stashDraft, unstashDraft } from "./chatDraft";
 import { chatKey } from "./chatColumns";
+import { titleCase } from "./parts";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
@@ -210,6 +216,32 @@ function Attached({ names, thumbnails }: { names: string[]; thumbnails?: (string
   );
 }
 
+export type ChatPart = { id: string; name: string; title?: string | null; thumbnail?: string | null };
+
+// Another part the agent wrote during this conversation. Without it the new part
+// sits in the project menu where nobody thinks to look.
+function PartLink({ name, thumbnail, onOpen }: { name: string; thumbnail: string | null; onOpen: () => void }) {
+  const dark = useIsDark();
+  return (
+    <div className="flex items-center gap-3 rounded-[6px] border border-line bg-ground p-2 pr-2.5">
+      <div className="grid size-12 shrink-0 place-items-center overflow-hidden rounded-[4px] bg-raised text-faint">
+        {thumbnail ? (
+          <img src={dark ? `${thumbnail}&theme=dark` : thumbnail} alt="" className="size-full object-contain" />
+        ) : (
+          <Icon name="box" />
+        )}
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[13px] font-medium text-ink">{name}</span>
+        <span className="mono-caption text-muted">Part in this project</span>
+      </div>
+      <Button size="sm" onClick={onOpen}>
+        Open part
+      </Button>
+    </div>
+  );
+}
+
 // A spot clicked on the part, attached to a message rather than written into it.
 function SpotChip({ sentence, onRemove }: { sentence: string; onRemove?: () => void }) {
   return (
@@ -297,6 +329,9 @@ function Chat({
   onAgent,
   onBusy,
   onSignIn,
+  parts,
+  onStage,
+  onOpenPart,
 }: {
   path: string;
   // The project's own transcript, which outlives any one conversation. Hidden
@@ -333,6 +368,11 @@ function Chat({
   onAgent: (id: string, unstarted: boolean) => void;
   onBusy: (busy: boolean) => void;
   onSignIn: (agent: string) => Promise<boolean>;
+  // The project's parts, so a card for another part can show its name and picture.
+  parts?: ChatPart[];
+  // The part on screen, which needs no card: a one-part project talks in its project column.
+  onStage?: string | null;
+  onOpenPart?: (name: string) => void;
 }) {
   const label = AGENT_LABEL[agent] ?? agent;
   // Known signed out, not merely unknown: an unknown status stays quiet.
@@ -347,6 +387,9 @@ function Chat({
   // that made it, so a reply reads the name at the moment it arrives.
   const stampRef = useRef(stamp);
   stampRef.current = stamp;
+  const transcript = useRef(Promise.resolve());
+  const toolWrites = useRef(new Map<string, PartWrite | null>());
+  const linkScope = useRef<{ originId: string | null; turnId: string | null; linked: Set<string> } | null>(null);
   // A first prompt starts its part once. The column moves to the new row a moment
   // later, and a second send before it does must not start another.
   const startedRef = useRef(false);
@@ -624,6 +667,23 @@ function Chat({
   const applyEvent = useCallback(
     (event: ChatEvent) => {
       quietSince.current = Date.now();
+      const save = (write: () => Promise<unknown>, landed?: () => void) => {
+        transcript.current = transcript.current
+          .then(write)
+          .then(() => landed?.())
+          .catch((e) => setItems((list) => withNote(list, String(e))));
+      };
+      const scope = linkScope.current;
+      if (scope && !restoringRef.current) {
+        const written =
+          event.type === "tool_call" || event.type === "tool_call_update"
+            ? finishedPartWrite(toolWrites.current, event)
+            : event.type === "part_written" ? event.part_write : null;
+        if (written?.project_id === projectId && !scope.linked.has(written.part_name)) {
+          scope.linked.add(written.part_name);
+          save(() => addPartLink(projectId, written.part_name, scope.originId, scope.turnId));
+        }
+      }
       switch (event.type) {
         case "session_info":
           // Titles have no home since the visible session list went away.
@@ -643,11 +703,11 @@ function Chat({
           if (isClaude) {
             // Drop the streaming copy only once the row exists, or the text
             // blinks out for the refetch's round trip.
-            addMessage(projectId, "assistant", event.text, stampRef.current)
-              .then(() =>
-                setItems((list) => applyChatEvent(list, event, Date.now(), seqRef.current)),
-              )
-              .catch((e) => setItems((list) => [...list, { kind: "note", text: String(e) }]));
+            const part = stampRef.current;
+            save(
+              () => addMessage(projectId, "assistant", event.text, part),
+              () => setItems((list) => applyChatEvent(list, event, Date.now(), seqRef.current)),
+            );
             return;
           }
           break;
@@ -835,6 +895,7 @@ function Chat({
         attachmentDraft.restore(files);
       };
       try {
+        await transcript.current;
         if (files.length > 0) {
           refused = true;
           await invoke("check_attachments", { attachments: files, claude: isClaude });
@@ -848,6 +909,8 @@ function Chat({
         const starting = (isNew || (isProject && !aboutProject)) && !startedRef.current;
         let started: string | null = null;
         let drafted = false;
+        let turnId: string | null = null;
+        let originId = parts?.find((p) => p.name === (stamp ?? (!aboutProject ? subject : null)))?.id ?? null;
         if (isClaude) {
           const said = await addMessage(
             projectId,
@@ -860,10 +923,13 @@ function Chat({
           );
           started = said.part ?? null;
           drafted = said.drafted;
+          turnId = said.id;
           stored = true;
         } else if (starting) {
           // This agent keeps its own transcript, so the part is started on its own.
-          ({ part: started, drafted } = await startPart(projectId, text, isNew));
+          const draft = await startPart(projectId, text, isNew);
+          ({ part: started, drafted } = draft);
+          originId = draft.part_id ?? originId;
         }
         if (starting) startedRef.current = true;
         if (drafted && text) {
@@ -874,6 +940,8 @@ function Chat({
             .catch(() => {});
         }
         promptingRef.current = true;
+        toolWrites.current.clear();
+        linkScope.current = { originId, turnId, linked: new Set() };
         // A new part's chat moves to the row its first prompt made, a placeholder the
         // agent's first write replaces, so that move is no rename to announce.
         const renamed =
@@ -916,7 +984,7 @@ function Chat({
         if (completed) cue(document.hasFocus() ? "ready" : "arrival");
       }
     },
-    [ensureSession, part, wholeProject, attachmentDraft, addSpots, isClaude, projectId, thumbnailOf, agent],
+    [ensureSession, part, wholeProject, attachmentDraft, addSpots, isClaude, projectId, thumbnailOf, agent, parts, subject],
   );
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1238,6 +1306,106 @@ function Chat({
   for (const message of ordered) if (message.content || !isWork(message)) flow.push({ kind: "stored", message });
   items.forEach((item, index) => item.kind !== "step" && flow.push({ kind: "live", item, index }));
 
+  // A tool write owns its card's place in the transcript. Prose can link parts
+  // the agent referred to without writing.
+  const offered = (parts ?? []).filter((p) => p.name !== part && p.name !== onStage);
+  const cardsAt = new Map<number, string[]>();
+  if (onOpenPart && !isNew && offered.length > 0) {
+    const last = new Map<string, number>();
+    const written = new Map<string, number>();
+    const names = new Map(offered.map((p) => [p.id, p.name]));
+    flow.forEach((entry, at) => {
+      if (entry.kind === "stored" && entry.message.payload?.type === "part_written") {
+        const name = names.get(entry.message.payload.part_id);
+        if (name) written.set(name, at);
+      }
+      const prose = entry.kind === "stored"
+        ? entry.message.role === "assistant" ? entry.message.content : null
+        : entry.item.kind === "agent" ? entry.item.text : null;
+      if (prose) for (const name of mentionedParts(prose, offered)) last.set(name, at);
+    });
+    for (const [name, at] of written) last.set(name, at);
+    for (const [name, at] of last) cardsAt.set(at, [...(cardsAt.get(at) ?? []), name]);
+  }
+  const cardsAfter = (at: number) =>
+    (cardsAt.get(at) ?? []).map((name) => {
+      const shown = offered.find((p) => p.name === name);
+      return (
+        <PartLink
+          key={`part-${name}`}
+          name={shown?.title ?? titleCase(name)}
+          thumbnail={shown?.thumbnail ?? null}
+          onOpen={() => onOpenPart?.(name)}
+        />
+      );
+    });
+
+  const renderEntry = (entry: (typeof flow)[number]) => {
+    if (entry.kind === "stored") {
+      if (entry.message.payload?.type === "part_written") return null;
+      return (
+        <Stored
+          key={entry.message.id}
+          message={entry.message}
+          who={label}
+          n={entry.message.content || entry.message.files?.length ? nextTurn() : undefined}
+        />
+      );
+    }
+    const { item, index } = entry;
+    switch (item.kind) {
+      case "user":
+        return (
+          <Turn key={index} who="You" n={nextTurn()} text={item.text}>
+            <Said text={item.text} />
+            {item.files && <Attached names={item.files} thumbnails={item.thumbnails} />}
+          </Turn>
+        );
+      case "agent":
+        return (
+          <Turn key={index} who={label} n={nextTurn()} text={item.text}>
+            <div className="text-chat text-ink-soft">
+              <AssistantMarkdown
+                content={item.text}
+                streaming={busy && index === items.length - 1}
+              />
+            </div>
+          </Turn>
+        );
+      case "thought":
+        return (
+          <details key={index} className="group">
+            <summary className="mono-label chrome cursor-default list-none text-faint hover:text-muted">
+              Thinking
+            </summary>
+            <div className="mt-1.5 text-[12.5px] leading-[18px] text-faint">{item.text}</div>
+          </details>
+        );
+      case "plan":
+        return (
+          <ul key={index} className="flex flex-col gap-1">
+            {item.entries.map((entry, i) => (
+              <li
+                key={i}
+                className={clsx(
+                  "text-[12.5px] leading-[18px]",
+                  PLAN_TONE[entry.status] ?? "text-muted",
+                )}
+              >
+                {entry.content}
+              </li>
+            ))}
+          </ul>
+        );
+      case "note":
+        return (
+          <p key={index} className="text-chat text-muted">
+            {item.text}
+          </p>
+        );
+    }
+  };
+
   return (
     <ChatPanel
       hidden={hidden}
@@ -1399,70 +1567,12 @@ function Chat({
             )}
           </div>
         )}
-        {flow.map((entry) => {
-          if (entry.kind === "stored") {
-            return (
-              <Stored
-                key={entry.message.id}
-                message={entry.message}
-                who={label}
-                n={entry.message.content || entry.message.files?.length ? nextTurn() : undefined}
-              />
-            );
-          }
-          const { item, index } = entry;
-          switch (item.kind) {
-            case "user":
-              return (
-                <Turn key={index} who="You" n={nextTurn()} text={item.text}>
-                  <Said text={item.text} />
-                  {item.files && <Attached names={item.files} thumbnails={item.thumbnails} />}
-                </Turn>
-              );
-            case "agent":
-              return (
-                <Turn key={index} who={label} n={nextTurn()} text={item.text}>
-                  <div className="text-chat text-ink-soft">
-                    <AssistantMarkdown
-                      content={item.text}
-                      streaming={busy && index === items.length - 1}
-                    />
-                  </div>
-                </Turn>
-              );
-            case "thought":
-              return (
-                <details key={index} className="group">
-                  <summary className="mono-label chrome cursor-default list-none text-faint hover:text-muted">
-                    Thinking
-                  </summary>
-                  <div className="mt-1.5 text-[12.5px] leading-[18px] text-faint">{item.text}</div>
-                </details>
-              );
-            case "plan":
-              return (
-                <ul key={index} className="flex flex-col gap-1">
-                  {item.entries.map((entry, i) => (
-                    <li
-                      key={i}
-                      className={clsx(
-                        "text-[12.5px] leading-[18px]",
-                        PLAN_TONE[entry.status] ?? "text-muted",
-                      )}
-                    >
-                      {entry.content}
-                    </li>
-                  ))}
-                </ul>
-              );
-            case "note":
-              return (
-                <p key={index} className="text-chat text-muted">
-                  {item.text}
-                </p>
-              );
-          }
-        })}
+        {flow.map((entry, at) => (
+          <Fragment key={entry.kind === "stored" ? entry.message.id : `live-${entry.index}`}>
+            {renderEntry(entry)}
+            {cardsAfter(at)}
+          </Fragment>
+        ))}
         {starting && (
           <p className="mono-caption text-muted">
             {restoringRef.current ? "restoring conversation…" : `starting ${label}…`}

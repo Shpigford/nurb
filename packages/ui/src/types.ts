@@ -118,6 +118,7 @@ export type MessagePayload =
   | { type: "spec"; spec: Spec; model?: string; effort?: string; tool?: string }
   | { type: "measurement"; measurement: Measurement; tool?: string }
   | { type: "step"; step: ToolStep; tool?: string }
+  | { type: "part_written"; part_id: string; tool?: never }
 
 export interface Message {
   id: string

@@ -15,6 +15,7 @@ import {
   fetchProjects,
   importFolder,
   listParts,
+  absolute,
   movePart,
   openSharedPart,
   peekSharedPart,
@@ -450,6 +451,18 @@ function App() {
   }, [projectId, dirs, chatPart]);
 
   const activeDir = projectId ? dirs[projectId] ?? null : null;
+  // The part on screen, the way the workbench picks it when none is named.
+  const stagePart = partName ?? project?.parts.find((p) => !p.assembly)?.name ?? null;
+  const chatParts = useMemo(
+    () =>
+      (project?.parts ?? []).map((p) => ({
+        id: p.id,
+        name: p.name,
+        title: p.title,
+        thumbnail: p.build?.thumbnail_url ? absolute(p.build.thumbnail_url) : null,
+      })),
+    [project?.parts],
+  );
   const chatVisible = screen === "workspace" && !chatHidden;
 
   // Who is at work on the part on screen, for the stage of a part with no design yet.
@@ -1139,6 +1152,9 @@ function App() {
                     }}
                     onBusy={(busy) => chatBusy(col.path, col.part, agent, busy, visible)}
                     onSignIn={signInAgent}
+                    parts={col.path === activeDir ? chatParts : undefined}
+                    onStage={stagePart}
+                    onOpenPart={col.path === activeDir ? setPartName : undefined}
                   />
                 );
               })}

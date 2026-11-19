@@ -229,11 +229,12 @@ MIGRATIONS = [
         shared_at TEXT NOT NULL
     );
     """,
+    "ALTER TABLE build_runs ADD COLUMN fit_export TEXT;",
 ]
 
 # What a run can carry besides its geometry: it is measured from one build, so it
 # hangs off that run and dies with it rather than outliving the shape it describes.
-RUN_RESULTS = ("slice",)
+RUN_RESULTS = ("slice", "fit_export")
 
 
 def home():
@@ -713,7 +714,7 @@ def add_revision(conn, part_id, source, card_md=None, note=None):
 
 
 def set_run_result(conn, run_id, column, payload):
-    """Hang a print estimate on the run it was measured from."""
+    """Store a print result on the build it came from."""
     if column not in RUN_RESULTS:
         raise ValueError(f"a run carries {' and '.join(RUN_RESULTS)}, not {column!r}")
     with transaction(conn):

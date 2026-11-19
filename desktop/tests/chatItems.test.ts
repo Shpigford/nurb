@@ -5,6 +5,8 @@ import {
   applyChatEvent,
   claudeNote,
   clearUntilSend,
+  finishedPartWrite,
+  mentionedParts,
   pruneLanded,
   toolWords,
   withNote,
@@ -64,11 +66,12 @@ test("a nurb step leaves the overlay once its own transcript row lands", () => {
     [call, START],
     [done, START + 2500],
   ]);
-  assert.equal(items.length, 1, "the step waits for its row");
+  const steps = (list: Item[]) => list.filter((item) => item.kind === "step");
+  assert.equal(steps(items).length, 1, "the step waits for its row");
 
   // An older row for the same tool is not this call's row.
   const older = [{ sequence_number: 0, payload: { type: "step", tool: "write_part_source" } }];
-  assert.equal(pruneLanded(items, older).length, 1);
+  assert.equal(steps(pruneLanded(items, older)).length, 1);
   const landed = [{ sequence_number: 1, payload: { type: "build", tool: "write_part_source" } }];
   assert.deepEqual(pruneLanded(items, landed), []);
 });
@@ -184,4 +187,33 @@ test("with no call running the line says the agent is thinking, and for how long
   assert.equal(activity([], 75_000), "measuring twice (1 min)");
   assert.equal(activity([], 4 * 60_000), "doodling in the margins (4 min)");
   assert.match(activity([], 19.5 * 60_000), / \(19 min\)$/);
+});
+
+test("a sibling write is identified after completion even with missing or capped tool detail", () => {
+  const writes = new Map();
+  const part_write = { project_id: "p", part_name: "stand_fit_test" };
+  assert.equal(finishedPartWrite(writes, { type: "tool_call", id: "t1", title: "write_part_source", status: "in_progress" }), null);
+  assert.equal(finishedPartWrite(writes, { type: "tool_call_update", id: "t1", part_write }), null);
+  assert.deepEqual(finishedPartWrite(writes, { type: "tool_call_update", id: "t1", status: "completed" }), part_write);
+  assert.equal(finishedPartWrite(writes, { type: "tool_call_update", id: "t1", status: "completed" }), null);
+
+  const call = { type: "tool_call", id: "t2", title: "write_part_source", status: "in_progress", input: "{... truncated", part_write } as const;
+  assert.equal(finishedPartWrite(writes, call), null);
+  assert.equal(finishedPartWrite(writes, { type: "tool_call_update", id: "t2", status: "failed" }), null);
+  assert.equal(finishedPartWrite(writes, call), null);
+  assert.deepEqual(finishedPartWrite(writes, { type: "tool_call_update", id: "t2", status: "completed" }), part_write);
+});
+
+test("agent prose names a part by slug, by its words, or by its title", () => {
+  const parts = [
+    { name: "phone_stand_fit_test", title: "Puck Fit Test" },
+    { name: "rib_grip" },
+    { name: "lid" },
+  ];
+  assert.deepEqual(mentionedParts("Next step is still the Puck Fit Test ring.", parts), ["phone_stand_fit_test"]);
+  assert.deepEqual(mentionedParts("Leave `rib_grip` alone, and the phone stand fit test too.", parts), [
+    "phone_stand_fit_test",
+    "rib_grip",
+  ]);
+  assert.deepEqual(mentionedParts("The lidded box and the puck fit are fine.", parts), []);
 });

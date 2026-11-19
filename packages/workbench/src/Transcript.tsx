@@ -6,7 +6,7 @@ import { AssistantMarkdown, MeasurementCard, SpecCard, changedSize, type Message
 function shown(message: Message): boolean {
   const payload = message.payload
   if (message.content || !payload) return true
-  if (payload.type === "step" || payload.type === "build") return false
+  if (payload.type === "step" || payload.type === "build" || payload.type === "part_written") return false
   return payload.type !== "measurement" || changedSize(payload.measurement)
 }
 

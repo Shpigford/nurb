@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 
-from . import __version__, db, edit, engine_run, labels, materialize, mcp_server, og, share, spec
+from . import __version__, db, edit, engine_run, fit_tests, labels, materialize, mcp_server, og, share, spec
 from .color import HEX
 
 STATE = "serve.json"
@@ -364,6 +364,8 @@ def _step_payload(conn, row, payload):
 
 
 def _message_payload(conn, row, payload):
+    if payload.get("type") == "part_written":
+        return {"type": "part_written", "part_id": payload["part_id"]}
     run_id = payload.get("run_id")
     if run_id:
         run = conn.execute("SELECT * FROM build_runs WHERE id = ?", (run_id,)).fetchone()
@@ -869,9 +871,16 @@ def _project(conn, project_id, part=None):
         return None
     rows = db.parts_of(conn, project_id)
     grouping = _grouping(conn, project_id, rows)
+    reads = mcp_server._measurement_uses(rows, db.project_files_of(conn, project_id))
+    measurements = db.measurements_of(conn, project_id)
     parts = [
         {
             **_part_entry(conn, project_id, entry, grouping),
+            # The measurements it reads, so the page can tell a fit nobody has printed yet.
+            "measures": sorted(reads[entry["id"]]),
+            "fit_export_id": fit_tests.export_id(
+                entry, db.latest_run(conn, entry["id"]), measurements, reads[entry["id"]]
+            ) if fit_tests.is_coupon(entry) else None,
             # Only the part page draws labels, so the library's read never measures them.
             # Against the geometry on screen, the same run the build's glb_url names.
             "labels": labels.placed(
@@ -907,7 +916,7 @@ def _project(conn, project_id, part=None):
                 "provisional": bool(m["provisional"]),
                 "value_changed_at": m["value_changed_at"],
             }
-            for m in db.measurements_of(conn, project_id)
+            for m in measurements
         ],
         "parts": parts,
         # The family's shared files and which parts import each, so the page can say
@@ -1199,7 +1208,48 @@ def _routes(conn, lock, server, token, pid):
                 raise _Refused(404, "no project")
             content = word(sent, "content", "content must be what was said")
             drafted, part = _start_part(conn, project, content, sent.get("new_part") is True)
-            return {"part": part, "drafted": drafted}
+            result = {"part": part, "drafted": drafted}
+            if drafted and sent.get("include_part_id") is True:
+                result["part_id"] = db.draft_of(conn, project["id"])["id"]
+            return result
+
+        return await acted(work)
+
+    async def project_part_link(request):
+        """File a successful tool write in the conversation that requested it."""
+        sent = await body_of(request)
+        name = word(sent, "part_name", "part_name must name the part that was written")
+        turn_id = word(sent, "turn_id", "turn_id must identify the originating turn")
+        origin_id = word(sent, "origin_id", "origin_id must identify the originating part")
+        project_id = request.path_params["project_id"]
+
+        def work(conn):
+            part = conn.execute(
+                "SELECT id, name FROM parts WHERE project_id = ? AND name = ? AND kind = 'part'",
+                (project_id, name),
+            ).fetchone()
+            if part is None:
+                raise _Refused(404, f"no part called {name} in this project")
+            origin = None
+            if turn_id:
+                turn = conn.execute(
+                    "SELECT part FROM messages WHERE id = ? AND project_id = ? AND role = 'user'",
+                    (turn_id, project_id),
+                ).fetchone()
+                if turn is None:
+                    raise _Refused(404, "the originating turn is no longer in the project")
+                origin = turn["part"]
+            elif origin_id:
+                row = conn.execute(
+                    "SELECT name FROM parts WHERE id = ? AND project_id = ? AND kind = 'part'",
+                    (origin_id, project_id),
+                ).fetchone()
+                if row is None:
+                    raise _Refused(404, "the originating part is no longer in the project")
+                origin = row["name"]
+            if origin != part["name"]:
+                db.add_message(conn, project_id, "event", None, {"type": "part_written", "part_id": part["id"]}, part=origin)
+            return {"part_id": part["id"]}
 
         return await acted(work)
 
@@ -1320,10 +1370,11 @@ def _routes(conn, lock, server, token, pid):
         return await acted(work)
 
     async def project_measurement(request):
-        """Correct a measurement's value from the app and rebuild the parts that read it."""
+        """Correct a measurement or its provenance from the project panel."""
         sent = await body_of(request)
         project_id = request.path_params["project_id"]
         name = request.path_params["name"]
+        how = word(sent, "how", "how must say where the number came from")
 
         def work(conn):
             row = conn.execute(
@@ -1331,24 +1382,34 @@ def _routes(conn, lock, server, token, pid):
             ).fetchone()
             if row is None:
                 raise _Refused(404, f"no measurement called {name}")
-            value = sent.get("value_mm")
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise _Refused(400, "value_mm must be a number of millimetres")
-            result = mcp_server.record_measurement(
-                conn,
-                {
+            provisional = sent.get("provisional", bool(row["provisional"]))
+            if not isinstance(provisional, bool):
+                raise _Refused(400, "provisional must be true or false")
+            if "value_mm" not in sent:
+                db.set_measurement(conn, project_id, name, row["value"], how or row["how"], row["unit"], provisional)
+                return _system(conn, project_id)
+            value = sent["value_mm"]
+            try:
+                valid = type(value) in (int, float) and math.isfinite(value)
+            except OverflowError:
+                valid = False
+            if not valid:
+                raise _Refused(400, "value_mm must be a finite number of millimetres")
+            changed = row["value"] != value or row["unit"] != "mm"
+            edited_fit = changed and row["how"].endswith(fit_tests.PROVENANCE)
+            if edited_fit:
+                provisional = True
+            mcp_server.record_measurement(
+                conn, {
                     "project_id": project_id,
                     "name": name,
                     "value_mm": value,
-                    "how": row["how"],
-                    "provisional": bool(row["provisional"]),
+                    "how": how or ("Corrected from the project panel" if edited_fit else row["how"]),
+                    "provisional": provisional,
                     "note": "Corrected from the project panel",
-                },
-                "",
+                }, "",
             )
-            if result.is_error:
-                raise _Refused(400, result.content[0].text)
-            if float(row["value"]) != float(value):
+            if changed:
                 # Every part that reads it, built or not: the panel promised them all.
                 rows = list(db.parts_of(conn, project_id))
                 reads = mcp_server._measurement_uses(rows, db.project_files_of(conn, project_id))
@@ -1356,6 +1417,27 @@ def _routes(conn, lock, server, token, pid):
                     [r["id"] for r in rows if r["kind"] == "part" and name in reads.get(r["id"], [])], project_id
                 )
             return _system(conn, project_id)
+
+        return await acted(work)
+
+    def fit_inputs(conn, part):
+        project_id = part["project_id"]
+        reads = mcp_server._measurement_uses(db.parts_of(conn, project_id), db.project_files_of(conn, project_id))
+        return db.measurements_of(conn, project_id), reads[part["id"]]
+
+    async def confirm_fit(request):
+        sent = await body_of(request)
+        export_id = word(sent, "export_id", "choose the downloaded fit test")
+
+        def work(conn):
+            part = _part_row(conn, request.path_params["part_id"])
+            with db.transaction(conn):
+                measurements, names = fit_inputs(conn, part)
+                run = db.latest_run(conn, part["id"])
+                if not export_id or export_id != fit_tests.export_id(part, run, measurements, names):
+                    raise _Refused(409, "Download the current fit test at its saved dimensions and print it before confirming.")
+                fit_tests.confirm(conn, part["project_id"], measurements, names)
+            return {"confirmed": True}
 
         return await acted(work)
 
@@ -1660,7 +1742,7 @@ def _routes(conn, lock, server, token, pid):
                 run = _run_for(conn, part, values)
                 if run["glb"] is None:
                     raise _Refused(409, _said(run, part["name"]))
-                return part["name"], fmt, run["glb"], None, None
+                return part["name"], fmt, run["glb"], None, None, None
             # Only the part's identity under the lock. Exporting it is a round trip to
             # the build worker, which imports the CAD kernel when it is not warm yet,
             # and that is seconds of a held lock: a frozen app (issue #296).
@@ -1668,9 +1750,16 @@ def _routes(conn, lock, server, token, pid):
                 identity = engine_run.part_identity(conn, part["id"])
             except ValueError as exc:
                 raise _Refused(409, str(exc)) from None
-            return part["name"], fmt, None, identity, values or None
+            fit_export = None
+            if fit_tests.is_coupon(part) and fmt in ("3mf", "stl"):
+                run = db.latest_run(conn, part["id"])
+                if run is not None:
+                    measured, names = fit_inputs(conn, part)
+                    basis = fit_tests.basis(part, run, measured, names) if fit_tests.default_values(run, values) else None
+                    fit_export = (part["id"], run["id"], basis)
+            return part["name"], fmt, None, identity, values or None, fit_export
 
-        name, fmt, body, identity, overrides = await query(prepare)
+        name, fmt, body, identity, overrides, fit_export = await query(prepare)
         note = None
         if body is None:
             try:
@@ -1679,6 +1768,20 @@ def _routes(conn, lock, server, token, pid):
                 )
             except ValueError as exc:
                 raise _Refused(409, str(exc)) from None
+        if fit_export is not None:
+            part_id, run_id, basis = fit_export
+
+            def remember(conn):
+                part = conn.execute("SELECT * FROM parts WHERE id = ?", (part_id,)).fetchone()
+                run = db.latest_run(conn, part_id) if part is not None else None
+                if run is None or run["id"] != run_id:
+                    return
+                measured, names = fit_inputs(conn, part)
+                current = fit_tests.basis(part, run, measured, names)
+                payload = {"id": db.new_id(), "values": basis} if basis is not None and basis == current else None
+                db.set_run_result(conn, run_id, "fit_export", payload)
+
+            await query(remember)
         headers = {
             "Content-Disposition": f'attachment; filename="{name}.{fmt}"',
             "Cache-Control": "no-store",
@@ -2271,6 +2374,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/projects/{project_id}/system", endpoint=answering(project_system)),
         Route("/api/projects/{project_id}/settings", endpoint=answering(project_setting), methods=["POST"]),
         Route("/api/projects/{project_id}/measurements/{name}", endpoint=answering(project_measurement), methods=["PATCH"]),
+        Route("/api/projects/{project_id}/part-links", endpoint=answering(project_part_link), methods=["POST"]),
         Route("/api/printers", endpoint=answering(printers_read)),
         Route("/api/printers", endpoint=answering(printers_add), methods=["POST"]),
         Route("/api/printers/default", endpoint=answering(printers_default), methods=["POST"]),
@@ -2286,6 +2390,7 @@ def _routes(conn, lock, server, token, pid):
         Route("/api/parts/{part_id}/revisions/{revision_id}", endpoint=answering(part_revision)),
         Route("/api/parts/{part_id}/revisions/{revision_id}/restore", endpoint=answering(part_restore), methods=["POST"]),
         Route("/api/parts/{part_id}/export", endpoint=answering(part_export), methods=["POST"]),
+        Route("/api/parts/{part_id}/confirm-fit", endpoint=answering(confirm_fit), methods=["POST"]),
         Route("/api/parts/{part_id}/slice", endpoint=answering(part_slice), methods=["POST"]),
         Route("/api/parts/{part_id}/share", endpoint=answering(changing_shares(part_share)), methods=["POST"]),
         Route("/api/parts/{part_id}/share", endpoint=answering(changing_shares(part_unshare)), methods=["DELETE"]),

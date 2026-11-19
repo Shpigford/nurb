@@ -89,7 +89,7 @@ bounding box and still exports, so nothing downstream catches it.
 
 Clearance is ISO 273, cap head is ISO 4762 socket head, nut is ISO 4032 hex. In mm. Across corners is the one a round pocket has to clear, and it is the number people reach for the wrong column of: an M3 nut is 5.5 across the flats and will not go into a 5.5 hole.
 
-**Reach for the medium column.** A printed hole comes out under its modelled size, by a few tenths that vary with the machine, the material and how fast the perimeter was laid, so the close column is a fit you have to earn with a coupon rather than one you can assume. Medium already carries that much slack, which is why it is the default here and close is the exception a fit coupon has justified.
+**Reach for the medium column.** A printed hole comes out under its modelled size, by a few tenths that vary with the machine, the material and how fast the perimeter was laid, so the close column is a fit you have to earn with a fit test rather than one you can assume. Medium already carries that much slack, which is why it is the default here and close is the exception a fit test has justified.
 
 **Give a screw head its pocket through `counterbore`, never a plain wider hole.** Head diameter plus about 0.4, head height plus a layer, and the pocket faces the bed with the shaft rising out of it: that is the shape the table above is sized for, and it is the shape `counterbore` cuts.
 
@@ -112,7 +112,7 @@ The fastener table covers steel meeting plastic. Two printed faces that work tog
 | moving | 0.3 | swings and slides through its whole travel, the hinge floor |
 | free | 0.5 | drops in every time, on any printer, in any material |
 
-In mm. The table is where a fit starts, never what lets it skip the coupon: anything fit-critical is still measured, printed as a coupon, and corrected before the part prints. Two limits: below 0.1 is not a tighter press, it is a bind that varies by machine, and a moving pair never ships at less than 0.3, because the 0.2 that swings freely on the printer that made it seizes on the next one.
+In mm. The table is where a fit starts, never what lets it skip the fit test: the clearance is recorded as a provisional measurement, printed as a fit test, and corrected before a long part prints. Two limits: below 0.1 is not a tighter press, it is a bind that varies by machine, and a moving pair never ships at less than 0.3, because the 0.2 that swings freely on the printer that made it seizes on the next one.
 
 ## Print orientation
 
@@ -391,9 +391,11 @@ moment to ask rather than to pick something plausible.
 
 **A photo is a shape, never a dimension.** It can identify the standard, that the siding is dutch lap, that the rail is 2020 extrusion, and the published profile carries the numbers from there. Pixels carry no millimetres, so a dimension read off a photo is a guess and gets marked like one.
 
-**A phone scan is reference geometry, not metrology.** Its error changes with the phone, capture mode, surface and technique, so no universal millimetre threshold makes it a caliper. nurb cannot read a scan file yet, so a number taken off one by the user is recorded with `how` naming the scan, and every scan-derived fit stays `provisional` until a coupon proves it against the real object.
+**A phone scan is reference geometry, not metrology.** Its error changes with the phone, capture mode, surface and technique, so no universal millimetre threshold makes it a caliper. nurb cannot read a scan file yet, so a number taken off one by the user is recorded with `how` naming the scan, and every scan-derived fit stays `provisional` until a fit test proves it against the real object.
 
-**A fit coupon turns a loose measurement into a tight one.** Before printing a part modelled against a scan or a photo, print the mating surface alone: a thin strip carrying just the profile, minutes of filament. Held against the real object it shows every gap the numbers hid, the parameters get corrected, and only then does the full part print. A coupon that fits is what takes the provisional flag off.
+**A fit against a real object is a guess until it is printed.** The object's number can be exact, a published spec or a caliper reading, and the fit is still not: a printer lays a bore a few tenths under its modelled size, by an amount that depends on the machine, the material and the speed. So the clearance a fit is modelled with is its own measurement, read through `measured()`, recorded `provisional = true` with `how` naming where it started ("snug, fit table, not printed yet"), never folded into the object's number.
+
+**Print a fit test before a long print.** When a part reads a provisional measurement and its print takes more than about an hour, build the fit test before calling the part ready: a second part in the same project named after the first with `_fit_test` on the end (`phone_stand_fit_test`), carrying only the mating surface, a thin ring or strip, minutes of filament. It reads the same measurements through `measured()`, which is how the app links the two: the long part shows Fit not tested above its download until the fit is confirmed, and the fit test asks the person Did it fit, with It fits, Too loose and Too tight. One fit test covers every untested fit it can reach, so put a puck ring and a pocket corner on one plate rather than testing one fit and sending the rest to the long print. In the workbench, download the current fit test as STL or 3MF at its saved dimensions. After the person prints that file and says it fits, the app clears the provisional flag on the measurements that went into it. For a loose or tight fit, correct the measurement, rebuild the fit test, and ask again. Under an hour, the part is its own fit test.
 
 **When there is nobody to ask**, write the guess down and mark it `provisional = true`.
 The danger was never the guess, it is that a guess and a measurement look identical six

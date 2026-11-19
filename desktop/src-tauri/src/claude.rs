@@ -399,17 +399,22 @@ fn assistant_block(block: &Value) -> Option<ChatEvent> {
         Some("text") => Some(ChatEvent::Prose {
             text: string_of(block, "text")?,
         }),
-        Some("tool_use") => Some(ChatEvent::ToolCall {
-            id: string_of(block, "id")?,
-            title: string_of(block, "name")?
+        Some("tool_use") => {
+            let title = string_of(block, "name")?
                 .trim_start_matches("mcp__nurb__")
-                .to_string(),
-            kind: "nurb".into(),
-            status: "in_progress".into(),
-            input: block.get("input").and_then(|input| capped(input.to_string())),
-            output: None,
-            locations: Vec::new(),
-        }),
+                .to_string();
+            let input = block.get("input");
+            Some(ChatEvent::ToolCall {
+                id: string_of(block, "id")?,
+                part_write: crate::acp::PartWrite::from_input(Some(&title), input),
+                title,
+                kind: "nurb".into(),
+                status: "in_progress".into(),
+                input: input.and_then(|input| capped(input.to_string())),
+                output: None,
+                locations: Vec::new(),
+            })
+        }
         _ => None,
     }
 }
@@ -426,6 +431,7 @@ fn tool_result(block: &Value) -> Option<ChatEvent> {
         id: string_of(block, "tool_use_id")?,
         title: None,
         status: Some(if failed { "failed" } else { "completed" }.into()),
+        part_write: None,
         input: None,
         output: capped(result_text(block.get("content"))),
         locations: Vec::new(),
@@ -951,6 +957,20 @@ mod tests {
         assert_eq!(mapped[4]["output"], "built shelf in 1.2s\n[image]");
         assert_eq!(mapped[5]["type"], "result");
         assert_eq!(mapped[5]["stop"], "end_turn");
+    }
+
+    #[test]
+    fn large_part_source_keeps_its_write_identity_when_detail_is_capped() {
+        let line = serde_json::json!({
+            "type": "assistant",
+            "message": {"content": [{
+                "type": "tool_use", "id": "write-1", "name": "mcp__nurb__write_part_source",
+                "input": {"project_id": "project", "part_name": "ring", "source": "x".repeat(25_000)}
+            }]}
+        });
+        let mapped = events(&line.to_string());
+        assert_eq!(mapped[0]["part_write"], serde_json::json!({"project_id": "project", "part_name": "ring"}));
+        assert!(mapped[0]["input"].as_str().unwrap().ends_with("(truncated)"));
     }
 
     #[test]

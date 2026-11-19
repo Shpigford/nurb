@@ -58,6 +58,7 @@ import { loadCamera, saveCamera } from "./camera"
 import { LabelEditor, LabelTag } from "./Labels"
 import AssemblyStrip, { assemblyOf } from "./AssemblyStrip"
 import Slice from "./Slice"
+import FitTest from "./FitTest"
 import { spotText } from "./spot"
 import { verdictOf, type Verdict } from "./verdict"
 
@@ -298,6 +299,13 @@ export default function PartView({
   const paramsPending = useRef(false)
 
   const parts = project?.parts ?? []
+  // A part the agent adds lands in the project menu, so the menu says so until it is opened.
+  const [seenParts, setSeenParts] = useState<{ id: string; ids: Set<string> } | null>(null)
+  useEffect(() => {
+    if (project && seenParts?.id !== project.id) {
+      setSeenParts({ id: project.id, ids: new Set(project.parts.map((p) => p.id)) })
+    }
+  }, [project, seenParts?.id])
   // Selection is by name and a rename changes the name, so for the round trip the host
   // and the project disagree on it. The part on stage stays put until they agree.
   const shownId = useRef<string | null>(null)
@@ -306,6 +314,9 @@ export default function PartView({
     (partName ? parts.find((p) => p.id === shownId.current) : undefined) ??
     (starting ? null : parts.find((p) => !p.assembly) ?? parts[0] ?? null)
   shownId.current = part?.id ?? null
+  // A part inside an assembly is reached from the assembly's strip.
+  const menuParts = parts.filter((p) => !p.assembly || p.name === part?.name)
+  const partAdded = seenParts?.id === project?.id && menuParts.some((p) => !seenParts?.ids.has(p.id))
   const build = part?.build ?? null
   const runId = build?.id ?? null
 
@@ -806,6 +817,9 @@ export default function PartView({
               filter={parts.length > 8 ? "Find a part" : undefined}
               menuClassName="w-[260px] max-h-[min(420px,70vh)] overflow-y-auto!"
               triggerClassName="h-[50px] rounded-none border-l border-line"
+              onOpenChange={(open) => {
+                if (open) setSeenParts({ id: project.id, ids: new Set(parts.map((p) => p.id)) })
+              }}
               trigger={(open) => (
                 <span
                   className={
@@ -816,13 +830,18 @@ export default function PartView({
                 >
                   <Icon name="folder" />
                   <span className="mono-label">In {project.name}</span>
+                  <span className="mono-caption text-faint">
+                    · {menuParts.length} {menuParts.length === 1 ? "part" : "parts"}
+                  </span>
+                  {partAdded ? (
+                    <span className="size-1.5 rounded-full bg-accent" title="A part was added" aria-label="A part was added" />
+                  ) : null}
                   <Icon name="chevron-down" />
                 </span>
               )}
               items={[
                 ...(onNewPart ? [{ label: `New part in ${project.name}`, onSelect: onNewPart }] : []),
-                // A part inside an assembly is reached from the assembly's strip.
-                ...parts.filter((p) => !p.assembly || p.name === part?.name).map((p, index) => ({
+                ...menuParts.map((p, index) => ({
                   separated: Boolean(onNewPart) && index === 0,
                   label: p.title ?? p.name,
                   checked: p.name === part?.name,
@@ -1103,6 +1122,26 @@ export default function PartView({
             </>
           }
           actions={
+            <div className="flex w-full flex-col gap-3">
+              {part && projectId && project && !viewing ? (
+                <FitTest
+                  key={`fit-${part.id}`}
+                  part={part}
+                  parts={parts}
+                  measurements={project.measurements}
+                  seconds={sliceStatus?.state === "succeeded" ? (sliceStatus.seconds ?? null) : null}
+                  atSavedValues={Object.entries(values).every(([name, value]) => part.params.some((p) => p.name === name && p.default === value))}
+                  onSelectPart={onSelectPart}
+                  onAsk={
+                    onPointAt
+                      ? (text) => {
+                          setChatHidden(false)
+                          onPointAt(text)
+                        }
+                      : undefined
+                  }
+                />
+              ) : null}
             <div className="flex w-full gap-2">
               {viewing ? (
                 <Button variant="accent" size="md" className="flex-1" disabled={history.restoring} onClick={() => void history.restore()}>
@@ -1119,6 +1158,7 @@ export default function PartView({
                   openIn={slicer ? { name: slicer.name, open: openInSlicer } : null}
                 />
               ) : null}
+            </div>
             </div>
           }
         />

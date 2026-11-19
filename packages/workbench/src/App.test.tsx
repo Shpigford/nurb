@@ -63,6 +63,18 @@ describe("workbench", () => {
     expect(stage()).toHaveAttribute("data-glb-url", "/glb/p2/lid.glb?run=1")
   })
 
+  it("marks a replacement part even when the menu count stays the same", async () => {
+    const body = part("body", "/body.glb")
+    const before = project("p2", "Second", [body, part("lid", "/lid.glb")], messages)
+    const { rerender } = render(<PartView project={before} partName="body" />)
+    rerender(<PartView project={{ ...before, parts: [body] }} partName="body" />)
+    rerender(<PartView project={{ ...before, parts: [body, part("cap", "/cap.glb")] }} partName="body" />)
+    expect(screen.getByLabelText("A part was added")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Parts in Second" }))
+    await screen.findByRole("menuitemradio", { name: "cap" })
+    expect(screen.queryByLabelText("A part was added")).toBeNull()
+  })
+
   it("says the part is opening while a running build holds the project's read", async () => {
     vi.stubGlobal("fetch", (url: string) =>
       url === "/api/projects"

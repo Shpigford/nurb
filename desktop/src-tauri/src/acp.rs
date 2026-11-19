@@ -85,7 +85,7 @@ pub async fn authenticate(
 }
 
 use crate::prefs::{ConfigChoice, ConfigRow, PrefStore};
-pub(crate) use events::ChatEvent;
+pub(crate) use events::{ChatEvent, PartWrite};
 use events::{forward, permission_choice, permission_title, wire_string};
 
 /// The whole-project conversation rides the per-part session plumbing under a
@@ -166,8 +166,15 @@ async fn capture_parts(capture: Capture, names: Vec<String>, channel: Channel<Ch
         )
         .await
         {
-            Ok(_) => {
-                capture.parts.lock().unwrap().insert(name, source);
+            Ok(changed) => {
+                capture.parts.lock().unwrap().insert(name.clone(), source);
+                if changed {
+                    let event = ChatEvent::PartWritten {
+                        part_write: PartWrite { project_id: capture.project_id.clone(), part_name: name },
+                    };
+                    events::mirror(&event);
+                    let _ = channel.send(event);
+                }
             }
             Err(sentence) => {
                 let note = ChatEvent::Note { text: sentence };

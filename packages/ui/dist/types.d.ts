@@ -123,6 +123,10 @@ export type MessagePayload = {
     type: "step";
     step: ToolStep;
     tool?: string;
+} | {
+    type: "part_written";
+    part_id: string;
+    tool?: never;
 };
 export interface Message {
     id: string;
