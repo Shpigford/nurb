@@ -66,6 +66,10 @@ export interface Part {
   assembly?: string | null
   /** The part's public link on nurb.app, or null when it is not shared. */
   share?: PartShare | null
+  /** The project measurements its source reads. */
+  measures?: string[]
+  /** The latest print export eligible to confirm this coupon's measurements. */
+  fit_export_id?: string | null
 }
 
 /** A part's public link. `current` is false once the part has built again since. */
@@ -417,8 +421,14 @@ export function startPart(
   projectId: string,
   content: string,
   newPart: boolean
-): Promise<{ part: string | null; drafted: boolean }> {
-  return post(`/api/projects/${encodeURIComponent(projectId)}/draft`, { content, new_part: newPart })
+): Promise<{ part: string | null; drafted: boolean; part_id?: string | null }> {
+  return post(`/api/projects/${encodeURIComponent(projectId)}/draft`, { content, new_part: newPart, include_part_id: true })
+}
+
+export function addPartLink(projectId: string, partName: string, originId: string | null, turnId: string | null) {
+  return post<{ part_id: string }>(`/api/projects/${encodeURIComponent(projectId)}/part-links`, {
+    part_name: partName, origin_id: originId, turn_id: turnId,
+  })
 }
 
 /**
@@ -494,6 +504,10 @@ export async function setMeasurement(id: string, name: string, valueMm: number):
   })
   if (!res.ok) throw await refusal(res, `${url} answered ${res.status}`)
   return (await res.json()) as ProjectSystem
+}
+
+export function confirmFit(partId: string, exportId: string): Promise<{ confirmed: boolean }> {
+  return post(partUrl(partId, "confirm-fit"), { export_id: exportId })
 }
 
 /** Write a project out as a folder of part files (the 0.x layout) at `directory`,

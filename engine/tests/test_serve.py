@@ -1500,6 +1500,9 @@ def test_a_new_part_in_a_folder_is_asked_for_and_files_its_turns(home):
         draft = f"{url}/api/projects/{shelves}/draft"
         assert json.loads(post(draft, {"content": "a lid", "new_part": True})[2]) == {"part": "new_part_3", "drafted": True}
         assert json.loads(post(draft, {"content": "more about the set"})[2]) == {"part": None, "drafted": False}
+        with_id = json.loads(post(draft, {"content": "a latch", "new_part": True, "include_part_id": True})[2])
+        parts = {p["name"]: p for p in json.loads(get(f"{url}/api/projects/{shelves}")[2])["parts"]}
+        assert with_id == {"part": "new_part_4", "drafted": True, "part_id": parts["new_part_4"]["id"]}
 
         # A quick model's short name replaces the prompt's opening words, but only on a draft.
         titled = f"{url}/api/projects/{shelves}/draft/title"
@@ -1988,6 +1991,136 @@ def test_the_project_panel_reads_and_tunes_the_system(tmp_path, monkeypatch):
     assert fixed["measurements"][0]["value_mm"] == 21.5
     names = {r["id"]: r["name"] for r in db.parts_of(conn, project_id)}
     assert names[engine_run.take_rebuild()] == "lid" and engine_run.take_rebuild() is None
+    conn.close()
+
+
+def test_a_fit_test_confirms_only_the_measurements_used_for_its_current_print_file(tmp_path, monkeypatch):
+    import threading
+
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from nurb import db, engine_run, fit_tests, serve
+
+    monkeypatch.setenv("NURB_HOME", str(tmp_path))
+    conn = db.connect(check_same_thread=False)
+    project_id = db.create_project(conn, "stand")
+    db.set_measurement(conn, project_id, "puck_fit", 56.2, "snug fit table", provisional=True)
+    coupon = db.create_part(
+        conn, project_id, "stand_fit_test",
+        'from nurb import *\n@part\ndef stand_fit_test(d=measured("puck_fit")):\n    return Box(d, d, 1)\n',
+    )
+    db.create_part(
+        conn, project_id, "plate",
+        'from nurb import *\n@assembly\ndef plate():\n    return use("stand_fit_test")\n',
+    )
+    while engine_run.take_rebuild():
+        pass
+    _, routes, _ = serve._routes(conn, threading.Lock(), None, "t", 0)
+    client = TestClient(Starlette(routes=[r for r in routes if "/api/" in getattr(r, "path", "")]))
+    project = f"/api/projects/{project_id}"
+    download = f"/api/parts/{coupon}/export"
+    confirm = f"/api/parts/{coupon}/confirm-fit"
+
+    def state():
+        return client.get(project).json()
+
+    def export_id():
+        parts = {part["name"]: part for part in state()["parts"]}
+        return parts["stand_fit_test"]["fit_export_id"]
+
+    parts = {part["name"]: part for part in state()["parts"]}
+    assert parts["plate"]["measures"] == parts["stand_fit_test"]["measures"] == ["puck_fit"]
+    assert client.post(confirm, json={"export_id": "guessed"}).status_code == 409
+
+    engine_run.run_build(conn, coupon)
+    exported = client.post(download, json={"format": "stl"})
+    assert exported.status_code == 200, exported.text
+    original = export_id()
+    assert original
+
+    modified = client.post(download, json={"format": "stl", "values": {"d": 56.7}})
+    assert modified.status_code == 200, modified.text
+    assert modified.content != exported.content
+    assert export_id() is None
+    assert client.post(confirm, json={"export_id": original}).status_code == 409
+
+    assert client.post(download, json={"format": "stl"}).status_code == 200
+    before_edit = export_id()
+    assert before_edit and before_edit != original
+    db.set_measurement(conn, project_id, "puck_fit", 56.4, "tighter fit", provisional=True)
+    assert export_id() is None
+    assert client.post(confirm, json={"export_id": before_edit}).status_code == 409
+    assert state()["measurements"][0]["provisional"]
+
+    engine_run.run_build(conn, coupon)
+    assert client.post(download, json={"format": "stl"}).status_code == 200
+    printed = export_id()
+    assert printed
+    assert client.post(confirm, json={"export_id": printed}).status_code == 200
+    assert client.post(confirm, json={"export_id": printed}).status_code == 200
+    [m] = state()["measurements"]
+    assert (m["value_mm"], m["provisional"], m["how"]) == (56.4, False, "tighter fit" + fit_tests.PROVENANCE)
+    assert engine_run.take_rebuild() is None
+
+    edited = client.patch(f"{project}/measurements/puck_fit", json={"value_mm": 56.9})
+    assert edited.status_code == 200
+    assert state()["measurements"][0]["provisional"]
+    assert not state()["measurements"][0]["how"].endswith(fit_tests.PROVENANCE)
+    assert engine_run.take_rebuild() is not None
+    while engine_run.take_rebuild():
+        pass
+    conn.close()
+
+
+def test_measurement_metadata_edits_keep_units_and_validate_provenance(tmp_path, monkeypatch):
+    import threading
+
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from nurb import db, serve
+
+    monkeypatch.setenv("NURB_HOME", str(tmp_path))
+    conn = db.connect(check_same_thread=False)
+    project = db.create_project(conn, "stand")
+    db.set_measurement(conn, project, "width", 2, "ruler", unit="in", provisional=True)
+    _, routes, _ = serve._routes(conn, threading.Lock(), None, "t", 0)
+    client = TestClient(Starlette(routes=[r for r in routes if "/api/projects" in getattr(r, "path", "")]))
+    url = f"/api/projects/{project}/measurements/width"
+    assert client.patch(url, json={"how": 123}).status_code == 400
+    assert client.patch(url, json={"provisional": "no"}).status_code == 400
+    assert client.patch(url, json={"provisional": False, "how": "steel ruler"}).status_code == 200
+    [m] = db.measurements_of(conn, project)
+    assert (m["value"], m["unit"], m["how"], m["provisional"]) == (2, "in", "steel ruler", False)
+    conn.close()
+
+
+def test_a_written_part_link_survives_reopen_in_its_originating_conversation(tmp_path, monkeypatch):
+    import threading
+
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from nurb import db, serve
+
+    monkeypatch.setenv("NURB_HOME", str(tmp_path))
+    conn = db.connect(check_same_thread=False)
+    project = db.create_project(conn, "stand")
+    db.create_part(conn, project, "stand", "from nurb import *")
+    turn = db.add_message(conn, project, "user", "Make a test piece", {})
+    coupon = db.create_part(conn, project, "coupon", "from nurb import *")
+    _, routes, _ = serve._routes(conn, threading.Lock(), None, "t", 0)
+    app = Starlette(routes=[r for r in routes if "/api/projects" in getattr(r, "path", "")])
+    url = f"/api/projects/{project}"
+    assert TestClient(app).post(f"{url}/part-links", json={"part_name": "coupon", "turn_id": turn}).status_code == 200
+    db.add_message(conn, project, "user", "Follow-up question", {}, part="stand")
+    db.rename_part(conn, coupon, "sizing_ring")
+    reopened = TestClient(app).get(url, params={"part": "stand"}).json()["messages"]
+    assert [m["id"] for m in reopened[:1]] == [turn]
+    assert reopened[1]["payload"] == {"type": "part_written", "part_id": coupon}
+    assert reopened[2]["content"] == "Follow-up question"
+    assert TestClient(app).get(url, params={"part": "sizing_ring"}).json()["messages"] == []
     conn.close()
 
 

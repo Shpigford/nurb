@@ -35,6 +35,8 @@ pub(crate) enum ChatEvent {
         title: String,
         kind: String,
         status: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        part_write: Option<PartWrite>,
         /// The tool's raw input (the command, the file), for the card's
         /// expandable detail.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,12 +52,17 @@ pub(crate) enum ChatEvent {
         title: Option<String>,
         status: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        part_write: Option<PartWrite>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         input: Option<String>,
         /// Replaces earlier output (ACP update fields replace, not append).
         #[serde(skip_serializing_if = "Option::is_none")]
         output: Option<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         locations: Vec<String>,
+    },
+    PartWritten {
+        part_write: PartWrite,
     },
     Plan {
         entries: Vec<PlanItem>,
@@ -71,6 +78,25 @@ pub(crate) enum ChatEvent {
     SessionError {
         message: String,
     },
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct PartWrite {
+    pub(crate) project_id: String,
+    pub(crate) part_name: String,
+}
+
+impl PartWrite {
+    pub(crate) fn from_input(title: Option<&str>, input: Option<&serde_json::Value>) -> Option<Self> {
+        if title.is_some_and(|name| !matches!(name, "write_part_source" | "edit_part_source")) {
+            return None;
+        }
+        let input = input?;
+        Some(Self {
+            project_id: input.get("project_id")?.as_str()?.into(),
+            part_name: input.get("part_name")?.as_str()?.into(),
+        })
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -125,6 +151,7 @@ pub(super) fn forward(channel: &Channel<ChatEvent>, update: SessionUpdate, repla
             }
             Some(ChatEvent::ToolCall {
                 id: wire_string(&call.tool_call_id),
+                part_write: PartWrite::from_input(Some(&title), call.raw_input.as_ref()),
                 title,
                 kind,
                 status: wire_string(&call.status),
@@ -133,20 +160,24 @@ pub(super) fn forward(channel: &Channel<ChatEvent>, update: SessionUpdate, repla
                 locations: paths_of(Some(&call.locations)),
             })
         }
-        SessionUpdate::ToolCallUpdate(update) => Some(ChatEvent::ToolCallUpdate {
-            id: wire_string(&update.tool_call_id),
-            title: update
+        SessionUpdate::ToolCallUpdate(update) => {
+            let title = update
                 .fields
                 .title
-                .map(|title| super::mcp::named(title, String::new()).0),
-            status: update.fields.status.as_ref().map(wire_string),
-            input: input_of(update.fields.raw_input.as_ref()),
-            output: output_of(
-                update.fields.content.as_deref().unwrap_or(&[]),
-                update.fields.raw_output.as_ref(),
-            ),
-            locations: paths_of(update.fields.locations.as_deref()),
-        }),
+                .map(|title| super::mcp::named(title, String::new()).0);
+            Some(ChatEvent::ToolCallUpdate {
+                id: wire_string(&update.tool_call_id),
+                part_write: PartWrite::from_input(title.as_deref(), update.fields.raw_input.as_ref()),
+                title,
+                status: update.fields.status.as_ref().map(wire_string),
+                input: input_of(update.fields.raw_input.as_ref()),
+                output: output_of(
+                    update.fields.content.as_deref().unwrap_or(&[]),
+                    update.fields.raw_output.as_ref(),
+                ),
+                locations: paths_of(update.fields.locations.as_deref()),
+            })
+        }
         SessionUpdate::Plan(plan) => Some(ChatEvent::Plan {
             entries: plan
                 .entries

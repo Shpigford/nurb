@@ -6,6 +6,7 @@ import type { StepStatus, ToolStep } from "@nurb/ui";
 
 export type PlanEntry = { content: string; status: string };
 export type PermissionOption = { optionId: string; name: string; kind: string };
+export type PartWrite = { project_id: string; part_name: string };
 
 // Mirrors ChatEvent in src-tauri/src/acp.rs.
 export type ChatEvent =
@@ -17,8 +18,9 @@ export type ChatEvent =
   | { type: "prose"; text: string }
   | { type: "session_info"; title: string | null }
   | { type: "note"; text: string }
-  | { type: "tool_call"; id: string; title: string; kind?: string; status: string; input?: string; output?: string; locations?: string[] }
-  | { type: "tool_call_update"; id: string; title?: string; status?: string; input?: string; output?: string; locations?: string[] }
+  | { type: "tool_call"; id: string; title: string; kind?: string; status: string; part_write?: PartWrite; input?: string; output?: string; locations?: string[] }
+  | { type: "tool_call_update"; id: string; title?: string; status?: string; part_write?: PartWrite; input?: string; output?: string; locations?: string[] }
+  | { type: "part_written"; part_write: PartWrite }
   | { type: "plan"; entries: PlanEntry[] }
   | { type: "permission_request"; id: number; title: string; options: PermissionOption[] }
   | { type: "permission_resolved"; id: number }
@@ -208,6 +210,23 @@ export function advanceStep(
   };
 }
 
+const WRITES_PART = /^(?:mcp__nurb__)?(?:write|edit)_part_source$/;
+
+/** A successful write gets its own transcript row, independent of tool detail and pruning. */
+export function finishedPartWrite(
+  writes: Map<string, PartWrite | null>,
+  event: Extract<ChatEvent, { type: "tool_call" | "tool_call_update" }>,
+): PartWrite | null {
+  if (!writes.has(event.id) && !WRITES_PART.test(event.title ?? "")) return null;
+  const part = event.part_write ?? writes.get(event.id) ?? null;
+  if (event.status === "completed" || event.status === "failed") {
+    writes.delete(event.id);
+    return event.status === "completed" ? part : null;
+  }
+  writes.set(event.id, part);
+  return null;
+}
+
 function settled(status: StepStatus): boolean {
   return status !== "running";
 }
@@ -244,21 +263,13 @@ export function applyChatEvent(items: Item[], event: ChatEvent, at: number, seq 
       if (!last || last.kind !== "agent") return items;
       return items.slice(0, -1).filter((item) => item.kind !== "step" || item.step.status !== "done");
     case "tool_call":
-      return [
-        ...items,
-        { kind: "step", toolKind: event.kind, tool: event.title, seq, step: stepFrom(event, at) },
-      ];
-    case "tool_call_update": {
-      const next: Item[] = [];
-      for (const item of items) {
-        if (item.kind !== "step" || item.step.id !== event.id) {
-          next.push(item);
-          continue;
-        }
-        next.push({ ...item, step: advanceStep(item.step, event, at, item.toolKind) });
-      }
-      return next;
-    }
+      return [...items, { kind: "step", toolKind: event.kind, tool: event.title, seq, step: stepFrom(event, at) }];
+    case "tool_call_update":
+      return items.map((item) =>
+        item.kind === "step" && item.step.id === event.id
+          ? { ...item, step: advanceStep(item.step, event, at, item.toolKind) }
+          : item,
+      );
     case "plan": {
       let index = -1;
       for (let i = items.length - 1; i >= 0; i--) {
@@ -329,4 +340,24 @@ export function withNote(items: Item[], text: string, { untilSend = false } = {}
 /** What a new send keeps: everything but the notes that asked for it. */
 export function clearUntilSend(items: Item[]): Item[] {
   return items.filter((item) => item.kind !== "note" || !item.untilSend);
+}
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * The parts a block of agent prose names, by slug ("puck_fit_test"), by the slug as
+ * words ("puck fit test"), or by the title the person gave it. Whole words only, so
+ * a part called "lid" is not found inside "lidded".
+ */
+export function mentionedParts(
+  text: string,
+  parts: { name: string; title?: string | null }[],
+): string[] {
+  return parts
+    .filter((p) =>
+      [p.name, p.name.replace(/_+/g, " "), p.title ?? ""]
+        .filter((said) => said.trim().length > 0)
+        .some((said) => new RegExp(`(^|[^\\w])${escape(said)}(?![\\w])`, "i").test(text)),
+    )
+    .map((p) => p.name);
 }

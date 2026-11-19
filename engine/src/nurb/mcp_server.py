@@ -675,7 +675,10 @@ def _module_imports(source, module_names, current_module=None):
 
 def _measurement_uses(rows, project_files=()):
     """Direct and transitive measurement reads for every project part."""
+    from . import shared
+
     modules = {}
+    parts = {row["name"]: row["id"] for row in rows if row["kind"] == "part"}
     sources = {row["id"]: row["source"] for row in rows}
     current_modules = {}
     for row in rows:
@@ -703,6 +706,8 @@ def _measurement_uses(rows, project_files=()):
         key: _module_imports(source, modules, current_modules.get(key))
         for key, source in sources.items()
     }
+    for part_id in parts.values():
+        imports[part_id].extend(parts[name] for name in shared.placed(sources[part_id]) if name in parts)
 
     def walk(name, seen):
         if name in seen:
