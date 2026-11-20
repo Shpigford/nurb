@@ -72,7 +72,7 @@ fn scrub_text(text: &str, home: &str) -> String {
 
 /// An engine failure the person did not cause: it exited, stopped answering,
 /// never started, or raised past its own error handling.
-pub fn engine_error(title: &str, log: &str) {
+pub fn engine_error(title: &str, log: &str, probe: Option<&str>) {
     if dsn().is_none() {
         return;
     }
@@ -80,6 +80,10 @@ pub fn engine_error(title: &str, log: &str) {
         |scope| {
             scope.set_tag("source", "engine");
             scope.set_extra("engine_log", log.into());
+            // How the health check failed, when that is why the engine was replaced.
+            if let Some(probe) = probe {
+                scope.set_extra("probe", probe.into());
+            }
             // An engine killed with no last words was killed from outside, and a
             // low number here says macOS ran out of memory (NURB-DESKTOP-6).
             if let Some(free) = memory_free_percent() {
