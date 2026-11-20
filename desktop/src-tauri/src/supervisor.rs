@@ -111,8 +111,13 @@ impl Supervisor {
             if state.shutting_down {
                 return Err("app is shutting down".into());
             }
+            let probe = match &state.phase {
+                Phase::Running(running) if alive(&running.info) => Ok(()),
+                Phase::Running(running) => busy(running),
+                _ => Ok(()),
+            };
             match &state.phase {
-                Phase::Running(running) if alive(&running.info) || busy(running) => {
+                Phase::Running(running) if probe.is_ok() => {
                     return Ok(running.info.clone());
                 }
                 Phase::Running(_) => {
@@ -127,7 +132,7 @@ impl Supervisor {
                             Some(status) => format!("The engine exited unexpectedly ({status})"),
                             None => "The engine stopped answering".to_string(),
                         };
-                        crash::engine_error(&title, &self.tail_text());
+                        crash::engine_error(&title, &self.tail_text(), probe.err().as_deref());
                         kill_tree(&child);
                     }
                 }
@@ -162,6 +167,7 @@ impl Supervisor {
                     crash::engine_error(
                         "The engine did not start",
                         &format!("{error}\n\n{}", self.tail_text()),
+                        None,
                     );
                 }
                 Err(error)
@@ -383,7 +389,7 @@ fn watch_stderr(stderr: ChildStderr, tail: Arc<Mutex<VecDeque<String>>>) {
                 tail.push_back(line.clone());
             }
             if let Some((title, text)) = traceback.feed(&line) {
-                crash::engine_error(&title, &text);
+                crash::engine_error(&title, &text, None);
             }
         }
     });
@@ -449,15 +455,33 @@ fn alive(info: &ServeInfo) -> bool {
     health_pid(info.port, HEALTH_TIMEOUT) == Some(info.pid)
 }
 
-/// Our own serve, still running and answering, only slowly.
-fn busy(running: &Running) -> bool {
-    running.child.as_deref().is_some_and(|child| exited(child).is_none())
-        && health_pid(running.info.port, BUSY_TIMEOUT) == Some(running.info.pid)
+/// Our own serve, still running and answering, only slowly. The error says how
+/// the last probe failed, which is all a "stopped answering" report has to go
+/// on (NURB-DESKTOP-3).
+fn busy(running: &Running) -> Result<(), String> {
+    match running.child.as_deref() {
+        None => return Err("not our serve, so not waited on".into()),
+        Some(child) => {
+            if let Some(status) = exited(child) {
+                return Err(format!("the process exited ({status})"));
+            }
+        }
+    }
+    let health = health_answer(running.info.port, BUSY_TIMEOUT)?;
+    match health.get("pid").and_then(|pid| pid.as_u64()) {
+        Some(pid) if pid == u64::from(running.info.pid) => Ok(()),
+        Some(pid) => Err(format!("the port answered as pid {pid}, not {}", running.info.pid)),
+        None => Err(format!("the health answer named no pid: {health}")),
+    }
 }
 
 fn health(port: u16, timeout: Duration) -> Option<serde_json::Value> {
-    let body = loopback_get(port, "/health", timeout).ok()?;
-    serde_json::from_str(&body).ok()
+    health_answer(port, timeout).ok()
+}
+
+fn health_answer(port: u16, timeout: Duration) -> Result<serde_json::Value, String> {
+    let body = loopback_get(port, "/health", timeout)?;
+    serde_json::from_str(&body).map_err(|e| format!("unreadable health answer: {e}"))
 }
 
 fn health_pid(port: u16, timeout: Duration) -> Option<u32> {
@@ -520,9 +544,13 @@ fn loopback_get(port: u16, path: &str, timeout: Duration) -> Result<String, Stri
     )
     .map_err(|e| format!("request: {e}"))?;
     let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .map_err(|e| format!("response: {e}"))?;
+    stream.read_to_string(&mut response).map_err(|e| match e.kind() {
+        // macOS reports a read timeout as EAGAIN, which reads like something else.
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => {
+            format!("no answer within {:?}", timeout)
+        }
+        _ => format!("response: {e}"),
+    })?;
     let (head, body) = response
         .split_once("\r\n\r\n")
         .ok_or("malformed response from the serve")?;
@@ -787,6 +815,43 @@ server.serve_forever()
         let (stubborn, _) = fake_serve(None, true, true);
         stop_serve(stubborn);
         assert!(!running(stubborn));
+    }
+
+    #[test]
+    fn a_failed_probe_says_how_it_failed() {
+        // A port that accepts and never answers: the probe times out, and says so
+        // rather than macOS's EAGAIN (NURB-DESKTOP-3).
+        let silent = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = silent.local_addr().unwrap().port();
+        let error = loopback_get(port, "/health", Duration::from_millis(200)).unwrap_err();
+        assert_eq!(error, "no answer within 200ms");
+        drop(silent);
+
+        // Our child is running, but another process answers on its port.
+        let (other, port) = fake_serve(None, false, false);
+        let process = Command::new("sh")
+            .args(["-c", "sleep 60"])
+            .stdin(Stdio::null())
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let pid = process.id();
+        let child = Arc::new(ManagedChild {
+            state: Mutex::new(ChildState {
+                process,
+                stopped: false,
+            }),
+        });
+        let running = Running {
+            info: info(pid, port),
+            child: Some(Arc::clone(&child)),
+        };
+        assert_eq!(
+            busy(&running),
+            Err(format!("the port answered as pid {other}, not {pid}"))
+        );
+        kill_tree(&child);
+        stop_serve(other);
     }
 
     #[test]
