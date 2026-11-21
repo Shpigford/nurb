@@ -57,6 +57,7 @@ import { activity } from "./activity"
 import { loadCamera, saveCamera } from "./camera"
 import { LabelEditor, LabelTag } from "./Labels"
 import AssemblyStrip, { assemblyOf } from "./AssemblyStrip"
+import AssemblyHint, { redrawnSiblings } from "./AssemblyHint"
 import Slice from "./Slice"
 import FitTest from "./FitTest"
 import { spotText } from "./spot"
@@ -263,6 +264,13 @@ export default function PartView({
     setLocalChatHidden(hidden)
     onChatHiddenChange?.(hidden)
   }, [onChatHiddenChange])
+  // A card's request goes in the chat for the person to send, so the chat opens with it.
+  const ask = onPointAt
+    ? (text: string) => {
+        setChatHidden(false)
+        onPointAt(text)
+      }
+    : undefined
   useEffect(() => saveHidden(CONVERSATION_HIDDEN_KEY, chatHidden), [chatHidden])
   const [labelsHidden, setLabelsHidden] = useHidden(LABELS_HIDDEN_KEY)
   const [markersHidden, setMarkersHidden] = useHidden(MARKERS_HIDDEN_KEY)
@@ -1123,6 +1131,9 @@ export default function PartView({
           }
           actions={
             <div className="flex w-full flex-col gap-3">
+              {part && project && !viewing ? (
+                <AssemblyHint siblings={redrawnSiblings(part, parts, project.shared ?? [], findings)} onAsk={ask} />
+              ) : null}
               {part && projectId && project && !viewing ? (
                 <FitTest
                   key={`fit-${part.id}`}
@@ -1132,14 +1143,7 @@ export default function PartView({
                   seconds={sliceStatus?.state === "succeeded" ? (sliceStatus.seconds ?? null) : null}
                   atSavedValues={Object.entries(values).every(([name, value]) => part.params.some((p) => p.name === name && p.default === value))}
                   onSelectPart={onSelectPart}
-                  onAsk={
-                    onPointAt
-                      ? (text) => {
-                          setChatHidden(false)
-                          onPointAt(text)
-                        }
-                      : undefined
-                  }
+                  onAsk={ask}
                 />
               ) : null}
             <div className="flex w-full gap-2">
