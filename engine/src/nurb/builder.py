@@ -346,15 +346,22 @@ def to_glb(shape, tolerance=0.1, up=(0, 0, 1)):
             out.add_geometry(to_mesh(body, tolerance, up), node_name=name, geom_name=name)
         return out.export(file_type="glb")
     from .assembly import NODE
+    from .color import placed_bodies
 
+    # A placed part keeps its colors and text, merged per color across the scene: the
+    # viewer reads a node's paint from its name, so one node per color is enough.
+    nodes = {}
+    placed = [(NODE.format(i), h.solid) for i, h in enumerate(scene.hinges)]
+    placed += [("fixed", s) for s in scene.statics]
+    for name, solid in placed:
+        for color, body in placed_bodies(solid) or [(None, solid)]:
+            key = name if color is None else node_name(color, 0)
+            nodes.setdefault(key, []).append(to_mesh(body, tolerance, up))
+    if scene.obstacles:
+        nodes["context"] = [to_mesh(s, tolerance, up) for s in scene.obstacles]
     out = trimesh.Scene()
-    for i, h in enumerate(scene.hinges):
-        name = NODE.format(i)
-        out.add_geometry(to_mesh(h.solid, tolerance, up), node_name=name, geom_name=name)
-    for name, group in (("fixed", scene.statics), ("context", scene.obstacles)):
-        if group:
-            merged = trimesh.util.concatenate([to_mesh(s, tolerance, up) for s in group])
-            out.add_geometry(merged, node_name=name, geom_name=name)
+    for name, meshes in nodes.items():
+        out.add_geometry(trimesh.util.concatenate(meshes), node_name=name, geom_name=name)
     return out.export(file_type="glb")
 
 

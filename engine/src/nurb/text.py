@@ -84,6 +84,12 @@ class Lettering:
     # move() and locate() mutate owner itself, so its placement needs a separate copy.
     location: object = None
 
+    # build123d deep-copies a shape's attributes on every move, and a copied owner is a
+    # new shape, so a part moved after `add_text` could never be matched to its letters.
+    # The record is never changed in place, so a moved copy can share it.
+    def __deepcopy__(self, memo):
+        return self
+
 
 def font_file(font):
     """The bundled file for a font name, or a refusal that lists the ones nurb has."""
@@ -328,7 +334,7 @@ def lettering(shape):
     """The text a part carries, or None once anything has changed the shape since."""
     found = getattr(shape, "_nurb_text", None)
     wrapped = getattr(shape, "wrapped", None)
-    if found is None or wrapped is None or not wrapped.IsEqual(found.owner) or shape.location != found.location:
+    if found is None or wrapped is None or not wrapped.IsPartner(found.owner) or shape.location != found.location:
         return None
     return found
 

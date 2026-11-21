@@ -327,3 +327,42 @@ def test_placed_parts_are_read_from_the_source():
     owners = shared.owners(sources)
     assert owners["jaw_set"] == "vise" and owners["jaw"] == "vise"
     assert set(owners) == {"jaw_set", "jaw"}
+
+
+COLORED = '''from nurb import *
+
+
+@part
+def drive(draft=False):
+    body = add_color(Box(20, 20, 6), "#d8c8a0")
+    return add_color(body, "#222222", Pos(0, 0, 3) * Box(6, 6, 2))
+'''
+
+COLORED_ASM = '''from nurb import *
+
+
+@assembly
+def stand(lift=0.0):
+    plain = Pos(0, 40, 0) * use("plate")
+    return Pos(5, 0, 10 + lift) * use("drive").rotate(Axis.Z, 30), plain
+'''
+
+
+def test_an_assembly_glb_keeps_the_colors_of_the_parts_it_moved(project):
+    """A placed part is the same part somewhere else, so it shows in its own colors."""
+    import io
+
+    import trimesh
+
+    write(project, "plate", PLATE)
+    write(project, "drive", COLORED)
+    path = write(project, "stand", COLORED_ASM)
+    shape, _, _ = builder.build(path)
+    scene = trimesh.load(io.BytesIO(builder.to_glb(shape)), file_type="glb")
+    names = set(scene.geometry)
+    assert {"fixed", "color-d8c8a0-0", "color-222222-0"} <= names
+    # The colored bodies sit where the moved part sits, not where it was modelled.
+    knob = scene.geometry["color-222222-0"].bounds
+    assert knob[0][2] == pytest.approx(12.0, abs=0.01)
+    assert knob[1][2] == pytest.approx(14.0, abs=0.01)
+    assert (knob[0][:2] + knob[1][:2]) / 2 == pytest.approx((5.0, 0.0), abs=0.01)
