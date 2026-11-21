@@ -82,6 +82,8 @@ export interface ViewerIslandProps {
   section?: Section | null
   /** Drawn over the canvas, each with its top-left corner on its point. */
   anchors?: ViewerAnchor[]
+  /** False hides the scenery: what a part is shown with and an assembly's obstacles. Default true. */
+  scenery?: boolean
   /** A view to restore, taken when it can still see the part; compared by value, so a parent may re-send it freely. */
   camera?: CameraState | null
   /** The user's orbits, debounced 250 ms after the last one. The component's own framing never reports. */
@@ -546,6 +548,11 @@ function rebuildMarks(h: Holder, findings: Finding[], highlight: number | null |
   h.render()
 }
 
+// Scenery is never printed, so hiding it is only a matter of drawing.
+function showScenery(group: Group | null, shown: boolean) {
+  for (const child of group?.children ?? []) if (child.name === "context") child.visible = shown
+}
+
 export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
   const { glbUrl, targetUrl, targetOffset, findings, highlight, bed, up, section, camera, settleKey, purge, className } = props
   const [gridfinity, setGridfinity] = useState(false)
@@ -801,6 +808,7 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
         const previous = h.part
         if (previous && h.ghost) previous.remove(h.ghost)
         if (h.ghost) part.add(h.ghost)
+        showScenery(part, latest.current.scenery ?? true)
         h.root.add(part)
         h.part = part
         settle(h, latest.current.camera)
@@ -890,6 +898,13 @@ export function ViewerIsland(props: ViewerIslandProps): JSX.Element {
     if (!h || h.loaded !== h.generation) return // the load's own pass draws them on the new part
     rebuildMarks(h, findings ?? [], highlight)
   }, [findings, highlight])
+
+  useEffect(() => {
+    const h = holderRef.current
+    if (!h) return
+    showScenery(h.part, props.scenery ?? true)
+    h.render()
+  }, [props.scenery])
 
   useEffect(() => {
     const h = holderRef.current

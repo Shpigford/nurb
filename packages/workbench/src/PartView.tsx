@@ -74,6 +74,7 @@ const FIRST_BUILD_KEY = "nurb-first-build"
 const CONVERSATION_HIDDEN_KEY = "nurb.conversation-hidden"
 const LABELS_HIDDEN_KEY = "nurb.labels-hidden"
 const MARKERS_HIDDEN_KEY = "nurb.markers-hidden"
+const SCENERY_HIDDEN_KEY = "nurb.scenery-hidden"
 
 function readHidden(key: string): boolean {
   try {
@@ -274,6 +275,7 @@ export default function PartView({
   useEffect(() => saveHidden(CONVERSATION_HIDDEN_KEY, chatHidden), [chatHidden])
   const [labelsHidden, setLabelsHidden] = useHidden(LABELS_HIDDEN_KEY)
   const [markersHidden, setMarkersHidden] = useHidden(MARKERS_HIDDEN_KEY)
+  const [sceneryHidden, setSceneryHidden] = useHidden(SCENERY_HIDDEN_KEY)
   const [highlight, setHighlight] = useState<number | null>(null)
   // A refused rename or label move says why for a few seconds, then gets out of the way.
   const [stageError, setStageError] = useState<string | null>(null)
@@ -901,6 +903,7 @@ export default function PartView({
             onHighlight={markersHidden ? (index) => index == null && setHighlight(null) : setHighlight}
             onPick={pointing || labelling ? onPick : null}
             anchors={anchors}
+            scenery={!sceneryHidden}
             bed={bedOf(project)}
             camera={camera}
             settleKey={settleKey}
@@ -979,6 +982,7 @@ export default function PartView({
                   : []),
                 { label: "Spot labels", checkbox: true, checked: !labelsHidden, keepOpen: true, onSelect: () => setLabelsHidden((v) => !v) },
                 { label: "Check markers", checkbox: true, checked: !markersHidden, keepOpen: true, onSelect: () => setMarkersHidden((v) => !v) },
+                { label: "Stand-in objects", checkbox: true, checked: !sceneryHidden, keepOpen: true, onSelect: () => setSceneryHidden((v) => !v) },
               ]}
             />
             {viewing ? null : (

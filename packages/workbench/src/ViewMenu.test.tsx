@@ -15,13 +15,15 @@ vi.mock("@nurb/ui", async (importOriginal) => {
       anchors,
       findings,
       highlight,
+      scenery,
     }: {
       onPick?: ((spot: unknown) => void) | null
       anchors?: unknown[]
       findings?: Finding[]
       highlight?: number | null
+      scenery?: boolean
     }) => (
-      <div data-testid="viewer" data-anchors={anchors?.length ?? 0} data-findings={findings?.length ?? 0} data-highlight={highlight ?? ""}>
+      <div data-testid="viewer" data-scenery={String(scenery)} data-anchors={anchors?.length ?? 0} data-findings={findings?.length ?? 0} data-highlight={highlight ?? ""}>
         <button onClick={() => onPick?.({ point: [1, 2, 3], normal: [0, 0, 1] })}>Pick a spot</button>
       </div>
     ),
@@ -101,6 +103,15 @@ describe("the View menu", () => {
     toggle("Check markers")
     expect(viewer()).toHaveAttribute("data-anchors", "1")
     expect(viewer()).toHaveAttribute("data-findings", "2")
+  })
+
+  it("hides the objects a part is shown with", () => {
+    render(<PartView project={bracket} partName="bracket" />)
+    expect(viewer()).toHaveAttribute("data-scenery", "true")
+    toggle("Stand-in objects")
+    expect(viewer()).toHaveAttribute("data-scenery", "false")
+    toggle("Stand-in objects")
+    expect(viewer()).toHaveAttribute("data-scenery", "true")
   })
 
   it("shows labels again when the person starts labelling a spot", () => {

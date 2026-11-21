@@ -48,6 +48,7 @@ def test_the_documented_vocabulary_is_the_exported_one():
         "use",
         "hinge",
         "obstacle",
+        "show_with",
         "add_text",
         "Literal",
     }
