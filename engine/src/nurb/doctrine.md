@@ -423,6 +423,8 @@ parts mount into: the machine, the wall, the shelf above. The joint angle is an
 ordinary keyword default, so the viewer's slider swings it live, and the slider ends
 exactly where the declared range does.
 
+**Showing parts together is an assembly.** A part that redraws its siblings by calling the same shared shape functions is one model of several prints: it fails the one-piece rule, exports as one blob, and the library cannot tell it from a part. Place the siblings with `use(name, **params)`, pass the parameters they share, and add anything that is not printed, like the phone a stand holds, with `obstacle()`.
+
 **The declared range is a claim, and the checks audit it** the way min_wall audits
 a wall: each hinge sweeps through it against everything else in the scene, and a
 finding is the angle where it jams plus the coordinates of the contact. Declare what

@@ -149,7 +149,7 @@ const TIGHT = "The fit test came out too tight. "
 const askFor = (owed: string[]) =>
   `Make a fit test for this part before I print it. It should test ${list(owed)} and take a few minutes of filament.`
 
-function Card({ icon, heading, children }: { icon: "ruler" | "warning" | "check"; heading: string; children: ReactNode }) {
+export function Card({ icon, heading, children }: { icon: "ruler" | "warning" | "check" | "box"; heading: string; children: ReactNode }) {
   return (
     <div className="flex flex-col overflow-hidden rounded-[6px] border border-line">
       <div className="chrome flex h-[30px] items-center border-b border-line-soft bg-raised px-3">
