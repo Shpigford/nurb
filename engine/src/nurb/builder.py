@@ -336,14 +336,19 @@ def to_glb(shape, tolerance=0.1, up=(0, 0, 1)):
         from .color import bodies
 
         split = bodies(shape)
-        if split is None:
+        shown = getattr(shape, "_nurb_shown", None)
+        if split is None and not shown:
             return trimesh.Scene([to_mesh(shape, tolerance, up)]).export(file_type="glb")
         # Each filament is its own node, so the viewer paints it. The meshes together
         # are the part: the base with its pockets, and what fills or stands on them.
         out = trimesh.Scene()
-        for i, (color, body) in enumerate(split):
+        for i, (color, body) in enumerate(split or [(None, shape)]):
             name = node_name(color, i)
             out.add_geometry(to_mesh(body, tolerance, up), node_name=name, geom_name=name)
+        if shown:
+            # What show_with() put beside the part is scenery, the same node an obstacle uses.
+            context = trimesh.util.concatenate([to_mesh(s, tolerance, up) for s in shown])
+            out.add_geometry(context, node_name="context", geom_name="context")
         return out.export(file_type="glb")
     from .assembly import NODE
     from .color import placed_bodies

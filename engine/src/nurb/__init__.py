@@ -15,7 +15,7 @@ from typing import Literal  # noqa: F401  -- a choice parameter: style: Literal[
 import build123d as _b3d
 from build123d import *  # noqa: F401,F403  -- geometry vocabulary
 
-from .assembly import assembly, hinge, obstacle, use  # noqa: E402
+from .assembly import assembly, hinge, obstacle, show_with, use  # noqa: E402
 from .checks import concave_edges, is_convex  # noqa: E402
 from .color import FilamentColor, add_color  # noqa: E402
 from .crown import crown  # noqa: E402
@@ -90,6 +90,7 @@ __all__ = [
     "use",
     "hinge",
     "obstacle",
+    "show_with",
     "add_text",
     "add_color",
     "FilamentColor",

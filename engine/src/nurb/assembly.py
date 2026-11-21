@@ -281,6 +281,18 @@ def obstacle(solid, name="an obstacle"):
     return solid
 
 
+def show_with(part, *solids):
+    """Show a part next to what it is made for: the phone on the stand, the tool in the holder.
+
+    Each solid is drawn as see-through scenery beside the part and is never printed,
+    checked or exported, so a stand-in object cannot fail the part's checks or end up
+    in the person's 3MF. The person can hide it from the View menu. Call it last, on
+    the part you return: anything done to its result rebuilds the shape and drops it.
+    """
+    part._nurb_shown = [*getattr(part, "_nurb_shown", []), *solids]
+    return part
+
+
 def _flatten(result):
     if isinstance(result, (tuple, list)):
         out = []

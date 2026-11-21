@@ -41,6 +41,8 @@ export interface ViewerIslandProps {
     section?: Section | null;
     /** Drawn over the canvas, each with its top-left corner on its point. */
     anchors?: ViewerAnchor[];
+    /** False hides the scenery: what a part is shown with and an assembly's obstacles. Default true. */
+    scenery?: boolean;
     /** A view to restore, taken when it can still see the part; compared by value, so a parent may re-send it freely. */
     camera?: CameraState | null;
     /** The user's orbits, debounced 250 ms after the last one. The component's own framing never reports. */
