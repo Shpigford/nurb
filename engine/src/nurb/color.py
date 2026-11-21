@@ -37,6 +37,9 @@ class Coloring:
     owner: object = None
     location: object = None
 
+    def __deepcopy__(self, memo):
+        return self  # shared through moves, for the reason `Lettering` gives
+
 
 def checked(color):
     """A color as "#rrggbb", or a refusal that says what a color looks like."""
@@ -91,7 +94,7 @@ def coloring(shape):
     """The colors a part carries, or None once anything has changed the shape since."""
     found = getattr(shape, "_nurb_color", None)
     wrapped = getattr(shape, "wrapped", None)
-    if found is None or wrapped is None or not wrapped.IsEqual(found.owner) or shape.location != found.location:
+    if found is None or wrapped is None or not wrapped.IsPartner(found.owner) or shape.location != found.location:
         return None
     return found
 
@@ -131,6 +134,30 @@ def bodies(shape):
     if letters is not None and letters.volume > 1e-6:
         out.append((lettered.color or "text", letters))
     return out or None
+
+
+def placed_bodies(shape):
+    """`bodies`, for a part an assembly moved after its colors and text were set.
+
+    A move keeps the same OCCT shape at a new location, so the colors still describe
+    it; only a boolean or a rebuild makes them stale. This puts them where the part now
+    sits instead of dropping them.
+    """
+    wrapped = getattr(shape, "wrapped", None)
+    found = {
+        attr: record
+        for attr in ("_nurb_color", "_nurb_text")
+        if (record := getattr(shape, attr, None)) is not None and wrapped is not None and wrapped.IsPartner(record.owner)
+    }
+    if not found:
+        return None
+    # The part as it stood when the records were made, so `moved` can carry them.
+    at = next(iter(found.values())).location
+    original = copy.copy(shape)
+    original.wrapped = wrapped.Located(at.wrapped)
+    for attr, record in found.items():
+        setattr(original, attr, dataclasses.replace(record, owner=original.wrapped, location=original.location))
+    return bodies(moved(original, shape.location * at.inverse()))
 
 
 def moved(shape, location):
