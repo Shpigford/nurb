@@ -51,6 +51,8 @@ describe("paramsState", () => {
     expect(adjustable(name)).toBe(true)
     expect(adjustable({ name: "pick", kind: "choice", default: "a", options: ["a"] })).toBe(true)
     expect(adjustable({ name: "tuple", kind: "other" as Param["kind"], default: "(1, 2)" })).toBe(false)
+    // A float("nan") default reaches the page as null, and a slider has no range for it.
+    expect(adjustable({ name: "tweak", kind: "float", default: null as unknown as number })).toBe(false)
   })
 
   it("keeps only what differs from the declared default", () => {

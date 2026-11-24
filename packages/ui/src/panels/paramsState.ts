@@ -62,6 +62,9 @@ export function tidy(value: number, step: number): number {
 const ADJUSTABLE = new Set(["bool", "int", "float", "str", "choice", "color"])
 
 export function adjustable(param: Param): boolean {
+  // A number with no default to stand on (a float("nan") the engine sent as null) has
+  // no slider range, so it is shown, not adjusted.
+  if ((param.kind === "int" || param.kind === "float") && typeof param.default !== "number") return false
   return ADJUSTABLE.has(param.kind)
 }
 

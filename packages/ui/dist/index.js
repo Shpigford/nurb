@@ -10262,7 +10262,7 @@ function At(e, t) {
 }
 const ab = /* @__PURE__ */ new Set(["bool", "int", "float", "str", "choice", "color"]);
 function br(e) {
-  return ab.has(e.kind);
+  return (e.kind === "int" || e.kind === "float") && typeof e.default != "number" ? !1 : ab.has(e.kind);
 }
 const Fi = 200;
 function lb(e, t) {
