@@ -1026,14 +1026,32 @@ def _composite(conn, project_id, name, run_id=None):
         return None
 
 
+def _finite(value):
+    """`value` with every NaN and infinity as null. A part may default a parameter to
+    float("nan"), and a stored run reads it back, but JSON has no word for it, so one
+    such number would otherwise fail the whole page's read."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {key: _finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_finite(item) for item in value]
+    return value
+
+
 def _routes(conn, lock, server, token, pid):
     import anyio
     from mcp.server.streamable_http_manager import StreamableHTTPASGIApp, StreamableHTTPSessionManager
     from mcp.server.transport_security import TransportSecuritySettings
-    from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+    from starlette import responses
+    from starlette.responses import HTMLResponse, PlainTextResponse, Response
     from starlette.routing import Mount, Route, WebSocketRoute
     from starlette.staticfiles import StaticFiles
     from starlette.websockets import WebSocketDisconnect
+
+    class JSONResponse(responses.JSONResponse):
+        def render(self, content):
+            return super().render(_finite(content))
 
     manager = StreamableHTTPSessionManager(
         app=server,
@@ -1827,7 +1845,7 @@ def _routes(conn, lock, server, token, pid):
             printable = engine_run.export_geometry(identity, "3mf", overrides=overrides, scratch_root=snapshot.name)[0]
             return share.upload(
                 {
-                    "part.json": json.dumps(shared).encode(),
+                    "part.json": json.dumps(_finite(shared)).encode(),
                     "part.glb": run["glb"],
                     "part.stl": stl,
                     "part.3mf": printable,

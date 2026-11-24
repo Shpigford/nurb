@@ -2430,3 +2430,30 @@ def test_a_shared_part_from_a_newer_nurb_or_with_a_strange_file_is_refused(home)
     # A refusal leaves nothing half made in the library.
     assert conn.execute("SELECT COUNT(*) FROM projects").fetchone()[0] == 0
     conn.close()
+
+
+def test_a_part_that_defaults_to_nan_still_reads_as_json(home):
+    """NURB-DESKTOP-8: a part with a NaN default built, and then every read of its
+    project failed, because JSON has no NaN. The page reads null in its place."""
+    import threading
+
+    from starlette.applications import Starlette
+    from starlette.testclient import TestClient
+
+    from nurb import db, mcp_server, serve
+
+    conn = db.connect(check_same_thread=False)
+    project_id = db.create_project(conn, "odd")
+    source = 'from nurb import *\n\n\n@part\ndef cube(width=10.0, tweak=float("nan")):\n    return Box(width, width, width)\n'
+    result = mcp_server.dispatch(conn, "write_part_source", {"project_id": project_id, "part_name": "cube", "source": source}, "http://x")
+    assert result.is_error is False, result.content[0].text
+    _, routes, _ = serve._routes(conn, threading.Lock(), None, "t", 0)
+    client = TestClient(Starlette(routes=[r for r in routes if getattr(r, "path", "").startswith("/api/")]))
+
+    for url in (f"/api/projects/{project_id}", "/api/parts"):
+        response = client.get(url)
+        assert response.status_code == 200, url
+        assert "NaN" not in response.text
+    params = {p["name"]: p for p in client.get(f"/api/projects/{project_id}").json()["parts"][0]["params"]}
+    assert params["tweak"]["default"] is None and params["width"]["default"] == 10.0
+    conn.close()
