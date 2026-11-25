@@ -18,6 +18,17 @@ export function folders(projects: ProjectSummary[]): ProjectSummary[] {
 }
 
 /**
+ * The folder a typed name already belongs to, ignoring case and stray spaces, so a
+ * second "Desk organizer" opens the first instead of making a twin beside it.
+ */
+export function folderNamed(projects: ProjectSummary[], name: string): ProjectSummary | undefined {
+  const wanted = name.trim();
+  return folders(projects).find(
+    (project) => project.name.trim().localeCompare(wanted, undefined, { sensitivity: "base" }) === 0,
+  );
+}
+
+/**
  * One folder's cards, from the list the library already holds. Reading the project
  * instead would wait out a running build, and the shelf would look empty meanwhile.
  */

@@ -1180,6 +1180,11 @@ function App() {
           onSelectAll={() => setShowAll(true)}
           onOpenPart={openPart}
           onNewPart={(folderId) => void newPart(folderId)}
+          onCreateProject={async (name) => {
+            const created = await createProject(name, true);
+            await loadProjects();
+            selectProject(created.id);
+          }}
           onAddToProject={(part) => {
             setMoveError(null);
             setPicking(part);

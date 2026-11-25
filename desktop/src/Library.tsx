@@ -37,7 +37,7 @@ import {
   type Part,
   type ProjectSummary,
 } from "@nurb/workbench/api";
-import { folders, isDraft, matchesSearch, partsIn, sortParts, titleCase, type LibrarySort } from "./parts";
+import { folderNamed, folders, isDraft, matchesSearch, partsIn, sortParts, titleCase, type LibrarySort } from "./parts";
 
 const SORTS: Record<LibrarySort, string> = { built: "Last built", name: "Name" };
 const SORT_KEY = "nurb.librarySort";
@@ -84,6 +84,8 @@ type Props = {
   onOpenPart: (projectId: string, name: string) => void;
   /** Starts a part, inside the folder when one is named. */
   onNewPart: (folderId?: string) => void;
+  /** Makes an empty folder with this name and opens it. */
+  onCreateProject: (name: string) => Promise<void>;
   /** Opens the picker that puts this part in a folder. */
   onAddToProject: (part: LibraryPart) => void;
   onImportFolder: () => void;
@@ -144,6 +146,7 @@ export default function Library({
   onSelectAll,
   onOpenPart,
   onNewPart,
+  onCreateProject,
   onAddToProject,
   onImportFolder,
   onRemoved,
@@ -263,8 +266,33 @@ export default function Library({
       .catch((e) => setFailure(e instanceof Error ? e.message : String(e)));
   };
 
+  // A new folder is named where it will be listed, in the same field a rename uses.
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const startCreate = () => {
+    settled.current = false;
+    setRenaming(null);
+    setNewName("");
+    setCreating(true);
+  };
+  // A name the rail already has opens that folder rather than making a second one.
+  const endCreate = (save: boolean) => {
+    if (settled.current) return;
+    settled.current = true;
+    setCreating(false);
+    const name = newName.trim();
+    if (!save || !name) return;
+    const existing = folderNamed(projects, name);
+    if (existing) {
+      onSelectProject(existing.id);
+      return;
+    }
+    onCreateProject(name).catch((e) => setFailure(e instanceof Error ? e.message : String(e)));
+  };
+
   const startRename = (summary: ProjectSummary) => {
     settled.current = false;
+    setCreating(false);
     setDraft(summary.name);
     setRenaming(summary.id);
   };
@@ -395,91 +423,121 @@ export default function Library({
           </button>
         </div>
         {/* Projects are rare, so the rail only names them once one exists. The empty list stays to hold the settings strip at the bottom. */}
-        {rail.length > 0 ? <PanelStrip label="Projects" inset={16} /> : null}
-        <ul
-          ref={listRef}
-          role="tree"
-          aria-label="Projects"
-          className="min-h-0 flex-1 overflow-y-auto p-1.5"
-        >
-          {rail.map((summary, index) => {
-            const selected = !showAll && summary.id === projectId;
-            return (
-              <li key={summary.id} role="treeitem" aria-selected={selected}>
-                <div
-                  data-row
-                  role="button"
-                  tabIndex={selected || (showAll && index === 0) ? 0 : -1}
-                  onClick={() => onSelectProject(summary.id)}
-                  onContextMenu={(e) => context.open(e, renaming === summary.id ? undefined : projectMenu(summary))}
-                  onKeyDown={(e) => {
-                    // The actions menu is a button inside this row. Its own keys
-                    // are its own, or Enter would select the project instead of
-                    // opening the menu.
-                    if (e.target !== e.currentTarget) return;
-                    if (e.key === "ArrowDown") {
-                      e.preventDefault();
-                      move(e.currentTarget, 1);
-                    } else if (e.key === "ArrowUp") {
-                      e.preventDefault();
-                      move(e.currentTarget, -1);
-                    } else if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onSelectProject(summary.id);
-                    }
-                  }}
-                  className={clsx(
-                    "group flex h-[30px] cursor-default items-center gap-2 rounded-[3px] px-2.5",
-                    "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
-                    selected ? "bg-raised" : "hover:bg-raised/60",
-                  )}
-                >
-                  {renaming === summary.id ? (
-                    <input
-                      autoFocus
-                      aria-label={`Rename ${summary.name}`}
-                      maxLength={100}
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      onBlur={() => endRename(summary, true)}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Enter") endRename(summary, true);
-                        else if (e.key === "Escape") endRename(summary, false);
-                      }}
-                      className="mono-value h-[22px] min-w-0 flex-1 rounded-[2px] border border-accent bg-ground px-1 uppercase text-ink focus:outline-none"
-                    />
-                  ) : (
-                    <span className="mono-value min-w-0 flex-1 truncate uppercase text-ink">
-                      {summary.name}
+        {rail.length > 0 || creating ? <PanelStrip label="Projects" inset={16} /> : null}
+        {/* The new-project row trails the list, so a new folder is named where it will appear. */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
+          <ul ref={listRef} role="tree" aria-label="Projects">
+            {rail.map((summary, index) => {
+              const selected = !showAll && summary.id === projectId;
+              return (
+                <li key={summary.id} role="treeitem" aria-selected={selected}>
+                  <div
+                    data-row
+                    role="button"
+                    tabIndex={selected || (showAll && index === 0) ? 0 : -1}
+                    onClick={() => onSelectProject(summary.id)}
+                    onContextMenu={(e) => context.open(e, renaming === summary.id ? undefined : projectMenu(summary))}
+                    onKeyDown={(e) => {
+                      // The actions menu is a button inside this row. Its own keys
+                      // are its own, or Enter would select the project instead of
+                      // opening the menu.
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        move(e.currentTarget, 1);
+                      } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        move(e.currentTarget, -1);
+                      } else if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelectProject(summary.id);
+                      }
+                    }}
+                    className={clsx(
+                      "group flex h-[30px] cursor-default items-center gap-2 rounded-[3px] px-2.5",
+                      "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
+                      selected ? "bg-raised" : "hover:bg-raised/60",
+                    )}
+                  >
+                    {renaming === summary.id ? (
+                      <input
+                        autoFocus
+                        aria-label={`Rename ${summary.name}`}
+                        maxLength={100}
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={() => endRename(summary, true)}
+                        onKeyDown={(e) => {
+                          e.stopPropagation();
+                          if (e.key === "Enter") endRename(summary, true);
+                          else if (e.key === "Escape") endRename(summary, false);
+                        }}
+                        className="mono-value h-[22px] min-w-0 flex-1 rounded-[2px] border border-accent bg-ground px-1 uppercase text-ink focus:outline-none"
+                      />
+                    ) : (
+                      <span className="mono-value min-w-0 flex-1 truncate uppercase text-ink">
+                        {summary.name}
+                      </span>
+                    )}
+                    {/* The count gives way to the row's actions, so no column sits empty at rest. An open menu keeps them, or its trigger would vanish under it. */}
+                    <span className="mono-caption shrink-0 text-muted group-hover:hidden group-focus-within:hidden group-has-[[aria-expanded=true]]:hidden">
+                      {summary.parts}
                     </span>
-                  )}
-                  {/* The count gives way to the row's actions, so no column sits empty at rest. An open menu keeps them, or its trigger would vanish under it. */}
-                  <span className="mono-caption shrink-0 text-muted group-hover:hidden group-focus-within:hidden group-has-[[aria-expanded=true]]:hidden">
-                    {summary.parts}
-                  </span>
-                  <span className="-mr-1 hidden shrink-0 items-center group-hover:flex group-focus-within:flex group-has-[[aria-expanded=true]]:flex">
-                    <IconButton
-                      icon="plus"
-                      label={`New part in ${summary.name}`}
-                      className="size-6"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onNewPart(summary.id);
-                      }}
-                    />
-                    <Menu
-                      portal
-                      label={`Actions for ${summary.name}`}
-                      items={projectMenu(summary)}
-                    />
-                  </span>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                    <span className="-mr-1 hidden shrink-0 items-center group-hover:flex group-focus-within:flex group-has-[[aria-expanded=true]]:flex">
+                      <IconButton
+                        icon="plus"
+                        label={`New part in ${summary.name}`}
+                        className="size-6"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onNewPart(summary.id);
+                        }}
+                      />
+                      <Menu
+                        portal
+                        label={`Actions for ${summary.name}`}
+                        items={projectMenu(summary)}
+                      />
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          {creating ? (
+            <div className="flex h-[30px] items-center gap-2 rounded-[3px] bg-raised px-2.5">
+              <input
+                autoFocus
+                aria-label="New project name"
+                placeholder="Project name"
+                maxLength={100}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onBlur={() => endCreate(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") endCreate(true);
+                  else if (e.key === "Escape") endCreate(false);
+                }}
+                className="mono-value h-[22px] min-w-0 flex-1 rounded-[2px] border border-accent bg-ground px-1 uppercase text-ink placeholder:text-faint focus:outline-none"
+              />
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={startCreate}
+              title="Make a project to keep parts together"
+              className={clsx(
+                "flex h-[30px] w-full cursor-default items-center gap-2 rounded-[3px] px-2.5 text-muted",
+                "hover:bg-raised/60 hover:text-ink",
+                "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
+              )}
+            >
+              <Icon name="plus" className="shrink-0" />
+              <span className="mono-value min-w-0 flex-1 truncate text-left uppercase">New project</span>
+            </button>
+          )}
+        </div>
         {note ? (
           <div className="mono-caption shrink-0 px-4 pb-2 text-fail" role="alert">
             {note}
@@ -510,6 +568,7 @@ export default function Library({
         onContextMenu={(e) =>
           context.open(e, [
             { label: folder ? `New part in ${folder.name}` : "New part", onSelect: () => onNewPart(folder?.id) },
+            { label: "New project", onSelect: startCreate },
             { label: "Import folder…", disabled: importing, onSelect: onImportFolder },
           ])
         }
