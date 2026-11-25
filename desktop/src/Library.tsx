@@ -282,11 +282,8 @@ export default function Library({
     const name = draft.trim();
     if (!save || !name) return;
     const existing = folderNamed(projects, name);
-    if (existing) {
-      onSelectProject(existing.id);
-      return;
-    }
-    onCreateProject(name).catch((e) => setFailure(e instanceof Error ? e.message : String(e)));
+    if (existing) onSelectProject(existing.id);
+    else onCreateProject(name).catch((e) => setFailure(e instanceof Error ? e.message : String(e)));
   };
 
   const startRename = (summary: ProjectSummary) => {
