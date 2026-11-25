@@ -477,6 +477,10 @@ function Chat({
     queuedRef.current = list;
     setQueuedState(list);
   }, []);
+  const dropQueued = useCallback(
+    (id: number) => setQueued(queuedRef.current.filter((q) => q.id !== id)),
+    [setQueued],
+  );
   const nextQueuedIdRef = useRef(1);
   // Stop can land before the prompt has gone out, while the files are checked or
   // the session starts. There is nothing to interrupt yet, so the send stands down.
@@ -652,14 +656,7 @@ function Chat({
   keyRef.current = chatKey(path, part);
   useEffect(() => {
     const box = inputRef.current;
-    const draft = unstashDraft(keyRef.current);
-    const { spots: stashedSpots, rest } = splitSpots(draft.text);
-    addSpots(stashedSpots);
-    if (box && rest) {
-      box.value = restoreDraftText(rest, box.value);
-      grow();
-    }
-    attachmentDraft.restore(draft.files);
+    returnToComposer(unstashDraft(keyRef.current));
     return () => {
       if (discardRef.current) return;
       // Leaving the part closes its session, so nothing queued would ever send.
@@ -1049,6 +1046,8 @@ function Chat({
         const draining =
           completed && !stoppedRef.current && !closedRef.current && queuedRef.current.length > 0;
         if (draining) {
+          // sendingRef stays held across the wait for its attachments, so an
+          // Enter meanwhile queues and a stop meanwhile reaches the send.
           sendNextQueued();
         } else {
           sendingRef.current = false;
@@ -1076,10 +1075,6 @@ function Chat({
     const [next, ...rest] = queuedRef.current;
     if (!next) return;
     setQueued(rest);
-    // Held across the wait for its attachments, so an Enter meanwhile queues
-    // and a stop meanwhile reaches the send.
-    sendingRef.current = true;
-    stoppedRef.current = false;
     void next.ready.then((files) => {
       if (closedRef.current) return;
       void sendRef.current(next.text, files, true);
@@ -1098,7 +1093,7 @@ function Chat({
 
   // Back into the composer to be changed, ahead of anything typed since.
   const editQueued = async (entry: Queued) => {
-    setQueued(queuedRef.current.filter((q) => q.id !== entry.id));
+    dropQueued(entry.id);
     returnToComposer({ text: entry.text, files: await entry.ready });
     inputRef.current?.focus();
   };
@@ -1111,23 +1106,22 @@ function Chat({
     // and a double send would spawn a second adapter. A photo alone is a
     // legitimate message ("model this"), so attachments count as content.
     if ((!text && !attachmentDraft.hasContent) || starting) return;
-    if (sendingRef.current) {
-      // A turn is running: this one waits for it, as it stands now.
+    const clearComposer = () => {
       setSpots([]);
       if (box) {
         box.value = "";
         grow();
       }
+    };
+    if (sendingRef.current) {
+      // A turn is running: this one waits for it, as it stands now.
+      clearComposer();
       const entry: Queued = { id: nextQueuedIdRef.current++, text, files: null, ready: attachmentDraft.take() };
       setQueued([...queuedRef.current, entry]);
       void entry.ready.then((files) => {
-        const list = queuedRef.current;
-        if (!list.some((q) => q.id === entry.id)) return;
-        setQueued(
-          !text && files.length === 0
-            ? list.filter((q) => q.id !== entry.id)
-            : list.map((q) => (q.id === entry.id ? { ...q, files } : q)),
-        );
+        if (!queuedRef.current.some((q) => q.id === entry.id)) return;
+        if (!text && files.length === 0) dropQueued(entry.id);
+        else setQueued(queuedRef.current.map((q) => (q.id === entry.id ? { ...q, files } : q)));
       });
       return;
     }
@@ -1135,11 +1129,7 @@ function Chat({
     // Reserve the turn before waiting: a second Enter must not queue another
     // send while a pasted image is still crossing the IPC boundary.
     sendingRef.current = true;
-    setSpots([]);
-    if (box) {
-      box.value = "";
-      grow();
-    }
+    clearComposer();
     const files = await attachmentDraft.take();
     if (!text && files.length === 0) {
       sendingRef.current = false;
@@ -1585,7 +1575,7 @@ function Chat({
                   entry={entry}
                   label={at === 0 ? "next" : "queued"}
                   onEdit={() => void editQueued(entry)}
-                  onRemove={() => setQueued(queuedRef.current.filter((q) => q.id !== entry.id))}
+                  onRemove={() => dropQueued(entry.id)}
                 />
               ))}
             </ol>
