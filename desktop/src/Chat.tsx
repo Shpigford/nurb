@@ -920,9 +920,12 @@ function Chat({
   }, [resume, restoreSession]);
 
   const send = useCallback(
-    async (text: string, files: string[]) => {
+    // `queued` is a message going out on its own as the last turn ends: the
+    // turn is still the one the person started, so a stop pressed in the
+    // handoff stands and the send makes no sound.
+    async (text: string, files: string[], queued = false) => {
       sendingRef.current = true;
-      stoppedRef.current = false;
+      if (!queued) stoppedRef.current = false;
       const pictures = await Promise.all(files.map(thumbnailOf));
       const sentThumbnails = pictures.some(Boolean) ? pictures : undefined;
       // Live notes sit below Claude's stored turns, so a note about the last
@@ -948,7 +951,7 @@ function Chat({
       onBusyRef.current(true);
       // The send is the only half of the turn that makes a sound. Stopping is
       // the user changing their mind, which is not news to them.
-      cue("press");
+      if (!queued) cue("press");
       setAuthNeeded("none");
       let completed = false;
       let stored = false;
@@ -1035,25 +1038,29 @@ function Chat({
         }
       } finally {
         promptingRef.current = false;
-        sendingRef.current = false;
-        setBusy(false);
-        onBusyRef.current(false);
         setPermissions([]);
-        // Every completed turn gets a cue, where the old chime waited 8s: the cue
-        // is short enough that a short reply can have one, and it marks the beat.
-        // Two of them: "ready" is for someone watching the part, "arrival"
-        // carries to another window, where the reply is news rather than a beat.
-        if (completed) cue(document.hasFocus() ? "ready" : "arrival");
         if (unsent) {
           setItems((list) =>
             list.filter((item) => item.kind !== "user" || item.localId !== localId),
           );
         }
-        if (completed && !stoppedRef.current && !closedRef.current) {
+        // The next queued message takes the turn over without the column ever
+        // reading idle: no send button, no open agent picker, no rail blink.
+        const draining =
+          completed && !stoppedRef.current && !closedRef.current && queuedRef.current.length > 0;
+        if (draining) {
           sendNextQueued();
         } else {
-          // A stopped or failed turn is the person's move: nothing queued
-          // fires into it, and nothing queued is lost either.
+          sendingRef.current = false;
+          setBusy(false);
+          onBusyRef.current(false);
+          // Every completed turn gets a cue, where the old chime waited 8s: the cue
+          // is short enough that a short reply can have one, and it marks the beat.
+          // Two of them: "ready" is for someone watching the part, "arrival"
+          // carries to another window, where the reply is news rather than a beat.
+          if (completed) cue(document.hasFocus() ? "ready" : "arrival");
+          // A stopped or failed turn is the person's move: nothing queued fires
+          // into it, and nothing queued is lost either.
           void unqueueAll(unsent ? { text, files } : null);
         }
       }
@@ -1069,11 +1076,13 @@ function Chat({
     const [next, ...rest] = queuedRef.current;
     if (!next) return;
     setQueued(rest);
-    // Held across the wait for its attachments, so an Enter meanwhile queues.
+    // Held across the wait for its attachments, so an Enter meanwhile queues
+    // and a stop meanwhile reaches the send.
     sendingRef.current = true;
+    stoppedRef.current = false;
     void next.ready.then((files) => {
       if (closedRef.current) return;
-      void sendRef.current(next.text, files);
+      void sendRef.current(next.text, files, true);
     });
   };
 
