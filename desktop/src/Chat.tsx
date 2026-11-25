@@ -54,7 +54,15 @@ import {
   pruneLanded,
   withNote,
 } from "./chatItems";
-import { AttachmentDraft, restoreDraftText, stashDraft, unstashDraft } from "./chatDraft";
+import {
+  AttachmentDraft,
+  foldDrafts,
+  restoreDraftText,
+  stashDraft,
+  unstashDraft,
+  type Draft,
+  type Queued,
+} from "./chatDraft";
 import { chatKey } from "./chatColumns";
 import { titleCase } from "./parts";
 
@@ -266,6 +274,48 @@ function SpotChip({ sentence, onRemove }: { sentence: string; onRemove?: () => v
   );
 }
 
+// A message waiting for the turn ahead of it. Its words open it back up in
+// the composer; the cross drops it.
+function QueuedRow({
+  entry,
+  label,
+  onEdit,
+  onRemove,
+}: {
+  entry: Queued;
+  label: string;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
+  const { spots, rest } = splitSpots(entry.text);
+  const extras = [
+    spots.length ? `${spots.length} ${spots.length === 1 ? "spot" : "spots"}` : "",
+    entry.files?.length ? `${entry.files.length} ${entry.files.length === 1 ? "file" : "files"}` : "",
+  ].filter(Boolean);
+  return (
+    <li className="flex items-start gap-2">
+      <span className="mono-caption w-[46px] shrink-0 pt-px text-faint">{label}</span>
+      <button
+        type="button"
+        title="edit before it sends"
+        className="text-chat line-clamp-2 min-w-0 flex-1 text-left text-muted hover:text-ink"
+        onClick={onEdit}
+      >
+        {rest || extras.join(", ")}
+        {rest && extras.length > 0 && <span className="text-faint"> · {extras.join(", ")}</span>}
+      </button>
+      <button
+        type="button"
+        className="grid size-4 shrink-0 place-items-center pt-0.5 text-faint hover:text-ink"
+        aria-label="remove queued message"
+        onClick={onRemove}
+      >
+        <Icon name="xmark" className="size-2.5" />
+      </button>
+    </li>
+  );
+}
+
 // What the person sent: the spots as chips, then their words.
 function Said({ text }: { text: string }) {
   const { spots, rest } = splitSpots(text);
@@ -419,6 +469,15 @@ function Chat({
     (more: string[]) => setSpots((list) => [...new Set([...list, ...more])]),
     [],
   );
+  // Messages typed while a turn runs, sent one turn each once it finishes. The
+  // ref is the truth, because a turn ends in a callback that outlived its render.
+  const [queued, setQueuedState] = useState<Queued[]>([]);
+  const queuedRef = useRef<Queued[]>([]);
+  const setQueued = useCallback((list: Queued[]) => {
+    queuedRef.current = list;
+    setQueuedState(list);
+  }, []);
+  const nextQueuedIdRef = useRef(1);
   // Stop can land before the prompt has gone out, while the files are checked or
   // the session starts. There is nothing to interrupt yet, so the send stands down.
   const stoppedRef = useRef(false);
@@ -510,6 +569,16 @@ function Chat({
     box.style.height = `${box.scrollHeight}px`;
     setEmpty(box.value.trim().length === 0);
   };
+  // Unsent work goes back ahead of whatever is in the composer now.
+  const returnToComposer = (draft: Draft) => {
+    const { spots: back, rest } = splitSpots(draft.text);
+    addSpots(back);
+    if (inputRef.current && rest) {
+      inputRef.current.value = restoreDraftText(rest, inputRef.current.value);
+      grow();
+    }
+    attachmentDraft.restore(draft.files);
+  };
   // Latest callbacks behind stable refs so ensureSession never goes stale.
   const onSessionRef = useRef(onSession);
   onSessionRef.current = onSession;
@@ -593,10 +662,14 @@ function Chat({
     attachmentDraft.restore(draft.files);
     return () => {
       if (discardRef.current) return;
-      stashDraft(keyRef.current, {
-        text: joinSpots(spotsRef.current, box?.value ?? ""),
-        files: attachmentDraft.current,
-      });
+      // Leaving the part closes its session, so nothing queued would ever send.
+      stashDraft(
+        keyRef.current,
+        foldDrafts([
+          ...queuedRef.current.map((q) => ({ text: q.text, files: q.files ?? [] })),
+          { text: joinSpots(spotsRef.current, box?.value ?? ""), files: attachmentDraft.current },
+        ]),
+      );
     };
   }, [attachmentDraft, addSpots]);
 
@@ -880,20 +953,9 @@ function Chat({
       let completed = false;
       let stored = false;
       let refused = false;
-      // Nothing was sent. Restore it ahead of any next draft composed during
-      // the turn, and keep both turns' attachments.
-      const restoreDraft = () => {
-        setItems((list) =>
-          list.filter((item) => item.kind !== "user" || item.localId !== localId),
-        );
-        const { spots: sentSpots, rest } = splitSpots(text);
-        addSpots(sentSpots);
-        if (inputRef.current) {
-          inputRef.current.value = restoreDraftText(rest, inputRef.current.value);
-          grow();
-        }
-        attachmentDraft.restore(files);
-      };
+      // Nothing was sent. It goes back ahead of anything queued and any next
+      // draft composed during the turn, once the turn has wound down.
+      let unsent = false;
       try {
         await transcript.current;
         if (files.length > 0) {
@@ -903,7 +965,7 @@ function Chat({
         }
         const session = await ensureSession();
         if (stoppedRef.current) {
-          restoreDraft();
+          unsent = true;
           return;
         }
         const starting = (isNew || (isProject && !aboutProject)) && !startedRef.current;
@@ -964,7 +1026,7 @@ function Chat({
         const message = String(e);
         const trouble = isClaude ? claudeNote(message) : null;
         if (trouble || refused || message.includes("auth_required")) {
-          if (!stored) restoreDraft();
+          if (!stored) unsent = true;
           if (trouble) setItems((list) => withNote(list, trouble, { untilSend: true }));
           else if (refused) setItems((list) => withNote(list, message, { untilSend: true }));
           else setAuthNeeded("resend");
@@ -982,10 +1044,55 @@ function Chat({
         // Two of them: "ready" is for someone watching the part, "arrival"
         // carries to another window, where the reply is news rather than a beat.
         if (completed) cue(document.hasFocus() ? "ready" : "arrival");
+        if (unsent) {
+          setItems((list) =>
+            list.filter((item) => item.kind !== "user" || item.localId !== localId),
+          );
+        }
+        if (completed && !stoppedRef.current && !closedRef.current) {
+          sendNextQueued();
+        } else {
+          // A stopped or failed turn is the person's move: nothing queued
+          // fires into it, and nothing queued is lost either.
+          void unqueueAll(unsent ? { text, files } : null);
+        }
       }
     },
     [ensureSession, part, wholeProject, attachmentDraft, addSpots, isClaude, projectId, thumbnailOf, agent, parts, subject],
   );
+  // The latest send, for a queued message: a new part's first turn changes the
+  // part it is filed under before the next one goes out.
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
+  const sendNextQueued = () => {
+    const [next, ...rest] = queuedRef.current;
+    if (!next) return;
+    setQueued(rest);
+    // Held across the wait for its attachments, so an Enter meanwhile queues.
+    sendingRef.current = true;
+    void next.ready.then((files) => {
+      if (closedRef.current) return;
+      void sendRef.current(next.text, files);
+    });
+  };
+
+  const unqueueAll = async (unsent: Draft | null) => {
+    const waiting = queuedRef.current;
+    setQueued([]);
+    const drafts = await Promise.all(
+      waiting.map(async (q) => ({ text: q.text, files: await q.ready })),
+    );
+    if (unsent) drafts.unshift(unsent);
+    if (drafts.length) returnToComposer(foldDrafts(drafts));
+  };
+
+  // Back into the composer to be changed, ahead of anything typed since.
+  const editQueued = async (entry: Queued) => {
+    setQueued(queuedRef.current.filter((q) => q.id !== entry.id));
+    returnToComposer({ text: entry.text, files: await entry.ready });
+    inputRef.current?.focus();
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -994,13 +1101,28 @@ function Chat({
     // sendingRef, not busy: two Enters in one tick both read the stale state,
     // and a double send would spawn a second adapter. A photo alone is a
     // legitimate message ("model this"), so attachments count as content.
-    if (
-      (!text && !attachmentDraft.hasContent) ||
-      sendingRef.current ||
-      starting ||
-      startRef.current
-    )
+    if ((!text && !attachmentDraft.hasContent) || starting) return;
+    if (sendingRef.current) {
+      // A turn is running: this one waits for it, as it stands now.
+      setSpots([]);
+      if (box) {
+        box.value = "";
+        grow();
+      }
+      const entry: Queued = { id: nextQueuedIdRef.current++, text, files: null, ready: attachmentDraft.take() };
+      setQueued([...queuedRef.current, entry]);
+      void entry.ready.then((files) => {
+        const list = queuedRef.current;
+        if (!list.some((q) => q.id === entry.id)) return;
+        setQueued(
+          !text && files.length === 0
+            ? list.filter((q) => q.id !== entry.id)
+            : list.map((q) => (q.id === entry.id ? { ...q, files } : q)),
+        );
+      });
       return;
+    }
+    if (startRef.current) return;
     // Reserve the turn before waiting: a second Enter must not queue another
     // send while a pasted image is still crossing the IPC boundary.
     sendingRef.current = true;
@@ -1446,6 +1568,19 @@ function Chat({
           )}
         >
           <DropHint active={dropping} />
+          {queued.length > 0 && (
+            <ol className="flex flex-col gap-1.5 border-b border-line pb-2" aria-label="queued messages">
+              {queued.map((entry, at) => (
+                <QueuedRow
+                  key={entry.id}
+                  entry={entry}
+                  label={at === 0 ? "next" : "queued"}
+                  onEdit={() => void editQueued(entry)}
+                  onRemove={() => setQueued(queuedRef.current.filter((q) => q.id !== entry.id))}
+                />
+              ))}
+            </ol>
+          )}
           {attachments.length + spots.length > 0 && (
             <div className="flex flex-wrap items-start gap-1.5">
               {spots.map((spot) => (
@@ -1500,7 +1635,7 @@ function Chat({
                 priming
                   ? ""
                   : busy
-                    ? `${label} is working…`
+                    ? `${label} is working. Anything you send now goes next.`
                     : starting
                       ? restoringRef.current
                         ? "Restoring conversation…"
@@ -1532,9 +1667,16 @@ function Chat({
               />
             </div>
             {busy ? (
-              <Button variant="accent" onClick={cancel}>
-                stop
-              </Button>
+              <div className="flex items-center gap-1.5">
+                {(!empty || spots.length > 0 || attachments.length > 0) && (
+                  <Button type="submit" variant="ink" trailingIcon="arrow-up">
+                    queue
+                  </Button>
+                )}
+                <Button variant="accent" onClick={cancel}>
+                  stop
+                </Button>
+              </div>
             ) : (
               <Button type="submit" variant="ink" trailingIcon="arrow-up" disabled={starting}>
                 send

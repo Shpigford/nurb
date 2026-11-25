@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   AttachmentDraft,
+  foldDrafts,
   restoreDraftFiles,
   restoreDraftText,
   stashDraft,
@@ -53,4 +54,20 @@ test("a stashed draft outlives its column and comes back once", () => {
   stashDraft("loose\u0000bin", { text: "kept", files: [] });
   stashDraft("loose\u0000bin", { text: "  ", files: [] });
   assert.deepEqual(unstashDraft("loose\u0000bin"), { text: "", files: [] });
+});
+
+test("queued messages fold back in the order they were written", () => {
+  assert.deepEqual(
+    foldDrafts([
+      { text: "Stopped turn", files: ["a.png"] },
+      { text: "First queued", files: [] },
+      { text: "Second queued", files: ["b.stl", "a.png"] },
+    ]),
+    { text: "Stopped turn\n\nFirst queued\n\nSecond queued", files: ["a.png", "b.stl"] },
+  );
+  assert.deepEqual(foldDrafts([{ text: "", files: ["photo.png"] }, { text: "Only words", files: [] }]), {
+    text: "Only words",
+    files: ["photo.png"],
+  });
+  assert.deepEqual(foldDrafts([]), { text: "", files: [] });
 });

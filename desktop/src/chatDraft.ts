@@ -10,6 +10,23 @@ export function restoreDraftFiles(failed: string[], draft: string[]): string[] {
 
 export type Draft = { text: string; files: string[] };
 
+// Several unsent messages as one draft, in the order they were written: a
+// stopped turn's own message, then whatever was queued behind it.
+export function foldDrafts(drafts: Draft[]): Draft {
+  return drafts.reduceRight<Draft>(
+    (later, draft) => ({
+      text: restoreDraftText(draft.text, later.text),
+      files: restoreDraftFiles(draft.files, later.files),
+    }),
+    { text: "", files: [] },
+  );
+}
+
+// A message typed while a turn runs. Its attachments are still being taken
+// from the composer when it joins the queue, so `ready` holds them, and
+// `files` shows them once they land.
+export type Queued = { id: number; text: string; files: string[] | null; ready: Promise<string[]> };
+
 // A column remounts when its agent changes and is dropped when a loose part is
 // left, and the composer's text lives in the DOM. Unsent work waits here,
 // keyed by chatKey, until that part's column mounts again.
