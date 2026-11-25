@@ -268,11 +268,10 @@ export default function Library({
 
   // A new folder is named where it will be listed, in the same field a rename uses.
   const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState("");
   const startCreate = () => {
     settled.current = false;
     setRenaming(null);
-    setNewName("");
+    setDraft("");
     setCreating(true);
   };
   // A name the rail already has opens that folder rather than making a second one.
@@ -280,7 +279,7 @@ export default function Library({
     if (settled.current) return;
     settled.current = true;
     setCreating(false);
-    const name = newName.trim();
+    const name = draft.trim();
     if (!save || !name) return;
     const existing = folderNamed(projects, name);
     if (existing) {
@@ -512,8 +511,8 @@ export default function Library({
                 aria-label="New project name"
                 placeholder="Project name"
                 maxLength={100}
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
                 onBlur={() => endCreate(true)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") endCreate(true);

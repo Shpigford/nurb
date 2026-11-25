@@ -23,8 +23,8 @@ export function folders(projects: ProjectSummary[]): ProjectSummary[] {
  */
 export function folderNamed(projects: ProjectSummary[], name: string): ProjectSummary | undefined {
   const wanted = name.trim();
-  return folders(projects).find(
-    (project) => project.name.trim().localeCompare(wanted, undefined, { sensitivity: "base" }) === 0,
+  return projects.find(
+    (project) => project.folder && project.name.trim().localeCompare(wanted, undefined, { sensitivity: "base" }) === 0,
   );
 }
 
