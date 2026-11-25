@@ -1060,7 +1060,7 @@ function Chat({
           if (completed) cue(document.hasFocus() ? "ready" : "arrival");
           // A stopped or failed turn is the person's move: nothing queued fires
           // into it, and nothing queued is lost either.
-          void unqueueAll(unsent ? { text, files } : null);
+          void returnUnsent(unsent ? [{ text, files }] : []);
         }
       }
     },
@@ -1073,7 +1073,6 @@ function Chat({
 
   const sendNextQueued = () => {
     const [next, ...rest] = queuedRef.current;
-    if (!next) return;
     setQueued(rest);
     void next.ready.then((files) => {
       if (closedRef.current) return;
@@ -1081,13 +1080,14 @@ function Chat({
     });
   };
 
-  const unqueueAll = async (unsent: Draft | null) => {
+  // The stopped turn's own message first, then the queue behind it.
+  const returnUnsent = async (unsent: Draft[]) => {
     const waiting = queuedRef.current;
     setQueued([]);
-    const drafts = await Promise.all(
-      waiting.map(async (q) => ({ text: q.text, files: await q.ready })),
-    );
-    if (unsent) drafts.unshift(unsent);
+    const drafts = [
+      ...unsent,
+      ...(await Promise.all(waiting.map(async (q) => ({ text: q.text, files: await q.ready })))),
+    ];
     if (drafts.length) returnToComposer(foldDrafts(drafts));
   };
 
