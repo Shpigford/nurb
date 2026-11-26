@@ -301,7 +301,7 @@ function QueuedRow({
         className="text-chat line-clamp-2 min-w-0 flex-1 text-left text-muted hover:text-ink"
         onClick={onEdit}
       >
-        {rest || extras.join(", ")}
+        {rest || extras.join(", ") || "saving photo…"}
         {rest && extras.length > 0 && <span className="text-faint"> · {extras.join(", ")}</span>}
       </button>
       <button
@@ -1048,19 +1048,9 @@ function Chat({
         if (draining) {
           // sendingRef stays held across the wait for its attachments, so an
           // Enter meanwhile queues and a stop meanwhile reaches the send.
-          sendNextQueued();
+          sendNextQueued(true);
         } else {
-          sendingRef.current = false;
-          setBusy(false);
-          onBusyRef.current(false);
-          // Every completed turn gets a cue, where the old chime waited 8s: the cue
-          // is short enough that a short reply can have one, and it marks the beat.
-          // Two of them: "ready" is for someone watching the part, "arrival"
-          // carries to another window, where the reply is news rather than a beat.
-          if (completed) cue(document.hasFocus() ? "ready" : "arrival");
-          // A stopped or failed turn is the person's move: nothing queued fires
-          // into it, and nothing queued is lost either.
-          void returnUnsent(unsent ? [{ text, files }] : []);
+          finishTurn(completed, unsent ? [{ text, files }] : []);
         }
       }
     },
@@ -1071,11 +1061,39 @@ function Chat({
   const sendRef = useRef(send);
   sendRef.current = send;
 
-  const sendNextQueued = () => {
+  // Nothing more goes out: the column reads idle again.
+  const finishTurn = (completed: boolean, unsent: Draft[]) => {
+    sendingRef.current = false;
+    setBusy(false);
+    onBusyRef.current(false);
+    // Every completed turn gets a cue, where the old chime waited 8s: the cue
+    // is short enough that a short reply can have one, and it marks the beat.
+    // Two of them: "ready" is for someone watching the part, "arrival"
+    // carries to another window, where the reply is news rather than a beat.
+    if (completed) cue(document.hasFocus() ? "ready" : "arrival");
+    // A stopped or failed turn is the person's move: nothing queued fires
+    // into it, and nothing queued is lost either.
+    void returnUnsent(unsent);
+  };
+
+  // `completed` is whether the turn ahead finished, for the cue if nothing
+  // queued turns out to have anything left to send.
+  const sendNextQueued = (completed: boolean) => {
     const [next, ...rest] = queuedRef.current;
     setQueued(rest);
     void next.ready.then((files) => {
-      if (closedRef.current) return;
+      if (closedRef.current) {
+        // The column closed while its photo saved, after the leaving draft was
+        // stashed: this message goes in ahead of it.
+        stashDraft(keyRef.current, foldDrafts([{ text: next.text, files }, unstashDraft(keyRef.current)]));
+        return;
+      }
+      // A photo that failed to save leaves nothing to send.
+      if (!next.text && files.length === 0) {
+        if (queuedRef.current.length > 0) sendNextQueued(completed);
+        else finishTurn(completed, []);
+        return;
+      }
       void sendRef.current(next.text, files, true);
     });
   };
@@ -1132,7 +1150,9 @@ function Chat({
     clearComposer();
     const files = await attachmentDraft.take();
     if (!text && files.length === 0) {
-      sendingRef.current = false;
+      // An Enter while the photo was saving may have queued behind this one.
+      if (queuedRef.current.length > 0) sendNextQueued(false);
+      else sendingRef.current = false;
       return;
     }
     if (!primed) {
