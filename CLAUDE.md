@@ -132,7 +132,9 @@ The check is cheap: grep `desktop/src` for the concept you touched, and run `npm
 
 ### The part is the unit, the project is a folder
 
-Most people make one part at a time. A project exists only for a system, like a storage set whose bins and rails must agree, and it is born from parts that already exist. So creation, chat, the workspace header and the library all speak in parts: "New part" opens the workspace in one click, the conversation belongs to the part, and a project is something a part is added to later. Nothing may say "project" where the person is looking at a part.
+Most people make one part at a time. So creation, chat, the workspace header and the library all speak in parts: "New part" opens the workspace in one click, the conversation belongs to the part, and nothing may say "project" where the person is looking at a part.
+
+A project is a folder. Someone who knows several parts are coming can make one empty from the library and fill it, or add a part to one later. Either way the folder carries no code: a system, like a storage set whose bins and rails must agree, is still extracted from parts that already exist (see "Systems are extracted, never scaffolded"), never set up ahead of them.
 
 ### Tool names stay boring
 

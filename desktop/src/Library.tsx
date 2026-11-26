@@ -274,7 +274,8 @@ export default function Library({
     setDraft("");
     setCreating(true);
   };
-  // A name the rail already has opens that folder rather than making a second one.
+  // Only Enter makes the folder: a click elsewhere or a switch to another app drops a
+  // half-typed name instead of creating it. A name the rail already has opens that folder.
   const endCreate = (save: boolean) => {
     if (settled.current) return;
     settled.current = true;
@@ -510,7 +511,7 @@ export default function Library({
                 maxLength={100}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                onBlur={() => endCreate(true)}
+                onBlur={() => endCreate(false)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") endCreate(true);
                   else if (e.key === "Escape") endCreate(false);
