@@ -741,6 +741,16 @@ function App() {
     [loadProjects, dirs, moveChat],
   );
 
+  // A named project is a folder; a part's own container is never named.
+  const createFolder = useCallback(
+    async (name: string) => {
+      const created = await createProject(name, true);
+      await loadProjects();
+      selectProject(created.id);
+    },
+    [loadProjects, selectProject],
+  );
+
   const runImport = useCallback(
     async (path: string) => {
       setLibraryError(null);
@@ -840,10 +850,7 @@ function App() {
     const offs = [
       listen<string>("test-create", async (event) => {
         try {
-          // A named project is a folder; a part's own container is never named.
-          const created = await createProject(event.payload, true);
-          await loadProjects();
-          selectProject(created.id);
+          await createFolder(event.payload);
         } catch (e) {
           setLibraryError(String(e));
         }
@@ -886,7 +893,7 @@ function App() {
       // page must not carry an unhandled rejection for a teardown that worked.
       offs.forEach((off) => off.then((fn) => fn()).catch(() => {}));
     };
-  }, [served, loadProjects, selectProject, runImport, openPart]);
+  }, [served, selectProject, runImport, openPart, createFolder]);
 
   const startFresh = async (path: string, part: string, agent: string | null = null) => {
     if (!projectId) return;
@@ -1180,6 +1187,7 @@ function App() {
           onSelectAll={() => setShowAll(true)}
           onOpenPart={openPart}
           onNewPart={(folderId) => void newPart(folderId)}
+          onCreateProject={createFolder}
           onAddToProject={(part) => {
             setMoveError(null);
             setPicking(part);

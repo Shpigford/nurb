@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { folders, matchesSearch, messagesForPart, moveTargets, partsIn, sortParts } from "../src/parts.ts";
+import { folderNamed, folders, matchesSearch, messagesForPart, moveTargets, partsIn, sortParts } from "../src/parts.ts";
 import type { Message } from "@nurb/ui";
 import type { LibraryPart, ProjectSummary } from "@nurb/workbench/api";
 
@@ -30,6 +30,14 @@ test("the rail lists folders and hides the containers", () => {
     folders(list).map((p) => p.id),
     ["a"],
   );
+});
+
+test("a new folder's name finds the folder that already has it", () => {
+  const list = [project("a", "Desk organizer", true), project("b", "bracket", false)];
+  assert.equal(folderNamed(list, "  desk ORGANIZER ")?.id, "a");
+  // A part's own container is not a folder, so its name is free to take.
+  assert.equal(folderNamed(list, "bracket"), undefined);
+  assert.equal(folderNamed(list, "Desk"), undefined);
 });
 
 test("the rail alphabetizes folders regardless of case", () => {
