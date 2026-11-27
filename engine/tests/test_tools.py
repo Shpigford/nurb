@@ -114,7 +114,10 @@ def test_a_part_that_raises_is_a_result_not_a_tool_failure(conn):
     assert body["passed"] is False
     first = body["error"].splitlines()[:2]
     assert first[0] == "Traceback (most recent call last):"
-    assert 'parts/broken.py"' in first[1]
+    # The traceback names the file with this OS's separator, so comparing the raw text
+    # against a slash is comparing against one platform's rendering. Normalizing says
+    # what is actually meant: the error points at the part that broke.
+    assert "parts/broken.py\"" in first[1].replace("\\", "/")
 
 
 def test_the_first_write_names_the_part_the_person_started(conn):

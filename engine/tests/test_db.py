@@ -1,6 +1,7 @@
 """The store itself: schema, pragmas, and the few row helpers everything else uses."""
 
 import json
+import os
 import pathlib
 import sqlite3
 import stat
@@ -124,11 +125,19 @@ def test_default_state_permissions_are_private(monkeypatch, tmp_path):
 
     conn = db.connect()
     try:
-        assert stat.S_IMODE(root.stat().st_mode) == 0o700
-        assert stat.S_IMODE(log.stat().st_mode) == 0o600
+        # The state always exists and is usable. The mode bits are asserted only
+        # where the OS expresses privacy that way: on Windows os.chmod toggles just
+        # the read-only flag, so 0o777 stays 0o777 whatever nurb asks for, and the
+        # access-control list inherited from the config directory is what actually
+        # keeps it private. Asserting the bits there checks an API that never
+        # promised them.
         for path in (root / "nurb.db", root / "nurb.db-wal", root / "nurb.db-shm"):
             assert path.exists()
-            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        if os.name != "nt":
+            assert stat.S_IMODE(root.stat().st_mode) == 0o700
+            assert stat.S_IMODE(log.stat().st_mode) == 0o600
+            for path in (root / "nurb.db", root / "nurb.db-wal", root / "nurb.db-shm"):
+                assert stat.S_IMODE(path.stat().st_mode) == 0o600
     finally:
         conn.close()
 
@@ -144,8 +153,12 @@ def test_explicit_home_keeps_shared_permissions(monkeypatch, tmp_path):
 
     conn = db.connect()
     conn.close()
-    assert stat.S_IMODE(root.stat().st_mode) == 0o770
-    assert stat.S_IMODE(database.stat().st_mode) == 0o660
+    # Same reasoning as the private-state test: on Windows these chmod calls ask for
+    # bits the OS does not keep, so the only honest assertion is that connecting did
+    # not damage a shared home's own access list.
+    if os.name != "nt":
+        assert stat.S_IMODE(root.stat().st_mode) == 0o770
+        assert stat.S_IMODE(database.stat().st_mode) == 0o660
 
 
 def test_measurement_dependencies_accept_quoted_v1_names():
@@ -241,7 +254,12 @@ def test_an_old_database_migrates_forward(tmp_path):
             folder.checkout(conn, "project", tmp_path / "checkout"),
             materialize.materialize(conn, "project", into=tmp_path / "scratch"),
         ):
-            assert stat.S_IMODE((out / "viewer.command").stat().st_mode) & 0o111
+            # The file is written out either way. The exec bit is asserted only where
+            # the OS has one; on Windows the `executable` column above is the fact,
+            # and there is no per-file exec bit to carry onto disk.
+            assert (out / "viewer.command").is_file()
+            if os.name != "nt":
+                assert stat.S_IMODE((out / "viewer.command").stat().st_mode) & 0o111
     finally:
         conn.close()
 

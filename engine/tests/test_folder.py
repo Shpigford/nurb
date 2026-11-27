@@ -4,6 +4,7 @@ The round trip is the whole claim of the v2 store: nothing about a v1 project is
 by keeping it in rows, so the engine can keep reading files it has always read.
 """
 
+import os
 import pathlib
 import stat
 import tomllib
@@ -261,7 +262,11 @@ def test_root_python_file_with_non_identifier_name_round_trips_as_project_file(c
     (project / "parts").mkdir(parents=True)
     (project / "parts" / "shelf.py").write_text("from nurb import *\n")
     script = project / "build-part.py"
-    script.write_text("print('build')\n")
+    # Written as bytes on purpose. write_text defaults to newline=None, which on
+    # Windows turns "\n" into os.linesep, so the test would put a carriage return in
+    # the file itself and then fail its own byte comparison - a failure the engine
+    # cannot do anything about, since the file is faithfully round-tripped.
+    script.write_bytes(b"print('build')\n")
 
     project_id, _ = folder.import_folder(conn, project)
 
@@ -340,12 +345,19 @@ def test_default_materialized_scratch_is_private(conn, monkeypatch, tmp_path):
     project_id, _ = folder.import_folder(conn, DEMO)
 
     root = materialize.materialize(conn, project_id)
-    assert stat.S_IMODE(root.parent.stat().st_mode) == 0o700
-    assert stat.S_IMODE(root.stat().st_mode) == 0o700
-    assert stat.S_IMODE((root / "parts").stat().st_mode) == 0o700
-    for path in root.rglob("*"):
-        if path.is_file():
-            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    # The scratch folder and its parts are written either way; that is what the rest of
+    # this test would catch. The mode bits are asserted only where the OS expresses
+    # privacy through mode bits, which Windows does not - there the folder's inherited
+    # access-control list is the control, and os.chmod only toggles read-only.
+    assert (root / "parts").is_dir()
+    assert any(path.is_file() for path in root.rglob("*"))
+    if os.name != "nt":
+        assert stat.S_IMODE(root.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(root.stat().st_mode) == 0o700
+        assert stat.S_IMODE((root / "parts").stat().st_mode) == 0o700
+        for path in root.rglob("*"):
+            if path.is_file():
+                assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_reference_images_become_attachments_and_come_back(conn, tmp_path):
@@ -410,6 +422,12 @@ def test_checkout_refuses_an_attachment_name_that_escapes(conn, tmp_path):
     assert not (tmp_path / "escape.png").exists()
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows has no per-file exec bit, so chmod cannot be detected at import "
+    "or carried onto disk. The carry path is covered by the test below, which records "
+    "the flag through the store instead of reading it off the filesystem.",
+)
 def test_project_file_executable_mode_survives_checkout_and_materialize(conn, tmp_path):
     root = tmp_path / "proj"
     (root / "parts").mkdir(parents=True)
@@ -432,6 +450,34 @@ def test_project_file_executable_mode_survives_checkout_and_materialize(conn, tm
     ):
         assert stat.S_IMODE((out / "viewer.command").stat().st_mode) & 0o111
         assert not stat.S_IMODE((out / "notes.txt").stat().st_mode) & 0o111
+
+
+def test_a_recorded_executable_flag_reaches_the_written_file(conn, tmp_path):
+    """The carry path, without depending on the OS having an exec bit to detect.
+
+    `import_folder` reads the flag off the mode bits, which Windows does not have, so
+    the test above cannot run there. The flag still has to survive a round trip through
+    the store on every platform - that is the part nurb owns - so it is recorded here
+    through the store's own API, and the assertion about the bit on disk is made only
+    where a bit exists to assert.
+    """
+    project_id = db.create_project(conn, "launchers")
+    db.add_project_file(conn, project_id, "viewer.command", b"#!/bin/sh\n", executable=True)
+    db.add_project_file(conn, project_id, "notes.txt", b"notes\n")
+
+    rows = {row["path"]: row for row in db.project_files_of(conn, project_id)}
+    assert rows["viewer.command"]["executable"] == 1
+    assert rows["notes.txt"]["executable"] == 0
+
+    for out in (
+        folder.checkout(conn, project_id, tmp_path / "out"),
+        materialize.materialize(conn, project_id, into=tmp_path / "scratch"),
+    ):
+        assert (out / "viewer.command").read_bytes() == b"#!/bin/sh\n"
+        assert (out / "notes.txt").read_bytes() == b"notes\n"
+        if os.name != "nt":
+            assert stat.S_IMODE((out / "viewer.command").stat().st_mode) & 0o111
+            assert not stat.S_IMODE((out / "notes.txt").stat().st_mode) & 0o111
 
 
 def test_an_import_announces_its_parts_once_they_are_visible(conn, tmp_path):
