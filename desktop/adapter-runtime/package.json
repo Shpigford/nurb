@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@agentclientprotocol/codex-acp": "2.5.0",
+    "@agentclientprotocol/codex-acp": "2.12.1",
     "@google/gemini-cli": "0.66.0"
   }
 }

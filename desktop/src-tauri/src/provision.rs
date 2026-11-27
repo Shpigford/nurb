@@ -1138,12 +1138,12 @@ with zipfile.ZipFile(sys.argv[1], "w") as z:
                 r#"#!/bin/sh
 case "$*" in
   "--version") echo "{NODE_VERSION}" ;;
-  *"codex-acp --version"*) echo "@agentclientprotocol/codex-acp 2.5.0" ;;
+  *"codex-acp --version"*) echo "@agentclientprotocol/codex-acp 2.12.1" ;;
     *"gemini --version"*) echo "0.66.0" ;;
   *"/codex --version"*)
     [ ! -f "$0.missing-codex" ] || exit 1
     [ ! -f "$0.slow-codex" ] || sleep 3
-    echo "codex-cli 0.165.0"
+    echo "codex-cli 0.172.0"
     ;;
   *) exit 1 ;;
 esac
