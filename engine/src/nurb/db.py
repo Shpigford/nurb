@@ -283,6 +283,24 @@ def path():
     return home() / "nurb.db"
 
 
+def _read_journal_mode(conn, deadline_seconds=10.0):
+    """This database's journal mode, waiting briefly for a holder that is still dying.
+
+    SQLite reports a file another process has not finished releasing as a disk I/O
+    error rather than as busy, so a plain read raises where a short wait succeeds.
+    Only that error is retried; anything else is a real problem and propagates, and a
+    file that is genuinely unreadable fails the same way every time and still raises.
+    """
+    deadline = time.monotonic() + deadline_seconds
+    while True:
+        try:
+            return conn.execute("PRAGMA journal_mode").fetchone()[0]
+        except sqlite3.OperationalError as error:
+            if "disk i/o" not in str(error).lower() or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+
+
 def connect(db_path=None, check_same_thread=True):
     p = pathlib.Path(db_path) if db_path else path()
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -296,45 +314,31 @@ def connect(db_path=None, check_same_thread=True):
     # foreign_keys is a silent no-op there. busy_timeout goes before the other pragmas
     # rather than after them, so a statement that contends for the database waits for
     # its holder instead of failing on contact.
+    conn = sqlite3.connect(p, autocommit=True, check_same_thread=check_same_thread)
+    conn.execute("PRAGMA busy_timeout = 5000")
+    # Reading journal_mode takes no lock; writing it asks for an exclusive one even
+    # when the file is already WAL, where it is a no-op conversion. A build worker
+    # holds this database open on purpose, so every reconnect was taking an exclusive
+    # lock to change nothing. Read the mode, and convert only when it is not WAL yet.
     #
-    # The retry is for a different case than a lock. A build worker holds this
-    # database open on purpose, and when it will not stop it is force-killed. The
-    # kernel releases that process's file handles, but not instantly, and a connect
-    # landing in that window reads a write-ahead log whose shared-memory header is no
-    # longer coherent. SQLite reports it as "disk I/O error", which is not a lock
-    # timeout, so no busy_timeout covers it. Measured on Windows after a hard kill:
-    # 6 of 25 connects failed on the first attempt, 0 of 25 with this retry. The wait
-    # is for the kernel to finish reaping, not for a lock.
+    # The read is also where a dying holder shows up. A worker that will not stop is
+    # force-killed, and the kernel releases its file handles a moment later; a connect
+    # landing in that window gets "disk I/O error" from this statement rather than
+    # "database is locked", so busy_timeout does not cover it. Measured on Windows over
+    # rounds of start-a-worker, write, kill, connect-immediately: 5 of 15 plain
+    # connects failed, 0 of 15 with the wait. Every one of those failures landed on
+    # this read - never on the write, never on migrate(), never on the first read
+    # afterwards - which is why the wait sits here and nowhere else.
     #
-    # Deleting the -wal and -shm files instead was measured too, and is worse - 5 of
-    # 10 failed - and unsafe regardless: a WAL can hold committed transactions that
-    # SQLite would otherwise recover, so removing it can lose a person's work.
-    #
-    # The whole open is inside the retry, not just the pragmas. The stale log surfaces
-    # at whichever statement touches it first, and migrate() reads the schema.
-    def open_and_prepare():
-        conn = sqlite3.connect(p, autocommit=True, check_same_thread=check_same_thread)
-        try:
-            conn.execute("PRAGMA busy_timeout = 5000")
-            conn.execute("PRAGMA journal_mode = WAL")
-            conn.execute("PRAGMA synchronous = NORMAL")
-            conn.execute("PRAGMA foreign_keys = ON")
-            conn.row_factory = sqlite3.Row
-            migrate(conn)
-        except sqlite3.Error:
-            with contextlib.suppress(sqlite3.Error):
-                conn.close()
-            raise
-        return conn
-
-    for attempt in range(RECONNECT_ATTEMPTS):
-        try:
-            conn = open_and_prepare()
-            break
-        except sqlite3.OperationalError:
-            if attempt == RECONNECT_ATTEMPTS - 1:
-                raise
-            time.sleep(RECONNECT_PAUSE)
+    # Deleting the -wal and -shm files instead was measured too and is worse (5 of 10
+    # failed) and unsafe regardless: a WAL can hold committed transactions that SQLite
+    # would otherwise recover, so removing it can lose a person's work.
+    if _read_journal_mode(conn) != "wal":
+        conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.row_factory = sqlite3.Row
+    migrate(conn)
 
     if private:
         for candidate in (p, pathlib.Path(f"{p}-wal"), pathlib.Path(f"{p}-shm")):
