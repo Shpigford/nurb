@@ -251,5 +251,5 @@ def write(part_path, shape, ctx=None, findings=None, variants=None):
     was = card.read_text(encoding="utf-8") if card.is_file() else f"# {card.stem}\n"
     now = graft(was, facts(shape, ctx, findings, variants))
     if now != was:
-        card.write_text(now, encoding="utf-8")
+        card.write_text(now, encoding="utf-8", newline="\n")
     return card, now != was, thin(now)

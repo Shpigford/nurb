@@ -183,17 +183,17 @@ def checkout(conn, project_id, directory):
         if row["kind"] == "part":
             if not db.PART_NAME.match(name):
                 raise ValueError(f"not a part name: {name!r}")
-            (parts / f"{name}.py").write_text(row["source"], encoding="utf-8")
+            (parts / f"{name}.py").write_text(row["source"], encoding="utf-8", newline="\n")
             if row["card_md"]:
-                (parts / f"{name}.md").write_text(row["card_md"], encoding="utf-8")
+                (parts / f"{name}.md").write_text(row["card_md"], encoding="utf-8", newline="\n")
         elif row["kind"] == "module":
             if not name.isidentifier():
                 raise ValueError(f"not a part name: {name!r}")
-            (root / f"{name}.py").write_text(row["source"], encoding="utf-8")
+            (root / f"{name}.py").write_text(row["source"], encoding="utf-8", newline="\n")
         elif row["kind"] == db.PARTS_MODULE_KIND:
             if not name.isidentifier() or not name.startswith("_"):
                 raise ValueError(f"not a parts module name: {name!r}")
-            (parts / f"{name}.py").write_text(row["source"], encoding="utf-8")
+            (parts / f"{name}.py").write_text(row["source"], encoding="utf-8", newline="\n")
         else:
             raise ValueError(f"not a part kind: {row['kind']!r}")
 
@@ -204,5 +204,5 @@ def checkout(conn, project_id, directory):
         )
     project = db.get_project(conn, project_id)
     if project and project["printer_toml"]:
-        (root / "printer.toml").write_text(project["printer_toml"], encoding="utf-8")
+        (root / "printer.toml").write_text(project["printer_toml"], encoding="utf-8", newline="\n")
     return root

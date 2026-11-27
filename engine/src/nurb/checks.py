@@ -1348,7 +1348,7 @@ def write_top_line(target, key, line):
         text = f"{head}\n\n{line}\n" + (f"\n{tail}" if tail else "")
     handle, scratch = tempfile.mkstemp(dir=target.parent, prefix=target.name, suffix=".tmp")
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as sink:
+        with os.fdopen(handle, "w", encoding="utf-8", newline="\n") as sink:
             sink.write(text)
         os.replace(scratch, target)
     except BaseException:

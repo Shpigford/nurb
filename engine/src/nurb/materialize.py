@@ -99,17 +99,17 @@ def materialize(conn, project_id, into=None):
         if kind == "part":
             if not db.PART_NAME.match(name):
                 raise ValueError(f"not a part name: {name!r}")
-            (parts / f"{name}.py").write_text(row["source"], encoding="utf-8")
+            (parts / f"{name}.py").write_text(row["source"], encoding="utf-8", newline="\n")
             if row["card_md"]:
-                (parts / f"{name}.md").write_text(row["card_md"], encoding="utf-8")
+                (parts / f"{name}.md").write_text(row["card_md"], encoding="utf-8", newline="\n")
         elif kind == "module":
             if not name.isidentifier():
                 raise ValueError(f"not a part name: {name!r}")
-            (root / f"{name}.py").write_text(row["source"], encoding="utf-8")
+            (root / f"{name}.py").write_text(row["source"], encoding="utf-8", newline="\n")
         elif kind == db.PARTS_MODULE_KIND:
             if not name.isidentifier() or not name.startswith("_"):
                 raise ValueError(f"not a parts module name: {name!r}")
-            (parts / f"{name}.py").write_text(row["source"], encoding="utf-8")
+            (parts / f"{name}.py").write_text(row["source"], encoding="utf-8", newline="\n")
         else:
             raise ValueError(f"not a part kind: {kind!r}")
 
@@ -118,7 +118,7 @@ def materialize(conn, project_id, into=None):
     )
     project = db.get_project(conn, project_id)
     if project and project["printer_toml"]:
-        (root / "printer.toml").write_text(project["printer_toml"], encoding="utf-8")
+        (root / "printer.toml").write_text(project["printer_toml"], encoding="utf-8", newline="\n")
     if private:
         for candidate in root.rglob("*"):
             if candidate.is_symlink():
