@@ -72,7 +72,7 @@ impl AgentKind {
     /// release weekly, so no ranges. None for the ACP-native CLIs.
     pub fn adapter(self) -> Option<&'static str> {
         match self {
-            Self::Codex => Some("@agentclientprotocol/codex-acp@2.5.0"),
+            Self::Codex => Some("@agentclientprotocol/codex-acp@2.12.1"),
             Self::Gemini => Some("@google/gemini-cli@0.66.0"),
             Self::Claude | Self::Cursor | Self::Grok => None,
         }
