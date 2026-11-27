@@ -84,8 +84,11 @@ type Props = {
 
 // The slicer's path is a path; the person recognises the folder it sits in. For a Mac
 // app that is the folder holding the .app, not the bundle's own MacOS folder.
+//
+// Split on either separator: a Windows install reads as one long segment when only
+// "/" is a separator, so the line would show the whole path instead of the folder.
 function folderOf(path: string): string {
-  const parts = path.split("/").filter(Boolean);
+  const parts = path.split(/[\\/]/).filter(Boolean);
   const app = parts.findIndex((part) => part.endsWith(".app"));
   const at = app > 0 ? app - 1 : parts.length - 2;
   return at >= 0 ? parts[at] : path;

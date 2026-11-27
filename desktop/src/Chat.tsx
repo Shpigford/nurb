@@ -65,6 +65,7 @@ import {
 } from "./chatDraft";
 import { chatKey } from "./chatColumns";
 import { titleCase } from "./parts";
+import { pathName } from "./paths";
 
 // The whole-project conversation rides the per-part plumbing under a name no part
 // file can have. Twins live in App.tsx's mount and acp.rs's context line.
@@ -107,7 +108,10 @@ const SECTION_LABEL: Record<string, string> = {
   fast: "Fast mode",
 };
 
-const basename = (path: string) => path.split("/").pop() ?? path;
+// A file's own name, with either separator. These paths arrive from the Rust side
+// with the operating system's separator, so on Windows a "/" split leaves the whole
+// path as the "name", and an attachment is filed under that instead of its file name.
+const basename = (path: string) => pathName(path);
 
 // The button's own label: the selected names, not the model ids, since those
 // are the agent's wire values and mean nothing to someone printing a bracket.
@@ -448,8 +452,12 @@ function Chat({
   // Claude runs through the app's own driver, which stores the conversation in
   // the project rather than replaying one of its own.
   const isClaude = agent === "claude";
-  // The folder's last segment is the project's id in the store.
-  const projectId = path.split("/").filter(Boolean).pop() ?? "";
+  // The folder's last segment is the project's id in the store. This is the one
+  // place an id is recovered from a path, so it has to split on the machine's own
+  // separator: on Windows the folder is `C:\Users\...\projects\<id>` and holds no
+  // forward slash, which made the "id" the entire path and every write answer
+  // "no project".
+  const projectId = pathName(path);
   const [items, setItems] = useState<Item[]>([]);
   const [busy, setBusy] = useState(false);
   // A resumed transcript starts loading after the first paint, so treat it as
