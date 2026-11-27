@@ -481,7 +481,7 @@ def _preset_args(out_dir, machine_path, process, filament, settings=None, colors
         if kind == "process" and settings:
             data.update(settings)
         full = out_dir / f"{kind}.json"
-        full.write_text(json.dumps(data), encoding="utf-8")
+        full.write_text(json.dumps(data), encoding="utf-8", newline="\n")
         flattened.append(full)
     machine_full, process_full = flattened
     filaments = []
@@ -490,7 +490,7 @@ def _preset_args(out_dir, machine_path, process, filament, settings=None, colors
         if color:
             data["filament_colour"] = [color]
         full = out_dir / ("filament.json" if i == 0 else f"filament{i + 1}.json")
-        full.write_text(json.dumps(data), encoding="utf-8")
+        full.write_text(json.dumps(data), encoding="utf-8", newline="\n")
         filaments.append(str(full))
     return [
         "--load-settings", f"{machine_full};{process_full}",

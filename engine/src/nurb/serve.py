@@ -227,14 +227,14 @@ def read_connect(home):
 
 def _write_connect(home, token, port):
     tmp = home / (CONNECT + ".tmp")
-    tmp.write_text(json.dumps({"token": token, "port": port}), encoding="utf-8")
+    tmp.write_text(json.dumps({"token": token, "port": port}), encoding="utf-8", newline="\n")
     os.chmod(tmp, 0o600)  # it carries the token
     os.replace(tmp, home / CONNECT)
 
 
 def _publish(home, payload):
     tmp = home / (STATE + ".tmp")
-    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    tmp.write_text(json.dumps(payload), encoding="utf-8", newline="\n")
     os.chmod(tmp, 0o600)  # it carries the token
     os.replace(tmp, home / STATE)
 

@@ -172,7 +172,7 @@ def repeats(part_sources, limit=5):
         paths = {}
         for name, source in part_sources.items():
             path = pathlib.Path(folder) / f"{name}.py"
-            path.write_text(source or "", encoding="utf-8")
+            path.write_text(source or "", encoding="utf-8", newline="\n")
             paths[path] = name
         try:
             runs = extract.duplication(list(paths))
