@@ -121,16 +121,13 @@ fn resources(app: &tauri::AppHandle) -> Result<Resources, String> {
     let adapter_package = dir.join("adapter-package.json");
     let adapter_lock = dir.join("adapter-package-lock.json");
     let adapter_lock_hash = file_hash(&adapter_lock, "adapter lock")?;
-    let wheel = std::fs::read_dir(&dir)
-        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with("nurb-") && name.ends_with(".whl"))
-        })
-        .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))?;
+    let wheel = pick_wheel(
+        std::fs::read_dir(&dir)
+            .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path()),
+    )
+    .ok_or_else(|| format!("no nurb wheel bundled in {}", dir.display()))?;
     let wheel_hash = file_hash(&wheel, "wheel")?;
     Ok(Resources {
         wheel,
@@ -379,6 +376,40 @@ fn wheel_version(name: &str) -> Option<&str> {
         .strip_suffix(".whl")?
         .split('-')
         .next()
+}
+
+/// The bundled wheel to install, when the resources folder holds more than one.
+///
+/// The NSIS installer lays its files down over an existing install rather than
+/// clearing it, and the wheel is named after its version, so an updated app can
+/// ship `nurb-1.14.1-...whl` beside the `nurb-1.13.0-...whl` an earlier release
+/// left behind. Taking whichever entry comes back first then provisions the older
+/// engine, and because `read_dir` hands back NTFS's alphabetical order on Windows
+/// the older name wins every time: the app reports its own new version while the
+/// serve answers with the version the stale wheel carried.
+///
+/// So the choice is by version, not by order. Comparing the numbers rather than
+/// the filenames matters: `1.10.0` sorts below `1.9.0` as text.
+fn pick_wheel(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let version = wheel_version(path.file_name()?.to_str()?)?;
+            let numbers: Vec<u64> = version.split('.').filter_map(|part| part.parse().ok()).collect();
+            (numbers.len() == version.split('.').count()).then_some((numbers, path))
+        })
+        .max_by(|(left, _), (right, _)| {
+            let len = left.len().max(right.len());
+            for i in 0..len {
+                let a = left.get(i).copied().unwrap_or(0);
+                let b = right.get(i).copied().unwrap_or(0);
+                if a != b {
+                    return a.cmp(&b);
+                }
+            }
+            std::cmp::Ordering::Equal
+        })
+        .map(|(_, path)| path)
 }
 
 /// The OCCT version behind the pinned OCP wheels: `cadquery-ocp-novtk==7.9.3.1.1`
@@ -783,9 +814,11 @@ mod tests {
 
     use super::{
         chat_runtime_check, chat_runtime_ok, clear_env, env_reusable, file_hash, install_nurb,
-        occt_version, parts_import, parts_ok, probe_version, read_stamp, uv, wheel_version,
-        write_stamp, Provisioner, Resources, Stamp, NPM_CI_ARGS, PROBE_ID, PYTHON_VERSION,
+        occt_version, parts_import, parts_ok, pick_wheel, probe_version, read_stamp, uv,
+        wheel_version, write_stamp, Provisioner, Resources, Stamp, NPM_CI_ARGS, PROBE_ID,
+        PYTHON_VERSION,
     };
+    use std::path::PathBuf;
     use crate::env::{Paths, NODE_VERSION};
 
     #[test]
@@ -796,6 +829,36 @@ mod tests {
         );
         assert_eq!(wheel_version("requirements.lock"), None);
         assert_eq!(wheel_version("nurb-0.10.0.tar.gz"), None);
+    }
+
+    /// An updated NSIS install leaves the previous release's wheel in the resources
+    /// folder, and `read_dir` on NTFS hands back names in alphabetical order, so
+    /// "whichever entry comes first" provisions the older engine: the app says it is
+    /// 1.14.1 while the serve reports 1.13.0.
+    #[test]
+    fn a_leftover_older_wheel_does_not_win_the_resources_folder() {
+        let older = PathBuf::from("resources/nurb-1.13.0-py3-none-any.whl");
+        let newer = PathBuf::from("resources/nurb-1.14.1-py3-none-any.whl");
+        // Listed old-first, which is the order NTFS actually returns.
+        assert_eq!(pick_wheel(vec![older.clone(), newer.clone()]), Some(newer.clone()));
+        // And the choice does not depend on the order the folder happened to give.
+        assert_eq!(pick_wheel(vec![newer.clone(), older.clone()]), Some(newer));
+    }
+
+    /// Two-digit components sort wrong as text, so the comparison is numeric:
+    /// "1.10.0" is greater than "1.9.0" even though it sorts below it.
+    #[test]
+    fn wheel_versions_compare_as_numbers_not_strings() {
+        let ten = PathBuf::from("resources/nurb-1.10.0-py3-none-any.whl");
+        let nine = PathBuf::from("resources/nurb-1.9.0-py3-none-any.whl");
+        assert_eq!(pick_wheel(vec![nine, ten.clone()]), Some(ten));
+    }
+
+    #[test]
+    fn a_folder_with_no_usable_wheel_has_no_pick() {
+        let none: Option<PathBuf> = None;
+        assert_eq!(pick_wheel(vec![PathBuf::from("resources/requirements.lock")]), none);
+        assert_eq!(pick_wheel(Vec::new()), none);
     }
 
     #[test]
